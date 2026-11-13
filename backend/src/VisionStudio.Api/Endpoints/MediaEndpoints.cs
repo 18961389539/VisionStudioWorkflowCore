@@ -12,8 +12,14 @@ public static class MediaEndpoints
             .Produces<MediaLibraryStatus>();
         app.MapGet("/api/media/collections", (MediaLibraryService media) => Results.Ok(media.ListCollections()))
             .Produces<IReadOnlyList<MediaCollectionDescriptor>>();
-        app.MapGet("/api/media/items", (string? collection, string? label, int? take, MediaLibraryService media) =>
-            Results.Ok(media.ListItems(collection, label, take ?? 200)))
+        // 分页 + 总数（2026-11-13）：此前只支持 take，图库超过一页后旧图无法翻到。
+        // 与 /api/alarms 保持一致：响应体仍是数组（前端渲染不变），总数放 X-Total-Count。
+        app.MapGet("/api/media/items", (string? collection, string? label, int? skip, int? take, HttpContext http, MediaLibraryService media) =>
+        {
+            var page = media.ListItems(collection, label, skip ?? 0, take ?? 200);
+            http.Response.Headers["X-Total-Count"] = page.Total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return Results.Ok(page.Items);
+        })
             .Produces<IReadOnlyList<MediaItemDescriptor>>();
 
         app.MapGet("/api/media/preview", (string path, MediaLibraryService media) =>
@@ -29,8 +35,8 @@ public static class MediaEndpoints
             return Results.File(physical, contentType, enableRangeProcessing: false);
         });
 
-        app.MapPost("/api/media/collections", (MediaCollectionCreateRequest request, MediaLibraryService media) =>
-            Results.Ok(media.CreateCollection(request.Name)))
+        app.MapPost("/api/media/collections", async (MediaCollectionCreateRequest request, MediaLibraryService media, CancellationToken ct) =>
+            Results.Ok(await media.CreateCollectionAsync(request.Name, ct)))
             .Produces<MediaCollectionDescriptor>()
             .RequireEngineer("media.collection.create", "media");
 
@@ -57,10 +63,10 @@ public static class MediaEndpoints
             return Results.Ok(imported);
         }).Produces<IReadOnlyList<MediaItemDescriptor>>().RequireEngineer("media.import", "media").RequireRateLimiting("media-import");
 
-        app.MapDelete("/api/media/items", (string path, MediaLibraryService media, ProductionRuntimeService production) =>
+        app.MapDelete("/api/media/items", async (string path, MediaLibraryService media, ProductionRuntimeService production, CancellationToken ct) =>
         {
             production.EnsureMediaMutationAllowed(media.ToMediaUri(path));
-            media.DeleteItem(path);
+            await media.DeleteItemAsync(path, ct);
             return Results.NoContent();
         }).RequireEngineer("media.item.delete", "media");
 

@@ -199,7 +199,7 @@ public sealed class GigENetworkDiagnosticsService(
             catch { /* Network diagnostics remain useful even when a provenance probe is temporarily unavailable. */ }
 
             CameraCommissioningProfile? profile = null;
-            try { profile = await cameras.ReadCommissioningProfileAsync(cameraId, ct); } catch { }
+            try { profile = await cameras.ReadCommissioningProfileAsync(cameraId, ct); } catch { /* 未配置调试参数：推荐值按默认能力计算 */ }
             var telemetry = cameras.GetTransportTelemetry(cameraId);
             var matched = MatchInterface(ipAddress, host);
             var recommendations = BuildCameraRecommendations(
@@ -448,15 +448,15 @@ public sealed class GigENetworkDiagnosticsService(
                 foreach (var item in props.UnicastAddresses.Where(x => x.Address.AddressFamily == AddressFamily.InterNetwork))
                 {
                     IPAddress? mask = null;
-                    try { mask = item.IPv4Mask; } catch { }
+                    try { mask = item.IPv4Mask; } catch { /* 个别网卡不提供掩码：按未知处理 */ }
                     addresses.Add((item.Address, mask));
                     publicAddresses.Add(new GigEHostAddress(item.Address.ToString(), mask?.ToString()));
                 }
                 if (publicAddresses.Count == 0) continue;
                 int? mtu = null;
-                try { mtu = props.GetIPv4Properties()?.Mtu; } catch { }
+                try { mtu = props.GetIPv4Properties()?.Mtu; } catch { /* IPv4 属性不可用：MTU 留空 */ }
                 double speed = 0;
-                try { speed = Math.Max(0, nic.Speed / 1_000_000d); } catch { }
+                try { speed = Math.Max(0, nic.Speed / 1_000_000d); } catch { /* 速率不可读：按 0 处理 */ }
                 long? received = null, sent = null, inErrors = null, inDiscards = null, outErrors = null, outDiscards = null;
                 try
                 {
@@ -465,12 +465,12 @@ public sealed class GigENetworkDiagnosticsService(
                     inErrors = stats.IncomingPacketsWithErrors; inDiscards = stats.IncomingPacketsDiscarded;
                     outErrors = stats.OutgoingPacketsWithErrors; outDiscards = stats.OutgoingPacketsDiscarded;
                 }
-                catch { }
+                catch { /* IP 统计不可用：计数留空，不影响接口枚举 */ }
                 var snapshot = new GigEHostNetworkInterface(nic.Id, nic.Name, nic.Description, nic.OperationalStatus.ToString(), nic.NetworkInterfaceType.ToString(),
                     speed, mtu, publicAddresses, received, sent, inErrors, inDiscards, outErrors, outDiscards);
                 output.Add(new HostInterfaceInfo(snapshot, addresses));
             }
-            catch { }
+            catch { /* 单个网卡枚举失败：跳过该接口 */ }
         }
         return output.OrderByDescending(x => x.Snapshot.OperationalStatus == OperationalStatus.Up.ToString()).ThenByDescending(x => x.Snapshot.SpeedMbps).ToArray();
     }

@@ -6277,6 +6277,7 @@ export interface paths {
                 query?: {
                     collection?: string;
                     label?: string;
+                    skip?: number | string;
                     take?: number | string;
                 };
                 header?: never;

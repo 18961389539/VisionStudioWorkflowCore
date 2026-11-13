@@ -58,7 +58,7 @@ public sealed class BaslerPylonProvenanceProbe(
         // DeviceFirmwareVersion is a GenICam parameter and normally requires opening the camera.
         // Probe it opportunistically; enumeration identity is still useful if exclusive access is unavailable.
         try { firmware = TryReadOpenedStringParameter(assembly, selected, "DeviceFirmwareVersion"); }
-        catch { }
+        catch { /* 独占访问/固件参数不可用：枚举身份仍然有效 */ }
 
         var attrs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -115,7 +115,7 @@ public sealed class BaslerPylonProvenanceProbe(
         {
             if (camera is not null)
             {
-                try { cameraType.GetMethod("Close", Type.EmptyTypes)?.Invoke(camera, null); } catch { }
+                try { cameraType.GetMethod("Close", Type.EmptyTypes)?.Invoke(camera, null); } catch { /* 关闭探测相机会话失败：继续 Dispose */ }
                 if (camera is IDisposable disposable) disposable.Dispose();
             }
         }
@@ -128,7 +128,7 @@ public sealed class BaslerPylonProvenanceProbe(
             var p = prop.GetIndexParameters();
             if (p.Length != 1) continue;
             if (!p[0].ParameterType.IsInstanceOfType(key) && !(p[0].ParameterType == typeof(string) && key is string)) continue;
-            try { return prop.GetValue(instance, [key]); } catch { }
+            try { return prop.GetValue(instance, [key]); } catch { /* 索引器不支持该键：尝试下一个属性 */ }
         }
         return null;
     }
@@ -143,7 +143,7 @@ public sealed class BaslerPylonProvenanceProbe(
         }
         foreach (var name in names)
         {
-            try { return Assembly.Load(new AssemblyName(name)); } catch { }
+            try { return Assembly.Load(new AssemblyName(name)); } catch { /* 该程序集名不可用：继续尝试下一个 */ }
         }
         return null;
     }

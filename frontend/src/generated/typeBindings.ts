@@ -27,9 +27,6 @@ import type {
   NodePerformanceBaseline,
   RunObservabilitySnapshot,
   TracePage,
-  StorageBackupDescriptor,
-  StorageRestoreResult,
-  TraceStorageStatus,
   OfflineReplayContext,
   ValidationDatasetItem,
   ValidationDatasetDetail,
@@ -38,7 +35,6 @@ import type {
   ParameterTuningPreviewResult,
   VisionTransform2D,
   CalibrationWorkspaceRequest,
-  ProductionRuntimeConfig,
   ProductionRuntimeStatus,
   ProductionSynchronizationGuardSnapshot,
   DiagnosticsSummary,
@@ -100,12 +96,6 @@ type B_RunObservabilitySnapshot = components['schemas']['RunObservabilitySnapsho
 export type K_RunObservabilitySnapshot = Assert<KeysOf<RunObservabilitySnapshot> extends KeysOf<B_RunObservabilitySnapshot> ? true : false>;
 type B_TracePage = components['schemas']['TracePage'];
 export type K_TracePage = Assert<KeysOf<TracePage> extends KeysOf<B_TracePage> ? true : false>;
-type B_StorageBackupDescriptor = components['schemas']['StorageBackupDescriptor'];
-export type K_StorageBackupDescriptor = Assert<KeysOf<StorageBackupDescriptor> extends KeysOf<B_StorageBackupDescriptor> ? true : false>;
-type B_StorageRestoreResult = components['schemas']['StorageRestoreResult'];
-export type K_StorageRestoreResult = Assert<KeysOf<StorageRestoreResult> extends KeysOf<B_StorageRestoreResult> ? true : false>;
-type B_TraceStorageStatus = components['schemas']['TraceStorageStatus'];
-export type K_TraceStorageStatus = Assert<KeysOf<TraceStorageStatus> extends KeysOf<B_TraceStorageStatus> ? true : false>;
 type B_OfflineReplayContext = components['schemas']['OfflineReplayContext'];
 export type K_OfflineReplayContext = Assert<KeysOf<OfflineReplayContext> extends KeysOf<B_OfflineReplayContext> ? true : false>;
 type B_ValidationDatasetItem = components['schemas']['ValidationDatasetItem'];
@@ -122,8 +112,6 @@ type B_VisionTransform2D = components['schemas']['VisionTransform2D'];
 export type K_VisionTransform2D = Assert<KeysOf<VisionTransform2D> extends KeysOf<B_VisionTransform2D> ? true : false>;
 type B_CalibrationWorkspaceRequest = components['schemas']['CalibrationWorkspaceRequest'];
 export type K_CalibrationWorkspaceRequest = Assert<KeysOf<CalibrationWorkspaceRequest> extends KeysOf<B_CalibrationWorkspaceRequest> ? true : false>;
-type B_ProductionRuntimeConfig = components['schemas']['ProductionRuntimeConfig'];
-export type K_ProductionRuntimeConfig = Assert<KeysOf<ProductionRuntimeConfig> extends KeysOf<B_ProductionRuntimeConfig> ? true : false>;
 type B_ProductionRuntimeStatus = components['schemas']['ProductionRuntimeStatus'];
 export type K_ProductionRuntimeStatus = Assert<KeysOf<ProductionRuntimeStatus> extends KeysOf<B_ProductionRuntimeStatus> ? true : false>;
 type B_ProductionSynchronizationGuardSnapshot = components['schemas']['ProductionSynchronizationGuardSnapshot'];

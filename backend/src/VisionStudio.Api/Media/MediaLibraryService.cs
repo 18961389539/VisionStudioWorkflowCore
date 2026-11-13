@@ -31,6 +31,9 @@ public sealed record MediaItemDescriptor(
     long Bytes,
     DateTimeOffset ModifiedAt);
 
+/// <summary>媒体项分页结果；Total 是 skip/take 之前的过滤后条数。</summary>
+public sealed record MediaItemPage(IReadOnlyList<MediaItemDescriptor> Items, int Total);
+
 public sealed record ResolvedMediaSource(string Source, string RelativePath, string PhysicalPath, bool IsDirectory);
 
 /// <summary>
@@ -113,16 +116,20 @@ public sealed class MediaLibraryService
             .ToArray();
     }
 
-    public IReadOnlyList<MediaItemDescriptor> ListItems(string? collection, string? label, int take = 200)
-        => EnumerateItems(collection, label)
+    public MediaItemPage ListItems(string? collection, string? label, int skip = 0, int take = 200)
+    {
+        var filtered = EnumerateItems(collection, label)
             .OrderByDescending(x => x.ModifiedAt)
             .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Clamp(take, 1, 1000))
             .ToArray();
+        var effectiveSkip = Math.Max(0, skip);
+        var effectiveTake = Math.Clamp(take, 1, 1000);
+        return new MediaItemPage(filtered.Skip(effectiveSkip).Take(effectiveTake).ToArray(), filtered.Length);
+    }
 
-    public MediaCollectionDescriptor CreateCollection(string name)
+    public async Task<MediaCollectionDescriptor> CreateCollectionAsync(string name, CancellationToken ct = default)
     {
-        _mutationGate.Wait();
+        await _mutationGate.WaitAsync(ct);
         try
         {
             var safe = NormalizeSegment(name, "collection");
@@ -180,7 +187,7 @@ public sealed class MediaLibraryService
         }
         catch
         {
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* 上传临时文件清理失败：保留原异常，不覆盖导入错误 */ }
             throw;
         }
 
@@ -189,9 +196,9 @@ public sealed class MediaLibraryService
         finally { _mutationGate.Release(); }
     }
 
-    public void DeleteItem(string relativePath)
+    public async Task DeleteItemAsync(string relativePath, CancellationToken ct = default)
     {
-        _mutationGate.Wait();
+        await _mutationGate.WaitAsync(ct);
         try
         {
             var full = ResolveRelativePath(relativePath, allowMissingLeaf: false);
@@ -288,8 +295,8 @@ public sealed class MediaLibraryService
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             try { total += new FileInfo(file).Length; }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException) { /* 单个文件被占用/消失：跳过，不影响总量统计 */ }
+            catch (UnauthorizedAccessException) { /* 单个文件无权限：跳过，不影响总量统计 */ }
         }
         return total;
     }

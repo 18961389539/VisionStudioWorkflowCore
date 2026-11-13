@@ -254,7 +254,7 @@ public sealed partial class HikrobotMvsCameraDevice
                     if (raw is not null) return converter(raw);
                 }
             }
-            catch { }
+            catch { /* 节点读取方法不可用或类型不符：继续尝试下一个候选节点 */ }
         }
         return null;
     }

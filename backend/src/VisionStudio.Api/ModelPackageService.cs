@@ -52,7 +52,7 @@ public sealed class ModelPackageService(IWebHostEnvironment env)
         }
         finally
         {
-            try { if (Directory.Exists(staging)) Directory.Delete(staging, true); } catch { }
+            try { if (Directory.Exists(staging)) Directory.Delete(staging, true); } catch { /* 导入暂存目录清理失败：不影响包导入结果 */ }
         }
     }
 

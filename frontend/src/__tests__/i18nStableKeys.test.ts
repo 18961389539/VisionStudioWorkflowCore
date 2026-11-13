@@ -4,6 +4,7 @@ import type { NodeCatalogItem } from '../types';
 import {
   categories, descriptions, nodeNames, parameterDescriptions, parameterGroups
 } from '../i18n/catalog.zh';
+import { optionLabels, parameterLabels, variantLabels } from '../i18n/catalogLabels';
 import { canonicalParameterGroup, localizeCatalog } from '../i18n/catalog';
 
 /**
@@ -70,6 +71,18 @@ describe('i18n 稳定键', () => {
     for (const [name, table] of [['categories', categories], ['parameterGroups', parameterGroups]] as const) {
       for (const key of Object.keys(table)) {
         expect(key, `${name} 的键 "${key}" 看起来是自由文案，不是后端契约值`).toMatch(TOKEN_KEY);
+      }
+    }
+  });
+
+  it('参数标签/选项/变体表使用语义键', () => {
+    // 这三张表是最早迁移到稳定键的（2026-11-10）；守住形态，防止后续把英文文案粘回键位。
+    for (const key of Object.keys(parameterLabels)) {
+      expect(key, `parameterLabels 的键 "${key}" 不是类型.参数名`).toMatch(SEMANTIC_KEY);
+    }
+    for (const [name, table] of [['optionLabels', optionLabels], ['variantLabels', variantLabels]] as const) {
+      for (const nodeType of Object.keys(table)) {
+        expect(nodeType, `${name} 的节点键 "${nodeType}" 不是节点类型`).toMatch(SEMANTIC_KEY);
       }
     }
   });

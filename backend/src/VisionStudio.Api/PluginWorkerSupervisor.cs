@@ -297,7 +297,7 @@ public sealed class PluginWorkerSupervisor : IDisposable
         {
             _benchmarkOverride.Value = previous;
             pool.Dispose();
-            try { if (Directory.Exists(benchmarkRoot)) Directory.Delete(benchmarkRoot, recursive: true); } catch { }
+            try { if (Directory.Exists(benchmarkRoot)) Directory.Delete(benchmarkRoot, recursive: true); } catch { /* 基准临时目录清理失败：不影响性能结果 */ }
         }
     }
 

@@ -119,7 +119,7 @@ public sealed class PluginWorkerSharedMemoryStore
             {
                 if (File.GetLastWriteTimeUtc(path) < cutoff) File.Delete(path);
             }
-            catch { }
+            catch { /* 过期共享内存文件被占用：下一轮再清 */ }
         }
     }
 
@@ -130,7 +130,7 @@ public sealed class PluginWorkerSharedMemoryStore
             var path = ResolveFile(fileName);
             if (File.Exists(path)) File.Delete(path);
         }
-        catch { }
+        catch { /* 共享内存删除失败：句柄随进程退出回收 */ }
     }
 
     private string ResolveFile(string fileName)

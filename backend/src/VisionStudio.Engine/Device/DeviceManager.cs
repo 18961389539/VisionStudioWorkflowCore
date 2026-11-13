@@ -78,7 +78,7 @@ public sealed class DeviceManager : IAsyncDisposable
         try
         {
             await StopPollingAsync(entry);
-            try { await entry.Driver.DisconnectAsync(cancellationToken); } catch { }
+            try { await entry.Driver.DisconnectAsync(cancellationToken); } catch { /* 断开旧连接失败：继续释放驱动 */ }
             await entry.Driver.DisposeAsync();
             return true;
         }
@@ -335,7 +335,7 @@ public sealed class DeviceManager : IAsyncDisposable
         if (task is not null)
         {
             try { await task; }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* 轮询任务因取消退出：预期路径 */ }
         }
         cts.Dispose();
     }
@@ -506,8 +506,8 @@ public sealed class DeviceManager : IAsyncDisposable
     {
         foreach (var entry in _entries.Values)
         {
-            try { await StopPollingAsync(entry); } catch { }
-            try { await entry.Driver.DisposeAsync(); } catch { }
+            try { await StopPollingAsync(entry); } catch { /* 释放阶段停止轮询失败：继续释放驱动 */ }
+            try { await entry.Driver.DisposeAsync(); } catch { /* 驱动释放失败：句柄交由进程回收 */ }
             entry.LifecycleGate.Dispose();
             entry.CommandGate.Dispose();
         }

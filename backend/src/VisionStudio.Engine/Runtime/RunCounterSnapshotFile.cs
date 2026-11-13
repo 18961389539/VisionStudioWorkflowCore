@@ -138,6 +138,7 @@ public static class RunCounterSnapshotFile
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // 遗留快照文件被占用/无权限删除：保留该文件，下一轮清理重试。
         }
 
         return removed;

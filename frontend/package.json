@@ -12,7 +12,7 @@
     "lint:fix": "oxlint src --fix",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "generate:api-types": "npx --yes -p typescript@5.9.3 -p openapi-typescript@7.13.0 openapi-typescript src/generated/openapi.json -o src/generated/api-types.ts",
+    "generate:api-types": "npm ci --prefix tools/contract-gen --no-audit --no-fund && npm run generate --prefix tools/contract-gen",
     "generate:type-bindings": "node ../scripts/generate-type-bindings.mjs"
   },
   "dependencies": {

@@ -222,6 +222,17 @@ export const parameterGroups: Record<string, string> = {
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
+  // 2026-11-13 高频端口补全（按目录实际使用频次排序，先覆盖跨节点复用最多的名称）。
+  rotationDeg: '旋转角（度）', iterations: '迭代次数', outlierSampleIndex: '异常样本序号',
+  crossCheckTranslationDelta: '交叉校验平移偏差', crossCheckAngleDeltaDeg: '交叉校验角度偏差（度）',
+  translateX: '平移 X', translateY: '平移 Y', shear: '剪切量',
+  totalArea: '总面积', nominalLine: '名义直线', nominalCircle: '名义圆', totalLength: '总长度',
+  maxDistance: '最大距离', meanDistance: '平均距离', centerX: '中心 X', centerY: '中心 Y',
+  cutoff: '截止值', pitchDiameter: '中径', converged: '已收敛', conditionNumber: '条件数',
+  stdDevX: 'X 方向标准差', stdDevY: 'Y 方向标准差', angleStdDevDeg: '角度标准差（度）',
+  usedSampleCount: '使用样本数', encoder: '编码器',
+  hullPointCount: '凸包点数', hullArea: '凸包面积', convexity: '凸度',
+  maxDefectDepth: '最大缺陷深度', maxDefectPoint: '最大缺陷位置', defectCount: '缺陷数量',
   runId: '运行 ID', partId: '产品编号', fileName: '文件名', charCount: '字符数',
   iteration: '第几轮', total: '总轮数', isLast: '最后一轮', breakRequested: '请求跳出',
   message: '消息', level: '级别', severity: '严重度', logged: '已记录', code: '代码',

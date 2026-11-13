@@ -112,7 +112,7 @@ public sealed class RobotCommandTraceStore : IRobotCommandObserver
                 if (!string.IsNullOrWhiteSpace(robotId) && !string.Equals(item.RobotId, robotId, StringComparison.OrdinalIgnoreCase)) continue;
                 result.Add(item);
             }
-            catch { }
+            catch { /* 损坏/不可读的追踪文件：跳过该条 */ }
         }
         return result.OrderByDescending(x => x.StartedAt).Take(Math.Clamp(take, 1, 500)).ToArray();
     }
@@ -161,8 +161,8 @@ public sealed class RobotCommandTraceStore : IRobotCommandObserver
                 {
                     if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
                 }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
+                catch (IOException) { /* 空目录删除失败（并发写入）：下一轮再清 */ }
+                catch (UnauthorizedAccessException) { /* 空目录无权限删除：保留，不中断清理 */ }
             }
             return deleted;
         }

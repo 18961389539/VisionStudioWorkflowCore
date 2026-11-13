@@ -47,7 +47,7 @@ public sealed class VendorProvenanceProbeRegistry : IDisposable
     {
         foreach (var probe in _probes.Values)
         {
-            try { probe.Dispose(); } catch { }
+            try { probe.Dispose(); } catch { /* 探测会话释放失败：继续释放其余探测 */ }
         }
         _probes.Clear();
     }

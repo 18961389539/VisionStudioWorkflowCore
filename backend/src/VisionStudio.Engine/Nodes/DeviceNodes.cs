@@ -58,10 +58,10 @@ public sealed class DeviceReadTagNode(DeviceManager devices) : IVisionNodeExecut
         var tagValue = new VisionDeviceTagValue(deviceId, sample.TagId, sample.DataType.ToString(), sample.Value, sample.Quality.ToString(), sample.Timestamp);
         var boolValue = false;
         var boolValueValid = false;
-        try { boolValue = sample.AsBoolean(); boolValueValid = true; } catch (InvalidOperationException) { }
+        try { boolValue = sample.AsBoolean(); boolValueValid = true; } catch (InvalidOperationException) { /* 值不是布尔类型：跳过该输出 */ }
         var numberValue = 0d;
         var numberValueValid = false;
-        try { numberValue = sample.AsDouble(); numberValueValid = true; } catch (InvalidOperationException) { }
+        try { numberValue = sample.AsDouble(); numberValueValid = true; } catch (InvalidOperationException) { /* 值不是数值类型：跳过该输出 */ }
         var ageMs = Math.Max(0d, (DateTimeOffset.UtcNow - sample.Timestamp).TotalMilliseconds);
         var diag = CoordinateValidation.Diagnostics("device.readTag",
             ("deviceId", deviceId), ("tagId", sample.TagId), ("dataType", sample.DataType.ToString()),

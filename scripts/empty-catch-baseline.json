@@ -1,35 +1,5 @@
 {
   "_comment": "空 catch 的存量基线（棘轮）：值是该文件中\"未写忽略原因\"的空 catch 数量。只许降不许升——新增空 catch 必须写成 `catch { /* 或 // 原因 */ }` 或补注释，否则 static-audit 直接失败。行号会漂移，故按文件计数而不是锁行号。",
   "_updated": "2026-11-13",
-  "unexplainedByFile": {
-    "backend/src/VisionStudio.Api/AlarmStore.cs": 1,
-    "backend/src/VisionStudio.Api/GigENetworkCommissioning.cs": 6,
-    "backend/src/VisionStudio.Api/Infrastructure/RollingFileLogger.cs": 4,
-    "backend/src/VisionStudio.Api/Media/MediaLibraryService.cs": 3,
-    "backend/src/VisionStudio.Api/ModelPackageService.cs": 1,
-    "backend/src/VisionStudio.Api/PluginWorkerSupervisor.cs": 1,
-    "backend/src/VisionStudio.Api/Provenance/BaslerPylonProvenanceProbe.cs": 4,
-    "backend/src/VisionStudio.Api/Provenance/HikrobotMvsProvenanceProbe.cs": 3,
-    "backend/src/VisionStudio.Api/Provenance/ReflectionValueReader.cs": 2,
-    "backend/src/VisionStudio.Api/Provenance/VendorProvenance.cs": 1,
-    "backend/src/VisionStudio.Api/RobotCommandTraceStore.cs": 3,
-    "backend/src/VisionStudio.Api/StorageBackupService.cs": 7,
-    "backend/src/VisionStudio.Api/StorageMaintenance.cs": 4,
-    "backend/src/VisionStudio.Api/TraceabilityStore.cs": 9,
-    "backend/src/VisionStudio.Benchmark.Cli/Program.cs": 2,
-    "backend/src/VisionStudio.Camera.Basler/BaslerSdkReflection.cs": 6,
-    "backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs": 1,
-    "backend/src/VisionStudio.Camera.Hikrobot/HikrobotSdkReflection.cs": 5,
-    "backend/src/VisionStudio.Camera.Hikrobot/HikrobotTransportTelemetry.cs": 1,
-    "backend/src/VisionStudio.Engine/Algorithms/MatchingAutoTune.cs": 3,
-    "backend/src/VisionStudio.Engine/Camera/CameraAcquisitionWorker.cs": 4,
-    "backend/src/VisionStudio.Engine/Camera/CameraManager.cs": 6,
-    "backend/src/VisionStudio.Engine/Device/DeviceManager.cs": 4,
-    "backend/src/VisionStudio.Engine/Nodes/DeviceNodes.cs": 2,
-    "backend/src/VisionStudio.Engine/PluginWorkerSharedMemoryStore.cs": 2,
-    "backend/src/VisionStudio.Engine/Robot/RobotManager.cs": 1,
-    "backend/src/VisionStudio.Engine/Robot/SimulatedHandshakeRobotAdapter.cs": 1,
-    "backend/src/VisionStudio.Engine/Robot/TcpRobotSimulator.cs": 3,
-    "backend/src/VisionStudio.Engine/Runtime/RunCounterSnapshotFile.cs": 1
-  }
+  "unexplainedByFile": {}
 }

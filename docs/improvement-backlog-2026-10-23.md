@@ -213,6 +213,13 @@ quality-gate 的 `timeout-minutes` 为 25，当前总时长未触及上限，但
 ② 后端已新增字段、前端镜像尚未跟上的旧 DTO（`ProductionRuntimeConfig` / `ProductionRuntimeStatus` / `StorageBackupDescriptor` / `TraceStorageStatus` 等）；
 ③ 带 UI 附加字段的资产描述符（`CalibrationAssetDescriptor` / `HandEye*AssetDescriptor`）。
 
+**2026-11-13 收尾**：`types.ts` 1,425 → 978 行；② 的旧镜像全部改为 `ContractDto` 派生
+（`ProductionRuntimeConfig` / `ProductionRuntimeStatus` / `StorageBackupDescriptor` / `StorageRestoreResult` / `TraceStorageStatus`），
+其中生产状态只保留 `state` 封闭联合收窄；③ 的资产描述符此前已派生。生成链同时从
+`npx --yes`（每次联网、无 lockfile）改为 `frontend/tools/contract-gen` 固定依赖
+（`openapi-typescript 7.13.0` + `TypeScript 5.9.3` + `package-lock.json`），
+`npm run generate:api-types` 先 `npm ci` 再生成。
+
 **PowerShell 脚本编码约定（本轮踩坑）**：`scripts/*.ps1` 若含中文注释，文件**必须是带 BOM 的 UTF-8**。
 PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语法——表现为变量莫名是 `$null`、
 循环一次不执行、错误信息与代码不符。`export-openapi.ps1` 与 `quality-gate.ps1` 已补 BOM。
@@ -235,6 +242,12 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 `JLVisionMatching` 已在 `10ce9fb` 拆到 973 行。预算只许降不许升：拆完一个就把记录值下调到新实测值，
 否则"拆小了"这件事不会被任何检查记住。
 
+**2026-11-13 第二批进展**：五条第二梯队大文件全部按语义拆分并进入显式预算——
+`SchemaMigrations` 359 / SQL 常量 760，`CSharpScriptRunner` 716 / 编辑器辅助 402，
+`TraceabilityStore` 606 / 附件维护 237（模型与后台清理另拆独立文件），
+`StorageMaintenance` 666（四个顶层类型各自成文件），`StorageBackupService` 305 / 恢复逻辑 621。
+拆分后 `backend/src` 已无超过默认上限 1200 行的文件；`Api.Tests` 538 项、`Engine.Tests` 2263 项全绿。
+
 ### P2-6 i18n 键设计
 
 `frontend/src/i18n/catalog.ts` 2,935 行，**以英文原文为键**（2,258 条）。改一句英文文案会静默丢掉对应中文。
@@ -248,6 +261,12 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 `Running/Succeeded/Failed/Cancelled/Queued/Interrupted/Breakpoint` 一定存在（这几条是生产面板的状态文案，
 丢了会让界面显示原始枚举名）。为此把 `catalog.ts` 里的 `statusNames` 从模块私有改为导出。
 存量 2,258 条仍然以原文为键，迁移时按"用到的先迁"分批做，不要一次性重写词表。
+
+**2026-11-13 收尾**：目录标签已分批迁到稳定键（`catalogLabels.ts` 的节点类型 / `类型.参数名` / 选项值），
+描述、参数描述、节点名、分类与分组由 `i18nStableKeys.test.ts` 守形态和悬空键；状态键由
+`i18nStatusKeys.test.ts` 守标识符形态。剩余缺口集中在端口显示名：本轮补了 31 条高频端口中文，
+并新增 `i18nPortCoverage.test.ts` 棘轮（当前存量 157 条，只减不增；新增端口必须同时补中文）。
+`parameterGroups` 的英文短 token 是后端契约值（非自由文案），保留原样并由测试锁定唯一反查。
 
 ### P2-7 可观测性：ActivitySource
 

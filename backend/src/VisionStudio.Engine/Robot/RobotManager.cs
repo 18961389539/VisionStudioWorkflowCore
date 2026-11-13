@@ -360,7 +360,7 @@ public sealed class RobotManager : IAsyncDisposable
                     var afterStop = adapter.Snapshot();
                     if (afterStop.ConnectionState == RobotConnectionState.Faulted || afterStop.Handshake.Error)
                     {
-                        try { await adapter.ResetFaultAsync(ct); } catch { }
+                        try { await adapter.ResetFaultAsync(ct); } catch { /* 故障复位失败：保留故障状态，等待人工处理 */ }
                     }
                 }
             }

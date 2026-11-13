@@ -797,7 +797,7 @@ camera_profile_hash=read_safe('backend/src/VisionStudio.Engine/Camera/CameraFeat
 basler_features=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerCameraFeatures.cs')
 hik_features=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs')
 profile_store=read_safe('backend/src/VisionStudio.Api/CameraFeatureProfileStore.cs')
-profile_schema=read_safe('backend/src/VisionStudio.Api/SchemaMigrations.cs')
+profile_schema=read_family('backend/src/VisionStudio.Api/SchemaMigrations*.cs')
 profile_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraFeatureProfileEndpoints.cs')
 profile_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/CameraFeatureProfileTests.cs')
 profile_store_tests=read_safe('backend/tests/VisionStudio.Api.Tests/CameraFeatureProfileStoreTests.cs')
@@ -916,7 +916,7 @@ frontend_security=read_safe('frontend/src/security.tsx')
 for token in ['SecurityRoles.Operator','SecurityRoles.Engineer','SecurityRoles.Administrator','SetFallbackPolicy','AddAuthentication','AddRateLimiter','RateLimitPartition.GetFixedWindowLimiter']:
     if token not in host_registration: fail(f'V0.24 security registration missing: {token}')
 # V0.28 moved DDL into an explicit ordered migration source.
-schema_migration_source=read_safe('backend/src/VisionStudio.Api/SchemaMigrations.cs')
+schema_migration_source=read_family('backend/src/VisionStudio.Api/SchemaMigrations*.cs')
 # "Current schema version" assertions read the live implementation instead of a frozen literal.
 _current_schema_match = re.search(r'CurrentVersion\s*=\s*(\d+)', schema_migration_source)
 CURRENT_SCHEMA_TOKEN = f'CurrentVersion = {_current_schema_match.group(1)}' if _current_schema_match else 'CurrentVersion = 0'
@@ -1577,11 +1577,11 @@ ok('V0.59 portable baseline CI spec + headless benchmark runner + deterministic 
 
 # V0.60 exact run timeline + node latency baseline observability
 observability_source=read_safe('backend/src/VisionStudio.Api/RunObservability.cs')
-trace_store=read_safe('backend/src/VisionStudio.Api/TraceabilityStore.cs')
+trace_store=read_family('backend/src/VisionStudio.Api/TraceabilityStore*.cs') + '\n' + read_safe('backend/src/VisionStudio.Api/TraceRetentionHostedService.cs')
 models=read_safe('backend/src/VisionStudio.Engine/Models.cs')
 workflow_data=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowData.cs')
 node_runtime=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionNodeRuntime.cs')
-schema=read_safe('backend/src/VisionStudio.Api/SchemaMigrations.cs')
+schema=read_family('backend/src/VisionStudio.Api/SchemaMigrations*.cs')
 trace_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/TraceEndpoints.cs')
 observability_ui=read_safe('frontend/src/components/RunObservabilityPanel.tsx')
 observability_tests=read_safe('backend/tests/VisionStudio.Api.Tests/RunObservabilityTests.cs')
@@ -1666,7 +1666,7 @@ if 'Category!=Soak' not in qsh or 'check-coverage.py' not in qsh: fail('Quality 
 
 
 # Retained V0.20 storage semantics
-trace_store=read_safe('backend/src/VisionStudio.Api/TraceabilityStore.cs')
+trace_store=read_family('backend/src/VisionStudio.Api/TraceabilityStore*.cs') + '\n' + read_safe('backend/src/VisionStudio.Api/TraceRetentionHostedService.cs')
 job_store=read_safe('backend/src/VisionStudio.Api/JobStore.cs')
 cal_store=read_safe('backend/src/VisionStudio.Api/CalibrationWorkspace.cs')
 sqlite_db=read_safe('backend/src/VisionStudio.Api/SqliteMetadataDatabase.cs')
@@ -1685,9 +1685,9 @@ ok('V0.20 SQLite storage semantics retained')
 
 
 # V0.28 explicit schema migrations + local backup/restore + capacity guard
-schema_migrations=read_safe('backend/src/VisionStudio.Api/SchemaMigrations.cs')
-storage_maintenance=read_safe('backend/src/VisionStudio.Api/StorageMaintenance.cs')
-storage_backup=read_safe('backend/src/VisionStudio.Api/StorageBackupService.cs')
+schema_migrations=read_family('backend/src/VisionStudio.Api/SchemaMigrations*.cs')
+storage_maintenance=read_family('backend/src/VisionStudio.Api/StorageMaintenance*.cs') + '\n' + read_family('backend/src/VisionStudio.Api/StorageCapacity*.cs')
+storage_backup=read_family('backend/src/VisionStudio.Api/StorageBackupService*.cs')
 storage_panel=read_safe('frontend/src/components/StoragePanel.tsx')
 for token in [CURRENT_SCHEMA_TOKEN,'schema_migration_history','BaselineHistoryAsync','VerifyHistoryChecksumsAsync','SHA256.HashData','BeginTransaction(deferred: false)']:
     if token not in schema_migrations: fail(f'V0.28 migration runner missing: {token}')
@@ -1790,7 +1790,7 @@ if 'NODE_MATURITY_ACK_REQUIRED' not in read_safe('frontend/src/components/Recipe
 script_maturity = maturity_catalog.split('["script.csharp"]', 1)
 if len(script_maturity) < 2 or 'NodeMaturity.Preview' not in script_maturity[1][:200]:
     fail('script.csharp must stay non-Stable in NodeMaturityCatalog (trusted-code runtime requires publish acknowledgement)')
-script_runner = read_safe('backend/src/VisionStudio.Scripting/CSharpScriptRunner.cs')
+script_runner = read_family('backend/src/VisionStudio.Scripting/CSharpScriptRunner*.cs')
 for token in ['ForbiddenDirective', 'ForbiddenApiWalker', 'MaxCachedScripts']:
     if token not in script_runner: fail(f'C# script sandbox guard missing: {token}')
 script_endpoints = read_safe('backend/src/VisionStudio.Api/Endpoints/ScriptEndpoints.cs')

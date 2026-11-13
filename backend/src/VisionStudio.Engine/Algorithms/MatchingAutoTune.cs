@@ -522,9 +522,9 @@ public static class MatchingAutoTune
 
     private static string SafeString(JlTupleElements element)
     {
-        try { return element.S; } catch (Exception) { }
-        try { return element.I.ToString(CultureInfo.InvariantCulture); } catch (Exception) { }
-        try { return element.D.ToString("R", CultureInfo.InvariantCulture); } catch (Exception) { }
+        try { return element.S; } catch (Exception) { /* 字段不是字符串：尝试下一个表示形式 */ }
+        try { return element.I.ToString(CultureInfo.InvariantCulture); } catch (Exception) { /* 字段不是整数：尝试下一个表示形式 */ }
+        try { return element.D.ToString("R", CultureInfo.InvariantCulture); } catch (Exception) { /* 字段不是浮点数：返回空串 */ }
         return string.Empty;
     }
 

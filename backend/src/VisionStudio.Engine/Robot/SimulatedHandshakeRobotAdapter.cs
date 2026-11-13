@@ -363,7 +363,7 @@ public abstract class SimulatedHandshakeRobotAdapter : IRobot2DAdapter, IHardwar
             cts.Cancel();
             if (task is not null)
             {
-                try { await task; } catch (OperationCanceledException) { }
+                try { await task; } catch (OperationCanceledException) { /* 关停时取消运动任务：预期路径 */ }
             }
             cts.Dispose();
         }

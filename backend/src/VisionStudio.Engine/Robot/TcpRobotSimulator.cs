@@ -115,7 +115,7 @@ public sealed class TcpRobotSimulatorServer : IAsyncDisposable
         _listener?.Stop();
         if (_loop is not null)
         {
-            try { await _loop; } catch (OperationCanceledException) { }
+            try { await _loop; } catch (OperationCanceledException) { /* 模拟器关停取消：预期路径 */ }
         }
         await _robot.DisposeAsync();
         _cts?.Dispose();
@@ -232,7 +232,7 @@ public sealed class TcpJsonRobotAdapter : IRobot2DAdapter
                     await Task.Delay(25, ct);
                 }
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* 轮询任务因取消退出：预期路径 */ }
             catch
             {
                 // Connection errors surface on the next explicit command; polling is diagnostic only.
@@ -250,7 +250,7 @@ public sealed class TcpJsonRobotAdapter : IRobot2DAdapter
         cts.Cancel();
         if (task is not null)
         {
-            try { await task; } catch (OperationCanceledException) { }
+            try { await task; } catch (OperationCanceledException) { /* 客户端处理任务因取消退出：预期路径 */ }
         }
         cts.Dispose();
     }

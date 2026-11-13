@@ -8,113 +8,7 @@ using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api;
 
-public sealed record RunTraceContext(
-    string Source,
-    string? JobId = null,
-    int? JobVersion = null,
-    string? WorkflowHash = null,
-    string? DebugMode = null,
-    string? DependencyManifestHash = null,
-    string? Note = null);
-
-public sealed record RunTraceRecord(
-    string RunId,
-    DateTimeOffset StartedAt,
-    string Source,
-    string? JobId,
-    int? JobVersion,
-    string WorkflowId,
-    string WorkflowName,
-    string? WorkflowHash,
-    string? DependencyManifestHash,
-    string ExecutionStatus,
-    string Disposition,
-    double TotalDurationMs,
-    int NodeCount,
-    int OverlayCount,
-    bool HasPreview,
-    bool HasReplayInput,
-    string? ReplaySourceNodeId,
-    string? Error,
-    string? Note,
-    IReadOnlyList<NodeRunReport> NodeReports,
-    string? ErrorCode = null);
-
-public sealed record UpdateDispositionRequest(string Disposition, string? Note = null);
-
-public sealed record TraceStats(
-    int Total,
-    int Ok,
-    int Ng,
-    int Review,
-    int Errors,
-    double AverageDurationMs);
-
-public sealed record TracePage(
-    int Offset,
-    int Limit,
-    int Total,
-    IReadOnlyList<RunTraceRecord> Items);
-
-/// <summary>
-/// 追溯查询过滤条件：分页与统计共用同一组谓词，保证“命中 N 条”与统计口径一致。
-/// 时间一律 UTC（started_at 以 UTC ISO "O" 格式落库，字符串比较即时间比较）；
-/// RunIdPrefix 供“输入运行 ID 直接查找”——前端在直查模式下不附加时间窗。
-/// </summary>
-public sealed record TraceQuery(
-    int Offset = 0,
-    int Limit = 100,
-    string? JobId = null,
-    int? JobVersion = null,
-    string? Disposition = null,
-    string? ExecutionStatus = null,
-    string? Source = null,
-    string? RunIdPrefix = null,
-    string? WorkflowKeyword = null,
-    string? ErrorCode = null,
-    DateTimeOffset? From = null,
-    DateTimeOffset? To = null,
-    /// <summary>
-    /// 是否在列表里带上逐节点报告（2026-10-26 性能）。默认 true 保持既有契约；
-    /// 追溯面板按页展示时传 false——50 条记录各带几十份报告，实际只用得到选中那一条。
-    /// </summary>
-    bool IncludeReports = true);
-
-public sealed class TraceRetentionOptions
-{
-    public int MetadataRetentionDays { get; set; } = 3650;
-    public int OkArtifactRetentionDays { get; set; } = 7;
-    public int NgArtifactRetentionDays { get; set; } = 90;
-    public int ErrorArtifactRetentionDays { get; set; } = 90;
-    public int ReviewArtifactRetentionDays { get; set; } = 30;
-    public int OkPreviewSampleEvery { get; set; } = 20;
-    public int OkReplaySampleEvery { get; set; } = 20;
-    public int CleanupIntervalMinutes { get; set; } = 60;
-}
-
-/// <summary>
-/// 存储状态（/api/storage/status）。F05：SnapshotSkippedPreviews/Replays 暴露在线备份冻结窗口
-/// 期间跳过的附件落盘次数——"跳过是明确的行为变化，其数量必须可见并由现场验收确认"。
-/// </summary>
-public sealed record TraceStorageStatus(
-    string DatabaseFile,
-    long DatabaseBytes,
-    int TraceCount,
-    int PreviewCount,
-    int ReplayInputCount,
-    long ArtifactBytes,
-    TraceRetentionOptions Retention,
-    StorageCapacityStatus? Capacity = null,
-    SchemaMigrationStatus? Schema = null,
-    long SnapshotSkippedPreviews = 0,
-    long SnapshotSkippedReplays = 0);
-
-/// <summary>
-/// SQLite-backed trace index and structured run payload store.
-/// Node reports, exact workflow snapshots and overlays live in SQLite JSON columns;
-/// binary preview and replay-input artifacts live on disk. No recursive directory scan is used for list/stats/get.
-/// </summary>
-public sealed class TraceabilityStore
+public sealed partial class TraceabilityStore
 {
     private readonly SqliteMetadataDatabase _db;
     private readonly string _artifactRoot;
@@ -334,7 +228,7 @@ ON CONFLICT(run_id) DO UPDATE SET
                 capacityUpdate.Parameters.AddWithValue("$run", result.RunId);
                 await capacityUpdate.ExecuteNonQueryAsync(CancellationToken.None);
             }
-            catch { }
+            catch { /* 容量告警备注写入失败：返回值仍携带跳过原因 */ }
             return record with { Note = capacityNote };
         }
 
@@ -359,7 +253,7 @@ ON CONFLICT(run_id) DO UPDATE SET
                 noteUpdate.Parameters.AddWithValue("$run", result.RunId);
                 await noteUpdate.ExecuteNonQueryAsync(CancellationToken.None);
             }
-            catch { }
+            catch { /* 备份快照备注写入失败：返回值仍携带跳过原因 */ }
             if (capacityReservation > 0) _capacity?.ReleaseArtifactReservation(capacityReservation);
             return record with { Note = snapshotNote };
         }
@@ -383,7 +277,7 @@ ON CONFLICT(run_id) DO UPDATE SET
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {
-            try { if (File.Exists(absolute)) File.Delete(absolute); } catch { }
+            try { if (File.Exists(absolute)) File.Delete(absolute); } catch { /* 预览残留文件清理失败：已记录持久化失败备注 */ }
             var note = $"Preview artifact persistence failed: {ex.Message}";
             try
             {
@@ -401,7 +295,7 @@ ON CONFLICT(run_id) DO UPDATE SET
         {
             if (!string.IsNullOrWhiteSpace(temp))
             {
-                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { /* 临时预览文件清理失败：不影响主流程 */ }
             }
             if (capacityReservation > 0) _capacity?.ReleaseArtifactReservation(capacityReservation);
         }
@@ -657,95 +551,6 @@ WHERE t.run_id=$run;
             SnapshotSkippedPreviews, SnapshotSkippedReplays);
     }
 
-    public async Task<int> CleanupAsync(CancellationToken ct)
-    {
-        await _cleanupGate.WaitAsync(ct);
-        try
-        {
-            // R07：清理会删除附件文件。持共享附件写租约 → 备份冻结窗口（排他）期间不执行，
-            // 从而杜绝"快照已含某 run 的路径、清理随后删掉该文件"的悬空引用。
-            // 备份窗口进行中直接跳过本轮清理（下次宿主 tick 会重试）。
-            using var artifactWrite = _maintenance?.TryEnterArtifactWrite();
-            if (_maintenance is not null && artifactWrite is null) return 0;
-
-            var changed = 0;
-            await using var connection = await _db.OpenConnectionAsync(ct);
-
-        var artifacts = new List<(string RunId, DateTimeOffset StartedAt, string Disposition, string RelativePath)>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT run_id,started_at,disposition,preview_relative_path FROM run_traces WHERE has_preview=1 AND preview_relative_path IS NOT NULL;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) artifacts.Add((reader.GetString(0), ParseTime(reader.GetString(1)), reader.GetString(2), reader.GetString(3)));
-        }
-
-        foreach (var item in artifacts)
-        {
-            if (!ArtifactExpired(item.StartedAt, item.Disposition)) continue;
-            var path = ArtifactPath(item.RelativePath);
-            try { if (File.Exists(path)) File.Delete(path); } catch { continue; }
-            await using var update = connection.CreateCommand();
-            update.CommandText = "UPDATE run_traces SET has_preview=0, preview_relative_path=NULL, preview_bytes=0 WHERE run_id=$run;";
-            update.Parameters.AddWithValue("$run", item.RunId);
-            changed += await update.ExecuteNonQueryAsync(ct);
-            RemoveEmptyParents(Path.GetDirectoryName(path));
-        }
-
-        var replayArtifacts = new List<(string RunId, DateTimeOffset StartedAt, string Disposition, string RelativePath)>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT run_id,started_at,disposition,replay_relative_path FROM run_traces WHERE has_replay_input=1 AND replay_relative_path IS NOT NULL;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) replayArtifacts.Add((reader.GetString(0), ParseTime(reader.GetString(1)), reader.GetString(2), reader.GetString(3)));
-        }
-        foreach (var item in replayArtifacts)
-        {
-            if (!ArtifactExpired(item.StartedAt, item.Disposition)) continue;
-            var path = ArtifactPath(item.RelativePath);
-            try { if (File.Exists(path)) File.Delete(path); } catch { continue; }
-            await using var update = connection.CreateCommand();
-            update.CommandText = "UPDATE run_traces SET has_replay_input=0, replay_relative_path=NULL, replay_bytes=0, replay_source_node_id=NULL WHERE run_id=$run;";
-            update.Parameters.AddWithValue("$run", item.RunId);
-            changed += await update.ExecuteNonQueryAsync(ct);
-            RemoveEmptyParents(Path.GetDirectoryName(path));
-        }
-
-        if (_retention.MetadataRetentionDays > 0)
-        {
-            var cutoff = DateTimeOffset.UtcNow.AddDays(-_retention.MetadataRetentionDays);
-            var expiredPaths = new List<string>();
-            await using (var paths = connection.CreateCommand())
-            {
-                paths.CommandText = "SELECT artifact_path FROM (SELECT preview_relative_path AS artifact_path FROM run_traces WHERE started_at < $cutoff AND preview_relative_path IS NOT NULL UNION ALL SELECT replay_relative_path AS artifact_path FROM run_traces WHERE started_at < $cutoff AND replay_relative_path IS NOT NULL);";
-                paths.Parameters.AddWithValue("$cutoff", Iso(cutoff));
-                await using var reader = await paths.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct)) expiredPaths.Add(reader.GetString(0));
-            }
-            foreach (var relative in expiredPaths)
-            {
-                var path = ArtifactPath(relative);
-                try { if (File.Exists(path)) File.Delete(path); RemoveEmptyParents(Path.GetDirectoryName(path)); } catch { }
-            }
-            await using var delete = connection.CreateCommand();
-            delete.CommandText = "DELETE FROM run_traces WHERE started_at < $cutoff;";
-            delete.Parameters.AddWithValue("$cutoff", Iso(cutoff));
-            changed += await delete.ExecuteNonQueryAsync(ct);
-        }
-
-            if (changed > 0)
-            {
-                await using var checkpoint = connection.CreateCommand();
-                checkpoint.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
-                await checkpoint.ExecuteNonQueryAsync(ct);
-            }
-
-            return changed;
-        }
-        finally
-        {
-            _cleanupGate.Release();
-        }
-    }
 
     private static async Task InsertNodeObservationsAsync(
         SqliteConnection connection,
@@ -777,138 +582,6 @@ VALUES($run,$sequence,$node,$type,$phase,$success,$start,$end,$duration,$error);
         }
     }
 
-    private bool ShouldPersistPreview(string runId, string disposition)
-        => RunArtifactSampling.Include(runId, disposition, _retention.OkPreviewSampleEvery);
-
-    private bool ShouldPersistReplayInput(string runId, string disposition, string source)
-        // 生产循环（ProductionRuntime）的 OK trace 按采样留存 replay 素材以控制磁盘占用；
-        // 交互式运行（ad-hoc / debug / 手动作业）是用户主动留下、供数据集素材与离线重放使用的
-        // 证据链，一律持久化——采样曾将其一并剔除，导致参数调优的数据集引用被 409 拒绝。
-        => source.Equals("ProductionRuntime", StringComparison.OrdinalIgnoreCase)
-            ? RunArtifactSampling.Include(runId, disposition, _retention.OkReplaySampleEvery, replay: true)
-            : true;
-
-    public RunArtifactOptions GetArtifactOptions(long maxRawBytes)
-        => new(DeferEncoding: true, PreviewSampleEvery: _retention.OkPreviewSampleEvery,
-            ReplaySampleEvery: _retention.OkReplaySampleEvery, MaxRawBytes: maxRawBytes);
-
-    private async Task<RunTraceRecord> PersistReplayInputAsync(RunTraceRecord record, ReplayInputArtifact replay, DateTimeOffset startedAt, CancellationToken ct)
-    {
-        if (_capacity is not null && !_capacity.CanPersistArtifact(replay.Png.LongLength)) return record;
-        // N01：CanPersistArtifact 通过即已占用容量预留。与 preview 分支对称——所有提前返回路径
-        // 都必须归还预留，否则冻结窗口反复出现时预留泄漏会累积成虚假占用。
-        var capacityReservation = _capacity is not null ? replay.Png.LongLength : 0L;
-
-        // R07：与 preview 同理，持共享附件写租约；备份冻结窗口内跳过落盘（保留素材可重生成/重新采集）。
-        // N01：跳过路径归还容量预留，并把跳过原因写入数据库（与 preview 分支一致），保证历史记录可诊断。
-        using var artifactWrite = _maintenance?.TryEnterArtifactWrite();
-        if (_maintenance is not null && artifactWrite is null)
-        {
-            const string snapshotNote = "Replay input skipped because a storage backup snapshot is in progress.";
-            Interlocked.Increment(ref _snapshotSkippedReplays);
-            try
-            {
-                await using var noteConnection = await _db.OpenConnectionAsync(CancellationToken.None);
-                await using var noteUpdate = noteConnection.CreateCommand();
-                noteUpdate.CommandText = "UPDATE run_traces SET note=COALESCE(note || ' | ','') || $note WHERE run_id=$run;";
-                noteUpdate.Parameters.AddWithValue("$note", snapshotNote);
-                noteUpdate.Parameters.AddWithValue("$run", record.RunId);
-                await noteUpdate.ExecuteNonQueryAsync(CancellationToken.None);
-            }
-            catch { }
-            if (capacityReservation > 0) _capacity?.ReleaseArtifactReservation(capacityReservation);
-            return record with { Note = string.IsNullOrWhiteSpace(record.Note) ? snapshotNote : record.Note + " | " + snapshotNote };
-        }
-
-        var relative = ReplayRelativePath(startedAt, record.RunId);
-        var absolute = ArtifactPath(relative);
-        string? temp = null;
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
-            temp = absolute + $".{Guid.NewGuid():N}.tmp";
-            await File.WriteAllBytesAsync(temp, replay.Png, ct);
-            File.Move(temp, absolute, true);
-            temp = null;
-
-            await using var connection = await _db.OpenConnectionAsync(ct);
-            await using var update = connection.CreateCommand();
-            update.CommandText = "UPDATE run_traces SET has_replay_input=1,replay_relative_path=$path,replay_bytes=$bytes,replay_source_node_id=$source WHERE run_id=$run;";
-            update.Parameters.AddWithValue("$path", relative);
-            update.Parameters.AddWithValue("$bytes", replay.Png.LongLength);
-            update.Parameters.AddWithValue("$source", replay.SourceNodeId);
-            update.Parameters.AddWithValue("$run", record.RunId);
-            await update.ExecuteNonQueryAsync(ct);
-            return record with { HasReplayInput = true, ReplaySourceNodeId = replay.SourceNodeId };
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
-        {
-            try { if (File.Exists(absolute)) File.Delete(absolute); } catch { }
-            var note = $"Replay input persistence failed: {ex.Message}";
-            try
-            {
-                await using var connection = await _db.OpenConnectionAsync(CancellationToken.None);
-                await using var update = connection.CreateCommand();
-                update.CommandText = "UPDATE run_traces SET note=COALESCE(note || ' | ','') || $note WHERE run_id=$run;";
-                update.Parameters.AddWithValue("$note", note);
-                update.Parameters.AddWithValue("$run", record.RunId);
-                await update.ExecuteNonQueryAsync(CancellationToken.None);
-            }
-            catch { }
-            return record with { Note = string.IsNullOrWhiteSpace(record.Note) ? note : record.Note + " | " + note };
-        }
-        finally
-        {
-            if (!string.IsNullOrWhiteSpace(temp))
-            {
-                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
-            }
-            if (capacityReservation > 0) _capacity?.ReleaseArtifactReservation(capacityReservation);
-        }
-    }
-
-    private bool ArtifactExpired(DateTimeOffset startedAt, string disposition)
-    {
-        var days = disposition.ToUpperInvariant() switch
-        {
-            "NG" => _retention.NgArtifactRetentionDays,
-            "ERROR" => _retention.ErrorArtifactRetentionDays,
-            "REVIEW" => _retention.ReviewArtifactRetentionDays,
-            _ => _retention.OkArtifactRetentionDays
-        };
-        return days >= 0 && startedAt < DateTimeOffset.UtcNow.AddDays(-days);
-    }
-
-    private string PreviewRelativePath(DateTimeOffset at, string runId)
-        => Path.Combine("traces", at.UtcDateTime.ToString("yyyy-MM-dd"), Sanitize(runId), "preview.jpg");
-
-    private string ReplayRelativePath(DateTimeOffset at, string runId)
-        => Path.Combine("traces", at.UtcDateTime.ToString("yyyy-MM-dd"), Sanitize(runId), "replay-input.png");
-
-    private string ArtifactPath(string relative)
-    {
-        var path = Path.GetFullPath(Path.Combine(_artifactRoot, relative));
-        var root = Path.GetFullPath(_artifactRoot) + Path.DirectorySeparatorChar;
-        if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Artifact path escaped storage root.");
-        return path;
-    }
-
-    private void RemoveEmptyParents(string? directory)
-    {
-        var root = Path.GetFullPath(_artifactRoot).TrimEnd(Path.DirectorySeparatorChar);
-        while (!string.IsNullOrWhiteSpace(directory))
-        {
-            var full = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
-            if (string.Equals(full, root, StringComparison.OrdinalIgnoreCase) || !full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) break;
-            try
-            {
-                if (Directory.EnumerateFileSystemEntries(full).Any()) break;
-                Directory.Delete(full);
-            }
-            catch { break; }
-            directory = Path.GetDirectoryName(full);
-        }
-    }
 
     private RunTraceRecord ReadRecord(SqliteDataReader reader)
     {
@@ -930,58 +603,4 @@ VALUES($run,$sequence,$node,$type,$phase,$success,$start,$end,$duration,$error);
     private static string Iso(DateTimeOffset value) => value.ToUniversalTime().ToString("O");
     private static DateTimeOffset ParseTime(string value) => DateTimeOffset.Parse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
     private static string Sanitize(string id) => string.Concat(id.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_'));
-}
-
-public sealed class TraceRetentionHostedService : BackgroundService
-{
-    /// <summary>Runs older than this without finalization are treated as orphaned by periodic maintenance.</summary>
-    private static readonly TimeSpan OrphanedRunAge = TimeSpan.FromHours(1);
-
-    private readonly TraceabilityStore _traces;
-    private readonly TraceRetentionOptions _options;
-    private readonly ILogger<TraceRetentionHostedService> _logger;
-    private readonly StorageMaintenanceCoordinator _maintenance;
-
-    public TraceRetentionHostedService(TraceabilityStore traces, IOptions<TraceRetentionOptions> options, ILogger<TraceRetentionHostedService> logger, StorageMaintenanceCoordinator maintenance)
-    {
-        _traces = traces;
-        _options = options.Value;
-        _logger = logger;
-        _maintenance = maintenance;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Startup reconciliation: a row still "Running" belongs to a previous process that never finalized it.
-        try
-        {
-            var interrupted = await _traces.SweepStaleRunsAsync(TimeSpan.Zero, stoppingToken);
-            if (interrupted > 0) _logger.LogWarning("Marked {Count} interrupted run trace(s) as Unknown after startup.", interrupted);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Startup reconciliation of running trace records failed.");
-        }
-
-        var interval = TimeSpan.FromMinutes(Math.Max(1, _options.CleanupIntervalMinutes));
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(interval, stoppingToken);
-                using var maintenanceLease = _maintenance.TryEnterRequest();
-                if (maintenanceLease is null) continue;
-                var orphaned = await _traces.SweepStaleRunsAsync(OrphanedRunAge, stoppingToken);
-                if (orphaned > 0) _logger.LogWarning("Marked {Count} orphaned run trace(s) as Unknown.", orphaned);
-                var changed = await _traces.CleanupAsync(stoppingToken);
-                if (changed > 0) _logger.LogInformation("Trace retention cleanup changed {Count} records/artifacts.", changed);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Trace retention cleanup failed.");
-            }
-        }
-    }
 }

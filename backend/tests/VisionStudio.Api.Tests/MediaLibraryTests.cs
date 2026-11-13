@@ -72,7 +72,7 @@ public sealed class MediaLibraryTests
         var media = CreateMedia(env);
         using var bytes = new MemoryStream(new byte[] { 1, 2, 3, 4 });
         await Assert.ThrowsAsync<ApiValidationException>(() => media.ImportAsync("bad", "Unlabeled", "fake.png", bytes, bytes.Length, default));
-        Assert.Empty(media.ListItems("bad", null));
+        Assert.Empty(media.ListItems("bad", null).Items);
     }
 
     [Fact]
@@ -98,8 +98,36 @@ public sealed class MediaLibraryTests
         var second = await media.ImportAsync("repeat", "OK", "sample.png", secondBytes, secondBytes.Length, default);
 
         Assert.NotEqual(first.RelativePath, second.RelativePath);
-        Assert.Equal(2, media.ListItems("repeat", "OK").Count);
+        Assert.Equal(2, media.ListItems("repeat", "OK").Items.Count);
         Assert.Equal(TinyPng, File.ReadAllBytes(media.ResolveItemPath(first.RelativePath)));
+    }
+
+    [Fact]
+    public async Task ListItems_PaginatesAndReportsFilteredTotal()
+    {
+        using var env = new TempWebHostEnvironment();
+        var media = CreateMedia(env);
+        for (var i = 1; i <= 5; i++)
+        {
+            using var bytes = new MemoryStream(TinyPng);
+            await media.ImportAsync("page", "OK", $"sample-{i}.png", bytes, bytes.Length, default);
+        }
+
+        var first = media.ListItems("page", "OK", skip: 0, take: 2);
+        Assert.Equal(5, first.Total);
+        Assert.Equal(2, first.Items.Count);
+
+        var middle = media.ListItems("page", "OK", skip: 2, take: 2);
+        Assert.Equal(5, middle.Total);
+        Assert.Equal(2, middle.Items.Count);
+
+        var last = media.ListItems("page", "OK", skip: 4, take: 2);
+        Assert.Equal(5, last.Total);
+        Assert.Single(last.Items);
+
+        var beyond = media.ListItems("page", "OK", skip: 99, take: 2);
+        Assert.Equal(5, beyond.Total);
+        Assert.Empty(beyond.Items);
     }
 
     [Fact]

@@ -417,8 +417,8 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
             await Task.Delay(delayMs, cancellationToken);
             try
             {
-                try { await _device.StopAsync(cancellationToken); } catch { }
-                try { await _device.CloseAsync(cancellationToken); } catch { }
+                try { await _device.StopAsync(cancellationToken); } catch { /* 重连前停止旧会话失败：继续尝试关闭并重开 */ }
+                try { await _device.CloseAsync(cancellationToken); } catch { /* 重连前关闭旧会话失败：继续重开 */ }
                 await _device.OpenAsync(cancellationToken);
                 await _device.StartAsync(cancellationToken);
                 Interlocked.Increment(ref _reconnects);
@@ -495,7 +495,7 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
             var loop = _loop;
             if (loop is not null)
             {
-                try { await loop.ConfigureAwait(false); } catch { }
+                try { await loop.ConfigureAwait(false); } catch { /* 采集循环异常已由循环内部报告：此处只等待退出 */ }
             }
             await StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
@@ -503,7 +503,7 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        try { await StopAsync(); } catch { }
+        try { await StopAsync(); } catch { /* 释放阶段停止失败：保留未确认状态，资源交由进程回收 */ }
         // Q03：旧采集调用仍未返回（停止未确认）时，释放同步原语会让仍在运行的孤儿循环抛
         // ObjectDisposedException，而底层问题（厂商调用卡死）不会因此消失。保留资源交由进程回收，
         // 绝不制造"已清理"的假象。

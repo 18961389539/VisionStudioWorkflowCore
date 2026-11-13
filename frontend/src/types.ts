@@ -1,5 +1,11 @@
 import type { components } from './generated/api-types';
 
+/**
+ * 契约类型约定（2026-11-13）：与后端同名、且没有 UI 收窄的 DTO 一律用 `ContractDto<'X'>`
+ * 从生成 schema 派生；本文件只保留目录 UI 视图（`NodeCatalogItem` / `ParameterDescriptor` 等）、
+ * 前端刻意收窄的封闭联合与复合视图。新增手写 DTO 前先确认能否直接派生。
+ */
+
 /** 后端 OpenAPI schema 别名：枚举与 DTO 以生成类型为准，手写侧只保留 UI 需要的收窄。 */
 type ContractSchema<K extends keyof components['schemas']> = components['schemas'][K];
 
@@ -515,37 +521,13 @@ export type SchemaMigrationHistoryEntry = ContractDto<'SchemaMigrationHistoryEnt
 
 export type SchemaMigrationStatus = ContractDto<'SchemaMigrationStatus'>;
 
-/** UI 视图：数值收窄为 number；后端新增的 systemAssets 相关字段暂未消费。 */
-export type StorageBackupDescriptor = {
-  backupId: string;
-  createdAt: string;
-  schemaVersion: number;
-  archiveBytes: number;
-  includesArtifacts: boolean;
-  artifactCount: number;
-  artifactBytes: number;
-};
+/** 从生成 schema 派生；后端新增的 systemAssets 字段自动包含。 */
+export type StorageBackupDescriptor = ContractDto<'StorageBackupDescriptor'>;
 
-export type StorageRestoreResult = {
-  backupId: string;
-  sourceSchemaVersion: number;
-  currentSchemaVersion: number;
-  artifactsRestored: boolean;
-  restartRecommended: boolean;
-};
+export type StorageRestoreResult = ContractDto<'StorageRestoreResult'>;
 
-/** UI 视图：数值收窄为 number；后端新增的 snapshotSkipped* 计数暂未展示。 */
-export type TraceStorageStatus = {
-  databaseFile: string;
-  databaseBytes: number;
-  traceCount: number;
-  previewCount: number;
-  replayInputCount: number;
-  artifactBytes: number;
-  retention: TraceRetentionOptions;
-  capacity?: StorageCapacityStatus | null;
-  schema?: SchemaMigrationStatus | null;
-};
+/** 从生成 schema 派生；后端新增的 snapshotSkipped* 计数自动包含。 */
+export type TraceStorageStatus = ContractDto<'TraceStorageStatus'>;
 
 /** UI 视图：trace/workflow 复用前端视图，可空字段允许省略。 */
 export type OfflineReplayContext = {
@@ -766,62 +748,14 @@ export type DeviceProtocolDiagnostics = ContractDto<'DeviceProtocolDiagnostics'>
 
 export type DeviceDescriptor = ContractDto<'DeviceDescriptor'>;
 
-/** UI 视图：数值收窄为 number；后端 maxRecoveryAttempts 暂未在配置面板暴露。 */
-export type ProductionRuntimeConfig = {
-  jobId?: string | null;
-  autoStart: boolean;
-  cycleDelayMs: number;
-  maxCycleMs: number;
-  maxConsecutiveFailures: number;
-  autoRecover: boolean;
-  recoveryDelayMs: number;
-  stopTimeoutMs: number;
-  ptpDriftGuardEnabled: boolean;
-  ptpGuardWindowRuns: number;
-  ptpGuardMinimumEvidenceRuns: number;
-  ptpGuardMinimumReadyRate: number;
-  ptpGuardCheckEveryCycles: number;
-  ptpGuardFaultOnMasterClockChange: boolean;
-  synchronizationHealthGuardEnabled: boolean;
-  synchronizationGuardWindowRuns: number;
-  synchronizationGuardMinimumEvidenceRuns: number;
-  synchronizationGuardMaximumFailureRate: number;
-  synchronizationGuardMaximumFrameTimeoutRate: number;
-  synchronizationGuardMaxConsecutiveFailures: number;
-  synchronizationGuardMaxConsecutiveSkewViolations: number;
-  synchronizationGuardMaximumNativeFrameLossRate: number;
-  synchronizationGuardMaximumBufferUnderruns: number;
-  synchronizationGuardMaximumResynchronizations: number;
-  synchronizationGuardMaximumSequenceGapRate: number;
-  synchronizationGuardCheckEveryCycles: number;
-  synchronizationGuardUnhealthyChecksToFault: number;
-  synchronizationGuardHealthyChecksToRecover: number;
-  synchronizationGuardRecoveryTimeoutMs: number;
-};
+/** 从生成 schema 派生；后端新增 maxRecoveryAttempts 等字段自动包含。 */
+export type ProductionRuntimeConfig = ContractDto<'ProductionRuntimeConfig'>;
 
-/** UI 视图：state 收窄为封闭联合；后端 trace 队列/副作用字段暂未消费。 */
-export type ProductionRuntimeStatus = {
-  state: 'Stopped' | 'Starting' | 'Running' | 'Recovering' | 'Stopping' | 'Faulted';
-  jobId?: string | null;
-  lockedJobVersion?: number | null;
-  lockedWorkflowHash?: string | null;
-  lockedDependencyManifestHash?: string | null;
-  startedAt?: string | null;
-  lastCycleAt?: string | null;
-  currentRunId?: string | null;
-  cycleCount: number;
-  okCount: number;
-  ngCount: number;
-  errorCount: number;
-  consecutiveFailures: number;
-  watchdogTrips: number;
-  lastDurationMs: number;
-  lastDisposition?: string | null;
-  lastError?: string | null;
-  productionLocked: boolean;
-  ptpGuard?: ProductionPtpGuardSnapshot | null;
-  synchronizationGuard?: ProductionSynchronizationGuardSnapshot | null;
-};
+/** UI 视图：state 收窄为封闭联合；其余字段全部来自生成 schema。 */
+export type ProductionRuntimeStatus =
+  Omit<ContractDto<'ProductionRuntimeStatus'>, 'state'> & {
+    state: 'Stopped' | 'Starting' | 'Running' | 'Recovering' | 'Stopping' | 'Faulted';
+  };
 
 export type ProductionPtpGuardIssue = ContractSchema<'ProductionPtpGuardIssue'>;
 export type ProductionPtpGuardGroupStatus = ContractDto<'ProductionPtpGuardGroupStatus'>;

@@ -186,14 +186,14 @@ static async Task EnsureSuccessAsync(HttpResponseMessage response, string operat
         using var doc = JsonDocument.Parse(body);
         if (doc.RootElement.TryGetProperty("detail", out var el)) detail = el.GetString() ?? body;
     }
-    catch { }
+    catch { /* 错误体不是 JSON：保留原始响应文本作为详情 */ }
     throw new CliException($"Failed to {operation}: {(int)response.StatusCode} {response.ReasonPhrase}. {detail}");
 }
 
 static async Task BestEffortCancelAsync(HttpClient client, string runId)
 {
     try { using var _ = await client.PostAsync($"api/plugin-benchmarks/{Uri.EscapeDataString(runId)}/cancel", content: null); }
-    catch { }
+    catch { /* 取消是尽力而为：服务端可能已自行结束或不可达 */ }
 }
 
 static async Task WriteTextAsync(string? path, string text)

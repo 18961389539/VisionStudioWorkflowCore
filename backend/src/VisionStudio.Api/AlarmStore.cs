@@ -186,7 +186,7 @@ public sealed class AlarmStore
         }
         finally
         {
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* 临时文件清理失败不阻断原子写入结果 */ }
         }
     }
 }

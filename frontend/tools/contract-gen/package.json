@@ -1,0 +1,13 @@
+{
+  "name": "visionstudio-contract-gen",
+  "private": true,
+  "description": "Pinned OpenAPI → TypeScript generator environment (TypeScript 5.9 peer for openapi-typescript; the app itself uses TypeScript 7).",
+  "type": "module",
+  "scripts": {
+    "generate": "openapi-typescript ../../src/generated/openapi.json -o ../../src/generated/api-types.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

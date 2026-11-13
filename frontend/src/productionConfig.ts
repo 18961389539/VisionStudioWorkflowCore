@@ -4,6 +4,7 @@ import type { ProductionRuntimeConfig, ProductionRuntimeStatus } from './types';
 export const defaultProductionConfig: ProductionRuntimeConfig = {
   jobId: null, autoStart: false, cycleDelayMs: 25, maxCycleMs: 15000,
   maxConsecutiveFailures: 3, autoRecover: true, recoveryDelayMs: 1000, stopTimeoutMs: 5000,
+  maxRecoveryAttempts: 3,
   ptpDriftGuardEnabled: true, ptpGuardWindowRuns: 20, ptpGuardMinimumEvidenceRuns: 5,
   ptpGuardMinimumReadyRate: 0.99, ptpGuardCheckEveryCycles: 10, ptpGuardFaultOnMasterClockChange: true,
   synchronizationHealthGuardEnabled: true, synchronizationGuardWindowRuns: 20,

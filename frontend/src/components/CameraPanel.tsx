@@ -42,6 +42,9 @@ export default function CameraPanel({ open, onClose }: Props) {
   const [mediaStatus, setMediaStatus] = useState<MediaLibraryStatus>();
   const [collections, setCollections] = useState<MediaCollectionDescriptor[]>([]);
   const [mediaItems, setMediaItems] = useState<MediaItemDescriptor[]>([]);
+  const [mediaTotal, setMediaTotal] = useState(0);
+  const [mediaPage, setMediaPage] = useState(1);
+  const [mediaPageSize, setMediaPageSize] = useState(20);
   const [mediaCollection, setMediaCollection] = useState<string>();
   const [mediaLabel, setMediaLabel] = useState<string>();
   const [selectedMedia, setSelectedMedia] = useState<MediaItemDescriptor>();
@@ -305,12 +308,13 @@ export default function CameraPanel({ open, onClose }: Props) {
     finally { setBusy(undefined); }
   };
 
-  const refreshMedia = async (quiet = false) => {
+  const refreshMedia = async (quiet = false, page = mediaPage, pageSize = mediaPageSize) => {
     try {
       const query = new URLSearchParams();
       if (mediaCollection) query.set('collection', mediaCollection);
       if (mediaLabel) query.set('label', mediaLabel);
-      query.set('take', '300');
+      query.set('skip', String(Math.max(0, page - 1) * pageSize));
+      query.set('take', String(pageSize));
       const [statusResponse, collectionsResponse, itemsResponse] = await Promise.all([
         apiFetch(media.status), apiFetch(media.collections), apiFetch(media.itemsQuery(query.toString()))
       ]);
@@ -318,6 +322,17 @@ export default function CameraPanel({ open, onClose }: Props) {
       setMediaStatus(await statusResponse.json());
       setCollections(await collectionsResponse.json());
       const items: MediaItemDescriptor[] = await itemsResponse.json();
+      const rawTotal = itemsResponse.headers.get('X-Total-Count');
+      const parsedTotal = rawTotal === null ? Number.NaN : Number(rawTotal);
+      const total = Number.isFinite(parsedTotal) ? parsedTotal : items.length;
+      const lastPage = Math.max(1, Math.ceil(total / pageSize));
+      if (page > lastPage) {
+        // 删除当前页最后一项后页码可能越界：收到总数后回退到最后一页重新取。
+        setMediaPage(lastPage);
+        await refreshMedia(quiet, lastPage, pageSize);
+        return;
+      }
+      setMediaTotal(total);
       setMediaItems(items);
       if (selectedMedia && !items.some((x) => x.relativePath === selectedMedia.relativePath)) setSelectedMedia(undefined);
     } catch (error) {
@@ -341,7 +356,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (monitorSnapshot) void refresh(true);
   }, [monitorSnapshot?.capturedAt]);
 
-  useEffect(() => { if (open) refreshMedia(true); }, [mediaCollection, mediaLabel]);
+  useEffect(() => { if (open) { setMediaPage(1); void refreshMedia(true, 1, mediaPageSize); } }, [mediaCollection, mediaLabel]);
   useEffect(() => { if (open) { refreshSyncStatus(true); refreshSyncRuns(true); refreshSyncStatistics(true); refreshSyncPtpDiagnostics(true); refreshGigEDiagnostics(true); refreshSyncTests(true); } }, [open, selectedSyncId]);
   useEffect(() => { if (!open || !selectedSyncId) return; const timer = window.setInterval(() => refreshSyncTests(true), 1000); return () => window.clearInterval(timer); }, [open, selectedSyncId]);
   useEffect(() => {
@@ -533,7 +548,7 @@ export default function CameraPanel({ open, onClose }: Props) {
       const response = await apiFetch(apiUrl('media/import'), { method: 'POST', body });
       if (!response.ok) throw new Error(await responseError(response, 'Media import failed'));
       const imported: MediaItemDescriptor[] = await response.json();
-      setUploadFiles([]); setMediaCollection(uploadCollection.trim()); await refreshMedia(true); messageApi.success(`Imported ${imported.length} image(s)`);
+      setUploadFiles([]); setMediaCollection(uploadCollection.trim()); setMediaPage(1); await refreshMedia(true, 1, mediaPageSize); messageApi.success(`Imported ${imported.length} image(s)`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Media import failed'); }
     finally { setBusy(undefined); }
   };
@@ -913,9 +928,22 @@ export default function CameraPanel({ open, onClose }: Props) {
           <div className="media-filter-row">
             <Select allowClear placeholder="全部集合" value={mediaCollection} onChange={setMediaCollection} options={collections.map((x) => ({ value: x.name, label: x.name }))} />
             <Select allowClear placeholder="全部标签" value={mediaLabel} onChange={setMediaLabel} options={['Unlabeled', 'OK', 'NG', 'Review'].map((x) => ({ value: x, label: labelText[x] }))} />
-            <Button onClick={() => refreshMedia()}>扫描</Button>
+            <Button onClick={() => { setMediaPage(1); void refreshMedia(false, 1, mediaPageSize); }}>扫描</Button>
           </div>
-          <Table<MediaItemDescriptor> size="small" rowKey="relativePath" dataSource={mediaItems} pagination={{ pageSize: 8, size: 'small' }} onRow={(row) => ({ onClick: () => setSelectedMedia(row) })} rowClassName={(row) => row.relativePath === selectedMedia?.relativePath ? 'camera-selected-row' : ''} columns={[
+          <Table<MediaItemDescriptor> size="small" rowKey="relativePath" dataSource={mediaItems} pagination={{
+            current: mediaPage,
+            pageSize: mediaPageSize,
+            total: mediaTotal,
+            size: 'small',
+            showSizeChanger: true,
+            pageSizeOptions: [20, 50, 100],
+            showTotal: (total) => `共 ${total} 项`,
+            onChange: (page, pageSize) => {
+              setMediaPage(page);
+              setMediaPageSize(pageSize);
+              void refreshMedia(false, page, pageSize);
+            }
+          }} onRow={(row) => ({ onClick: () => setSelectedMedia(row) })} rowClassName={(row) => row.relativePath === selectedMedia?.relativePath ? 'camera-selected-row' : ''} columns={[
             { title: '标签', dataIndex: 'label', width: 86, render: (value: string) => <Tag color={labelColor[value]}>{labelText[value] ?? value}</Tag> },
             { title: '图像', dataIndex: 'name', ellipsis: true }, { title: '集合', dataIndex: 'collection', width: 110 }, { title: '大小', width: 80, render: (_: unknown, row) => formatBytes(row.bytes) },
             { title: '', width: 70, render: (_: unknown, row) => <Popconfirm title="确定删除此媒体项吗？" okText="删除" cancelText="取消" onConfirm={() => deleteMedia(row)}><Button size="small" danger loading={busy === `delete:${row.relativePath}`}>删除</Button></Popconfirm> }

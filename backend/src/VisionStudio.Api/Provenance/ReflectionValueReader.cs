@@ -53,10 +53,10 @@ internal static class ReflectionValueReader
                         var result = Text(indexer.GetValue(instance, [key]));
                         if (result is not null) return result;
                     }
-                    catch { }
+                    catch { /* 索引器不支持该键：尝试下一个索引器 */ }
                 }
             }
-            catch { }
+            catch { /* 字典/索引探测失败：按无该键处理 */ }
         }
         return null;
     }

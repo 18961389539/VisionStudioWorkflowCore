@@ -64,7 +64,7 @@ public sealed class HikrobotMvsProvenanceProbe(
             throw new InvalidOperationException($"No Hikrobot camera matched SerialNumber='{options.SerialNumber ?? "*"}', UserDefinedName='{options.UserDefinedName ?? "*"}'. Enumerated={count}.");
 
         string? firmware = null;
-        try { firmware = TryReadStringNode(myCamera, selectedDevice, "DeviceFirmwareVersion"); } catch { }
+        try { firmware = TryReadStringNode(myCamera, selectedDevice, "DeviceFirmwareVersion"); } catch { /* 固件参数不可用：枚举身份仍然有效 */ }
 
         var attrs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -164,8 +164,8 @@ public sealed class HikrobotMvsProvenanceProbe(
         }
         finally
         {
-            try { myCamera.GetMethod("MV_CC_CloseDevice_NET", Type.EmptyTypes)?.Invoke(camera, null); } catch { }
-            try { myCamera.GetMethod("MV_CC_DestroyDevice_NET", Type.EmptyTypes)?.Invoke(camera, null); } catch { }
+            try { myCamera.GetMethod("MV_CC_CloseDevice_NET", Type.EmptyTypes)?.Invoke(camera, null); } catch { /* 关闭探测相机会话失败：继续销毁句柄 */ }
+            try { myCamera.GetMethod("MV_CC_DestroyDevice_NET", Type.EmptyTypes)?.Invoke(camera, null); } catch { /* 销毁探测相机句柄失败：继续 Dispose */ }
             if (camera is IDisposable disposable) disposable.Dispose();
         }
     }

@@ -89,7 +89,7 @@ Produces<T>()  →  frontend/src/generated/openapi.json  →  api-types.ts  → 
 ```powershell
 dotnet build backend/VisionStudio.slnx            # 导出脚本用 --no-build 启动
 pwsh scripts/export-openapi.ps1                    # 刷新 OpenAPI 快照
-cd frontend; npm run generate:api-types            # 刷新 TS 类型（一次性 TS5 环境，不污染依赖）
+cd frontend; npm run generate:api-types            # 刷新 TS 类型（tools/contract-gen 固定 TS5 + lockfile，不污染应用依赖）
 npm run generate:type-bindings                     # 刷新手写视图的键集绑定（后端删/改字段会红）
 bash scripts/generate-frontend-catalog.sh          # 节点目录有改动时刷新目录快照
 ```

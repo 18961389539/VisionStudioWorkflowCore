@@ -54,10 +54,10 @@ internal static class BaslerSdkReflection
                         var value = Text(prop.GetValue(instance, [key]));
                         if (value is not null) return value;
                     }
-                    catch { }
+                    catch { /* 单个索引属性不可读：跳过该候选 */ }
                 }
             }
-            catch { }
+            catch { /* 字典索引探测失败：按无该键处理 */ }
         }
         return null;
     }
@@ -117,7 +117,7 @@ internal static class BaslerSdkReflection
             var p = prop.GetIndexParameters();
             if (p.Length != 1) continue;
             if (!p[0].ParameterType.IsInstanceOfType(key) && !(p[0].ParameterType == typeof(string) && key is string)) continue;
-            try { return prop.GetValue(instance, [key]); } catch { }
+            try { return prop.GetValue(instance, [key]); } catch { /* 索引器不支持该键：尝试下一个属性 */ }
         }
         return null;
     }
@@ -145,10 +145,10 @@ internal static class BaslerSdkReflection
                     var result = method.Invoke(parameter, args);
                     return result is not bool b || b;
                 }
-                catch { }
+                catch { /* 该重载参数不兼容：尝试下一个重载 */ }
             }
         }
-        catch { }
+        catch { /* 参数对象不可写或 SDK 反射失败：返回 false */ }
         return false;
     }
 
@@ -180,7 +180,7 @@ internal static class BaslerSdkReflection
                 return result is not bool b || b;
             }
         }
-        catch { }
+        catch { /* 命令执行探测失败：返回 false */ }
         return false;
     }
 

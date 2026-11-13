@@ -37,13 +37,13 @@
 |---|---|---|
 | `static-audit.py` | 结构性与契约性断言：安全中间件顺序、反向代理边界、生产模拟器边界、发布门禁、脚本编码契约、文档必备 token | 按报文补齐实现；若断言本身过期（实现搬到别处），改断言并写清为什么 |
 | `check-metric-floor.py` | 节点目录条数与测试数量下限（`scripts/metric-floor.json`） | 覆盖率挡不住"删测试"——被删的往往是难覆盖的分支，删完覆盖率反而更高。数量下限是唯一能发现"测试悄悄消失"的信号 |
-| `check-size-budget.py` | 单文件行数预算（`scripts/size-budget.json`，默认 1200，目标 800） | 拆文件，或**下调**预算记录值。拆分是一次性动作，没有预算就会长回去——JLVisionMatching 拆到 973 行后，Compiler/NodeCatalog 仍在 1700/1600 行 |
+| `check-size-budget.py` | 单文件行数预算（`scripts/size-budget.json`，默认 1200，目标 800） | 拆文件，或**下调**预算记录值。2026-11-13 起后端第二梯队五条大文件已按语义拆分并登记显式预算，`backend/src` 无超过默认上限的文件 |
 | `test-publish-data-separation.ps1` / `test-data-migration.ps1` | 发布包与数据根分离；迁移是"暂存→校验→标记→原子切换" | 修实现，不要放宽断言：这两条对应的是现场数据丢失风险 |
 | `test-publish-runtime.sh` | Bash 发布路径与 Windows 路径同一安全契约 | 同上；无 bash 的主机会跳过并打印说明 |
 | `dotnet test`（Release，排除 Soak，收集覆盖率） | 宿主 + 引擎行为 | 修代码；确实需要改期望时在 CHANGELOG 里写清理由 |
 | `check-warning-baseline.ps1` | 编译器/分析器告警不新增（`scripts/warning-baseline.txt`） | 修掉告警；确属误报则显式加入基线，让下一次 review 看得到 |
 | `check-coverage.py` | 合并行/分支覆盖率下限 | 行 81 / 分支 60 是棘轮：只升不降，提升后同步上调脚本默认值与 workflow 的 `MIN_LINE_COVERAGE`/`MIN_BRANCH_COVERAGE` |
-| `static-audit.py` 的空 catch 规则（2026-11-12） | 未写忽略原因的空 `catch` 不得新增（`scripts/empty-catch-baseline.json` 按文件锁存量 106 处） | 写 `catch { } // 原因`（或 `/* */`），或补上真正的错误处理。存量下降后**同步下调**基线，否则棘轮失效 |
+| `static-audit.py` 的空 catch 规则（2026-11-12，2026-11-13 清零） | 未写忽略原因的空 `catch` 不得新增（`scripts/empty-catch-baseline.json` 存量已清零） | 写 `catch { } // 原因`（或 `/* */`），或补上真正的错误处理。新增即失败，不再有按文件锁定的存量额度 |
 | `dotnet list package --vulnerable`（2026-11-12） | NuGet 已知漏洞只拦 high/critical；离线时打印跳过而不是失败 | 在 `backend/Directory.Packages.props` 升版本。版本只在这一处改——24 个包原先散落在 15 个 csproj 里 |
 
 覆盖率棘轮的由来：原阈值 60 只能防"腰斩"，挡不住每次合并掉零点几个点的慢性退化。分支覆盖率单独
@@ -56,7 +56,7 @@
 | `npm ci` | 锁文件与 package.json 一致（不允许"本地能装、CI 装不上"） |
 | `npm audit --audit-level=high`（2026-11-12） | 前端依赖已知漏洞（只拦 high/critical）。首次接入即发现 vite 8.3.2 与 undici 各带 high |
 | `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径 |
-| `npm run test:coverage` | 单测 + 覆盖率阈值（写在 `vite.config.ts` 的 `test.coverage.thresholds`，棘轮同理） |
+| `npm run test:coverage` | 单测 + 覆盖率阈值（写在 `vite.config.ts` 的 `test.coverage.thresholds`，棘轮同理）；其中 `apiUsage.test.ts` 另有静默失败棘轮：组件里禁止用 `if (!response.ok) return;` 把失败渲染成空数据，白名单仅保留附加信息路径与组件文档反例 |
 | `npm run build` | `tsc -b`（`strict: true`）+ 生产构建；类型不过不产出包 |
 
 覆盖率产物写在**系统临时目录**（`vite.config.ts` 的 `reportsDirectory`），门禁跑完只把

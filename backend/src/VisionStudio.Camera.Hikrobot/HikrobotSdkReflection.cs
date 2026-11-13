@@ -16,7 +16,7 @@ internal static class HikrobotSdkReflection
         }
         foreach (var name in new[] { "MvCamCtrl.NET", "MvCameraControl.Net", "MvCameraControl.Net.Standard" })
         {
-            try { return Assembly.Load(new AssemblyName(name)); } catch { }
+            try { return Assembly.Load(new AssemblyName(name)); } catch { /* 该程序集名不可用：继续尝试下一个 SDK 名称 */ }
         }
         throw new InvalidOperationException("Hikrobot MVS .NET runtime was not found. Install MVS or configure CameraAdapters:HikrobotAssemblyPath.");
     }
@@ -198,10 +198,10 @@ internal static class HikrobotSdkReflection
                     if (ps[i].ParameterType.IsByRef) args[i] = invokeArgs[i];
                 return result;
             }
-            catch (ArgumentException) { }
-            catch (InvalidCastException) { }
-            catch (FormatException) { }
-            catch (OverflowException) { }
+            catch (ArgumentException) { /* 该重载参数类型不匹配：尝试下一个重载 */ }
+            catch (InvalidCastException) { /* 返回值/参数无法转换：尝试下一个重载 */ }
+            catch (FormatException) { /* 字符串形式的参数格式不支持：尝试下一个重载 */ }
+            catch (OverflowException) { /* 数值超出目标类型范围：尝试下一个重载 */ }
         }
         throw new MissingMethodException(instance.GetType().FullName, name);
     }

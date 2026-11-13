@@ -157,15 +157,15 @@ public sealed class RollingFileLoggerProvider : ILoggerProvider
     public void Dispose()
     {
         // 关键：先 TryComplete()，写入线程会把队列读净后退出——保证关闭前的日志不丢。
-        try { _queue.Writer.TryComplete(); } catch { }
+        try { _queue.Writer.TryComplete(); } catch { /* 队列已完成/已释放：关闭流程继续 */ }
         var drained = false;
-        try { drained = _writerTask.Wait(TimeSpan.FromSeconds(5)); } catch { }
+        try { drained = _writerTask.Wait(TimeSpan.FromSeconds(5)); } catch { /* 等待排空异常：按超时处理并强制取消 */ }
         // 兜底：若写入线程在异常路径卡死，用取消令牌强制退出，绝不让 Dispose 阻塞宿主关闭。
         if (!drained)
         {
             Interlocked.Increment(ref _drainTimeouts);
-            try { _shutdown.Cancel(); } catch { }
-            try { _writerTask.Wait(TimeSpan.FromSeconds(1)); } catch { }
+            try { _shutdown.Cancel(); } catch { /* 取消令牌已释放：忽略并继续兜底等待 */ }
+            try { _writerTask.Wait(TimeSpan.FromSeconds(1)); } catch { /* 兜底等待异常：继续关闭写线程 */ }
         }
         // 双保险：无论写入线程是否正常退出，都确保缓冲落盘并释放文件句柄。
         CloseWriter();

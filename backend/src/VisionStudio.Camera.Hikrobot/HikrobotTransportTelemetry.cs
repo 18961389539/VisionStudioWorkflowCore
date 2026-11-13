@@ -125,7 +125,7 @@ public sealed partial class HikrobotMvsCameraDevice
         {
             var value = HikrobotSdkReflection.Member(info, name);
             if (value is null) continue;
-            try { return Convert.ToInt64(value); } catch { }
+            try { return Convert.ToInt64(value); } catch { /* 遥测值格式异常：按该字段缺失处理 */ }
         }
         return null;
     }

@@ -117,7 +117,7 @@ public sealed class CameraManager : IAsyncDisposable
             await runtime.Worker.StopAsync(cancellationToken);
             if (runtime.Worker.IsStopUnconfirmed)
                 throw new InvalidOperationException($"Camera '{id}' acquisition has an unconfirmed in-flight grab. The SDK session was retained; retry close after the grab returns.");
-            try { await runtime.Device.StopAsync(cancellationToken); } catch { }
+            try { await runtime.Device.StopAsync(cancellationToken); } catch { /* 停止失败：继续关闭会话，关停路径尽力而为 */ }
             await runtime.Device.CloseAsync(cancellationToken);
             runtime.Hub.Clear();
         }
@@ -347,14 +347,14 @@ public sealed class CameraManager : IAsyncDisposable
             await runtime.LifecycleGate.WaitAsync();
             try
             {
-                try { await runtime.Worker.DisposeAsync(); } catch { }
+                try { await runtime.Worker.DisposeAsync(); } catch { /* 采集 Worker 释放失败：继续处理设备会话 */ }
                 if (runtime.Worker.IsStopUnconfirmed)
                 {
                     if (Interlocked.Exchange(ref runtime.DeferredDisposeStarted, 1) == 0)
                         _ = DisposeAfterStopConfirmationAsync(runtime);
                     continue;
                 }
-                try { await runtime.Device.DisposeAsync(); } catch { }
+                try { await runtime.Device.DisposeAsync(); } catch { /* 设备释放失败：从运行时表移除，句柄交由进程回收 */ }
                 runtime.Hub.Dispose();
                 _runtimes.TryRemove(runtime.Device.Id, out _);
             }
@@ -371,9 +371,9 @@ public sealed class CameraManager : IAsyncDisposable
             try
             {
             await runtime.Worker.DisposeAsync().ConfigureAwait(false);
-            try { await runtime.Device.StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
-            try { await runtime.Device.CloseAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
-            try { await runtime.Device.DisposeAsync().ConfigureAwait(false); } catch { }
+            try { await runtime.Device.StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { /* 关停后停止失败：继续关闭 */ }
+            try { await runtime.Device.CloseAsync(CancellationToken.None).ConfigureAwait(false); } catch { /* 关停后关闭失败：继续释放 */ }
+            try { await runtime.Device.DisposeAsync().ConfigureAwait(false); } catch { /* 关停后释放失败：句柄交由进程回收 */ }
             runtime.Hub.Dispose();
             _runtimes.TryRemove(runtime.Device.Id, out _);
             }

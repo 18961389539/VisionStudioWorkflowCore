@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, Select, Space, Spin, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { InvestigationCaseDetail, InvestigationTrendDashboard, InvestigationVerificationEvidence, ValidationDatasetSummary, ValidationRunRecord } from '../types';
 import { apiFetch } from '../apiClient';
+import { responseErrorMessage } from '../apiErrors';
 import { apiUrl, investigations, validation } from '../endpoints';
+import DataErrorAlert from './DataErrorAlert';
 
 type Props = { runId?: string; onReplay?: (nodeId?: string) => void };
 
@@ -20,7 +22,9 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
   const [rootCause, setRootCause] = useState('');
   const [datasets, setDatasets] = useState<ValidationDatasetSummary[]>([]);
   const [datasetId, setDatasetId] = useState<string>();
+  const [datasetError, setDatasetError] = useState<string>();
   const [validationRuns, setValidationRuns] = useState<ValidationRunRecord[]>([]);
+  const [validationRunsError, setValidationRunsError] = useState<string>();
   const [baselineRunId, setBaselineRunId] = useState<string>();
   const [candidateRunId, setCandidateRunId] = useState<string>();
   const [gateNote, setGateNote] = useState('');
@@ -50,24 +54,43 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
   const loadDatasets = async () => {
     try {
       const response = await apiFetch(validation.datasets);
-      if (response.ok) setDatasets(await response.json());
-    } catch { /* verification workspace remains optional */ }
+      if (!response.ok) {
+        // 失败不能落成“没有数据集”：保留上一次已知列表，同时给出可重试的原因。
+        setDatasetError(await responseErrorMessage(response, `读取验证数据集失败（HTTP ${response.status}）`));
+        return;
+      }
+      setDatasets(await response.json());
+      setDatasetError(undefined);
+    } catch (error) {
+      setDatasetError(error instanceof Error ? `读取验证数据集失败：${error.message}` : '读取验证数据集失败：网络请求未完成');
+    }
   };
 
   const loadValidationRuns = async (selectedDatasetId: string) => {
     try {
       const response = await apiFetch(validation.datasetRuns(selectedDatasetId));
-      if (!response.ok) return;
+      if (!response.ok) {
+        setValidationRuns([]);
+        setValidationRunsError(await responseErrorMessage(response, `读取验证运行失败（HTTP ${response.status}）`));
+        return;
+      }
       const runs = (await response.json() as ValidationRunRecord[]).filter(x => x.status === 'Completed' && x.summary);
       setValidationRuns(runs);
+      setValidationRunsError(undefined);
       setBaselineRunId(runs[1]?.runId ?? runs[0]?.runId);
       setCandidateRunId(runs[0]?.runId);
-    } catch { setValidationRuns([]); }
+    } catch (error) {
+      setValidationRuns([]);
+      setValidationRunsError(error instanceof Error ? `读取验证运行失败：${error.message}` : '读取验证运行失败：网络请求未完成');
+    }
   };
 
   useEffect(() => { if (runId) void load(); else setDetail(undefined); }, [runId]);
   useEffect(() => { if (detail?.case.status === 'Resolved') void loadDatasets(); }, [detail?.case.id, detail?.case.status]);
-  useEffect(() => { if (datasetId) void loadValidationRuns(datasetId); else setValidationRuns([]); }, [datasetId]);
+  useEffect(() => {
+    if (datasetId) void loadValidationRuns(datasetId);
+    else { setValidationRuns([]); setValidationRunsError(undefined); }
+  }, [datasetId]);
 
   const track = async () => {
     if (!runId) return;
@@ -187,6 +210,8 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
       {detail.case.status === 'Resolved' && <div style={{ marginTop: 12, padding: 12, border: '1px solid rgba(128,128,128,.25)', borderRadius: 6 }}>
         <Typography.Text strong>数据集回归验证门禁</Typography.Text>
         <div><Typography.Text type="secondary">基线运行必须复现此特征；候选运行必须消除该特征，且不能引入质量回归。</Typography.Text></div>
+        <DataErrorAlert scope="验证数据集" error={datasetError} onRetry={() => void loadDatasets()} />
+        <DataErrorAlert scope="验证运行" error={validationRunsError} onRetry={() => datasetId ? void loadValidationRuns(datasetId) : undefined} />
         <Space wrap style={{ marginTop: 8 }}>
           <Select style={{ width: 240 }} placeholder="选择数据集" value={datasetId} onChange={(v) => { setDatasetId(v); setBaselineRunId(undefined); setCandidateRunId(undefined); }} options={datasets.map(x => ({ value: x.id, label: `${x.name} (${x.itemCount})` }))} />
           <Select style={{ width: 260 }} placeholder="选择基线验证运行" value={baselineRunId} onChange={setBaselineRunId} options={validationRuns.map(x => ({ value: x.runId, label: `${x.runId.slice(0, 14)} · ${(x.summary!.accuracy * 100).toFixed(1)}%` }))} />
