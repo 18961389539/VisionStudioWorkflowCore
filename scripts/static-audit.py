@@ -448,6 +448,10 @@ required = [
     'SECURITY_ARCHITECTURE.md',
     'MIGRATION_V023_TO_V024.md',
     'backend/src/VisionStudio.Api/RuntimeDependencies.cs',
+    'backend/src/VisionStudio.Api/RuntimeDependencies.Capture.cs',
+    'backend/src/VisionStudio.Api/RuntimeDependencies.Hardware.cs',
+    'backend/src/VisionStudio.Api/RuntimeDependencies.Calibrations.cs',
+    'backend/src/VisionStudio.Api/RuntimeDependencies.Validation.cs',
     'backend/tests/VisionStudio.Api.Tests/RuntimeDependencyManifestTests.cs',
     'RUNTIME_DEPENDENCIES.md',
     'MIGRATION_V024_TO_V025.md',
@@ -726,7 +730,7 @@ for token in ['VendorProvenanceBootstrapHostedService','BaslerPylonProvenancePro
     if token not in host_bootstrap: fail(f'V0.32 vendor probe bootstrap missing: {token}')
 if 'AddHostedService<VendorProvenanceBootstrapHostedService>()' not in host_registration:
     fail('V0.32 vendor provenance bootstrap is not ordered before Production AutoStart')
-if 'CaptureForProductionAsync' not in read_safe('backend/src/VisionStudio.Api/RuntimeDependencies.cs'):
+if 'CaptureForProductionAsync' not in read_family('backend/src/VisionStudio.Api/RuntimeDependencies*.cs'):
     fail('V0.32 required live probes do not guard RuntimeDependencyManifest capture')
 for token in ['RequiredLiveProbe_Unavailable_BlocksProductionCapture','OptionalLiveProbe_Unavailable_AllowsProductionCaptureWithDescriptorFallback','LiveProbeData_IsMergedIntoAutomaticChannel_AndCannotBeMaskedByDescriptor','AbbRwsProbe_ReadsControllerRobotWareAndHashesRapidProgram','RequiredVendorProbe_WithUnknownAsset_FailsBootstrap']:
     if token not in hardware_tests: fail(f'V0.32 vendor provenance regression test missing: {token}')
@@ -810,7 +814,7 @@ for token in ['camera_feature_profiles','profile_hash','UpsertAsync','DeleteAsyn
 for token in ['/api/cameras/{id}/commissioning','/api/cameras/{id}/features','/api/camera-feature-profiles/capture','/api/camera-feature-profiles/import','apply/{cameraId}','EnsureDependencyMutationAllowed']:
     if token not in profile_endpoints: fail(f'V0.34 commissioning endpoint missing: {token}')
 for token in ['commissioningProfileHash','GetCommissioningProfileHash']:
-    if token not in read_safe('backend/src/VisionStudio.Api/RuntimeDependencies.cs'): fail(f'V0.34 dependency profile hash missing: {token}')
+    if token not in read_family('backend/src/VisionStudio.Api/RuntimeDependencies*.cs'): fail(f'V0.34 dependency profile hash missing: {token}')
 for token in ['FeatureProfileId','ApplyCommissioningProfileAsync','CameraFeatureProfileStore']:
     if token not in host_bootstrap and token not in camera_options: fail(f'V0.34 startup profile application missing: {token}')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
@@ -876,7 +880,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 318  # 2026-11-12：+24 = 平面手眼 12（会话 4 + 资产 8）+ 三维手眼 12（会话 4 + 资产 8）；+2 = 诊断包 /api/diagnostics/bundle 与账号解锁 /api/security/users/{id}/unlock；+1 = 节点单次执行快照 /api/diagnostics/node-spans；新增端点必须同步此值（这本身就是一次可见的评审）
+expected_routes = 322  # 2026-11-13：321 + 匿名探针 /healthz（详细 /api/health 改为认证后读取）；新增端点必须同步此值（这本身就是一次可见的评审）
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
@@ -972,7 +976,7 @@ ok('V0.24 RBAC + PBKDF2 local users + revocable sessions + audit trail present')
 
 # V0.25 RuntimeDependencyManifest / production provenance
 trace_store_dependency=read_safe('backend/src/VisionStudio.Api/TraceabilityStore.cs')
-dependency_source=read_safe('backend/src/VisionStudio.Api/RuntimeDependencies.cs')
+dependency_source=read_family('backend/src/VisionStudio.Api/RuntimeDependencies*.cs')
 job_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs')
 trace_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/TraceEndpoints.cs')
 production_source=read_family('backend/src/VisionStudio.Api/ProductionRuntime*.cs')
@@ -1380,13 +1384,17 @@ ok('V0.54 signed .vspkg preflight + trusted publisher + version repository + pen
 worker_contracts=read_safe('backend/src/VisionStudio.Abstractions/PluginWorkerContracts.cs')
 worker_wire=read_safe('backend/src/VisionStudio.Abstractions/PluginWorkerWire.cs')
 worker_supervisor=read_safe('backend/src/VisionStudio.Api/PluginWorkerSupervisor.cs')
+# Phase 0 脚本 Worker 改造（2026-11-13）：进程池/客户端已纯移动到 Workers/WorkerProcessPool.cs。
+# 审计守的是"这套运行时能力还在"，不是"某个特定文件里还有这些字"。
+worker_pool=read_safe('backend/src/VisionStudio.Api/Workers/WorkerProcessPool.cs')
+worker_runtime=worker_supervisor + '\n' + worker_pool
 worker_program=read_safe('backend/src/VisionStudio.Plugin.Worker/Program.cs')
 worker_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginWorkerEndpoints.cs')
 worker_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginWorkerTests.cs')
 for token in ['VisionPluginIsolationMode','WorkerProcess','PluginWorkerDiscovery','PluginWorkerExecutionResult','ProtocolVersion']:
     if token not in worker_contracts: fail(f'V0.55 worker contract token missing: {token}')
 for token in ['NamedPipeServerStream','ExecutionTimeoutMs','MaxWorkingSetMb','MaxRestartsPerMinute','Kill(entireProcessTree: true)','CircuitOpen']:
-    if token not in worker_supervisor: fail(f'V0.55 worker supervisor token missing: {token}')
+    if token not in worker_runtime: fail(f'V0.55 worker supervisor token missing: {token}')
 for token in ['NamedPipeClientStream','PluginWorkerWire.ReadAsync','registry.Register','PluginWorkerValueCodec']:
     if token not in worker_program: fail(f'V0.55 worker host token missing: {token}')
 for route in ['/api/plugin-workers','/api/plugin-workers/{pluginId}/restart']:
@@ -1413,7 +1421,7 @@ for token in ['PluginWorkerSharedImage','FileBackedSharedMemory','SupportedImage
 for token in ['MemoryMappedFile.CreateFromFile','Marshal.Copy','CleanupStaleFiles','Path.GetFileName(fileName)','8UC1','16UC1','32FC1']:
     if token not in worker_store: fail(f'V0.56 shared-memory transport token missing: {token}')
 for token in ['WorkerPool','DefaultPoolSize','MaxPoolSize','ConcurrentQueue<WorkerClient>','SharedMemoryThresholdBytes','SharedMemoryTransfers','PoolSize']:
-    if token not in worker_supervisor: fail(f'V0.56 worker-pool supervisor token missing: {token}')
+    if token not in worker_runtime: fail(f'V0.56 worker-pool supervisor token missing: {token}')
 for token in ['--shared-memory-root','PluginWorkerSharedMemoryStore','FileBackedSharedMemory']:
     if token not in worker_program and token not in worker_contracts: fail(f'V0.56 worker shared-memory host token missing: {token}')
 for token in ['WorkerPoolSize','WorkerSharedMemoryThresholdBytes','WorkerProtocolVersion','WorkerImageTransport']:
@@ -1432,6 +1440,69 @@ if plugin_manifest.get('workerPoolSize') != 2 or plugin_manifest.get('workerShar
 if not doc_has('MIGRATION_V055_TO_V056.md', 'schema v15'):
     fail('V0.56 migration does not explicitly preserve SQLite schema v15')
 ok('V0.56 pooled worker execution + file-backed shared-memory image transport + schema-v7 worker runtime provenance present')
+
+
+# Phase 1 脚本 Worker（2026-11-13）：script.csharp 必须能通过命名管道独立执行。
+# 这是"脚本下沉"的第一步；宿主接线（Phase 2）会在这个进程旁边增加后端抽象与配置开关。
+# system_endpoints 同时被 Phase 2（scriptWorker 健康字段）与 V0.27（目录响应头）使用，
+# 必须在两处之前读取（2026-11-13 修复：原先只在 1737 行赋值，Phase 2 先引用导致 NameError）。
+system_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/SystemEndpoints.cs')
+script_worker_program=read_safe('backend/src/VisionStudio.Script.Worker/Program.cs')
+for token in ['script.csharp','PluginWorkerWire','PluginWorkerValueCodec','VisionNodeRegistry','NamedPipeClientStream','CSharpScriptNode']:
+    if token not in script_worker_program: fail(f'script worker host token missing: {token}')
+if 'VisionStudio.Script.Worker' not in read_safe('backend/VisionStudio.slnx'):
+    fail('script worker project missing from solution')
+if 'VisionStudio.Script.Worker' not in read_safe('backend/src/VisionStudio.Api/VisionStudio.Api.csproj'):
+    fail('API host does not build/copy the script worker')
+for rel in ['scripts/publish-runtime.ps1','scripts/publish-runtime.sh']:
+    if 'VisionStudio.Script.Worker.dll' not in read_safe(rel):
+        fail(f'script worker is not part of the published runtime assets: {rel}')
+ok('Phase 1 script worker host present (pipe protocol + script.csharp execution + publish assets)')
+
+
+# Phase 2 宿主接线（2026-11-13）：脚本节点通过后端抽象选择 InProcess / WorkerProcess。
+# 默认必须仍是 InProcess；WorkerProcess 只能由配置显式开启，避免升级即改变现场行为。
+script_node_source=read_safe('backend/src/VisionStudio.Engine/Nodes/CSharpScriptNode.cs')
+for token in ['IScriptExecutionBackend','InProcessScriptExecutionBackend','_backend.RunAsync']:
+    if token not in script_node_source: fail(f'Phase 2 script node backend abstraction missing: {token}')
+script_backends=read_safe('backend/src/VisionStudio.Engine/Scripting/ScriptExecutionBackends.cs')
+for token in ['InProcessScriptExecutionBackend','CSharpScriptRunner.RunAsync','ScriptExecutionOutcome']:
+    if token not in script_backends: fail(f'Phase 2 in-process script backend missing: {token}')
+script_supervisor=read_safe('backend/src/VisionStudio.Api/ScriptWorkerSupervisor.cs')
+for token in ['ScriptIsolationMode','WorkerProcess','WorkerPool','PluginWorkerValueCodec','ExecutionTimeoutMs']:
+    if token not in script_supervisor: fail(f'Phase 2 script worker supervisor missing: {token}')
+if 'Configure<ScriptWorkerOptions>' not in host_registration or 'IScriptExecutionBackend' not in host_registration:
+    fail('Phase 2 script worker configuration/backend is not registered')
+script_worker_settings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json')).get('ScriptWorkers', {})
+for key in ['IsolationMode','PoolSize','ExecutionTimeoutMs','MaxWorkingSetMb','SharedMemoryThresholdBytes']:
+    if key not in script_worker_settings: fail(f'Phase 2 ScriptWorkers configuration missing: {key}')
+if script_worker_settings.get('IsolationMode') != 'InProcess':
+    fail('Phase 2 must keep InProcess as the default script isolation mode')
+if '/api/script-workers' not in read_safe('backend/src/VisionStudio.Api/Endpoints/ScriptWorkerEndpoints.cs'):
+    fail('Phase 2 script worker status endpoint missing')
+if 'MapScriptWorkerEndpoints' not in read_safe('backend/src/VisionStudio.Api/Endpoints/EndpointMapping.cs'):
+    fail('Phase 2 script worker endpoints are not mapped')
+if 'scriptWorker' not in system_endpoints:
+    fail('Phase 2 script worker status is not exposed by /api/health')
+ok('Phase 2 script execution backend switch (InProcess default / WorkerProcess opt-in) present')
+
+
+# Phase 3 生产默认 + OS 硬化（2026-11-13）：生产配置必须走 WorkerProcess，并启用 Windows Job Object。
+# CPU 硬上限是可选配置（默认 0）；受限令牌/AppContainer/网络 ACL 不在本阶段实现，见方案文档。
+production_script_settings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.Production.json')).get('ScriptWorkers', {})
+if production_script_settings.get('IsolationMode') != 'WorkerProcess':
+    fail('Phase 3 Production must default script execution to WorkerProcess')
+if int(production_script_settings.get('JobObjectMemoryLimitMb') or 0) <= 0:
+    fail('Phase 3 Production must configure a positive JobObjectMemoryLimitMb')
+job_object_source=read_safe('backend/src/VisionStudio.Api/Workers/WindowsJobObject.cs')
+for token in ['CreateJobObject','AssignProcessToJobObject','JobObjectLimitKillOnJobClose','ProcessMemoryLimit','ActiveProcessLimit']:
+    if token not in job_object_source: fail(f'Phase 3 Windows Job Object token missing: {token}')
+worker_process_pool=read_safe('backend/src/VisionStudio.Api/Workers/WorkerProcessPool.cs')
+for token in ['WindowsJobObject','JobObjectMemoryLimitMb','_job?.Dispose()']:
+    if token not in worker_process_pool: fail(f'Phase 3 worker pool hardening token missing: {token}')
+if 'IsolationMode=WorkerProcess but the worker assembly was not found' not in script_supervisor:
+    fail('Phase 3 WorkerProcess mode must fail fast when the script worker assembly is missing')
+ok('Phase 3 Production worker default + Windows Job Object memory/process/kill-on-close hardening present')
 
 
 # V0.57 Worker performance profiler + advisory adaptive pool recommendation
@@ -1681,13 +1752,15 @@ for token in ['ComputeHash','SchemaVersion = 1','DisplayOrder','CanonicalOrder',
     if token not in catalog_snapshot: fail(f'Catalog snapshot implementation missing: {token}')
 for token in ['BuiltInNodeCatalog.Items','--check','VisionCatalogSnapshot.Create','VisionCatalogSnapshot.ComputeHash(actual.Items)']:
     if token not in catalog_exporter: fail(f'Catalog exporter/check missing: {token}')
-if "generated/catalog.generated.json" not in frontend_catalog_source or 'fallbackCatalogRaw: NodeCatalogItem[] = document.items' not in frontend_catalog_source:
-    fail('Frontend fallback is not loaded from generated backend catalog artifact')
+if "generated/catalog.generated.json" not in frontend_catalog_source or 'loadFallbackCatalog' not in frontend_catalog_source or "import('./generated/catalog.generated.json')" not in frontend_catalog_source:
+    fail('Frontend fallback is not lazily loaded from generated backend catalog artifact')
+if "import generatedCatalog from './generated/catalog.generated.json'" in frontend_catalog_source:
+    fail('Frontend fallback catalog must not be statically imported into the main bundle')
 if "fallbackCatalog" in demos_source or "./catalog" in demos_source:
     fail('Demo definitions still depend on frontend fallback catalog instead of being vendor-neutral graph specs')
 if 'X-VisionStudio-Catalog-Hash' not in system_endpoints or 'X-VisionStudio-Catalog-Schema' not in system_endpoints or '/api/catalog/meta' not in system_endpoints:
     fail('Runtime catalog authority metadata/headers are missing')
-if 'validateCatalog(await response.json())' not in read_safe('frontend/src/App.tsx'):
+if 'validateCatalog(await response.json())' not in read_safe('frontend/src/useCatalogState.ts'):
     fail('Frontend does not validate/hydrate the authoritative runtime catalog')
 if '--check' not in qsh or 'VisionStudio.CatalogExporter' not in qsh:
     fail('Quality gate does not reject stale generated frontend catalog')
@@ -1700,6 +1773,7 @@ ok('V0.27 backend-authoritative runtime Catalog + generated offline fallback pre
 # 节点成熟度发布门禁（2026-11-12）：成熟度此前只是工具箱里的徽标，点"发布"没有任何阻力，
 # 发布之后这条信息也消失了。门禁必须留在 publish 路径上，且回滚不受影响。
 maturity_gate=read_safe('backend/src/VisionStudio.Api/NodeMaturityGate.cs')
+maturity_catalog=read_safe('backend/src/VisionStudio.Engine/NodeMaturityCatalog.cs')
 job_endpoints_source=read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs')
 for token in ['NodeMaturityCatalog.Declarations', 'AcknowledgementRequired', 'NODE_MATURITY_ACK_REQUIRED']:
     if token not in maturity_gate: fail(f'Node maturity gate implementation missing: {token}')
@@ -1711,7 +1785,19 @@ if 'acknowledgeMaturityNodes=true' not in read_safe('frontend/src/endpoints.ts')
     fail('Frontend cannot acknowledge the maturity gate (publish would always fail on Preview nodes)')
 if 'NODE_MATURITY_ACK_REQUIRED' not in read_safe('frontend/src/components/RecipePublicationDialog.tsx'):
     fail('Publication dialog does not surface the maturity gate as a confirmable step')
+# 脚本节点边界（2026-11-13）：script.csharp 是进程内 trusted-code 运行时，不是 OS 沙箱。
+# 它的发布确认完全依赖 NodeMaturityCatalog 的非 Stable 声明；编辑器接口只对工程师开放。
+script_maturity = maturity_catalog.split('["script.csharp"]', 1)
+if len(script_maturity) < 2 or 'NodeMaturity.Preview' not in script_maturity[1][:200]:
+    fail('script.csharp must stay non-Stable in NodeMaturityCatalog (trusted-code runtime requires publish acknowledgement)')
+script_runner = read_safe('backend/src/VisionStudio.Scripting/CSharpScriptRunner.cs')
+for token in ['ForbiddenDirective', 'ForbiddenApiWalker', 'MaxCachedScripts']:
+    if token not in script_runner: fail(f'C# script sandbox guard missing: {token}')
+script_endpoints = read_safe('backend/src/VisionStudio.Api/Endpoints/ScriptEndpoints.cs')
+if script_endpoints.count('RequireEngineer') < 3:
+    fail('Script editor endpoints must remain engineer-only')
 ok('Node maturity gate enforced on publish + recorded in audit (rollback exempt)')
+ok('script.csharp stays a non-Stable trusted-code capability; editor endpoints are engineer-only')
 
 # 2026-11-12 批次：金样回归、诊断包、登录锁定、节点遥测、帧池。
 # 这五件事的共同点是"删掉任何一件都不会有测试变红"——夹具被删只是少跑一条用例，

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext } from '@playwright/test';
 
 /**
  * 真后端冒烟（2026-11-12）。
@@ -59,19 +59,17 @@ function linearWorkflow() {
   };
 }
 
-test('真后端：登录 → 目录 → 运行 → 追溯 → 节点 span 闭环', async ({ request }) => {
-  // 1) 后端可达性：不可达就跳过，并说清怎么起。
+/** 后端可达 + Development 自动登录；不可达时 skip 并给出启动方式。 */
+async function connect(request: APIRequestContext): Promise<void> {
   let health;
   try {
-    health = await request.get(`${API}/api/health`, { timeout: 3000 });
+    health = await request.get(`${API}/healthz`, { timeout: 3000 });
   } catch {
     test.skip(true, `真后端未启动（${API}）。用 ./scripts/quality-gate.ps1 -Scope E2E 或手工启动宿主后再跑。`);
     return;
   }
-  expect(health.ok(), '宿主 /api/health 必须可达').toBeTruthy();
+  expect(health.ok(), '宿主 /healthz 必须可达').toBeTruthy();
 
-  // 2) 自动登录：Development + Security:AutoLoginAdmin=true 才有这个入口。
-  //    Cookie 由 Playwright 的 request context 自动保存，后续请求带上同一会话。
   const status = await request.get(`${API}/api/auth/status`);
   expect(status.ok()).toBeTruthy();
   const securityStatus = (await status.json()) as { enabled: boolean; autoLogin: boolean };
@@ -80,8 +78,12 @@ test('真后端：登录 → 目录 → 运行 → 追溯 → 节点 span 闭环
 
   const login = await request.post(`${API}/api/auth/auto-login`);
   expect(login.ok(), 'auto-login 失败：检查 ASPNETCORE_ENVIRONMENT=Development 与 AutoLoginAdmin').toBeTruthy();
+}
 
-  // 3) 节点目录：真实 registry，不是快照文件。哈希头是前端缓存键，缺了说明中间件链路被改过。
+test('真后端：登录 → 目录 → 运行 → 追溯 → 节点 span 闭环', async ({ request }) => {
+  await connect(request);
+
+  // 节点目录：真实 registry，不是快照文件。哈希头是前端缓存键，缺了说明中间件链路被改过。
   const catalogResponse = await request.get(`${API}/api/catalog`);
   expect(catalogResponse.ok()).toBeTruthy();
   const catalog = (await catalogResponse.json()) as Array<{ type: string }>;
@@ -133,4 +135,80 @@ test('真后端：登录 → 目录 → 运行 → 追溯 → 节点 span 闭环
     spans.recent.some(span => span.runId === result.runId),
     `节点 span 应带本次 runId（最近节点：${spans.recent.map(s => s.nodeType).join(', ')}）`
   ).toBeTruthy();
+
+  // 7) Prometheus 出口（2026-11-13）：没有这一条，指标端点可以静默 404/500 很久没人发现。
+  const metrics = await request.get(`${API}/api/diagnostics/metrics`);
+  expect(metrics.ok()).toBeTruthy();
+  const metricsText = await metrics.text();
+  expect(metricsText).toContain('visionstudio_node_spans_captured_total');
+  expect(metricsText).toContain('node_type="image.threshold"');
+  expect(metricsText).toContain('visionstudio_production_state{state="Stopped"}');
+});
+
+test('真后端：创建配方 → 发布 → 作业运行 → 追溯带 jobId', async ({ request }) => {
+  await connect(request);
+  const workflow = linearWorkflow();
+  const jobId = `e2e-job-${Date.now()}`;
+
+  const create = await request.post(`${API}/api/jobs`, {
+    data: { id: jobId, name: workflow.name, description: 'E2E 发布链路', workflow, note: 'smoke' }
+  });
+  expect(create.ok(), `POST /api/jobs 失败：${(await create.text()).slice(0, 400)}`).toBeTruthy();
+
+  const publish = await request.post(`${API}/api/jobs/${jobId}/versions/1/publish`);
+  expect(publish.ok(), `发布失败：${(await publish.text()).slice(0, 400)}`).toBeTruthy();
+  const published = (await publish.json()) as { publishedVersion: number };
+  expect(published.publishedVersion).toBe(1);
+
+  const run = await request.post(`${API}/api/jobs/${jobId}/run`);
+  expect(run.ok(), `作业运行失败：${(await run.text()).slice(0, 400)}`).toBeTruthy();
+  const result = (await run.json()) as { runId: string; success: boolean; error?: string | null };
+  expect(result.success, `作业执行失败：${result.error ?? 'no error message'}`).toBeTruthy();
+
+  const traceResponse = await request.get(`${API}/api/traces/${result.runId}`);
+  expect(traceResponse.ok()).toBeTruthy();
+  const trace = (await traceResponse.json()) as { jobId?: string | null; jobVersion?: number | null; executionStatus: string };
+  expect(trace.jobId).toBe(jobId);
+  expect(trace.jobVersion).toBe(1);
+  expect(trace.executionStatus).toBe('Complete');
+});
+
+test('真后端：失败流程返回失败报告并落一条 Failed 追溯', async ({ request }) => {
+  await connect(request);
+  const stamp = Date.now();
+  const workflow = {
+    id: `e2e-fail-${stamp}`,
+    name: `E2E 失败流程 ${stamp}`,
+    nodes: [{
+      id: 'load-1',
+      type: 'image.load',
+      name: 'Out-of-root Load',
+      position: { x: 60, y: 150 },
+      parameters: { path: 'C:\\definitely-not-an-authorized-root\\missing.png' }
+    }],
+    edges: []
+  };
+
+  const run = await request.post(`${API}/api/run`, { data: workflow });
+  const body = await run.text();
+  // 执行失败可能映射成 4xx（契约要求的"执行完成但结果为失败"），但绝不能是 5xx；
+  // 响应体仍必须是可解析的 WorkflowRunResult，而不是 ProblemDetails。
+  expect(run.status(), `POST /api/run 不应 5xx：${body.slice(0, 400)}`).toBeLessThan(500);
+  const result = JSON.parse(body) as {
+    runId: string;
+    success: boolean;
+    error?: string | null;
+    nodeReports: Array<{ success: boolean; error?: string | null }>;
+  };
+  expect(result.success).toBeFalsy();
+  expect(result.nodeReports).toHaveLength(1);
+  expect(result.nodeReports[0].success).toBeFalsy();
+  expect(result.runId).toBeTruthy();
+
+  const traceResponse = await request.get(`${API}/api/traces/${result.runId}`);
+  expect(traceResponse.ok()).toBeTruthy();
+  const trace = (await traceResponse.json()) as { executionStatus: string; disposition: string; error?: string | null };
+  expect(trace.executionStatus).toBe('Failed');
+  expect(trace.disposition).toBe('ERROR');
+  expect(trace.error ?? '').not.toBe('');
 });

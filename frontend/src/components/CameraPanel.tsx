@@ -13,6 +13,9 @@ const CAMERA_POLL_TIMEOUT_MS = 5000;
 
 type Props = { open: boolean; onClose: () => void };
 
+// 同步组表单只提交可编辑字段；configurationHash/createdAt/updatedAt 由后端维护。
+type SyncGroupFormValues = Omit<CameraSynchronizationGroup, 'id' | 'configurationHash' | 'createdAt' | 'updatedAt'> & { id?: string };
+
 const stateColor: Record<string, string> = { Closed: 'default', Open: 'blue', Streaming: 'green', Faulted: 'red' };
 const acquisitionColor: Record<string, string> = { Stopped: 'default', Starting: 'processing', Stopping: 'processing', StopUnconfirmed: 'red', Running: 'green', WaitingTrigger: 'gold', Reconnecting: 'orange', Faulted: 'red' };
 const labelColor: Record<string, string> = { Unlabeled: 'default', OK: 'green', NG: 'red', Review: 'gold' };
@@ -274,7 +277,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     window.setTimeout(() => URL.revokeObjectURL(url), 60000);
   };
 
-  const saveSyncGroup = async (values: any) => {
+  const saveSyncGroup = async (values: SyncGroupFormValues) => {
     const id = String(values.id ?? '').trim();
     setBusy('sync-save');
     try {
@@ -706,9 +709,9 @@ export default function CameraPanel({ open, onClose }: Props) {
             {syncStatus.error && <Alert type="warning" showIcon title={syncStatus.error} style={{ marginBottom: 8 }} />}
             <Table size="small" rowKey="cameraId" dataSource={syncStatus.members} pagination={false} columns={[
               { title: '相机', dataIndex: 'cameraId' },
-              { title: 'PTP 状态', render: (_: unknown, row: any) => <Tag color={['Locked','Slave','Master'].includes(row.timeSync.state) ? 'green' : 'gold'}>{localizeStatus(row.timeSync.state)}</Tag> },
-              { title: '时钟偏移', render: (_: unknown, row: any) => row.timeSync.offsetFromMasterNs == null ? '—' : `${row.timeSync.offsetFromMasterNs} ns` },
-              { title: '帧序号', render: (_: unknown, row: any) => row.latestFrame ? `#${row.latestFrame.sequence}` : '—' }
+              { title: 'PTP 状态', render: (_: unknown, row: CameraSynchronizationGroupStatus['members'][number]) => <Tag color={['Locked','Slave','Master'].includes(row.timeSync.state) ? 'green' : 'gold'}>{localizeStatus(row.timeSync.state)}</Tag> },
+              { title: '时钟偏移', render: (_: unknown, row: CameraSynchronizationGroupStatus['members'][number]) => row.timeSync.offsetFromMasterNs == null ? '—' : `${row.timeSync.offsetFromMasterNs} ns` },
+              { title: '帧序号', render: (_: unknown, row: CameraSynchronizationGroupStatus['members'][number]) => row.latestFrame ? `#${row.latestFrame.sequence}` : '—' }
             ]} />
           </>}
           {syncCapture && <Alert style={{ marginTop: 8 }} type={syncCapture.withinTolerance ? 'success' : 'warning'} showIcon title={`${syncCapture.scheduled ? '定时' : '立即'}采集 · 同步偏差 ${syncCapture.triggerSkewUs.toFixed(1)} µs（${localizeStatus(syncCapture.timestampBasis)}）`} description={`已确认设备数：${syncCapture.command.acknowledgedDevices}；允许偏差：${syncCapture.maxAllowedSkewUs.toFixed(1)} µs`} />}
@@ -776,9 +779,9 @@ export default function CameraPanel({ open, onClose }: Props) {
             </div>
             <Table size="small" rowKey="cameraId" dataSource={syncPtpDiagnostics.cameras} pagination={false} columns={[
               { title: '相机', dataIndex: 'cameraId' },
-              { title: 'PTP 就绪率', render: (_: unknown, row: any) => `${row.readySamples}/${row.samples} (${(row.readyRate * 100).toFixed(1)}%)` },
-              { title: '偏移绝对值 P95', render: (_: unknown, row: any) => row.p95AbsOffsetNs == null ? '—' : `${row.p95AbsOffsetNs.toFixed(0)} ns` },
-              { title: '最大偏移绝对值', render: (_: unknown, row: any) => row.maxAbsOffsetNs == null ? '—' : `${row.maxAbsOffsetNs} ns` },
+              { title: 'PTP 就绪率', render: (_: unknown, row: CameraSynchronizationPtpDiagnostics['cameras'][number]) => `${row.readySamples}/${row.samples} (${(row.readyRate * 100).toFixed(1)}%)` },
+              { title: '偏移绝对值 P95', render: (_: unknown, row: CameraSynchronizationPtpDiagnostics['cameras'][number]) => row.p95AbsOffsetNs == null ? '—' : `${row.p95AbsOffsetNs.toFixed(0)} ns` },
+              { title: '最大偏移绝对值', render: (_: unknown, row: CameraSynchronizationPtpDiagnostics['cameras'][number]) => row.maxAbsOffsetNs == null ? '—' : `${row.maxAbsOffsetNs} ns` },
               { title: '主时钟变更次数', dataIndex: 'masterClockChanges' }
             ]} />
           </>}

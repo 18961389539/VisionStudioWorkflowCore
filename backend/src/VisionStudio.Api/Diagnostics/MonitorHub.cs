@@ -60,12 +60,18 @@ public sealed class MonitorSubscriptions
 /// <summary>
 /// 一次监视快照。字段就是三个列表接口的返回体——前端拿到它可以直接替换本地状态，
 /// 不必为"推送格式"再维护一套映射。
+///
+/// 2026-11-13：加入生产状态与报警版本戳。生产面板此前仍每秒拉 5 个接口；
+/// 状态直接随快照下发（客户端零额外请求），报警只在版本戳变化时让客户端补拉，
+/// jobs/config/pending 保留 10 s 兜底。
 /// </summary>
 public sealed record MonitorSnapshot(
     DateTimeOffset CapturedAt,
     IReadOnlyList<CameraDescriptor> Cameras,
     IReadOnlyList<DeviceDescriptor> Devices,
-    IReadOnlyList<RobotDescriptor> Robots);
+    IReadOnlyList<RobotDescriptor> Robots,
+    ProductionRuntimeStatus Production,
+    string AlarmRevision);
 
 /// <summary>
 /// 每秒采集一次设备描述符，内容变化时广播 <c>monitorSnapshot</c>。
@@ -77,6 +83,8 @@ public sealed class MonitorBroadcastService(
     CameraManager cameras,
     DeviceManager devices,
     RobotManager robots,
+    ProductionRuntimeService production,
+    AlarmStore alarms,
     ILogger<MonitorBroadcastService> logger) : BackgroundService
 {
     /// <summary>采集周期。1 s 与人的操作节拍一致；再快只是把"变化"重复广播。</summary>
@@ -104,15 +112,19 @@ public sealed class MonitorBroadcastService(
                     continue;
                 }
 
-                var snapshot = new MonitorSnapshot(
-                    DateTimeOffset.UtcNow,
+                // 比较用的快照不带 CapturedAt：它每 tick 都变，带上会让"内容变了才广播"
+                // 退化成"每秒必广播"（2026-11-13 修正）。只有真的变化时才写入发送时间。
+                var probe = new MonitorSnapshot(
+                    DateTimeOffset.MinValue,
                     cameras.List(),
                     devices.List(),
-                    robots.List());
-                var payload = JsonSerializer.Serialize(snapshot, Json);
+                    robots.List(),
+                    production.Status,
+                    alarms.RevisionStamp());
+                var payload = JsonSerializer.Serialize(probe, Json);
                 if (string.Equals(payload, lastPayload, StringComparison.Ordinal)) continue;
                 lastPayload = payload;
-                await hub.Clients.All.SendAsync("monitorSnapshot", snapshot, stoppingToken);
+                await hub.Clients.All.SendAsync("monitorSnapshot", probe with { CapturedAt = DateTimeOffset.UtcNow }, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

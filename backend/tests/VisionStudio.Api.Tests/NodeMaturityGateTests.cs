@@ -51,6 +51,17 @@ public sealed class NodeMaturityGateTests
     }
 
     [Fact]
+    public void Scan_TreatsScriptAsTrustedCodeBoundary()
+    {
+        // script.csharp 是进程内 trusted-code 运行时（denylist 不是 OS 沙箱）：
+        // 发布时必须和其它非 Stable 节点一样被显式确认，不能静默带入产线。
+        var finding = Assert.Single(NodeMaturityGate.Scan(Workflow(("script", "script.csharp"))));
+        Assert.Equal("script.csharp", finding.NodeType);
+        Assert.Equal("Preview", finding.Maturity);
+        Assert.Contains("沙箱", finding.Reason);
+    }
+
+    [Fact]
     public void Scan_ReportsNodeNameForTheOperator()
     {
         var workflow = new WorkflowDefinition("inspection", "Inspection",

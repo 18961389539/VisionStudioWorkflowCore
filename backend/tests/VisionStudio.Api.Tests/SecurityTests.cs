@@ -12,11 +12,14 @@ public sealed class SecurityTests
 {
 
     [Fact]
-    public async Task ProtectedApi_RequiresAuthentication_ButStatusAndHealthAreAnonymous()
+    public async Task ProtectedApi_RequiresAuthentication_ButStatusAndAnonymousHealthzAreReachable()
     {
         using var factory = new SecureVisionStudioApiFactory();
         using var client = factory.CreateFreshClient();
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/health")).StatusCode);
+        // 2026-11-13：匿名探针拆到 /healthz（仅 status/ready/productionReady）；
+        // 详细健康含路径与运行 id，必须认证后才能读。
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/healthz")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/health")).StatusCode);
         var status = await client.GetFromJsonAsync<JsonElement>("/api/auth/status");
         Assert.True(status.GetProperty("enabled").GetBoolean());
         Assert.True(status.GetProperty("bootstrapRequired").GetBoolean());

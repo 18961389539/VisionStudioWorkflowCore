@@ -8,7 +8,7 @@ gen2 回收跟不上时，现象是"每隔几秒卡一下"，而 l3 长稳只看
 - 池：`backend/src/VisionStudio.Engine/Camera/FrameMatPool.cs`
 - 归还点：`CameraFrameHub.cs` 的 `SharedCameraFrame.Release()`
 - 租用点：`VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs`、`VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs`
-- 观测：`/api/health` 的 `framePool` 字段、`FrameMatPoolTests`
+- 观测：`/api/health` 的 `framePool` 字段（认证后读取；匿名探针 `/healthz` 只返回 status/ready/productionReady）、`FrameMatPoolTests`
 
 ## 为什么复用点在引用计数归零处
 
@@ -40,7 +40,7 @@ gen2 回收跟不上时，现象是"每隔几秒卡一下"，而 l3 长稳只看
 ## 观测
 
 ```text
-GET /api/health
+GET /api/health   （需要登录；匿名探针用 /healthz）
   framePool: "rented=120 reused=3840 returned=3840 dropped=12 pooled=4 bytes=62914560"
 ```
 

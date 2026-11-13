@@ -1,15 +1,11 @@
 {
   "_comment": "文件规模预算（棘轮）：只许降不许升。新增文件超过 defaultMaxLines 直接失败；已有条目必须 <= 记录值，降下来后应同步下调记录值。不计入统计：生成物、测试、i18n 词表（按节点数线性增长的数据表）。",
-  "_updated": "2026-11-12",
-  "_note": "首版基线取自 2026-11-12 实测。JLVisionMatching 已于 10ce9fb 拆到 973 行；VisionWorkflowCompiler(1740)/NodeCatalog(1622)/ProductionRuntime(1498) 已于本轮纯移动拆完，最大分部 584 行，三条预算随之移除。剩余目标：InferenceNodes / MeasurementGapNodes / RuntimeDependencies / types.ts / App.tsx / NodeConfigurationDialog。目标值 800 行。",
+  "_updated": "2026-11-13",
+  "_note": "首版基线取自 2026-11-12 实测。JLVisionMatching 已于 10ce9fb 拆到 973 行，2026-11-13 又把 Execute 拆到 342 行主文件（参数记录 375 / 编排 508，同前缀最大分部 508）。VisionWorkflowCompiler(1740)/NodeCatalog(1622)/ProductionRuntime(1498) 已纯移动拆完，最大分部 584 行，三条预算移除。2026-11-13：RuntimeDependencies 按资源域拆分为 Capture/Hardware/Calibrations/Validation 四个 partial，主文件降至 254 行；types.ts 通过 ContractDto 派生收敛到 1050 行（57 个类型直接派生）；InferenceNodes / MeasurementGapNodes / SubpixelNodes 按域纯移动拆分，最大分部 741 行；App.tsx 拆到 681 行、NodeConfigurationDialog 拆到 312 行（渲染层 499 / 模型 763）。目标值 800 行。",
   "defaultMaxLines": 1200,
   "targetMaxLines": 800,
   "budgets": {
-    "backend/src/VisionStudio.Engine/Nodes/InferenceNodes.cs": 1373,
-    "backend/src/VisionStudio.Engine/Nodes/MeasurementGapNodes.cs": 1314,
-    "backend/src/VisionStudio.Api/RuntimeDependencies.cs": 1263,
-    "frontend/src/types.ts": 1850,
-    "frontend/src/App.tsx": 1672,
-    "frontend/src/components/NodeConfigurationDialog.tsx": 1643
+    "backend/src/VisionStudio.Api/RuntimeDependencies.cs": 254,
+    "frontend/src/types.ts": 1050
   }
 }

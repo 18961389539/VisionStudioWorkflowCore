@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProductionMonitor } from '../useProductionMonitor';
 import { defaultProductionConfig as defaults } from '../productionConfig';
 
+// 推送通道由 useMonitorStream 单测覆盖；这里只验证轮询兜底与资源隔离，
+// 避免 SignalR 的 negotiate 请求混进 fetch 计数断言。
+vi.mock('../useMonitorStream', () => ({ useMonitorSnapshot: () => undefined }));
+
 const status = { state: 'Stopped', productionLocked: false, cycleCount: 1, okCount: 1, ngCount: 0,
   errorCount: 0, consecutiveFailures: 0, watchdogTrips: 0, lastDurationMs: 0 };
 const config = { ...defaults, jobId: 'A' };
@@ -37,7 +41,12 @@ describe('生产数据独立轮询', () => {
     expect(result.current.pending?.runId).toBe('run-1');
     await tick(2100);
     expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/config'))).toHaveLength(1);
-    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/status'))).toHaveLength(3);
+    // 2026-11-13：状态改由 /hubs/monitor 推送，轮询兜底周期由 1 s 放宽到 10 s。
+    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/status'))).toHaveLength(1);
+    await tick(8000);
+    // 配置首请求在 5 s 超时被放弃，10 s 兜底周期再重试一次——慢配置不会拖住其它资源。
+    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/config'))).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/status'))).toHaveLength(2);
     await act(async () => { slowConfig.resolve(ok(config)); });
     expect(result.current.configReady).toBe(true);
   });
@@ -71,11 +80,11 @@ describe('生产数据独立轮询', () => {
     const { result } = mount();
     await flush();
     next = failure('permission lost');
-    await tick();
+    await tick(10_000);
     expect(result.current.pending).toEqual(pending);
     expect(result.current.errors.pending).toMatch(/permission lost.*test-trace/);
     next = empty();
-    await tick();
+    await tick(10_000);
     expect(result.current.pending).toBeUndefined();
     expect(result.current.errors.pending).toBeUndefined();
   });
@@ -96,7 +105,10 @@ describe('生产数据独立轮询', () => {
     await flush();
     await tick(5000);
     expect(signal.aborted).toBe(true);
-    expect(calls).toBeGreaterThanOrEqual(2);
+    // 超时清掉在途请求后，下一次 10 s 兜底轮询才会重试。
+    expect(calls).toBe(1);
+    await tick(5000);
+    expect(calls).toBe(2);
     await act(async () => { old.resolve(status); });
     expect(result.current.statusFresh).toBe(false);
     expect(result.current.status).toBeUndefined();
@@ -172,11 +184,11 @@ describe('生产数据独立轮询', () => {
     await flush();
     const time = result.current.lastUpdatedAt;
     next = failure('restart required');
-    await tick();
+    await tick(10_000);
     expect(result.current.lastUpdatedAt).toBe(time);
     expect(result.current.statusFresh).toBe(false);
     next = ok({ ...status, cycleCount: 3 });
-    await tick();
+    await tick(10_000);
     expect(result.current.statusFresh).toBe(true);
     expect(result.current.errors.status).toBeUndefined();
     expect(result.current.lastUpdatedAt!.getTime()).toBeGreaterThan(time!.getTime());

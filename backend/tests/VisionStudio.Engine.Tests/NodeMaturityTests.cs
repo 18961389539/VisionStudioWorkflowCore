@@ -36,6 +36,7 @@ public sealed class NodeMaturityTests
         "output.database",
         "recognition.barcodeQuality",
         "region.fromMask",
+        "script.csharp",
         "tolerance.stackup",
         "value.counter"
     ];

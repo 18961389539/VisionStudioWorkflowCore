@@ -91,8 +91,10 @@ public sealed partial class HikrobotMvsCameraDevice : ICameraDevice, ICameraTele
             StopCore();
             if (_camera is not null)
             {
-                try { HikrobotSdkReflection.InvokeInt(_camera, "MV_CC_CloseDevice_NET"); } catch { }
-                try { HikrobotSdkReflection.InvokeInt(_camera, "MV_CC_DestroyDevice_NET"); } catch { }
+                try { HikrobotSdkReflection.InvokeInt(_camera, "MV_CC_CloseDevice_NET"); }
+                catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "close-device", ex); }
+                try { HikrobotSdkReflection.InvokeInt(_camera, "MV_CC_DestroyDevice_NET"); }
+                catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "destroy-device", ex); }
             }
             ReleaseSdkObjects();
             _state = CameraState.Closed;
@@ -268,7 +270,7 @@ public sealed partial class HikrobotMvsCameraDevice : ICameraDevice, ICameraTele
                 HikrobotSdkReflection.Check(Convert.ToInt32(method.Invoke(camera, args)), "OpenDevice");
                 return;
             }
-            catch (TargetParameterCountException) { }
+            catch (TargetParameterCountException) { /* 该重载参数不匹配，继续尝试下一个签名 */ }
         }
         throw new MissingMethodException(camera.GetType().FullName, "MV_CC_OpenDevice_NET");
     }
@@ -334,7 +336,7 @@ public sealed partial class HikrobotMvsCameraDevice : ICameraDevice, ICameraTele
                 var value = HikrobotSdkReflection.Member(holder, "nCurValue");
                 if (value is not null) return Convert.ToUInt64(value);
             }
-            catch { }
+            catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "read-payload-size", ex); }
         }
         return 16 * 1024 * 1024;
     }
@@ -373,14 +375,15 @@ public sealed partial class HikrobotMvsCameraDevice : ICameraDevice, ICameraTele
             holder = args[1] ?? holder;
             return HikrobotSdkReflection.Text(HikrobotSdkReflection.Member(holder, "chCurValue") ?? HikrobotSdkReflection.Member(holder, "strCurValue"));
         }
-        catch { return null; }
+        catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "read-string-node", ex); return null; }
     }
 
     private void StopCore()
     {
         if (_camera is not null && _state == CameraState.Streaming)
         {
-            try { HikrobotSdkReflection.InvokeInt(_camera, "MV_CC_StopGrabbing_NET"); } catch { }
+            try { HikrobotSdkReflection.InvokeInt(_camera, "MV_CC_StopGrabbing_NET"); }
+            catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "stop-grabbing", ex); }
         }
         if (_state != CameraState.Closed && _state != CameraState.Faulted) _state = CameraState.Open;
     }
@@ -395,7 +398,8 @@ public sealed partial class HikrobotMvsCameraDevice : ICameraDevice, ICameraTele
 
     public async ValueTask DisposeAsync()
     {
-        try { await CloseAsync(); } catch { }
+        try { await CloseAsync(); }
+        catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "dispose", ex); }
         _gate.Dispose();
     }
 }

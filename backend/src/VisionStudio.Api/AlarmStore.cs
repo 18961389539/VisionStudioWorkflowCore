@@ -53,6 +53,24 @@ public sealed class AlarmStore
     }
 
     /// <summary>
+    /// 报警文件的轻量版本戳（2026-11-13）：监视推送用它判断"有没有新报警/恢复/确认"，
+    /// 不必每秒读一遍 JSON。写入走临时文件 + 原子 Move，mtime/长度组合足够区分相邻写入。
+    /// </summary>
+    public string RevisionStamp()
+    {
+        try
+        {
+            var info = new FileInfo(_path);
+            return info.Exists ? $"{info.LastWriteTimeUtc.Ticks}:{info.Length}" : "0:0";
+        }
+        catch
+        {
+            // 文件被并发删除/占用时退化为"未知"：下一次 tick 会重新取到稳定值。
+            return "unknown";
+        }
+    }
+
+    /// <summary>
     /// 分页读取报警。返回分页结果与**裁剪前**的总数（供 X-Total-Count），
     /// take 会被夹在 [1, MaxPageSize]，skip 负数按 0 处理。
     /// </summary>

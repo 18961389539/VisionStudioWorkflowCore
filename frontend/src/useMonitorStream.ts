@@ -1,6 +1,6 @@
 import { HubConnectionBuilder, HubConnectionState, LogLevel, type HubConnection } from '@microsoft/signalr';
 import { useEffect, useState } from 'react';
-import type { CameraDescriptor, DeviceDescriptor, RobotDescriptor } from './types';
+import type { CameraDescriptor, DeviceDescriptor, ProductionRuntimeStatus, RobotDescriptor } from './types';
 
 /**
  * 设备监视推送（2026-11-12）。
@@ -20,6 +20,10 @@ export type MonitorSnapshot = {
   cameras: CameraDescriptor[];
   devices: DeviceDescriptor[];
   robots: RobotDescriptor[];
+  /** 生产状态随快照直达（2026-11-13）：生产面板不再为状态单独轮询。 */
+  production: ProductionRuntimeStatus;
+  /** 报警文件版本戳；变化时生产面板只补拉一次报警列表。 */
+  alarmRevision: string;
 };
 
 let shared: HubConnection | undefined;

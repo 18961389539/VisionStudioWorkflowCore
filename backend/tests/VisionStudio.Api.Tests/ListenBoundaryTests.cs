@@ -99,7 +99,8 @@ public sealed class ListenBoundaryTests : IDisposable
         // 合规路径仍能启动（发布脚本的实际姿态）。
         using var factory = ProductionHost(("urls", "http://127.0.0.1:5087"));
         using var client = factory.CreateClient();
-        var response = await client.GetAsync("/api/health");
+        // 生产姿态下管理端点需要登录；探活走匿名 /healthz。
+        var response = await client.GetAsync("/healthz");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
@@ -112,7 +113,7 @@ public sealed class ListenBoundaryTests : IDisposable
             ("Security:AllowInsecureRemoteTransport", "true"),
             ("ASPNETCORE_HTTP_PORTS", "18082"));
         using var client = factory.CreateClient();
-        var response = await client.GetAsync("/api/health");
+        var response = await client.GetAsync("/healthz");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 

@@ -167,6 +167,51 @@ export function imageFramesSharePixelPreservingAncestor(firstImageNodeId: string
   return [...ancestors(secondImageNodeId)].some((nodeId) => first.has(nodeId));
 }
 
+/**
+ * 向上游回溯测量节点的图像链，收集会“清零选区外像素”的裁剪源（巨型组件拆分，2026-11-13）。
+ * maskIsInCurrentFrame 表示该裁剪掩膜与当前测量图像同坐标系、可直接用于判断伪边缘。
+ */
+export function measurementCropMaskSources(
+  nodes: Node[], edges: Edge[], measurementImageSource: Node | undefined, framePreservingNodeTypes: ReadonlySet<string>
+): { node: Node; maskIsInCurrentFrame: boolean }[] {
+  const roiSourceMayMaskCropBounds = (sourceId: string, visited = new Set<string>()): boolean => {
+    if (visited.has(sourceId)) return true;
+    visited.add(sourceId);
+    const source = nodes.find((item) => item.id === sourceId);
+    if (source?.data.typeKey === 'roi.transform') return true;
+    if (source?.data.typeKey !== 'image.crop') return true;
+    const sourceRoiEdge = inputEdge(edges, sourceId, 'roi');
+    if (sourceRoiEdge) return roiSourceMayMaskCropBounds(sourceRoiEdge.source, visited);
+    const sourceRoi = (source.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
+    return sourceRoi ? sourceRoi.type !== 'Rectangle' : false;
+  };
+  const sources: { node: Node; maskIsInCurrentFrame: boolean }[] = [];
+  const visited = new Set<string>();
+  let current = measurementImageSource;
+  let cropsAfterCurrent = 0;
+  let hasCoordinateChange = false;
+  while (current && !visited.has(current.id)) {
+    const currentNode = current;
+    visited.add(currentNode.id);
+    const type = String(currentNode.data.typeKey ?? '').toLowerCase();
+    if (type === 'image.crop') {
+      const cropRoiEdge = inputEdge(edges, currentNode.id, 'roi');
+      const cropRoi = (currentNode.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
+      const masksOutsideSelection = cropRoiEdge
+        ? roiSourceMayMaskCropBounds(cropRoiEdge.source)
+        : Boolean(cropRoi && cropRoi.type !== 'Rectangle');
+      if (masksOutsideSelection)
+        sources.push({ node: currentNode, maskIsInCurrentFrame: cropsAfterCurrent === 0 && !hasCoordinateChange });
+      cropsAfterCurrent++;
+    } else if (imageFrameChanges(currentNode)) hasCoordinateChange = true;
+    else if (type !== 'roi.transform' && (!framePreservingNodeTypes.has(type) || imageFrameChanges(currentNode))) break;
+    const imageInputPort = type === 'roi.transform' ? 'debugImage' : 'image';
+    const imageInput = inputEdge(edges, currentNode.id, imageInputPort);
+    current = imageInput ? nodes.find((item) => item.id === imageInput.source) : undefined;
+  }
+  return sources;
+}
+
 export function clipLineToImage(start: { x: number; y: number }, end: { x: number; y: number }, width: number, height: number) {
   if (width <= 0 || height <= 0) return undefined;
   const dx = end.x - start.x;

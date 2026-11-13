@@ -8,8 +8,8 @@ backend/src/VisionStudio.Api/GigENetworkCommissioning.cs(466,80) : warning CA141
 backend/src/VisionStudio.Api/PluginPackageManagement.cs(147,33) : warning SYSLIB0057
 backend/src/VisionStudio.Api/PluginPackageManagement.cs(427,37) : warning SYSLIB0057
 backend/src/VisionStudio.Api/Security/VisionStudioAuthenticationHandler.cs(18,25) : warning CS0108
-backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs(346,54) : warning CS8603
-backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs(394,54) : warning CS8603
+backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs(356,54) : warning CS8603
+backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs(397,54) : warning CS8603
 backend/src/VisionStudio.Engine/Nodes/FeatureGapNodes.cs(86,23) : warning CS0618
 backend/src/VisionStudio.Engine/Nodes/MaskToVisionNodes.cs(101,33) : warning OCVS002
 backend/src/VisionStudio.Engine/Nodes/MaskToVisionNodes.cs(94,23) : warning CS0618

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, InputNumber, Segmented, Select, Space, Switch, Tooltip } from 'antd';
+import type Konva from 'konva';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Stage, Text } from 'react-konva';
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
 import { parameterFingerprint, roiConfigurationIssue } from '../nodeConfigurationState';
@@ -79,7 +80,7 @@ export default function ImageViewer({
   // the parameter editor can explain and clear it without crashing the whole configuration UI.
   const roi = useMemo(() => inputRoi && !roiConfigurationIssue(inputRoi, 'ROI', 1024) ? inputRoi : undefined, [inputRoi]);
   const hostRef = useRef<HTMLDivElement>(null);
-  const stageRef = useRef<any>(null);
+  const stageRef = useRef<Konva.Stage | null>(null);
   const [size, setSize] = useState({ width: 400, height: 260 });
   const [view, setView] = useState<ViewState>({ scale: 1, x: 0, y: 0 });
   const [tool, setTool] = useState<ToolMode>('pan');
@@ -364,7 +365,7 @@ export default function ImageViewer({
     return undefined;
   };
 
-  const onWheel = (event: any) => {
+  const onWheel = (event: Konva.KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault();
     const p = pointer();
     if (!p || !actualWidth) return;
@@ -385,14 +386,14 @@ export default function ImageViewer({
     return { x: clientX - rect.left, y: clientY - rect.top };
   };
 
-  const onStageTouchStart = (event: any) => {
+  const onStageTouchStart = (event: Konva.KonvaEventObject<TouchEvent>) => {
     // Konva 在某些调用路径（含测试里的合成事件）不保证有 evt，一律做空值保护
     const touches = event?.evt?.touches as TouchList | undefined;
     if (touches && touches.length >= 2) { pinchRef.current = undefined; return; }
     onPointerDown();
   };
 
-  const onStageTouchMove = (event: any) => {
+  const onStageTouchMove = (event: Konva.KonvaEventObject<TouchEvent>) => {
     const touches = event?.evt?.touches as TouchList | undefined;
     if (!touches || touches.length < 2) { onPointerMove(); return; }
     event?.evt?.preventDefault?.();

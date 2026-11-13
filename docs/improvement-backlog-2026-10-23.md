@@ -70,6 +70,9 @@ CI 已有 quality-gate（后端覆盖率 60%）、soak（工作日 18:30）、pl
 
 **不改的部分**：`React.lazy` 的面板级拆分继续保留（11 个面板，每个独立 chunk，首屏不下载），两套机制互补。
 
+**2026-11-13 首屏词表拆分**：中文词表（原 `i18n/catalog.ts` + `catalogLabels.ts`）移入 `i18n/catalog.zh.ts`，由 `main.tsx`（初始 zh）或 `I18nProvider`（切到 zh）动态导入；`catalog.ts` 只保留查表函数，词表未加载时一律回落英文原文。
+实测 index chunk **2,016 kB / 539 kB gzip → 1,569 kB / 383 kB gzip**；中文用户额外加载 `catalog.zh` 445 kB / 156 kB gzip，英文用户完全不下载。单元测试通过 `src/testSetup.ts` 预装词表，保持原有的中文断言口径。
+
 ### 1.3 关键路径 e2e（P1）
 
 **问题**：1091 个前端测试全跑在 jsdom 里——布局是假的（所有元素 0×0）、没有真实 Canvas、React Flow 的命中判定与
@@ -202,6 +205,13 @@ quality-gate 的 `timeout-minutes` 为 25，当前总时长未触及上限，但
 `tsc` 照样退出 0，断言完全空转；用 `Omit<Schema<'WorkflowDefinition'>, 'edges'>` 反向探针确认过现在真的会红。
 
 **仍未完成的是"收敛"本身**：`types.ts` 仍是 1,903 行手写镜像，下一步应改为 `type X = Schema<'X'>` 派生。
+
+**2026-11-13 进展**：`types.ts` 1,903 → 1,425 行；新增 `ContractDto<K>` 派生助手（生成 schema → 数值 `number|string` 收敛回 `number` → required-but-nullable 放宽为可选），
+插件、相机、机器人、设备、生产守卫、诊断、标定版本/结果、存储容量/迁移、媒体库等 **48 个 DTO** 改为 `ContractDto<'X'>`，
+另有 27 个枚举继续走 `ContractSchema`。仍需手写的只剩三类：
+① 前端刻意收窄的封闭联合与复合目录（`NodeCatalogItem` / `ParameterDescriptor` / `WorkflowModule*` / `ValidationDataset*` / `ParameterValueSet`）；
+② 后端已新增字段、前端镜像尚未跟上的旧 DTO（`ProductionRuntimeConfig` / `ProductionRuntimeStatus` / `StorageBackupDescriptor` / `TraceStorageStatus` 等）；
+③ 带 UI 附加字段的资产描述符（`CalibrationAssetDescriptor` / `HandEye*AssetDescriptor`）。
 
 **PowerShell 脚本编码约定（本轮踩坑）**：`scripts/*.ps1` 若含中文注释，文件**必须是带 BOM 的 UTF-8**。
 PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语法——表现为变量莫名是 `$null`、

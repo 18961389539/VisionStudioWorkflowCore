@@ -150,7 +150,7 @@ Write-BuildInfo $staging
 # the approved test configuration (security and simulators off), and the check verifies more than
 # an HTTP 200: required assets, health endpoint, the packaged frontend (wwwroot index) and a clean
 # plugin/dependency load in the host log.
-$smokeRequiredAssets = @('VisionStudio.Api.dll', 'appsettings.json', 'wwwroot/index.html', 'VisionStudio.Plugin.Worker.dll', 'build-info.json')
+$smokeRequiredAssets = @('VisionStudio.Api.dll', 'appsettings.json', 'wwwroot/index.html', 'VisionStudio.Plugin.Worker.dll', 'VisionStudio.Script.Worker.dll', 'build-info.json')
 $missingAssets = @($smokeRequiredAssets | Where-Object { -not (Test-Path (Join-Path $staging $_)) })
 if ($missingAssets.Count -gt 0) {
     Write-Host "Candidate package is missing required assets: $($missingAssets -join ', '). Keeping the current package." -ForegroundColor Red
@@ -285,7 +285,8 @@ try {
     while ((Get-Date) -lt $secureDeadline) {
         if ($secureProcess.HasExited) { break }
         try {
-            $secureHealthResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$securePort/api/health" -UseBasicParsing -TimeoutSec 3
+            # 安全开启后详细健康需要登录；探活走匿名 /healthz（只含 status/ready/productionReady）。
+            $secureHealthResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$securePort/healthz" -UseBasicParsing -TimeoutSec 3
             if ($secureHealthResponse.StatusCode -eq 200) {
                 $secureHealth = [string]$secureHealthResponse.Content | ConvertFrom-Json
                 if ($secureHealth.status -eq 'ok' -and $secureHealth.ready -eq $true) { $secureHealthy = $true; break }

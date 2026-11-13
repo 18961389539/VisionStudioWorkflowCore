@@ -421,6 +421,18 @@
         }
       }
     },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "tags": [
@@ -670,6 +682,44 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PluginWorkerPerformanceProfile"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/script-workers": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginWorkerStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/script-workers/restart": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginWorkerStatus"
                 }
               }
             }
@@ -1210,6 +1260,18 @@
       }
     },
     "/api/diagnostics/bundle": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/diagnostics/metrics": {
       "get": {
         "tags": [
           "VisionStudio.Api"

@@ -6,15 +6,17 @@
 import { Suspense, type ReactNode } from 'react';
 import { STORAGE_KEYS, readStored, readStoredJson, writeStored, writeStoredJson } from './storage';
 import { Skeleton } from 'antd';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import ErrorBoundary from './components/ErrorBoundary';
 import VisionNode from './components/VisionNode';
-import { catalogNodeData, fallbackCatalog, makeDefaultParameters } from './catalog';
+import { catalogNodeData, fallbackCatalogRaw, makeDefaultParameters } from './catalog';
+import { localizeCatalog } from './i18n';
+import type { Lang } from './i18n/lang';
 import { linearDemo, type DemoKey } from './demos';
 import { hydrateNodeParameters, type NodeParameters } from './nodeConfigurationState';
 import { withSwitchPorts } from './switchPorts';
 import { type PortRecommendation } from './toolboxModel';
-import type { NodeCatalogItem, PortDescriptor, WorkflowModuleParameter } from './types';
+import type { NodeCatalogItem, PortDescriptor, WorkflowModuleParameter, WorkflowPayload } from './types';
 
 // R12：条件挂载的按需面板包装——open=false 时完全不渲染（不触发动态加载）；
 // open=true 时由 Suspense 兜住加载窗口（面板自身是 Drawer，加载完立即展开）。
@@ -117,7 +119,11 @@ export function hydrateNodesFromCatalog(nodes: Node[], catalog: NodeCatalogItem[
 }
 
 const initialGraph = linearDemo();
-export const initial = { ...initialGraph, nodes: hydrateNodesFromCatalog(initialGraph.nodes, fallbackCatalog) };
+
+/** 首屏初始图：按当前语言本地化后再灌入目录元数据（zh 词表在 bootstrap 阶段已就绪）。 */
+export function createInitial(lang: Lang = 'zh') {
+  return { ...initialGraph, nodes: hydrateNodesFromCatalog(initialGraph.nodes, localizeCatalog(fallbackCatalogRaw, lang)) };
+}
 
 export function getPorts(node: Node | undefined, key: 'inputs' | 'outputs'): PortDescriptor[] {
   return ((node?.data?.[key] ?? []) as PortDescriptor[]);
@@ -141,7 +147,7 @@ export function moduleCatalogFromNode(node?: Node): NodeCatalogItem | undefined 
     inputs: meta.inputs,
     outputs: meta.outputs,
     parameters: meta.moduleParameters.map((x) => ({
-      name: x.name, label: x.label, type: x.type as any, defaultValue: x.defaultValue, min: x.min, max: x.max, step: x.step, options: x.options, unit: x.unit, group: x.group, description: x.description
+      name: x.name, label: x.label, type: x.type, defaultValue: x.defaultValue, min: x.min, max: x.max, step: x.step, options: x.options, unit: x.unit, group: x.group, description: x.description
     })),
     description: 'Immutable reusable Workflow Module call. The pinned module version is expanded before compile/execution.',
     pluginId: 'module',
@@ -153,6 +159,41 @@ export function edgePresentation(kind: 'control' | 'data') {
   return kind === 'control'
     ? { animated: true, data: { kind }, style: { strokeDasharray: '7 5' } }
     : { animated: false, data: { kind } };
+}
+
+/**
+ * 画布图 → 执行负载（巨型组件拆分，2026-11-13）。
+ * 性能：先建「节点 → 端口」Map，整体 O(N+E)，避免每条边都 nodes.find + 端口 find。
+ */
+export function buildWorkflowPayload(id: string, name: string, nodes: Node[], edges: Edge[]): WorkflowPayload {
+  const outputsByNode = new Map<string, Map<string, PortDescriptor>>();
+  for (const node of nodes) {
+    const ports = getPorts(node, 'outputs');
+    outputsByNode.set(node.id, new Map(ports.map((port) => [port.name, port])));
+  }
+  return {
+    id,
+    name,
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      type: String(node.data.typeKey),
+      name: String(node.data.label ?? node.id),
+      position: node.position,
+      parameters: (node.data.parameters ?? {}) as Record<string, unknown>
+    })),
+    edges: edges.map((edge) => {
+      const sourcePort = outputsByNode.get(edge.source)?.get(edge.sourceHandle ?? '');
+      const kind = String(edge.data?.kind ?? (sourcePort?.dataType === 'Control' ? 'control' : 'data'));
+      return {
+        id: edge.id,
+        sourceNodeId: edge.source,
+        sourcePort: edge.sourceHandle ?? 'next',
+        targetNodeId: edge.target,
+        targetPort: edge.targetHandle ?? 'exec',
+        kind
+      };
+    })
+  };
 }
 
 export const RECENT_NODES_LIMIT = 6;

@@ -10,6 +10,7 @@
   <Project Path="src/VisionStudio.Plugin.Sample/VisionStudio.Plugin.Sample.csproj" />
   <Project Path="src/VisionStudio.Plugin.Packager/VisionStudio.Plugin.Packager.csproj" />
   <Project Path="src/VisionStudio.Plugin.Worker/VisionStudio.Plugin.Worker.csproj" />
+  <Project Path="src/VisionStudio.Script.Worker/VisionStudio.Script.Worker.csproj" />
   <Project Path="src/VisionStudio.Benchmark.Cli/VisionStudio.Benchmark.Cli.csproj" />
   <Project Path="tests/VisionStudio.Engine.Tests/VisionStudio.Engine.Tests.csproj" />
   <Project Path="tests/VisionStudio.Api.Tests/VisionStudio.Api.Tests.csproj" />

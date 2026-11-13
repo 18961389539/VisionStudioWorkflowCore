@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# 最小权限（2026-11-13）：门禁只需要读仓库内容。上传产物走运行级 token，
+# 不依赖 GITHUB_TOKEN 的写权限；显式声明可避免仓库默认权限放宽时被动获得写能力。
+permissions:
+  contents: read
+
 # 同一分支上的新提交取消旧运行：门禁的价值在于"当前提交是否干净"，
 # 排队跑完一个已被取代的提交既浪费 runner 又延迟反馈。
 concurrency:
@@ -80,6 +85,15 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      # Playwright 浏览器缓存（2026-11-13）：默认安装路径在 Windows 上是
+      # %USERPROFILE%\AppData\Local\ms-playwright。key 跟 package-lock 走，
+      # 依赖版本不变时不再每轮重新下载完整 Chromium（约 130 MiB）。
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
       - name: Run frontend e2e gate
         shell: pwsh
         run: ./scripts/quality-gate.ps1 -Scope E2E

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "19238aaa56ee95b6c05ba58ae9cb41acd46f78033d4ee8d17b5433b549a6d123",
+  "hash": "1f5510d2b530e708f0a0f261f9a4cc47592a99084ca343932475d6b47e1fe25f",
   "items": [
     {
       "type": "image.acquire",
@@ -51063,7 +51063,7 @@
           "description": "Maximum input/output image pixel count. Reject oversized Mat objects before they can exhaust the host."
         }
       ],
-      "description": "Run trusted C# code with typed inputs and an optional OpenCV Mat image. Image input is cloned; image output is owned by the result. The runtime references only a minimal BCL surface plus OpenCvSharp and VisionStudio.Scripting; file/network/reflection/process/threading APIs and #r/#load directives are rejected by a syntax-tree allowlist. Loops and function entries receive a cooperative tick budget. Set Output.Result/Number/Text/Boolean/Json/Image or return a primitive value; at least one output is required. This is a trusted-engineer runtime, not a hard OS sandbox; imported workflows containing scripts require approval. algorithmBackend=roslyn.",
+      "description": "Run trusted C# code with typed inputs and an optional OpenCV Mat image. Image input is cloned; image output is owned by the result. The runtime references only a minimal BCL surface plus OpenCvSharp and VisionStudio.Scripting; file/network/reflection/process/threading APIs and #r/#load directives are rejected by a syntax-tree denylist (unlisted APIs are allowed). Loops and function entries receive a cooperative tick budget. Set Output.Result/Number/Text/Boolean/Json/Image or return a primitive value; at least one output is required. This is a trusted-engineer runtime, not a hard OS sandbox; imported workflows containing scripts require approval. algorithmBackend=roslyn.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -51082,6 +51082,7 @@
           "transform": "None"
         }
       ],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,

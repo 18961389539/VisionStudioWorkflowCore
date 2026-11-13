@@ -1,5 +1,6 @@
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
+using VisionStudio.Engine.Scripting;
 using VisionStudio.Scripting;
 
 namespace VisionStudio.Engine.Nodes;
@@ -8,12 +9,22 @@ namespace VisionStudio.Engine.Nodes;
 /// Built-in C# script node (script.csharp, 2026-10-27).
 ///
 /// Scripts are compiled in-process with Roslyn against a minimal reference set. The runner rejects
-/// file/network/reflection/process/threading APIs with a syntax-tree allowlist, injects a cooperative
-/// loop budget, and exposes only typed inputs, an optional Mat image and a typed output object.
+/// file/network/reflection/process/threading APIs with a syntax-tree denylist (unlisted APIs are allowed),
+/// injects a cooperative loop budget, and exposes only typed inputs, an optional Mat image and a typed output object.
 /// This is a trusted-engineer runtime; it is not a hard OS sandbox.
 /// </summary>
 public sealed class CSharpScriptNode : IVisionNodeExecutor
 {
+    private readonly IScriptExecutionBackend _backend;
+
+    /// <summary>Parameterless ctor keeps direct construction (tests / worker host) on the in-process backend.</summary>
+    public CSharpScriptNode() : this(new InProcessScriptExecutionBackend()) { }
+
+    public CSharpScriptNode(IScriptExecutionBackend backend)
+    {
+        _backend = backend ?? throw new ArgumentNullException(nameof(backend));
+    }
+
     public string Type => "script.csharp";
 
     private static readonly string[] InputNames = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -71,7 +82,7 @@ public sealed class CSharpScriptNode : IVisionNodeExecutor
 
             var imageForScript = inputImage;
             inputImage = null; // ownership transferred to ScriptGlobals and disposed by the runner.
-            using var scriptResult = await CSharpScriptRunner.RunAsync(
+            using var scriptResult = await _backend.RunAsync(
                 source,
                 new ScriptExecutionOptions(timeoutMs, maxTicks, maxOutputBytes, maxImagePixels),
                 inputs,
@@ -124,9 +135,8 @@ public sealed class CSharpScriptNode : IVisionNodeExecutor
             if (outputImage is null)
                 return new NodeExecutorResult(outputs, summary);
 
-            var imageOutput = VisionImage.Own(outputImage);
-            outputs["image"] = VisionValue.Image(imageOutput);
-            return NodeOutputContracts.CreateOwnedResult(imageOutput,
+            outputs["image"] = VisionValue.Image(outputImage);
+            return NodeOutputContracts.CreateOwnedResult(outputImage,
                 () => new NodeExecutorResult(outputs, summary), cancellationToken);
         }
         finally

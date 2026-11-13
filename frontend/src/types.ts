@@ -3,9 +3,35 @@ import type { components } from './generated/api-types';
 /** 后端 OpenAPI schema 别名：枚举与 DTO 以生成类型为准，手写侧只保留 UI 需要的收窄。 */
 type ContractSchema<K extends keyof components['schemas']> = components['schemas'][K];
 
+/**
+ * 响应 DTO 别名：在生成 schema 上应用两条前端消费约定。
+ *  - number|string → number：.NET 10 OpenAPI 为数值字段生成字符串兼容分支，实际 JSON 是数字；
+ *  - required-but-nullable → optional：后端必发 null，前端沿用历史上"可省略"的消费方式。
+ * 仅用于与后端 schema 完全一致、没有前端收窄/额外 UI 字段的 DTO；需要收窄时用 Omit 包装。
+ */
+type NormalizeContractNumber<T> = [NonNullable<T>] extends [string] ? T
+  : [NonNullable<T>] extends [number] ? T
+  : [NonNullable<T>] extends [string | number] ? Exclude<T, string>
+  : T extends readonly (infer U)[] ? NormalizeContractNumber<U>[]
+  : T extends object ? { [K in keyof T]: NormalizeContractNumber<T[K]> }
+  : T;
+
+type OptionalContractKeys<T> = {
+  [K in keyof T]-?: [null] extends [T[K]] ? K : [undefined] extends [T[K]] ? K : never;
+}[keyof T];
+
+type RelaxContractNullables<T> = T extends readonly (infer U)[] ? RelaxContractNullables<U>[]
+  : T extends object
+    ? { [K in Exclude<keyof T, OptionalContractKeys<T>>]: RelaxContractNullables<T[K]> }
+      & { [K in OptionalContractKeys<T>]?: RelaxContractNullables<T[K]> }
+    : T;
+
+export type ContractDto<K extends keyof components['schemas']> = RelaxContractNullables<NormalizeContractNumber<components['schemas'][K]>>;
+
 export type VisionRegionRun = { row: number; startColumn: number; endColumn: number };
 export type VisionRegion = { width: number; height: number; components: { runs: VisionRegionRun[] }[] };
 
+/** UI 视图：required 允许缺省（目录夹具不必逐项声明），label 由 localizeCatalog 注入。 */
 export type PortDescriptor = {
   name: string;
   dataType: string;
@@ -17,6 +43,7 @@ export type PortDescriptor = {
 
 export type ParameterOption = ContractSchema<'ParameterOption'>;
 
+/** UI 视图：type 收窄为表单封闭联合；边界/默认值等按面板需要允许 null 或省略。 */
 export type ParameterDescriptor = {
   name: string;
   label: string;
@@ -51,6 +78,7 @@ export type ParameterDescriptor = {
   overriddenByPorts?: string[] | null;
 };
 
+/** UI 视图：能力位均可缺省（未声明按 false 处理），executionMode 沿用后端枚举。 */
 export type VisionToolCapabilities = {
   supportsRoi?: boolean;
   emitsOverlay?: boolean;
@@ -141,8 +169,9 @@ export type NodeRunReport =
     phase?: ContractSchema<'NodeExecutionPhase'>;
   };
 
-export type OverlayPoint = { x: number; y: number };
+export type OverlayPoint = ContractDto<'VisionOverlayPoint'>;
 
+/** UI 视图：type 收窄为封闭图元联合；按图元类型只有部分坐标字段有值，故全部可空。 */
 export type VisionOverlay = {
   id: string;
   type: 'Point' | 'Line' | 'Circle' | 'Rectangle' | 'Polygon' | 'Contour' | 'Text' | 'Polyline';
@@ -195,15 +224,9 @@ export type RunResult = {
   controlFlowDecisions?: ControlFlowDecision[] | null;
 };
 
-export type PluginToolLoadInfo = {
-  type: string;
-  displayName: string;
-  toolVersion?: string | null;
-  lifetime: 'Singleton' | 'Transient' | 'PerNode';
-  concurrency: 'ThreadSafe' | 'Serialized';
-  experimental: boolean;
-};
+export type PluginToolLoadInfo = ContractDto<'PluginToolLoadInfo'>;
 
+/** UI 视图：isolationMode 收窄为封闭联合；后端必发 null 的字段按历史习惯允许省略。 */
 export type PluginLoadInfo = {
   id: string;
   name: string;
@@ -233,212 +256,55 @@ export type PluginLoadInfo = {
 };
 
 
-export type PluginPackageVersionInfo = {
-  id: string; name: string; version: string; vendor: string;
-  packageSha256: string; contentSha256: string; signed: boolean; signatureValid: boolean; publisherTrusted: boolean;
-  publisherThumbprint?: string | null; publisherSubject?: string | null; installedAt: string;
-  active: boolean; pending: boolean; restartRequired: boolean; packageFormat: string;
-};
+export type PluginPackageVersionInfo = ContractDto<'PluginPackageVersionInfo'>;
 
-export type PluginPackagePreflightResult = {
-  valid: boolean; error?: string | null; id?: string | null; name?: string | null; version?: string | null; vendor?: string | null; entryAssembly?: string | null;
-  packageSha256: string; contentSha256: string; signed: boolean; signatureValid: boolean; publisherTrusted: boolean;
-  publisherThumbprint?: string | null; publisherSubject?: string | null; warnings: string[];
-};
+export type PluginPackagePreflightResult = ContractDto<'PluginPackagePreflightResult'>;
 
-export type TrustedPluginPublisher = {
-  thumbprint: string; subject: string; displayName?: string | null; enabled: boolean; addedAt: string; notBefore?: string | null; notAfter?: string | null;
-};
+export type TrustedPluginPublisher = ContractDto<'TrustedPluginPublisher'>;
 
-export type PluginSdkInfo = {
-  apiVersion: number;
-  packageManifestSchemaVersion: number;
-  supportedLifetimes: string[];
-  supportedConcurrencyModes: string[];
-  supportedIsolationModes: string[];
-  runtimeDiscovery: boolean;
-  runtimeReplacement: boolean;
-  isolationBoundary: string;
-};
+export type PluginSdkInfo = ContractDto<'PluginSdkInfo'>;
 
 
-export type PluginWorkerInstanceStatus = {
-  workerIndex: number; state: string; processId?: number | null; startedAt?: string | null; lastRequestAt?: string | null;
-  restartCount: number; workingSetBytes: number; lastError?: string | null; circuitOpen: boolean; busy: boolean;
-};
+export type PluginWorkerInstanceStatus = ContractDto<'PluginWorkerInstanceStatus'>;
 
-export type PluginWorkerStatus = {
-  pluginId: string; state: string; processId?: number | null; startedAt?: string | null; lastRequestAt?: string | null;
-  restartCount: number; workingSetBytes: number; assemblyPath: string; lastError?: string | null; circuitOpen: boolean;
-  poolSize: number; runningWorkers: number; busyWorkers: number; requestCount: number; sharedMemoryTransfers: number;
-  imageTransport: string; sharedMemoryThresholdBytes: number; workers: PluginWorkerInstanceStatus[];
-};
+export type PluginWorkerStatus = ContractDto<'PluginWorkerStatus'>;
 
-export type PluginWorkerLatencyDistribution = {
-  averageMs: number; p50Ms: number; p95Ms: number; p99Ms: number; maxMs: number;
-};
+export type PluginWorkerLatencyDistribution = ContractDto<'PluginWorkerLatencyDistribution'>;
 
-export type PluginWorkerToolPerformanceProfile = {
-  nodeType: string; sampleCount: number; failureCount: number;
-  queueWait: PluginWorkerLatencyDistribution; pluginExecute: PluginWorkerLatencyDistribution; total: PluginWorkerLatencyDistribution;
-};
+export type PluginWorkerToolPerformanceProfile = ContractDto<'PluginWorkerToolPerformanceProfile'>;
 
-export type PluginWorkerPerformanceProfile = {
-  pluginId: string; poolSize: number; windowCapacity: number; sampleCount: number; successCount: number; failureCount: number;
-  windowStartedAt?: string | null; windowEndedAt?: string | null; requestsPerSecond: number; estimatedPoolUtilization: number; queuePressureRatio: number;
-  dominantStage: string; recommendedPoolSize: number; recommendationReady: boolean; recommendation: string;
-  hostInputEncode: PluginWorkerLatencyDistribution; queueWait: PluginWorkerLatencyDistribution; ipcRoundTrip: PluginWorkerLatencyDistribution;
-  ipcOverhead: PluginWorkerLatencyDistribution; workerInputDecode: PluginWorkerLatencyDistribution; pluginExecute: PluginWorkerLatencyDistribution;
-  workerOutputEncode: PluginWorkerLatencyDistribution; hostOutputDecode: PluginWorkerLatencyDistribution; total: PluginWorkerLatencyDistribution;
-  tools: PluginWorkerToolPerformanceProfile[];
-};
+export type PluginWorkerPerformanceProfile = ContractDto<'PluginWorkerPerformanceProfile'>;
 
 
-export type PluginBenchmarkRegressionPolicy = {
-  maximumP95RegressionPercent: number;
-  maximumP99RegressionPercent: number;
-  minimumThroughputRatio: number;
-  maximumWorkingSetRegressionPercent: number;
-  maximumFailureRate: number;
-};
+export type PluginBenchmarkRegressionPolicy = ContractDto<'PluginBenchmarkRegressionPolicy'>;
 
-export type PluginBenchmarkPoolResult = {
-  poolSize: number;
-  itemCount: number;
-  successCount: number;
-  failureCount: number;
-  failureRate: number;
-  totalDurationMs: number;
-  throughputPerSecond: number;
-  observedWorkingSetBytes: number;
-  workflowDuration: PluginWorkerLatencyDistribution;
-  workerPerformance: PluginWorkerPerformanceProfile;
-};
+export type PluginBenchmarkPoolResult = ContractDto<'PluginBenchmarkPoolResult'>;
 
-export type PluginBenchmarkRecommendation = {
-  recommendedPoolSize: number;
-  reason: string;
-  maximumThroughputPerSecond: number;
-  recommendedThroughputPerSecond: number;
-  recommendedP95Ms: number;
-};
+export type PluginBenchmarkRecommendation = ContractDto<'PluginBenchmarkRecommendation'>;
 
-export type PluginBenchmarkRegressionGate = {
-  status: 'PASS' | 'FAIL' | 'NO_BASELINE' | 'NOT_COMPARABLE' | string;
-  baselineRunId?: string | null;
-  comparedPoolSize?: number | null;
-  p95DeltaPercent?: number | null;
-  p99DeltaPercent?: number | null;
-  throughputRatio?: number | null;
-  workingSetDeltaPercent?: number | null;
-  candidateFailureRate?: number | null;
-  reasons: string[];
-  baselinePluginVersion?: string | null;
-  baselinePluginAssemblySha256?: string | null;
-};
+export type PluginBenchmarkRegressionGate = ContractDto<'PluginBenchmarkRegressionGate'>;
 
-export type PluginBenchmarkRun = {
-  runId: string;
-  datasetId: string;
-  validationRunId: string;
-  pluginId: string;
-  pluginVersion: string;
-  pluginAssemblySha256?: string | null;
-  workflowHash: string;
-  status: string;
-  poolSizes: number[];
-  requestedCount: number;
-  warmupCount: number;
-  workloadConcurrency: number;
-  baselineRunId?: string | null;
-  regressionPolicy: PluginBenchmarkRegressionPolicy;
-  startedAt: string;
-  completedAt?: string | null;
-  cancelRequested: boolean;
-  error?: string | null;
-  recommendation?: PluginBenchmarkRecommendation | null;
-  regressionGate?: PluginBenchmarkRegressionGate | null;
-  results?: PluginBenchmarkPoolResult[] | null;
-};
+export type PluginBenchmarkRun =
+  Omit<ContractDto<'PluginBenchmarkRun'>, 'recommendation' | 'regressionGate'> & {
+    recommendation?: PluginBenchmarkRecommendation | null;
+    regressionGate?: PluginBenchmarkRegressionGate | null;
+  };
 
 export type CameraTriggerMode = ContractSchema<'CameraTriggerMode'>;
 export type CameraOutputPixelFormat = ContractSchema<'CameraOutputPixelFormat'>;
 
-export type CameraSettings = {
-  exposureUs: number;
-  gainDb: number;
-  targetFps: number;
-  triggerMode: CameraTriggerMode;
-  outputPixelFormat: CameraOutputPixelFormat;
-  externalTriggerSource: string;
-};
+export type CameraSettings = ContractDto<'CameraSettings'>;
 
-export type CameraCapabilities = {
-  exposure: boolean;
-  gain: boolean;
-  frameRate: boolean;
-  softwareTrigger: boolean;
-  externalTrigger: boolean;
-  hostSimulatedExternalTrigger: boolean;
-  minExposureUs: number;
-  maxExposureUs: number;
-  minGainDb: number;
-  maxGainDb: number;
-  maxFps: number;
-  outputPixelFormats?: CameraOutputPixelFormat[] | null;
-};
+export type CameraCapabilities = ContractDto<'CameraCapabilities'>;
 
-export type CameraTransportTelemetry = {
-  cameraId: string;
-  driver: string;
-  native: boolean;
-  source: string;
-  capturedAt: string;
-  receivedBytes?: number | null;
-  receivedFrames?: number | null;
-  lostFrames?: number | null;
-  failedFrames?: number | null;
-  bufferUnderruns?: number | null;
-  receivedPackets?: number | null;
-  lostPackets?: number | null;
-  failedPackets?: number | null;
-  resendRequests?: number | null;
-  resentPackets?: number | null;
-  resynchronizations?: number | null;
-  throughputMbps?: number | null;
-  error?: string | null;
-  hasNativeCounters?: boolean;
-};
+export type CameraTransportTelemetry =
+  Omit<ContractDto<'CameraTransportTelemetry'>, 'hasNativeCounters'> & { hasNativeCounters?: boolean };
 
-export type CameraAcquisitionStats = {
-  acquisitionState: 'Stopped' | 'Starting' | 'Stopping' | 'StopUnconfirmed' | 'Running' | 'WaitingTrigger' | 'Reconnecting' | 'Faulted';
-  framesPublished: number;
-  ringOverwrites: number;
-  acquisitionErrors: number;
-  reconnectCount: number;
-  lastSequence: number;
-  actualFps: number;
-  lastFrameAt?: string | null;
-  runtimeError?: string | null;
-  frameTimeouts: number;
-  driverDroppedFrames: number;
-  nativePixelFormat?: string | null;
-  transport?: CameraTransportTelemetry | null;
-};
+export type CameraAcquisitionStats = ContractDto<'CameraAcquisitionStats'>;
 
-export type CameraDescriptor = {
-  id: string;
-  name: string;
-  driver: string;
-  state: 'Closed' | 'Open' | 'Streaming' | 'Faulted';
-  framesCaptured: number;
-  source?: string | null;
-  error?: string | null;
-  settings: CameraSettings;
-  capabilities: CameraCapabilities;
-  acquisition: CameraAcquisitionStats;
-};
+export type CameraDescriptor = ContractDto<'CameraDescriptor'>;
 
+/** 相机适配器探测结果：无同名后端 schema（响应为内联对象），字段与该端点保持一致。 */
 export type CameraAdapterDescriptor = {
   driver: string;
   vendor: string;
@@ -446,120 +312,31 @@ export type CameraAdapterDescriptor = {
   sdkError?: string | null;
 };
 
-export type CameraDiscoveredDevice = {
-  driver: string;
-  vendor: string;
-  model: string;
-  serialNumber: string;
-  userDefinedName?: string | null;
-  ipAddress?: string | null;
-  transport?: string | null;
-  deviceKey: string;
-  firmwareVersion?: string | null;
-};
+export type CameraDiscoveredDevice = ContractDto<'CameraDiscoveredDevice'>;
 
-export type RobotRuntimeSettings = {
-  linearSpeedMmPerSec: number;
-  angularSpeedDegPerSec: number;
-  positionToleranceMm: number;
-  angleToleranceDeg: number;
-};
+export type RobotRuntimeSettings = ContractDto<'RobotRuntimeSettings'>;
 
-export type RobotCapabilities = {
-  readCurrentPose: boolean;
-  sendTarget: boolean;
-  move2D: boolean;
-  stop: boolean;
-  resetFault: boolean;
-  acknowledge: boolean;
-  industrialHandshake: boolean;
-  maxLinearSpeedMmPerSec: number;
-  maxAngularSpeedDegPerSec: number;
-};
+export type RobotCapabilities = ContractDto<'RobotCapabilities'>;
 
-export type RobotHandshakeSignals = {
-  targetReady: boolean;
-  execute: boolean;
-  busy: boolean;
-  complete: boolean;
-  error: boolean;
-  ack: boolean;
-  commandId: number;
-  errorCode?: string | null;
-  updatedAt: string;
-};
+export type RobotHandshakeSignals = ContractDto<'RobotHandshakeSignals'>;
 
-export type CoordinatePose2D = {
-  x: number;
-  y: number;
-  thetaDeg: number;
-  frame: string;
-  unit: string;
-};
+export type CoordinatePose2D = ContractDto<'VisionCoordinatePose2D'>;
 
-export type RobotTarget2D = {
-  x: number;
-  y: number;
-  rDeg: number;
-  frame: string;
-  unit: string;
-  robot: string;
-  guidanceMode: string;
-};
+export type RobotTarget2D = ContractDto<'VisionRobotTarget2D'>;
 
-export type RobotDescriptor = {
-  id: string;
-  name: string;
-  vendor: string;
-  model: string;
-  driver: string;
-  baseFrame: string;
-  unit: string;
-  connectionState: 'Disconnected' | 'Connecting' | 'Connected' | 'Faulted';
-  handshakeState: 'Disconnected' | 'Ready' | 'TargetAccepted' | 'Executing' | 'InPosition' | 'Stopped' | 'Faulted';
-  handshake: RobotHandshakeSignals;
-  currentPose: CoordinatePose2D;
-  activeTarget?: RobotTarget2D | null;
-  lastCommandId: number;
-  busy: boolean;
-  inPosition: boolean;
-  error?: string | null;
-  settings: RobotRuntimeSettings;
-  capabilities: RobotCapabilities;
-  updatedAt: string;
-  /**
-   * 后端标记的虚拟/仿真适配器（2026-11-12）。现场最危险的误判是"以为在驱动真机，
-   * 其实连的是内置模拟器"：命令全部成功、状态一路正常，产线却没有任何动作。
-   */
-  simulated?: boolean;
-};
+export type RobotDescriptor =
+  Omit<ContractDto<'RobotDescriptor'>, 'activeTarget' | 'simulated'> & {
+    activeTarget?: RobotTarget2D | null;
+    /**
+     * 后端标记的虚拟/仿真适配器（2026-11-12）。现场最危险的误判是"以为在驱动真机，
+     * 其实连的是内置模拟器"：命令全部成功、状态一路正常，产线却没有任何动作。
+     */
+    simulated?: boolean;
+  };
 
-export type RobotCommandTraceEvent = {
-  traceId: string;
-  robotId: string;
-  commandId: number;
-  attempt: number;
-  stage: string;
-  timestamp: string;
-  message: string;
-  handshake?: RobotHandshakeSignals | null;
-  target?: RobotTarget2D | null;
-  error?: string | null;
-};
+export type RobotCommandTraceEvent = ContractDto<'RobotCommandTraceEvent'>;
 
-export type RobotCommandTraceRecord = {
-  traceId: string;
-  robotId: string;
-  startedAt: string;
-  updatedAt: string;
-  commandId: number;
-  maxAttempt: number;
-  lastStage: string;
-  status: string;
-  target?: RobotTarget2D | null;
-  error?: string | null;
-  events: RobotCommandTraceEvent[];
-};
+export type RobotCommandTraceRecord = ContractDto<'RobotCommandTraceRecord'>;
 
 /**
  * 工作流文档：字段名/基本类型来自后端 WorkflowDefinition / NodeDefinition / EdgeDefinition，
@@ -581,11 +358,9 @@ export type WorkflowPayload =
     }>;
   };
 
-export type JobVersionValidationInfo = {
-  validationRunId: string; datasetId: string; accepted: boolean; linkedAt: string; reason: string;
-  summary?: ValidationRunSummary | null; policy?: { minimumAccuracy: number; maximumFalseOkRate: number; maximumFalseNgRate: number; maximumErrors: number } | null;
-};
+export type JobVersionValidationInfo = ContractDto<'JobVersionValidationInfo'>;
 
+/** UI 视图：bindingCount 允许省略（旧版本记录没有该字段），validation 可空。 */
 export type JobVersionInfo = {
   version: number;
   workflowHash: string;
@@ -596,13 +371,9 @@ export type JobVersionInfo = {
   bindingCount?: number;
 };
 
-export type PublicationEvent = {
-  version: number;
-  action: string;
-  at: string;
-  dependencyManifestHash?: string | null;
-};
+export type PublicationEvent = ContractDto<'PublicationEvent'>;
 
+/** UI 视图：versions/publicationHistory 复用上面的视图类型；后端新增 productId 暂未消费。 */
 export type JobDescriptor = {
   id: string;
   name: string;
@@ -618,8 +389,9 @@ export type JobDescriptor = {
 };
 
 
-export type ValidationCandidateInfo = { validationRunId: string; datasetId: string; startedAt: string; completedAt?: string | null; summary: ValidationRunSummary; };
-export type JobVersionDiff = { jobId: string; fromVersion: number; toVersion: number; fromHash: string; toHash: string; changed: boolean; changes: Array<{kind:string;path:string;before?:string|null;after?:string|null}>; };
+export type ValidationCandidateInfo = ContractDto<'ValidationCandidateInfo'>;
+export type JobVersionDiff = ContractDto<'JobVersionDiff'>;
+/** UI 视图：workflow 复用宽松的 WorkflowPayload（画布坐标/参数按前端消费方式放宽）。 */
 export type JobVersionSnapshot = {
   jobId: string;
   version: number;
@@ -633,20 +405,17 @@ export type JobVersionSnapshot = {
   parameterSnapshot?: Record<string,unknown> | null;
 };
 
+/** UI 视图：scope 收窄为 'recipe'，updatedAt 允许省略。 */
 export type ParameterValueSet = { scope: 'recipe'; ownerId: string; values: Record<string,unknown>; updatedAt?: string|null; };
+/** UI 视图：两个 workflow 复用宽松的 WorkflowPayload，绑定/快照保留原始字典。 */
 export type ResolvedRecipeParameterization = {
   baseWorkflow: WorkflowPayload; effectiveWorkflow: WorkflowPayload; baseWorkflowHash: string; effectiveWorkflowHash: string;
   bindings: Record<string,string>; snapshot: Record<string,unknown>; bindingCount: number;
 };
 
-export type RuntimeDependencyDrift = {
-  kind: string;
-  id: string;
-  expected: string;
-  actual?: string | null;
-  message: string;
-};
+export type RuntimeDependencyDrift = ContractDto<'RuntimeDependencyDrift'>;
 
+/** UI 视图：drifts 复用 ContractDto；后端 currentManifest 暂未消费。 */
 export type RuntimeDependencyValidation = {
   compatible: boolean;
   expectedManifestHash: string;
@@ -654,6 +423,7 @@ export type RuntimeDependencyValidation = {
   drifts: RuntimeDependencyDrift[];
 };
 
+/** UI 视图：disposition 收窄为封闭联合驱动筛选/徽标，其余字段沿用后端。 */
 export type RunTraceRecord = {
   runId: string;
   startedAt: string;
@@ -678,6 +448,7 @@ export type RunTraceRecord = {
   nodeReports: NodeRunReport[];
 };
 
+/** UI 视图：phase 收窄为 Warmup/Run 封闭联合。 */
 export type NodeTimelineObservation = {
   runId: string;
   executionSequence: number;
@@ -691,6 +462,7 @@ export type NodeTimelineObservation = {
   error?: string | null;
 };
 
+/** UI 视图：status 收窄为封闭联合驱动颜色分级。 */
 export type NodePerformanceBaseline = {
   nodeId: string;
   nodeType: string;
@@ -703,6 +475,7 @@ export type NodePerformanceBaseline = {
   status: 'Insufficient' | 'Normal' | 'Slow' | 'VerySlow';
 };
 
+/** UI 视图：timeline/baselines 使用收窄了 phase/status 的节点视图。 */
 export type RunObservabilitySnapshot = {
   runId: string;
   timelineAvailable: boolean;
@@ -716,74 +489,17 @@ export type RunObservabilitySnapshot = {
   baselines: NodePerformanceBaseline[];
 };
 
-export type TraceNodeDelta = {
-  nodeId: string;
-  nodeType: string;
-  baselineSuccess?: boolean | null;
-  currentSuccess?: boolean | null;
-  baselineDurationMs?: number | null;
-  currentDurationMs?: number | null;
-  durationDeltaMs?: number | null;
-  durationRatio?: number | null;
-  summaryChanged: boolean;
-  summaryChangedKeys: string[];
-  errorChanged: boolean;
-  performanceStatus: 'Insufficient' | 'Normal' | 'Slow' | 'VerySlow' | string;
-  status: 'Same' | 'Added' | 'Missing' | 'TypeChanged' | 'StatusChanged' | 'OutputChanged' | 'PerformanceRegression' | string;
-};
+export type TraceNodeDelta = ContractDto<'TraceNodeDelta'>;
 
-export type RunTraceComparison = {
-  runId: string;
-  baselineRunId?: string | null;
-  baselineSelection: 'AutoPreviousOk' | 'Explicit' | string;
-  baselineAvailable: boolean;
-  sameWorkflowIdentity: boolean;
-  workflowHashChanged: boolean;
-  currentDisposition: string;
-  baselineDisposition?: string | null;
-  currentDurationMs: number;
-  baselineDurationMs?: number | null;
-  durationDeltaMs?: number | null;
-  durationRatio?: number | null;
-  changedNodeCount: number;
-  statusChangedNodeCount: number;
-  performanceRegressionNodeCount: number;
-  nodes: TraceNodeDelta[];
-};
+export type RunTraceComparison = ContractDto<'RunTraceComparison'>;
 
-export type FailureSignatureOccurrence = {
-  runId: string;
-  startedAt: string;
-  disposition: string;
-  totalDurationMs: number;
-  nodeDurationMs?: number | null;
-};
+export type FailureSignatureOccurrence = ContractDto<'FailureSignatureOccurrence'>;
 
-export type FailureSignatureAnalysis = {
-  runId: string;
-  hasSignature: boolean;
-  signatureId?: string | null;
-  category: 'None' | 'ExecutionFailure' | 'QualityNG' | 'PerformanceRegression' | string;
-  primaryNodeId?: string | null;
-  primaryNodeType?: string | null;
-  fingerprint: string;
-  occurrenceCount: number;
-  recurring: boolean;
-  windowDays: number;
-  recentOccurrences: FailureSignatureOccurrence[];
-  recommendedAction?: string | null;
-  replayNodeId?: string | null;
-};
+export type FailureSignatureAnalysis = ContractDto<'FailureSignatureAnalysis'>;
 
-export type TraceStats = {
-  total: number;
-  ok: number;
-  ng: number;
-  review: number;
-  errors: number;
-  averageDurationMs: number;
-};
+export type TraceStats = ContractDto<'TraceStats'>;
 
+/** UI 视图：items 复用收窄后的 RunTraceRecord。 */
 export type TracePage = {
   offset: number;
   limit: number;
@@ -791,47 +507,15 @@ export type TracePage = {
   items: RunTraceRecord[];
 };
 
-export type TraceRetentionOptions = {
-  metadataRetentionDays: number;
-  okArtifactRetentionDays: number;
-  ngArtifactRetentionDays: number;
-  errorArtifactRetentionDays: number;
-  reviewArtifactRetentionDays: number;
-  okPreviewSampleEvery: number;
-  okReplaySampleEvery: number;
-  cleanupIntervalMinutes: number;
-};
+export type TraceRetentionOptions = ContractDto<'TraceRetentionOptions'>;
 
-export type StorageCapacityStatus = {
-  level: 'Normal' | 'Warning' | 'Critical';
-  availableFreeBytes: number;
-  totalBytes: number;
-  databaseBytes: number;
-  artifactBytes: number;
-  backupBytes: number;
-  artifactQuotaExceeded: boolean;
-  backupQuotaExceeded: boolean;
-  productionStartAllowed: boolean;
-  artifactWritesAllowed: boolean;
-  sampledAt: string;
-};
+export type StorageCapacityStatus = ContractDto<'StorageCapacityStatus'>;
 
-export type SchemaMigrationHistoryEntry = {
-  version: number;
-  name: string;
-  checksum: string;
-  appliedAt: string;
-  durationMs: number;
-  baselined: boolean;
-};
+export type SchemaMigrationHistoryEntry = ContractDto<'SchemaMigrationHistoryEntry'>;
 
-export type SchemaMigrationStatus = {
-  currentVersion: number;
-  targetVersion: number;
-  upToDate: boolean;
-  history: SchemaMigrationHistoryEntry[];
-};
+export type SchemaMigrationStatus = ContractDto<'SchemaMigrationStatus'>;
 
+/** UI 视图：数值收窄为 number；后端新增的 systemAssets 相关字段暂未消费。 */
 export type StorageBackupDescriptor = {
   backupId: string;
   createdAt: string;
@@ -850,6 +534,7 @@ export type StorageRestoreResult = {
   restartRecommended: boolean;
 };
 
+/** UI 视图：数值收窄为 number；后端新增的 snapshotSkipped* 计数暂未展示。 */
 export type TraceStorageStatus = {
   databaseFile: string;
   databaseBytes: number;
@@ -862,6 +547,7 @@ export type TraceStorageStatus = {
   schema?: SchemaMigrationStatus | null;
 };
 
+/** UI 视图：trace/workflow 复用前端视图，可空字段允许省略。 */
 export type OfflineReplayContext = {
   sourceRunId: string;
   trace: RunTraceRecord;
@@ -874,18 +560,9 @@ export type OfflineReplayContext = {
   executionModel: string;
 };
 
-export type NodeReplayComparison = {
-  nodeId: string;
-  nodeType: string;
-  baselineSuccess?: boolean | null;
-  replaySuccess?: boolean | null;
-  baselineDurationMs?: number | null;
-  replayDurationMs?: number | null;
-  durationDeltaMs?: number | null;
-  summaryChanged: boolean;
-  status: 'Same' | 'Changed' | 'StatusChanged' | 'NotExecuted' | 'New' | string;
-};
+export type NodeReplayComparison = ContractDto<'NodeReplayComparison'>;
 
+/** 回放结果：交叉 RunResult 以复用预览/覆盖层等 UI 字段（该 schema 本身不含这些字段）。 */
 export type OfflineReplayResult = RunResult & {
   sourceRunId: string;
   comparison: NodeReplayComparison[];
@@ -894,23 +571,23 @@ export type OfflineReplayResult = RunResult & {
   executionModel: string;
 };
 
-export type ValidationDatasetSummary = {
-  id: string; name: string; description: string; topologyHash?: string | null; itemCount: number; createdAt: string; updatedAt: string;
-};
+export type ValidationDatasetSummary = ContractDto<'ValidationDatasetSummary'>;
+/** UI 视图：sourceKind/expectedDisposition 收窄为 UI 联合，其余按后端原样。 */
 export type ValidationDatasetItem = {
   itemId: string; datasetId: string; sourceKind: 'TRACE' | 'MEDIA'; sourceRef: string; sourceRunId?: string | null; expectedDisposition: 'OK' | 'NG'; note?: string | null; sortOrder: number; addedAt: string; sourceDisposition: string; displayName: string; replayReady: boolean;
 };
 export type ValidationDatasetDetail = { dataset: ValidationDatasetSummary; items: ValidationDatasetItem[] };
-export type ValidationRunSummary = {
-  total: number; completed: number; trueOk: number; trueNg: number; falseOk: number; falseNg: number; errors: number; accuracy: number; falseOkRate: number; falseNgRate: number; p50DurationMs: number; p95DurationMs: number; p99DurationMs: number; maxDurationMs: number;
-};
+export type ValidationRunSummary = ContractDto<'ValidationRunSummary'>;
+/** UI 视图：sourceKind 收窄，classification 保留宽 string（后端为开放分类）。 */
 export type ValidationResultRecord = {
   runId: string; itemId: string; sourceKind: 'TRACE' | 'MEDIA'; sourceRef: string; expectedDisposition: string; actualDisposition: string; classification: 'TRUE_OK' | 'TRUE_NG' | 'FALSE_OK' | 'FALSE_NG' | 'ERROR' | string; replayRunId?: string | null; success: boolean; durationMs: number; failedNodeIds: string[]; error?: string | null; completedAt: string;
 };
+/** UI 视图：status 收窄，results 复用上面的结果视图。 */
 export type ValidationRunRecord = {
   runId: string; datasetId: string; status: 'Running' | 'Completed' | 'Cancelled' | 'Failed' | string; sourceWorkflowRunId: string; workflowHash: string; requestedCount: number; completedCount: number; startedAt: string; completedAt?: string | null; cancelRequested: boolean; error?: string | null; summary?: ValidationRunSummary | null; results?: ValidationResultRecord[] | null;
 };
 
+/** UI 视图：sourceKind/expectedDisposition 收窄，replay 复用 OfflineReplayResult。 */
 export type ParameterTuningPreviewResult = {
   datasetId: string;
   itemId: string;
@@ -924,38 +601,13 @@ export type ParameterTuningPreviewResult = {
   replay: OfflineReplayResult;
 };
 
-export type CalibrationWorkspacePoint = {
-  index: number;
-  imageX: number;
-  imageY: number;
-  worldX: number;
-  worldY: number;
-  enabled: boolean;
-  source: string;
-};
+export type CalibrationWorkspacePoint = ContractDto<'CalibrationWorkspacePoint'>;
 
-export type CalibrationResidual = {
-  index: number;
-  imageX: number;
-  imageY: number;
-  worldX: number;
-  worldY: number;
-  predictedX: number;
-  predictedY: number;
-  dx: number;
-  dy: number;
-  error: number;
-  source: string;
-};
+export type CalibrationResidual = ContractDto<'CalibrationResidual'>;
 
-export type CalibrationHeatCell = {
-  column: number;
-  row: number;
-  x: number;
-  y: number;
-  error: number;
-};
+export type CalibrationHeatCell = ContractDto<'CalibrationHeatCell'>;
 
+/** UI 视图：数值收窄为 number；后端 sourceUnit 暂未消费，matrix 可空。 */
 export type VisionTransform2D = {
   sourceFrame: string;
   targetFrame: string;
@@ -982,6 +634,7 @@ export type VisionCoordinatePoint3D = {
   unit: string;
 };
 
+/** 请求视图：maxRmse/maxPointError 允许省略（后端有默认值），数值按表单输入收敛为 number。 */
 export type CalibrationWorkspaceRequest = {
   sourceFrame: string;
   targetFrame: string;
@@ -994,81 +647,19 @@ export type CalibrationWorkspaceRequest = {
   maxPointError?: number;
 };
 
-export type CalibrationWorkspaceResult = {
-  transform: VisionTransform2D;
-  rmse: number;
-  maxError: number;
-  residuals: CalibrationResidual[];
-  verificationRmse?: number | null;
-  verificationMaxError?: number | null;
-  verificationResiduals: CalibrationResidual[];
-  heatmap: CalibrationHeatCell[];
-  usedPointCount: number;
-  verificationPointCount: number;
-};
+export type CalibrationWorkspaceResult = ContractDto<'CalibrationWorkspaceResult'>;
 
-export type CalibrationVersionInfo = {
-  version: number;
-  snapshotHash: string;
-  createdAt: string;
-  note: string;
-  published: boolean;
-};
+export type CalibrationVersionInfo = ContractDto<'CalibrationVersionInfo'>;
 
-export type CalibrationAssetDescriptor = {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: string;
-  updatedAt: string;
-  latestVersion: number;
-  publishedVersion?: number | null;
-  versions: CalibrationVersionInfo[];
-  publicationHistory: Array<{ version: number; action: string; at: string }>;
-};
+export type CalibrationAssetDescriptor = ContractDto<'CalibrationAssetDescriptor'>;
 
-export type CalibrationVersionSnapshot = {
-  assetId: string;
-  version: number;
-  snapshotHash: string;
-  createdAt: string;
-  note: string;
-  workspace: CalibrationWorkspaceRequest;
-  result: CalibrationWorkspaceResult;
-};
+export type CalibrationVersionSnapshot = ContractDto<'CalibrationVersionSnapshot'>;
 
-export type CameraIntrinsicVersionInfo = {
-  version: number;
-  snapshotHash: string;
-  modelHash: string;
-  createdAt: string;
-  note: string;
-  published: boolean;
-};
+export type CameraIntrinsicVersionInfo = ContractDto<'CameraIntrinsicVersionInfo'>;
 
-export type CameraIntrinsicAssetDescriptor = {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: string;
-  updatedAt: string;
-  latestVersion: number;
-  publishedVersion?: number | null;
-  versions: CameraIntrinsicVersionInfo[];
-  publicationHistory: Array<{ version: number; action: string; at: string }>;
-};
+export type CameraIntrinsicAssetDescriptor = ContractDto<'CameraIntrinsicAssetDescriptor'>;
 
-export type CameraIntrinsicVersionSnapshot = {
-  assetId: string;
-  version: number;
-  snapshotHash: string;
-  modelHash: string;
-  createdAt: string;
-  note: string;
-  model: unknown;
-  sourceDocumentJson: string;
-  summaryJson: string;
-};
+export type CameraIntrinsicVersionSnapshot = ContractDto<'CameraIntrinsicVersionSnapshot'>;
 
 
 export type CalibrationWizardQuality = {
@@ -1126,24 +717,7 @@ export type CalibrationHandEyeResidual = {
   vision: { x: number; y: number; thetaDeg: number };
 };
 
-export type HandEyeWizardSessionDocument = {
-  formatVersion: string;
-  sessionId: string;
-  name: string;
-  updatedAt: string;
-  samplesJson: string;
-  mode: string;
-  angularWeight: number;
-  visionScale: number;
-  robustLoss: string;
-  maxTranslationError: number;
-  maxAngleErrorDeg: number;
-  sourceFrame: string;
-  targetFrame: string;
-  unit: string;
-  sourceUnit: string;
-  lastSolveSummaryJson?: string | null;
-};
+export type HandEyeWizardSessionDocument = ContractDto<'HandEyeWizardSessionDocument'>;
 
 export type HandEyeWizardSessionSummary = {
   sessionId: string;
@@ -1154,49 +728,11 @@ export type HandEyeWizardSessionSummary = {
   hasSolve: boolean;
 };
 
-export type HandEyeCalibrationAssetDescriptor = {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: string;
-  updatedAt: string;
-  latestVersion: number;
-  publishedVersion?: number | null;
-  versions: Array<{ version: number; snapshotHash: string; modelHash: string; createdAt: string; note: string; published: boolean }>;
-  publicationHistory: Array<{ version: number; action: string; at: string }>;
-};
+export type HandEyeCalibrationAssetDescriptor = ContractDto<'HandEyeCalibrationAssetDescriptor'>;
 
-export type HandEyeCalibrationVersionSnapshot = {
-  assetId: string;
-  version: number;
-  snapshotHash: string;
-  modelHash: string;
-  createdAt: string;
-  note: string;
-  model: unknown;
-  sourceDocumentJson: string;
-  summaryJson: string;
-};
+export type HandEyeCalibrationVersionSnapshot = ContractDto<'HandEyeCalibrationVersionSnapshot'>;
 
-export type HandEye3DWizardSessionDocument = {
-  formatVersion: string;
-  sessionId: string;
-  name: string;
-  updatedAt: string;
-  samplesJson: string;
-  mode: string;
-  method: string;
-  rotationWeight: number;
-  outlierRejection: string;
-  crossCheckMethod: string;
-  maxTranslationError: number;
-  maxRotationErrorDeg: number;
-  minTranslationSpan: number;
-  sourceFrame: string;
-  targetFrame: string;
-  unit: string;
-  lastSolveSummaryJson?: string | null;
-};
+export type HandEye3DWizardSessionDocument = ContractDto<'HandEye3DWizardSessionDocument'>;
 
 export type HandEye3DWizardSessionSummary = {
   sessionId: string;
@@ -1208,29 +744,9 @@ export type HandEye3DWizardSessionSummary = {
   hasSolve: boolean;
 };
 
-export type HandEye3DCalibrationAssetDescriptor = {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: string;
-  updatedAt: string;
-  latestVersion: number;
-  publishedVersion?: number | null;
-  versions: Array<{ version: number; snapshotHash: string; modelHash: string; createdAt: string; note: string; published: boolean }>;
-  publicationHistory: Array<{ version: number; action: string; at: string }>;
-};
+export type HandEye3DCalibrationAssetDescriptor = ContractDto<'HandEye3DCalibrationAssetDescriptor'>;
 
-export type HandEye3DCalibrationVersionSnapshot = {
-  assetId: string;
-  version: number;
-  snapshotHash: string;
-  modelHash: string;
-  createdAt: string;
-  note: string;
-  model: unknown;
-  sourceDocumentJson: string;
-  summaryJson: string;
-};
+export type HandEye3DCalibrationVersionSnapshot = ContractDto<'HandEye3DCalibrationVersionSnapshot'>;
 
 export type DeviceConnectionState = ContractSchema<'DeviceConnectionState'>;
 export type DeviceTagQuality = ContractSchema<'DeviceTagQuality'>;
@@ -1240,60 +756,17 @@ export type DeviceTagDefinition = ContractSchema<'DeviceTagDefinition'>;
 
 export type DeviceTagSample = ContractSchema<'DeviceTagSample'>;
 
-export type DeviceRuntimeSettings = {
-  pollIntervalMs: number;
-  reconnectDelayMs: number;
-  heartbeatIntervalMs: number;
-  hostHeartbeatTagId: string;
-  deviceHeartbeatTagId: string;
-};
+export type DeviceRuntimeSettings = ContractDto<'DeviceRuntimeSettings'>;
 
-export type DeviceRuntimeStats = {
-  pollCycles: number;
-  batchReadCycles: number;
-  readErrors: number;
-  writeErrors: number;
-  reconnectCount: number;
-  actualPollHz: number;
-  lastPollAt?: string | null;
-  lastGoodReadAt?: string | null;
-  lastDeviceHeartbeatAt?: string | null;
-  hostHeartbeat: boolean;
-  deviceHeartbeat: boolean;
-  runtimeError?: string | null;
-};
+export type DeviceRuntimeStats = ContractDto<'DeviceRuntimeStats'>;
 
 export type DeviceDriverCapabilities = ContractSchema<'DeviceDriverCapabilities'>;
 
-export type DeviceProtocolDiagnostics = {
-  transactions: number;
-  batchReads: number;
-  batchWrites: number;
-  lastRoundTripMs: number;
-  averageRoundTripMs: number;
-  lastTransactionAt?: string | null;
-  lastProtocolError?: string | null;
-};
+export type DeviceProtocolDiagnostics = ContractDto<'DeviceProtocolDiagnostics'>;
 
-export type DeviceDescriptor = {
-  id: string;
-  name: string;
-  vendor: string;
-  model: string;
-  driver: string;
-  protocol: string;
-  endpoint: string;
-  connectionState: DeviceConnectionState;
-  settings: DeviceRuntimeSettings;
-  stats: DeviceRuntimeStats;
-  capabilities: DeviceDriverCapabilities;
-  diagnostics: DeviceProtocolDiagnostics;
-  tags: DeviceTagDefinition[];
-  values: Record<string, DeviceTagSample>;
-  error?: string | null;
-  updatedAt: string;
-};
+export type DeviceDescriptor = ContractDto<'DeviceDescriptor'>;
 
+/** UI 视图：数值收窄为 number；后端 maxRecoveryAttempts 暂未在配置面板暴露。 */
 export type ProductionRuntimeConfig = {
   jobId?: string | null;
   autoStart: boolean;
@@ -1326,6 +799,7 @@ export type ProductionRuntimeConfig = {
   synchronizationGuardRecoveryTimeoutMs: number;
 };
 
+/** UI 视图：state 收窄为封闭联合；后端 trace 队列/副作用字段暂未消费。 */
 export type ProductionRuntimeStatus = {
   state: 'Stopped' | 'Starting' | 'Running' | 'Recovering' | 'Stopping' | 'Faulted';
   jobId?: string | null;
@@ -1350,28 +824,14 @@ export type ProductionRuntimeStatus = {
 };
 
 export type ProductionPtpGuardIssue = ContractSchema<'ProductionPtpGuardIssue'>;
-export type ProductionPtpGuardGroupStatus = {
-  groupId: string; groupName: string; requiredByScheduledCapture: boolean; requiredByGroupPolicy: boolean;
-  liveReady: boolean; windowRuns: number; evidenceRuns: number; ptpReadyRate?: number | null; p95MaxAbsOffsetNs?: number | null;
-  masterClockChanges: number; inconsistentMasterClockRuns: number; currentMasterClockId?: string | null; healthy: boolean; reason?: string | null;
-};
-export type ProductionPtpGuardSnapshot = {
-  enabled: boolean; healthy: boolean; evaluatedAt: string; groups: ProductionPtpGuardGroupStatus[]; issues: ProductionPtpGuardIssue[]; summary?: string | null;
-};
+export type ProductionPtpGuardGroupStatus = ContractDto<'ProductionPtpGuardGroupStatus'>;
+export type ProductionPtpGuardSnapshot = ContractDto<'ProductionPtpGuardSnapshot'>;
 
-export type ProductionSynchronizationTransportWindow = {
-  evidenceMode: string; nativeCameras: number; nativeEvidenceRuns: number; receivedFrames: number; lostFrames: number; failedFrames: number; bufferUnderruns: number;
-  nativeFrameLossRate?: number | null; lostPackets: number; failedPackets: number; resendRequests: number; resentPackets: number; resynchronizations: number; averageThroughputMbps?: number | null;
-};
+export type ProductionSynchronizationTransportWindow = ContractDto<'ProductionSynchronizationTransportWindow'>;
 export type ProductionSynchronizationGuardIssue = ContractSchema<'ProductionSynchronizationGuardIssue'>;
-export type ProductionSynchronizationGuardGroupStatus = {
-  groupId: string; groupName: string; liveReady: boolean; windowRuns: number; evidenceRuns: number; completedRuns: number; failedRuns: number; cancelledRuns: number;
-  completionRate: number; frameTimeoutRuns: number; frameTimeoutRate: number; actionCommandFailureRuns: number; actionAckShortfallRuns: number; skewViolationRuns: number;
-  consecutiveFailures: number; consecutiveSkewViolations: number; estimatedSequenceGapFrames: number; estimatedSequenceGapRate: number; healthy: boolean; reason?: string | null; transport?: ProductionSynchronizationTransportWindow | null;
-};
-export type ProductionSynchronizationGuardSnapshot = {
-  enabled: boolean; healthy: boolean; evaluatedAt: string; groups: ProductionSynchronizationGuardGroupStatus[]; issues: ProductionSynchronizationGuardIssue[]; summary?: string | null; liveRecoverableOnly?: boolean;
-};
+export type ProductionSynchronizationGuardGroupStatus = ContractDto<'ProductionSynchronizationGuardGroupStatus'>;
+export type ProductionSynchronizationGuardSnapshot =
+  Omit<ContractDto<'ProductionSynchronizationGuardSnapshot'>, 'liveRecoverableOnly'> & { liveRecoverableOnly?: boolean };
 
 export type AlarmRecord = ContractSchema<'AlarmRecord'>;
 
@@ -1379,33 +839,15 @@ export type AssetKind = ContractSchema<'AssetKind'>;
 export type AssetHealthLevel = ContractSchema<'AssetHealthLevel'>;
 export type AssetEventSeverity = ContractSchema<'AssetEventSeverity'>;
 
-export type AssetHealthSnapshot = {
-  kind: AssetKind;
-  id: string;
-  name: string;
-  driver: string;
-  level: AssetHealthLevel;
-  state: string;
-  connected: boolean;
-  activity: string;
-  error?: string | null;
-  metrics: Record<string, number>;
-  updatedAt: string;
-  key?: string | null;
-};
+export type AssetHealthSnapshot = ContractDto<'AssetHealthSnapshot'>;
 
 export type AssetEventEnvelope = ContractSchema<'AssetEventEnvelope'>;
 
-export type DiagnosticsSummary = {
-  total: number;
-  healthy: number;
-  degraded: number;
-  faulted: number;
-  offline: number;
-  updatedAt: string;
-  /** 采样失败的 provider：其资产为保留的上次快照，数据可能过期 */
-  staleProviders?: string[];
-};
+export type DiagnosticsSummary =
+  Omit<ContractDto<'DiagnosticsSummary'>, 'staleProviders'> & {
+    /** 采样失败的 provider：其资产为保留的上次快照，数据可能过期 */
+    staleProviders?: string[];
+  };
 
 /**
  * 跨轮计数器落盘状态（GET /api/diagnostics/run-counters）。
@@ -1413,36 +855,13 @@ export type DiagnosticsSummary = {
  * `degraded` 为真表示计数仍在内存累加、但磁盘副本已落后——重启后
  * "本班次良率 / 连续 NG"会倒退，这是现场最容易被误判成"视觉算错"的一类问题。
  */
-export type RunCounterPersistenceStatus = {
-  snapshotPath: string;
-  counterCount: number;
-  /** 最近一次成功写盘时间；从未成功写过为 null */
-  lastWriteAt: string | null;
-  consecutiveFailures: number;
-  lastError: string | null;
-  degraded: boolean;
-};
+export type RunCounterPersistenceStatus = ContractDto<'RunCounterPersistenceStatus'>;
 
-export type MediaLibraryStatus = {
-  root: string;
-  collectionCount: number;
-  itemCount: number;
-  ngItemCount: number;
-  totalBytes: number;
-  maxImportBytes: number;
-  maxLibraryBytes: number;
-  allowedExtensions: string[];
-};
+export type MediaLibraryStatus = ContractDto<'MediaLibraryStatus'>;
 
-export type MediaCollectionDescriptor = {
-  name: string;
-  source: string;
-  itemCount: number;
-  ngItemCount: number;
-  totalBytes: number;
-  lastModifiedAt?: string | null;
-};
+export type MediaCollectionDescriptor = ContractDto<'MediaCollectionDescriptor'>;
 
+/** UI 视图：label 收窄为封闭联合驱动筛选，bytes 收窄为 number。 */
 export type MediaItemDescriptor = {
   relativePath: string;
   source: string;
@@ -1459,6 +878,7 @@ export type HardwareProvenanceData = ContractSchema<'HardwareProvenanceData'>;
 
 export type HardwareProvenanceDeclaration = ContractSchema<'HardwareProvenanceDeclaration'>;
 
+/** UI 视图：kind/completeness 收窄为封闭联合；探针字段允许省略。 */
 export type HardwareProvenanceSnapshot = {
   kind: 'camera' | 'device' | 'robot';
   id: string;
@@ -1478,96 +898,18 @@ export type HardwareProvenanceSnapshot = {
 
 export type CameraCommissioningCapabilities = ContractSchema<'CameraCommissioningCapabilities'>;
 
-export type CameraCommissioningProfile = {
-  schemaVersion: number;
-  acquisition?: CameraSettings | null;
-  packetSizeBytes?: number | null;
-  interPacketDelayTicks?: number | null;
-  triggerDelayUs?: number | null;
-  triggerInputLine?: string | null;
-  lineDebouncerUs?: number | null;
-  outputLine?: string | null;
-  outputSource?: string | null;
-  outputInverted?: boolean | null;
-  strobeEnabled?: boolean | null;
-  strobeDelayUs?: number | null;
-  strobeDurationUs?: number | null;
-  strobePreDelayUs?: number | null;
-  ptpEnabled?: boolean | null;
-  actionDeviceKey?: number | null;
-  actionGroupKey?: number | null;
-  actionGroupMask?: number | null;
-  actionSelector?: number | null;
-  advancedFeatures?: Record<string, string> | null;
-};
+export type CameraCommissioningProfile = ContractDto<'CameraCommissioningProfile'>;
 
-export type CameraCommissioningSnapshot = {
-  cameraId: string;
-  driver: string;
-  capabilities: CameraCommissioningCapabilities;
-  profileHash?: string | null;
-  profile: CameraCommissioningProfile;
-};
+export type CameraCommissioningSnapshot = ContractDto<'CameraCommissioningSnapshot'>;
 
-export type CameraFeatureDescriptor = {
-  key: string;
-  displayName: string;
-  category: string;
-  valueKind: 'Boolean' | 'Integer' | 'Float' | 'Enum' | 'String';
-  value?: string | null;
-  readable: boolean;
-  writable: boolean;
-  profileEligible: boolean;
-  unit?: string | null;
-  min?: number | null;
-  max?: number | null;
-  increment?: number | null;
-  options?: string[] | null;
-  description?: string | null;
-};
+export type CameraFeatureDescriptor = ContractDto<'CameraFeatureDescriptor'>;
 
-export type CameraFeatureProfileRecord = {
-  id: string;
-  name: string;
-  driver: string;
-  sourceCameraId?: string | null;
-  profileHash: string;
-  profile: CameraCommissioningProfile;
-  createdAt: string;
-  updatedAt: string;
-};
+export type CameraFeatureProfileRecord = ContractDto<'CameraFeatureProfileRecord'>;
 
 export type CameraPtpClockState = ContractSchema<'CameraPtpClockState'>;
-export type CameraTimeSynchronizationStatus = {
-  cameraId: string;
-  driver: string;
-  ptpSupported: boolean;
-  ptpEnabled: boolean;
-  state: CameraPtpClockState;
-  offsetFromMasterNs?: number | null;
-  deviceTimestampNs?: number | null;
-  masterClockId?: string | null;
-  deviceTickFrequencyHz?: number | null;
-  error?: string | null;
-  capturedAt?: string | null;
-};
-export type CameraSynchronizationGroup = {
-  id: string;
-  name: string;
-  driver: string;
-  cameraIds: string[];
-  deviceKey: number;
-  groupKey: number;
-  groupMask: number;
-  broadcastAddress: string;
-  requirePtpLocked: boolean;
-  maxPtpOffsetNs: number;
-  maxTriggerSkewUs: number;
-  scheduledLeadTimeMs: number;
-  configurationHash: string;
-  createdAt: string;
-  updatedAt: string;
-};
+export type CameraTimeSynchronizationStatus = ContractDto<'CameraTimeSynchronizationStatus'>;
+export type CameraSynchronizationGroup = ContractDto<'CameraSynchronizationGroup'>;
+/** UI 视图：相机/采集状态保留宽 string（跨驱动展示），latestFrame 可空。 */
 export type CameraSynchronizationMemberStatus = {
   cameraId: string;
   driver: string;
@@ -1576,6 +918,7 @@ export type CameraSynchronizationMemberStatus = {
   timeSync: CameraTimeSynchronizationStatus;
   latestFrame?: { cameraId: string; sequence: number; hostTimestamp: string; deviceTimestampNs?: number | null; triggerId?: number | null } | null;
 };
+/** UI 视图：group/members 复用前端视图，可空字段允许省略。 */
 export type CameraSynchronizationGroupStatus = {
   group: CameraSynchronizationGroup;
   ready: boolean;
@@ -1585,75 +928,29 @@ export type CameraSynchronizationGroupStatus = {
   latestSkewUs?: number | null;
   timestampBasis: string;
 };
-export type CameraSynchronizationCaptureResult = {
-  groupId: string;
-  scheduled: boolean;
-  scheduledDeviceTimeNs?: number | null;
-  command: { driver: string; scheduled: boolean; scheduledDeviceTimeNs?: number | null; issuedAt: string; acknowledgedDevices: number; messages: string[] };
-  frames: Array<{ cameraId: string; sequence: number; hostTimestamp: string; deviceTimestampNs?: number | null; triggerId?: number | null }>;
-  triggerSkewUs: number;
-  timestampBasis: string;
-  withinTolerance: boolean;
-  maxAllowedSkewUs: number;
-  completedAt: string;
-};
-export type CameraSynchronizationCommissioningAssessment = {
-  status: 'InsufficientData' | 'Pass' | 'Fail' | string;
-  passed: boolean;
-  minimumSamples: number;
-  requiredCompletionRate: number;
-  requiredTolerancePassRate: number;
-  reasons: string[];
-};
+export type CameraSynchronizationCaptureResult = ContractDto<'CameraSynchronizationCaptureResult'>;
+export type CameraSynchronizationCommissioningAssessment = ContractDto<'CameraSynchronizationCommissioningAssessment'>;
 
-export type CameraSynchronizationStatistics = {
-  groupId: string;
-  sampleLimit: number;
-  totalRuns: number;
-  completedRuns: number;
-  failedRuns: number;
-  cancelledRuns: number;
-  measuredRuns: number;
-  withinToleranceRuns: number;
-  completionRate: number;
-  tolerancePassRate: number;
-  averageSkewUs?: number | null;
-  p50SkewUs?: number | null;
-  p95SkewUs?: number | null;
-  p99SkewUs?: number | null;
-  maxSkewUs?: number | null;
-  averageDurationMs?: number | null;
-  p95DurationMs?: number | null;
-  devicePtpRuns: number;
-  hostArrivalRuns: number;
-  firstCompletedAt?: string | null;
-  lastCompletedAt?: string | null;
-  commissioning: CameraSynchronizationCommissioningAssessment;
-};
+export type CameraSynchronizationStatistics = ContractDto<'CameraSynchronizationStatistics'>;
 
-export type CameraSynchronizationPtpCameraDiagnostics = { cameraId: string; samples: number; readySamples: number; readyRate: number; offsetSamples: number; averageAbsOffsetNs?: number | null; p95AbsOffsetNs?: number | null; maxAbsOffsetNs?: number | null; masterClockChanges: number; masterClockIds: string[] };
-export type CameraSynchronizationPtpTrendPoint = { runId: string; completedAt: string; outcome: string; triggerSkewUs?: number | null; maxAbsOffsetNs?: number | null; allPtpReady: boolean; masterClockConsistent: boolean; masterClockId?: string | null };
-export type CameraSynchronizationPtpDiagnostics = { groupId: string; sampleLimit: number; totalRuns: number; runsWithPtpEvidence: number; ptpReadyRuns: number; ptpNotReadyRuns: number; inconsistentMasterClockRuns: number; offsetSkewPearsonCorrelation?: number | null; maxAbsOffsetNs?: number | null; p95MaxAbsOffsetNs?: number | null; cameras: CameraSynchronizationPtpCameraDiagnostics[]; trend: CameraSynchronizationPtpTrendPoint[] };
+export type CameraSynchronizationPtpCameraDiagnostics = ContractDto<'CameraSynchronizationPtpCameraDiagnostics'>;
+export type CameraSynchronizationPtpTrendPoint = ContractDto<'CameraSynchronizationPtpTrendPoint'>;
+export type CameraSynchronizationPtpDiagnostics = ContractDto<'CameraSynchronizationPtpDiagnostics'>;
 
-export type GigEHostAddress = { address: string; mask?: string | null };
-export type GigEHostNetworkInterface = { id: string; name: string; description: string; operationalStatus: string; interfaceType: string; speedMbps: number; mtuBytes?: number | null; ipv4Addresses: GigEHostAddress[]; bytesReceived?: number | null; bytesSent?: number | null; incomingPacketErrors?: number | null; incomingPacketDiscards?: number | null; outgoingPacketErrors?: number | null; outgoingPacketDiscards?: number | null };
-export type GigECameraNetworkDiagnostic = { cameraId: string; driver: string; cameraIpAddress?: string | null; nicId?: string | null; nicName?: string | null; nicSpeedMbps?: number | null; nicMtuBytes?: number | null; packetSizeBytes?: number | null; interPacketDelayTicks?: number | null; currentThroughputMbps?: number | null; currentNicUtilization?: number | null; nativeTransportTelemetry: boolean; transportSource: string; recommendations: string[] };
-export type GigENicLoadDiagnostic = { nicId: string; nicName: string; speedMbps: number; mtuBytes?: number | null; cameraIds: string[]; currentCameraThroughputMbps: number; currentUtilization: number; level: string };
-export type GigENetworkTrendPoint = { runId: string; completedAt: string; nativeCameraSamples: number; throughputByCameraMbps: Record<string, number>; totalThroughputMbps: number; receivedFramesDelta: number; lostFramesDelta: number; failedFramesDelta: number; bufferUnderrunsDelta: number; receivedPacketsDelta: number; lostPacketsDelta: number; failedPacketsDelta: number; resendRequestsDelta: number; resentPacketsDelta: number; resynchronizationsDelta: number; frameIssueRate?: number | null; packetIssueRate?: number | null; resendRequestRate?: number | null };
-export type GigENetworkAssessment = { status: 'Pass' | 'Fail' | 'InsufficientData' | string; passed: boolean; minimumEvidenceRuns: number; evidenceRuns: number; maximumRecommendedNicUtilization: number; maximumFrameIssueRate: number; maximumPacketIssueRate: number; maximumResendRequestRate: number; peakNicUtilization?: number | null; aggregateFrameIssueRate?: number | null; aggregatePacketIssueRate?: number | null; aggregateResendRequestRate?: number | null; reasons: string[]; recommendations: string[] };
-export type GigENetworkDiagnostics = { groupId: string; groupName: string; groupConfigurationHash: string; capturedAt: string; historyRuns: number; hostInterfaces: GigEHostNetworkInterface[]; cameras: GigECameraNetworkDiagnostic[]; nicLoads: GigENicLoadDiagnostic[]; trend: GigENetworkTrendPoint[]; assessment: GigENetworkAssessment };
-export type GigENetworkCommissioningReport = { reportSchemaVersion: string; testId: string; groupId: string; status: string; requestedIterations: number; completedIterations: number; startedAt: string; completedAt?: string | null; diagnostics: GigENetworkDiagnostics; evidenceHash: string; notes: string[] };
+export type GigEHostAddress = ContractDto<'GigEHostAddress'>;
+export type GigEHostNetworkInterface = ContractDto<'GigEHostNetworkInterface'>;
+export type GigECameraNetworkDiagnostic = ContractDto<'GigECameraNetworkDiagnostic'>;
+export type GigENicLoadDiagnostic = ContractDto<'GigENicLoadDiagnostic'>;
+export type GigENetworkTrendPoint = ContractDto<'GigENetworkTrendPoint'>;
+export type GigENetworkAssessment = ContractDto<'GigENetworkAssessment'>;
+export type GigENetworkDiagnostics = ContractDto<'GigENetworkDiagnostics'>;
+export type GigENetworkCommissioningReport = ContractDto<'GigENetworkCommissioningReport'>;
 
-export type CameraSynchronizationCommissioningCameraEvidence = { cameraId: string; provider: string; hardware: { manufacturer?: string | null; productName?: string | null; model?: string | null; serialNumber?: string | null; hardwareRevision?: string | null; firmwareVersion?: string | null; softwareVersion?: string | null; controllerVersion?: string | null; programName?: string | null; programHash?: string | null; attributes?: Record<string,string> | null }; hardwareFingerprint: string; completeness: string; liveProbeConfigured: boolean; liveProbeSucceeded: boolean; liveProbeError?: string | null; ptpState: string; ptpSupported: boolean; ptpEnabled: boolean; offsetFromMasterNs?: number | null; masterClockId?: string | null; commissioningProfileHash?: string | null };
-export type CameraSynchronizationCommissioningReport = {
-  reportSchemaVersion: string; testId: string; groupId: string; groupName: string; groupDriver: string; groupConfigurationHash: string; cameraIds: string[]; scheduled: boolean; requestedIterations: number; completedIterations: number; startedAt: string; completedAt: string; maxAllowedSkewUs: number; requirePtpLocked: boolean; maxPtpOffsetNs: number;
-  statistics: CameraSynchronizationStatistics; cameras: CameraSynchronizationCommissioningCameraEvidence[]; trend: { index: number; runId: string; completedAt: string; outcome: string; triggerSkewUs?: number | null; withinTolerance?: boolean | null; timestampBasis: string }[]; worstRuns: { runId: string; completedAt: string; outcome: string; triggerSkewUs?: number | null; withinTolerance?: boolean | null; timestampBasis: string; error?: string | null; frames: { cameraId: string; sequence: number; hostTimestamp: string; deviceTimestampNs?: number | null; triggerId?: number | null; deltaFromFirstUs: number }[] }[]; signoff: { preparedBy: string; reviewedBy: string; approvedBy: string; notes: string; signedAt?: string | null }; evidenceHash: string; notes: string[]; ptpDiagnostics?: CameraSynchronizationPtpDiagnostics | null;
-};
-export type CameraSynchronizationCommissioningTest = {
-  testId: string; groupId: string; groupConfigurationHash: string; scheduled: boolean; requestedIterations: number; completedIterations: number; frameTimeoutMs: number; delayMs: number; minimumSamples: number;
-  status: 'Queued' | 'Running' | 'Completed' | 'Cancelled' | 'Failed' | string; startedAt: string; completedAt?: string | null; error?: string | null; report?: CameraSynchronizationCommissioningReport | null;
-};
+export type CameraSynchronizationCommissioningCameraEvidence = ContractDto<'CameraSynchronizationCommissioningCameraEvidence'>;
+export type CameraSynchronizationCommissioningReport = ContractDto<'CameraSynchronizationCommissioningReport'>;
+export type CameraSynchronizationCommissioningTest = ContractDto<'CameraSynchronizationCommissioningTest'>;
 
+/** UI 视图：command/frames 复用 CaptureResult 的字段，transportSnapshots 复用收窄后的遥测视图。 */
 export type CameraSynchronizationRunRecord = {
   runId: string;
   groupId: string;
@@ -1677,6 +974,7 @@ export type CameraSynchronizationRunRecord = {
 };
 
 
+/** UI 视图：dataType 保留宽 string（模块端口允许任意数据类型）。 */
 export type WorkflowModulePort = {
   name: string;
   dataType: string;
@@ -1685,12 +983,14 @@ export type WorkflowModulePort = {
   internalPort: string;
 };
 
+/** UI 视图：交叉 ParameterDescriptor 以复用节点参数渲染字段（type 为封闭联合）。 */
 export type WorkflowModuleParameter = ParameterDescriptor & {
   defaultValue: unknown;
   internalNodeId: string;
   internalParameter: string;
 };
 
+/** UI 视图：workflow/parameters 复用 WorkflowPayload 与模块参数视图。 */
 export type WorkflowModuleVersion = {
   moduleId: string;
   version: number;
@@ -1703,6 +1003,7 @@ export type WorkflowModuleVersion = {
   parameters: WorkflowModuleParameter[];
 };
 
+/** UI 视图：versions 复用上面的模块版本视图。 */
 export type WorkflowModuleDescriptor = {
   id: string;
   name: string;
@@ -1713,109 +1014,26 @@ export type WorkflowModuleDescriptor = {
   versions: WorkflowModuleVersion[];
 };
 
+/** UI 视图：module/version/replacementWorkflow 均复用前端视图。 */
 export type ExtractWorkflowModuleResult = {
   module: WorkflowModuleDescriptor;
   version: WorkflowModuleVersion;
   replacementWorkflow: WorkflowPayload;
 };
 
-export type InvestigationCaseSummary = {
-  id: string;
-  signatureId: string;
-  category: string;
-  title: string;
-  status: 'Open' | 'Investigating' | 'Resolved' | 'Verified' | 'Closed' | string;
-  severity: 'Low' | 'Medium' | 'High' | 'Critical' | string;
-  workflowId: string;
-  workflowHash?: string | null;
-  source: string;
-  jobId?: string | null;
-  jobVersion?: number | null;
-  primaryNodeId?: string | null;
-  primaryNodeType?: string | null;
-  fingerprint: string;
-  representativeRunId: string;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  occurrenceCount: number;
-  reopenCount: number;
-  owner?: string | null;
-  rootCause?: string | null;
-  resolutionNote?: string | null;
-  verificationNote?: string | null;
-  verificationRunId?: string | null;
-  resolvedAt?: string | null;
-  verifiedAt?: string | null;
-  closedAt?: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
+export type InvestigationCaseSummary = ContractDto<'InvestigationCaseSummary'>;
 
-export type InvestigationCaseRun = {
-  runId: string;
-  startedAt: string;
-  disposition: string;
-  totalDurationMs: number;
-  nodeDurationMs?: number | null;
-};
+export type InvestigationCaseRun = ContractDto<'InvestigationCaseRun'>;
 
-export type InvestigationVerificationEvidence = {
-  id: string;
-  caseId: string;
-  datasetId: string;
-  datasetName: string;
-  baselineValidationRunId: string;
-  candidateValidationRunId: string;
-  baselineWorkflowHash: string;
-  candidateWorkflowHash: string;
-  gateStatus: 'Passed' | 'Failed' | 'Inconclusive' | string;
-  baselineSignatureHits: number;
-  candidateSignatureHits: number;
-  baselineInspectableResults: number;
-  candidateInspectableResults: number;
-  baselineSummary: ValidationRunSummary;
-  candidateSummary: ValidationRunSummary;
-  reasons: string[];
-  warnings: string[];
-  note?: string | null;
-  createdAt: string;
-};
+export type InvestigationVerificationEvidence = ContractDto<'InvestigationVerificationEvidence'>;
 
-export type InvestigationCaseDetail = {
-  case: InvestigationCaseSummary;
-  evidenceRuns: InvestigationCaseRun[];
-  verificationEvidence: InvestigationVerificationEvidence[];
-};
+export type InvestigationCaseDetail = ContractDto<'InvestigationCaseDetail'>;
 
-export type InvestigationTrendPoint = {
-  day: string;
-  total: number;
-  executionFailure: number;
-  qualityNg: number;
-  performanceRegression: number;
-};
+export type InvestigationTrendPoint = ContractDto<'InvestigationTrendPoint'>;
 
-export type InvestigationSignatureTrend = {
-  caseId: string;
-  signatureId: string;
-  title: string;
-  category: string;
-  status: string;
-  severity: string;
-  primaryNodeType?: string | null;
-  occurrences: number;
-  lastSeenAt: string;
-};
+export type InvestigationSignatureTrend = ContractDto<'InvestigationSignatureTrend'>;
 
-export type InvestigationTrendDashboard = {
-  windowDays: number;
-  trackedCases: number;
-  activeCases: number;
-  verifiedOrClosedCases: number;
-  evidenceOccurrences: number;
-  timeline: InvestigationTrendPoint[];
-  topSignatures: InvestigationSignatureTrend[];
-};
+export type InvestigationTrendDashboard = ContractDto<'InvestigationTrendDashboard'>;
 
 /**
  * 节点级 span 的单次记录（2026-11-12）。
@@ -1823,28 +1041,10 @@ export type InvestigationTrendDashboard = {
  * `nodeId`/`nodeType` 对齐画布节点，`runId`/`scope` 用于串链，`durationMs` 与
  * `vision.node.duration_ms` 同值。`sequence` 是进程内自增序号，环形覆盖后仍可判先后。
  */
-export type NodeSpanRecord = {
-  sequence: number;
-  at: string;
-  nodeId: string;
-  nodeType: string;
-  runId?: string | null;
-  scope?: string | null;
-  durationMs: number;
-  timedOut: boolean;
-  status: string;
-  error?: string | null;
-};
+export type NodeSpanRecord = ContractDto<'NodeSpanRecord'>;
 
 /**
  * 最近执行快照。`overwritten > 0` 表示缓冲已回卷，`recent` 只是尾部而不是全量——
  * 展示时必须让这一点可见，否则会把"最近 64 条"误读成"全部都很慢"。
  */
-export type NodeSpanSnapshot = {
-  capturedAt: string;
-  capacity: number;
-  captured: number;
-  overwritten: number;
-  recent: NodeSpanRecord[];
-  failures: NodeSpanRecord[];
-};
+export type NodeSpanSnapshot = ContractDto<'NodeSpanSnapshot'>;

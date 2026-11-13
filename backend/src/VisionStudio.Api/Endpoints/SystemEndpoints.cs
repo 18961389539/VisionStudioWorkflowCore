@@ -26,77 +26,31 @@ public static class SystemEndpoints
             return Results.Ok(new { released = true, detail = reason });
         }).RequireAdministrator("lease.release", "lease");
 
-        // Q11：status 不再恒为 ok——审计/日志持久化失败或维护锁激活时返回 degraded，
-        // 并把原因显式列出（存活 ≠ 就绪）。ready 供编排/现场判断"能否接受业务"。
-        // R07：进一步区分 **API 服务就绪**（ready）与 **生产动作就绪**（productionReady）——
-        // 能响应 HTTP 不等于可以接受设备动作；未闭合动作意图、维护/待重启、生产 Faulted
-        // 都必须在这里显式表达，供现场监控使用正确的业务指标。
+        // Q11/R07：status/ready/productionReady 的语义保持不变，但拆成两个出口（2026-11-13）：
+        //  · /healthz 匿名，只回答"活着吗 / 能接业务吗"，供编排、发布脚本与反向代理探测；
+        //  · /api/health 需要认证，保留降级原因、阻断项、审计/日志/帧池/脚本 Worker 等内部细节。
+        // 详细正文会出现文件路径、运行 id 与错误原文，不再匿名挂载。
+        app.MapGet("/healthz", (AuditEventStore audits, RollingFileLoggerProvider logs, StorageMaintenanceCoordinator maintenance,
+            ProductionRuntimeService production, DeviceManager devices, RobotManager robots, DeviceActionAuthorizationService authorization,
+            DeviceProfileStore deviceProfiles, ScriptWorkerSupervisor scriptWorkers) =>
+        {
+            var health = EvaluateHealth(audits, logs, maintenance, production, devices, robots, authorization, deviceProfiles, scriptWorkers);
+            return Results.Ok(new { status = health.Status, ready = health.Ready, productionReady = health.ProductionReady });
+        }).AllowAnonymous();
+
         app.MapGet("/api/health", (AuditEventStore audits, RollingFileLoggerProvider logs, StorageMaintenanceCoordinator maintenance,
             ProductionRuntimeService production, DeviceManager devices, RobotManager robots, DeviceActionAuthorizationService authorization,
-            DeviceProfileStore deviceProfiles) =>
+            DeviceProfileStore deviceProfiles, ScriptWorkerSupervisor scriptWorkers) =>
         {
-            var reasons = new List<string>();
-            if (audits.PersistFailures > 0) reasons.Add("audit persistence failures");
-            if (logs.DroppedEntries > 0) reasons.Add("log entries dropped");
-            if (logs.WriteFailures > 0) reasons.Add("log write failures");
-            if (logs.FlushFailures > 0) reasons.Add("log flush failures");
-            // Q01（2026-10-13 审查）：维护门的原因必须进入健康正文——现场据此判断"为什么被阻断、
-            // 核对什么才能放行"，而不是只看到一句"storage failure lock engaged"。
-            if (maintenance.IsFailureLocked)
-                reasons.Add($"storage failure lock engaged: {maintenance.Reason ?? "unspecified"}");
-            if (maintenance.IsRestartPending)
-                reasons.Add($"restart pending after storage restore: {maintenance.Reason ?? "unspecified"}");
-            // R3-04（2026-10-13 R3 审查）：损坏的设备配置让设备从运行时列表消失——必须表达为
-            // **配置完整性降级**（现场可查询"为什么缺设备"），而不是与"设备被删除"混同后仍报 ok。
-            var profileProblems = deviceProfiles.Problems;
-            if (profileProblems.Count > 0)
-            {
-                var details = string.Join("; ", profileProblems.Take(3).Select(p => $"{p.FileName}: {p.Error}"));
-                if (profileProblems.Count > 3) details += $"; +{profileProblems.Count - 3} more";
-                reasons.Add($"device profile integrity: {profileProblems.Count} unreadable file(s) ({details})");
-            }
-            var degraded = reasons.Count > 0;
-
-            // R07：生产动作就绪——阻断原因必须可直接操作（现场据此决定能否下发设备动作）。
-            var productionBlockers = new List<string>();
-            if (authorization.UnresolvedProductionState() is { } pending)
-                productionBlockers.Add($"unresolved device-action intent ({pending.Phase}): {pending.Reason}");
-            // F03：手动/临时/调试/作业运行的未闭合意图同样必须表达为"生产动作未就绪"，
-            // 否则会出现"动作被拒但 productionReady=true"的不一致（探针已确认该反例）。
-            try
-            {
-                foreach (var intent in authorization.UnresolvedManualIntents())
-                    productionBlockers.Add($"unresolved manual device action ({intent.Action}): {intent.ClosedReason ?? "awaiting reconciliation"}");
-            }
-            catch (Exception ex)
-            {
-                productionBlockers.Add($"manual action intent file could not be read: {ex.Message}");
-            }
-            // Fix1/A01：意图台账落盘失败会置同进程故障锁（逐意图独立登记）——
-            // 每个故障都必须表达为"生产动作未就绪"（只报第一个会掩盖其余故障）。
-            foreach (var processFailure in authorization.StateTransitionFailures)
-                productionBlockers.Add($"in-process device-action failure lock engaged: {processFailure}");
-            if (maintenance.IsMaintenanceActive) productionBlockers.Add($"storage maintenance is active: {maintenance.Reason ?? "unspecified"}");
-            if (maintenance.IsRestartPending) productionBlockers.Add("restart required after storage restore");
-            var productionStatus = production.Status;
-            if (productionStatus.State == ProductionRuntimeState.Faulted)
-                productionBlockers.Add($"production runtime is Faulted: {productionStatus.LastError ?? "unspecified"}");
-
-            // 依赖可见性（信息性，不计入 blocker）：未连接的设备/机器人是标称待机状态，
-            // 不应把"设备未接线"笼统算作服务故障；真正影响动作就绪的是上面的阻断项。
-            var offlineDependencies = devices.List()
-                .Where(x => x.ConnectionState != DeviceConnectionState.Connected).Select(x => $"device:{x.Id}={x.ConnectionState}")
-                .Concat(robots.List().Where(x => x.ConnectionState != RobotConnectionState.Connected).Select(x => $"robot:{x.Id}={x.ConnectionState}"))
-                .ToArray();
-
+            var health = EvaluateHealth(audits, logs, maintenance, production, devices, robots, authorization, deviceProfiles, scriptWorkers);
             return Results.Ok(new
             {
-                status = degraded ? "degraded" : "ok",
-                ready = !degraded && !maintenance.IsMaintenanceActive,
-                degradedReasons = reasons,
-                productionReady = productionBlockers.Count == 0 && !degraded,
-                productionBlockers,
-                offlineDependencies,
+                status = health.Status,
+                ready = health.Ready,
+                degradedReasons = health.DegradedReasons,
+                productionReady = health.ProductionReady,
+                productionBlockers = health.ProductionBlockers,
+                offlineDependencies = health.OfflineDependencies,
                 service = "VisionStudio.Api",
                 // 程序版本单一来源（程序集版本）：安装包 / API / UI / 备份清单显示同一版本号
                 version = StorageBackupService.VisionStudioVersion(),
@@ -119,9 +73,20 @@ public static class SystemEndpoints
                     drainTimeouts = logs.DrainTimeouts
                 },
                 // 相机帧池（2026-11-12）：复用率与驻留字节。没有这组数字，池只是"看不见的第二套内存账本"。
-                framePool = FrameMatPool.Snapshot()
+                framePool = FrameMatPool.Snapshot(),
+                // 相机厂商 SDK 静默失败台账（2026-11-13）：清理/能力探测失败不再只留在 catch 里。
+                cameraSdk = CameraSdkDiagnostics.Snapshot(),
+                // 脚本 Worker（Phase 2）：只暴露现场需要的状态位，不把进程号/程序集路径放到健康接口。
+                scriptWorker = new
+                {
+                    state = health.ScriptWorkerStatus.State,
+                    poolSize = health.ScriptWorkerStatus.PoolSize,
+                    busyWorkers = health.ScriptWorkerStatus.BusyWorkers,
+                    restartCount = health.ScriptWorkerStatus.RestartCount,
+                    circuitOpen = health.ScriptWorkerStatus.CircuitOpen
+                }
             });
-        }).AllowAnonymous();
+        }).RequireOperator("diagnostics.health", "diagnostics");
 
         app.MapGet("/api/host-mode", (IConfiguration configuration) =>
         {
@@ -168,5 +133,93 @@ public static class SystemEndpoints
         }).RequireAuthorization(SecurityPolicies.Engineer);
 
         return app;
+    }
+
+    private sealed record HealthEvaluation(
+        string Status,
+        bool Ready,
+        bool ProductionReady,
+        IReadOnlyList<string> DegradedReasons,
+        IReadOnlyList<string> ProductionBlockers,
+        IReadOnlyList<string> OfflineDependencies,
+        PluginWorkerStatus ScriptWorkerStatus);
+
+    /// <summary>
+    /// 健康判定单一来源（2026-11-13）：匿名 /healthz 与认证后的 /api/health 共用同一组判定，
+    /// 避免两个出口对"就绪"给出不同答案。
+    /// </summary>
+    private static HealthEvaluation EvaluateHealth(
+        AuditEventStore audits,
+        RollingFileLoggerProvider logs,
+        StorageMaintenanceCoordinator maintenance,
+        ProductionRuntimeService production,
+        DeviceManager devices,
+        RobotManager robots,
+        DeviceActionAuthorizationService authorization,
+        DeviceProfileStore deviceProfiles,
+        ScriptWorkerSupervisor scriptWorkers)
+    {
+        var reasons = new List<string>();
+        if (audits.PersistFailures > 0) reasons.Add("audit persistence failures");
+        if (logs.DroppedEntries > 0) reasons.Add("log entries dropped");
+        if (logs.WriteFailures > 0) reasons.Add("log write failures");
+        if (logs.FlushFailures > 0) reasons.Add("log flush failures");
+        // Q01（2026-10-13 审查）：维护门的原因必须进入健康正文——现场据此判断"为什么被阻断、
+        // 核对什么才能放行"，而不是只看到一句"storage failure lock engaged"。
+        if (maintenance.IsFailureLocked)
+            reasons.Add($"storage failure lock engaged: {maintenance.Reason ?? "unspecified"}");
+        if (maintenance.IsRestartPending)
+            reasons.Add($"restart pending after storage restore: {maintenance.Reason ?? "unspecified"}");
+        // R3-04（2026-10-13 R3 审查）：损坏的设备配置让设备从运行时列表消失——必须表达为
+        // **配置完整性降级**（现场可查询"为什么缺设备"），而不是与"设备被删除"混同后仍报 ok。
+        var profileProblems = deviceProfiles.Problems;
+        if (profileProblems.Count > 0)
+        {
+            var details = string.Join("; ", profileProblems.Take(3).Select(p => $"{p.FileName}: {p.Error}"));
+            if (profileProblems.Count > 3) details += $"; +{profileProblems.Count - 3} more";
+            reasons.Add($"device profile integrity: {profileProblems.Count} unreadable file(s) ({details})");
+        }
+        var degraded = reasons.Count > 0;
+
+        // R07：生产动作就绪——阻断原因必须可直接操作（现场据此决定能否下发设备动作）。
+        var productionBlockers = new List<string>();
+        if (authorization.UnresolvedProductionState() is { } pending)
+            productionBlockers.Add($"unresolved device-action intent ({pending.Phase}): {pending.Reason}");
+        // F03：手动/临时/调试/作业运行的未闭合意图同样必须表达为"生产动作未就绪"，
+        // 否则会出现"动作被拒但 productionReady=true"的不一致（探针已确认该反例）。
+        try
+        {
+            foreach (var intent in authorization.UnresolvedManualIntents())
+                productionBlockers.Add($"unresolved manual device action ({intent.Action}): {intent.ClosedReason ?? "awaiting reconciliation"}");
+        }
+        catch (Exception ex)
+        {
+            productionBlockers.Add($"manual action intent file could not be read: {ex.Message}");
+        }
+        // Fix1/A01：意图台账落盘失败会置同进程故障锁（逐意图独立登记）——
+        // 每个故障都必须表达为"生产动作未就绪"（只报第一个会掩盖其余故障）。
+        foreach (var processFailure in authorization.StateTransitionFailures)
+            productionBlockers.Add($"in-process device-action failure lock engaged: {processFailure}");
+        if (maintenance.IsMaintenanceActive) productionBlockers.Add($"storage maintenance is active: {maintenance.Reason ?? "unspecified"}");
+        if (maintenance.IsRestartPending) productionBlockers.Add("restart required after storage restore");
+        var productionStatus = production.Status;
+        if (productionStatus.State == ProductionRuntimeState.Faulted)
+            productionBlockers.Add($"production runtime is Faulted: {productionStatus.LastError ?? "unspecified"}");
+
+        // 依赖可见性（信息性，不计入 blocker）：未连接的设备/机器人是标称待机状态，
+        // 不应把"设备未接线"笼统算作服务故障；真正影响动作就绪的是上面的阻断项。
+        var offlineDependencies = devices.List()
+            .Where(x => x.ConnectionState != DeviceConnectionState.Connected).Select(x => $"device:{x.Id}={x.ConnectionState}")
+            .Concat(robots.List().Where(x => x.ConnectionState != RobotConnectionState.Connected).Select(x => $"robot:{x.Id}={x.ConnectionState}"))
+            .ToArray();
+
+        return new HealthEvaluation(
+            degraded ? "degraded" : "ok",
+            !degraded && !maintenance.IsMaintenanceActive,
+            productionBlockers.Count == 0 && !degraded,
+            reasons,
+            productionBlockers,
+            offlineDependencies,
+            scriptWorkers.Status);
     }
 }

@@ -408,7 +408,7 @@ try {
     while ((Get-Date) -lt $deadline) {
         if ($apiProcess.HasExited) { break }
         try {
-            $probe = Invoke-WebRequest -Uri "$e2eApi/api/health" -UseBasicParsing -TimeoutSec 3
+            $probe = Invoke-WebRequest -Uri "$e2eApi/healthz" -UseBasicParsing -TimeoutSec 3
             if ($probe.StatusCode -eq 200) { $healthy = $true; break }
         }
         catch {

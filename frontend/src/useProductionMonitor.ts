@@ -5,6 +5,7 @@ import { isProductionConfig, isProductionStatus } from './productionConfig';
 import { apiFetch } from './apiClient';
 import { alarms as alarmsEndpoint } from './endpoints';
 import { apiUrl } from './endpoints';
+import { useMonitorSnapshot } from './useMonitorStream';
 
 export type ProductionJobItem = { id: string; name: string; publishedVersion?: number | null };
 export type DeviceActionPendingState = {
@@ -98,11 +99,24 @@ export function useProductionMonitor(open: boolean) {
   }, [accept]);
 
   const refresh = useCallback(() => { resources.forEach(read); }, [read]);
+  // 推送（2026-11-13）：生产状态直接来自 /hubs/monitor 快照，报警按版本戳补拉；
+  // 其余资源（配置/配方/待核对动作）保留 10 s 兜底——它们的变化频率远低于状态与报警。
+  const monitorSnapshot = useMonitorSnapshot(open);
+  const alarmRevisionRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!open || !monitorSnapshot) return;
+    if (isProductionStatus(monitorSnapshot.production)) accept('status', monitorSnapshot.production);
+    if (monitorSnapshot.alarmRevision !== alarmRevisionRef.current) {
+      alarmRevisionRef.current = monitorSnapshot.alarmRevision;
+      read('alarms');
+    }
+  }, [monitorSnapshot, open, accept, read]);
+
   useEffect(() => {
     active.current = open;
     setConfirmed({});
     if (open) refresh();
-    const timer = open ? setInterval(refresh, 1000) : undefined;
+    const timer = open ? setInterval(refresh, 10_000) : undefined;
     return () => {
       active.current = false;
       clearInterval(timer);

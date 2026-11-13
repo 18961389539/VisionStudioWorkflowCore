@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { statusNames } from '../i18n/catalog';
+import { statusNames } from '../i18n/catalog.zh';
 
 /**
  * 状态词表键形态守卫（2026-11-12）。

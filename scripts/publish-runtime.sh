@@ -86,7 +86,7 @@ fi
 # 3.05) R08/F07：候选包烟雾验证——与 Windows 侧同一契约（候选 contentRoot + Production 环境 +
 #       隔离数据根 + 批准的测试配置 + 资产清单 + health + 打包前端 + 插件加载干净）。
 #       无法启动或资产不完整的候选包绝不替换当前版本。
-SMOKE_ASSETS=("VisionStudio.Api.dll" "appsettings.json" "wwwroot/index.html" "VisionStudio.Plugin.Worker.dll")
+SMOKE_ASSETS=("VisionStudio.Api.dll" "appsettings.json" "wwwroot/index.html" "VisionStudio.Plugin.Worker.dll" "VisionStudio.Script.Worker.dll")
 for asset in "${SMOKE_ASSETS[@]}"; do
   if [ ! -e "$STAGING/$asset" ]; then
     echo "ERROR: candidate package is missing required asset '$asset'; the current package is untouched." >&2
@@ -176,7 +176,8 @@ SECURE_HEALTHY=0
 SECURE_DEADLINE=$(( SECONDS + 90 ))
 while [ "$SECONDS" -lt "$SECURE_DEADLINE" ]; do
   if ! kill -0 "$SECURE_PID" 2>/dev/null; then break; fi
-  health_body="$(curl -fsS --max-time 3 "http://127.0.0.1:$SECURE_PORT/api/health" 2>/dev/null)" || true
+  # 安全开启后详细健康需要登录；探活走匿名 /healthz（只含 status/ready/productionReady）。
+  health_body="$(curl -fsS --max-time 3 "http://127.0.0.1:$SECURE_PORT/healthz" 2>/dev/null)" || true
   if [ -n "$health_body" ] && printf '%s' "$health_body" | grep -q '"status":"ok"' && printf '%s' "$health_body" | grep -q '"ready":true'; then
     SECURE_HEALTHY=1
     break

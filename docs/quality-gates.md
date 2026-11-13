@@ -113,7 +113,7 @@ spec 用 `page.route('**/api/**')` 把后端全量桩化，**不依赖 .NET 进�
 而界面看起来"成功了"。
 
 此外 `real-backend-smoke.spec.ts` 走 `request` fixture 直连真宿主，不经过浏览器：门禁先在
-`127.0.0.1:5199` 以独立数据根拉起 Debug 版 API，等 `/api/health` 返回 200 后再跑
+`127.0.0.1:5199` 以独立数据根拉起 Debug 版 API，等 `/healthz` 返回 200 后再跑
 health → 登录 → `/api/catalog` → `/api/run` → `/api/traces/{runId}` → `/api/diagnostics/node-spans`
 整条链路；宿主不可达时该用例 skip 并打印原因，桩化用例照旧。真后端链路证明的是"契约端到端
 跑得通"，桩化用例证明的是"前端遇到某种 JSON 怎么表现"，两者不互相替代。

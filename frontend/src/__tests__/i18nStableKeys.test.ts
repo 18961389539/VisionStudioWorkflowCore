@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import catalogRaw from '../generated/catalog.generated.json?raw';
 import type { NodeCatalogItem } from '../types';
 import {
-  categories, descriptions, nodeNames, parameterDescriptions, parameterGroups,
-  canonicalParameterGroup, localizeCatalog
-} from '../i18n/catalog';
+  categories, descriptions, nodeNames, parameterDescriptions, parameterGroups
+} from '../i18n/catalog.zh';
+import { canonicalParameterGroup, localizeCatalog } from '../i18n/catalog';
 
 /**
  * i18n 稳定键守卫（2026-11-12）。

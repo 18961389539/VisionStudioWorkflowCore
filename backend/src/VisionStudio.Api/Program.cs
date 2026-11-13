@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.ResponseCompression;
 using VisionStudio.Api;
 using VisionStudio.Api.Endpoints;
 using VisionStudio.Api.Hosting;
@@ -6,6 +7,17 @@ using VisionStudio.Api.Security;
 using VisionStudio.Api.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// 首屏与目录接口的传输体积（2026-11-13）：/api/catalog 冷启动约 1.65 MB JSON，
+// 前端 index/vendor chunk 合计约 2.9 MB；这里统一开 Brotli/Gzip（默认 MIME 已含
+// application/json、JS、CSS、SVG）。部署在 TLS 终止代理后时，宿主看到的是 HTTP；
+// 代理若已压缩，ResponseCompression 会识别已有 Content-Encoding 并跳过。
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        ["application/json", "application/problem+json", "image/svg+xml"]);
+});
 
 // F06：站点配置源（数据根 site-config/appsettings.site.json）——现场策略覆盖内容根 appsettings、
 // 被环境变量/命令行覆盖；该文件随系统备份往返，恢复数据根即恢复"实际生效的配置"。
@@ -33,6 +45,8 @@ app.Logger.LogInformation("Reverse proxy forwarded headers: {ForwardedHeaders}",
 // RemoteIpAddress / Scheme。放在后面等于没配。
 app.UseForwardedHeaders();
 
+// 压缩必须早于静态文件与端点：越晚包住响应，能压到的正文越少。
+app.UseResponseCompression();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRouting();

@@ -8,9 +8,11 @@ public static class EndpointMapping
         app.MapSystemEndpoints();
         app.MapPluginEndpoints();
         app.MapPluginWorkerEndpoints();
+        app.MapScriptWorkerEndpoints();
         app.MapPluginBenchmarkEndpoints();
         app.MapPluginPackageEndpoints();
         app.MapDiagnosticsEndpoints();
+        app.MapMetricsEndpoints();
         app.MapCalibrationEndpoints();
         app.MapModelAssetEndpoints();
         app.MapTemplateAssetEndpoints();

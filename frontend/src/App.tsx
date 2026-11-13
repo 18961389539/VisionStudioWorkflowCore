@@ -1,94 +1,58 @@
-import { lazy, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
-  addEdge,
-  Background,
-  Controls,
-  ReactFlow,
-  ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
-  useNodesInitialized,
-  useReactFlow,
-  type Connection,
-  type Edge,
-  type Node,
-  type OnEdgesChange,
-  type OnConnectEnd,
-  type OnNodesChange
+  ReactFlowProvider, useEdgesState, useNodesState, useNodesInitialized, useReactFlow, type Edge, type Node
 } from '@xyflow/react';
-import { Alert, Button, Checkbox, Dropdown, Input, message, Modal, Segmented, Switch, Tag, type InputRef, type MenuProps } from 'antd';
+import { Button, message, Modal, type InputRef } from 'antd';
 import Toolbox from './components/Toolbox';
 import NodeConfigurationDialog, { type NodeConfigurationTab } from './components/NodeConfigurationDialog';
-import CameraPanel from './components/CameraPanel';
-import RobotPanel from './components/RobotPanel';
-import DevicePanel from './components/DevicePanel';
 import ProductionPanel from './components/ProductionPanel';
 import DiagnosticsPanel from './components/DiagnosticsPanel';
 import SplitHandle from './components/SplitHandle';
 import ErrorBoundary from './components/ErrorBoundary';
-import { HEADER_HEIGHT, LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState } from './layout';
-import CanvasMiniMap from './components/CanvasMiniMap';
-import WorkflowImagePreview from './components/WorkflowImagePreview';
-import { automaticResultHeight } from './layout';
-import { catalogNodeData, fallbackCatalogHash, fallbackCatalogRaw, fallbackCatalogSchemaVersion, makeDefaultParameters, validateCatalog } from './catalog';
-import { localizeCatalog } from './i18n';
+import EditorHeader from './components/EditorHeader';
+import EditorBottomDock from './components/EditorBottomDock';
+import EditorCanvasArea, { type EditorCanvasAreaProps } from './components/EditorCanvasArea';
+import EditorPanels, { type EditorPanelsProps } from './components/EditorPanels';
+import EditorOverlays, { type EditorOverlaysProps } from './components/EditorOverlays';
+import type { PaletteCommand } from './components/CommandPalette';
+import {
+  HEADER_HEIGHT, LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, automaticResultHeight,
+  clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState
+} from './layout';
 import { useI18n } from './i18n/provider';
 import { useThemeMode } from './theme';
 import { SecurityAccountBadge } from './security';
 import { demos, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, type WorkflowDraft } from './draft';
-import { graphConnectionVerdict, type WorkflowIssue } from './validation';
-import { responseErrorMessage } from './apiErrors';
-import { type DocumentBaseline } from './documentSync';
-import { isWorkflowDocument } from './workflowDocument';
+import type { WorkflowIssue } from './validation';
+import type { DocumentBaseline } from './documentSync';
 import { useWorkflowChanges } from './useWorkflowChanges';
-import { useWorkflowImport } from './useWorkflowImport';
 import { useWorkflowSave } from './useWorkflowSave';
 import { useWorkflowDraft } from './useWorkflowDraft';
 import { useWorkflowInspection } from './useWorkflowInspection';
+import { useWorkflowPicker } from './useWorkflowPicker';
 import { useEditorShortcuts } from './useEditorShortcuts';
+import { useEditorGraphOperations } from './useEditorGraphOperations';
+import { useEditorPanels } from './useEditorPanels';
+import { useEditorWorkflowDocument } from './useEditorWorkflowDocument';
+import { useCatalogState } from './useCatalogState';
 import { onConfigureNode, onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
 import { cloneParameters, type NodeParameters } from './nodeConfigurationState';
 import { applyReferenceParameters } from './roiReference';
 import { withSwitchPorts } from './switchPorts';
-import { migrateNodeType } from './legacyNodes';
-import { compatiblePorts } from './toolboxModel';
-import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, WorkflowPayload, WorkflowModuleVersion } from './types';
+import type { PluginLoadInfo, WorkflowPayload } from './types';
 import { apiFetch } from './apiClient';
-import { apiUrl, plugins as pluginEndpoints, workflows } from './endpoints';
-
-// R12（2026-10-12 复审）：低频重面板按需加载（dynamic import + Suspense）——首屏不下载其代码，
-// 首次打开时拉取并进入浏览器缓存。配对的渲染侧见 LazyPanel（条件挂载：关闭即卸载）。
-const JobPanel = lazy(() => import('./components/JobPanel'));
-const TracePanel = lazy(() => import('./components/TracePanel'));
-const DatasetValidationPanel = lazy(() => import('./components/DatasetValidationPanel'));
-const ModelPackagePanel = lazy(() => import('./components/ModelPackagePanel'));
-const ModelAssetPanel = lazy(() => import('./components/ModelAssetPanel'));
-const ParameterTuningPanel = lazy(() => import('./components/ParameterTuningPanel'));
-const WorkflowModulePanel = lazy(() => import('./components/WorkflowModulePanel'));
-const CalibrationPanel = lazy(() => import('./components/CalibrationPanel'));
-const FrameTreePanel = lazy(() => import('./components/FrameTreePanel'));
-const HardwareProvenancePanel = lazy(() => import('./components/HardwareProvenancePanel'));
-const PluginPackagePanel = lazy(() => import('./components/PluginPackagePanel'));
-const AboutPanel = lazy(() => import('./components/AboutPanel'));
-
-// 模块级共享件（LazyPanel / 常量 / 类型 / 图数据纯函数）见 ./appEditorShared（巨型组件拆分，2026-10-23）。
+import { apiUrl } from './endpoints';
 import {
-  LazyPanel, nodeTypes,
-  CANVAS_FIT_PADDING, COLLAPSED_RESULT_BAR_HEIGHT, DEMO_LABELS,
-  NEW_NODE_HEIGHT, NEW_NODE_WIDTH, RECENT_NODES_LIMIT, SPOT_GAP, WORKFLOW_IO_TIMEOUT_MS,
-  edgePresentation, getPorts, hydrateNodesFromCatalog, initial,
-  moduleCatalogFromNode, moduleMetadata, persistNodeCompact, persistRecentNodeTypes, readNodeCompact, readRecentNodeTypes,
-  type ConnectionPicker, type NodeAttachment, type WorkflowDocumentSummary
+  CANVAS_FIT_PADDING, COLLAPSED_RESULT_BAR_HEIGHT, buildWorkflowPayload, createInitial, moduleCatalogFromNode,
+  persistNodeCompact, readNodeCompact, readRecentNodeTypes, type ConnectionPicker
 } from './appEditorShared';
-import EditorHeader from './components/EditorHeader';
-import EditorBottomDock from './components/EditorBottomDock';
-import ShortcutHelpModal from './components/ShortcutHelpModal';
-import TemplateGalleryModal from './components/TemplateGalleryModal';
-import WorkflowPickerModal from './components/WorkflowPickerModal';
-import CommandPalette, { type PaletteCommand } from './components/CommandPalette';
+import {
+  buildDebugMenuItems, buildDeviceMenuItems, buildMoreMenu, buildNodeContextMenuItems, buildPaletteTargets,
+  buildProductionMenuItems, buildToolMenuItems, runPaletteCommand, type PanelOpeners
+} from './appEditorMenus';
 
 function Editor() {
   // 语言（2026-10-25 接线）：catalog 保存后端英文原文，显示用的本地化目录按语言派生——
@@ -96,23 +60,18 @@ function Editor() {
   const { lang, toggleLang, dateLocale: locale } = useI18n();
   const langRef = useRef(lang);
   langRef.current = lang;
-  const [rawCatalog, setRawCatalog] = useState<NodeCatalogItem[] | undefined>(undefined);
-  const catalog = useMemo(
-    () => localizeCatalog(rawCatalog ?? fallbackCatalogRaw, lang),
-    [rawCatalog, lang]
-  );
-  const [catalogSource, setCatalogSource] = useState<'runtime' | 'fallback'>('fallback');
-  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
-  const [catalogHash, setCatalogHash] = useState(fallbackCatalogHash);
-  const [catalogSchemaVersion, setCatalogSchemaVersion] = useState(fallbackCatalogSchemaVersion);
-  const [catalogError, setCatalogError] = useState<string>();
+
+  const [messageApi, contextHolder] = message.useMessage();
+  // A04：远端已存在同名文档时，覆盖必须由用户显式确认（绝不静默覆盖他人修改）。
+  const [modalApi, modalContextHolder] = Modal.useModal();
+  const [initialEditorState] = useState(() => createInitial(lang));
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialEditorState.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEditorState.edges);
   const [plugins, setPlugins] = useState<PluginLoadInfo[]>([]);
-  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
-  const [pluginSdk, setPluginSdk] = useState<PluginSdkInfo>();
-  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
-  const [pluginRescanning, setPluginRescanning] = useState(false);
-  const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
+  const { catalog, catalogSource, catalogSchemaVersion, catalogError, refreshCatalog } = useCatalogState({
+    lang, langRef, messageApi, setNodes, setPlugins
+  });
+  useEffect(() => { refreshCatalog(); }, [refreshCatalog]);
   const [selectedId, setSelectedId] = useState<string>('threshold-1');
   const [nodeConfigurationId, setNodeConfigurationId] = useState<string>();
   const [configurationTab, setConfigurationTab] = useState<NodeConfigurationTab>('parameters');
@@ -147,11 +106,6 @@ function Editor() {
   // undefined = 未知基线（保存前先探测后端）；revision='' = 后端尚无修订记录。
   const workflowRevisionRef = useRef<DocumentBaseline>(undefined);
   const [designerWorkflowId, setDesignerWorkflowId] = useState('demo-linear');
-  const [workflowPickerOpen, setWorkflowPickerOpen] = useState(false);
-  const [savedWorkflows, setSavedWorkflows] = useState<WorkflowDocumentSummary[]>([]);
-  const [workflowToLoad, setWorkflowToLoad] = useState<string>();
-  const [workflowListLoading, setWorkflowListLoading] = useState(false);
-  const [workflowListError, setWorkflowListError] = useState<string>();
   // 保存基线绑定文档生命周期，整块替换才换代（A→B→A 也不接受迟到响应）。
   const documentGenerationRef = useRef(0);
   const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio · 线性流程示例');
@@ -160,30 +114,17 @@ function Editor() {
     apiFetch(apiUrl('host-mode')).then(r => r.ok ? r.json() : undefined).then(data => setRuntimeOnly(Boolean(data?.runtimeOnly))).catch(() => undefined);
   }, []);
   useEffect(() => { persistNodeCompact(compactNodes); }, [compactNodes]);
-  const [pluginsOpen, setPluginsOpen] = useState(false);
-  const [camerasOpen, setCamerasOpen] = useState(false);
-  const [robotsOpen, setRobotsOpen] = useState(false);
-  const [devicesOpen, setDevicesOpen] = useState(false);
-  const [jobsOpen, setJobsOpen] = useState(false);
-  const [tracesOpen, setTracesOpen] = useState(false);
-  /** 从运行结果跳转到追溯时预置的运行 ID（打开即定位到那次运行） */
-  const [traceRunId, setTraceRunId] = useState<string>();
-  const [commandOpen, setCommandOpen] = useState(false);
-  const [validationOpen, setValidationOpen] = useState(false);
-  const [modelPackagesOpen, setModelPackagesOpen] = useState(false);
-  const [modelAssetsOpen, setModelAssetsOpen] = useState(false);
-  const [tuningOpen, setTuningOpen] = useState(false);
-  const [modulesOpen, setModulesOpen] = useState(false);
-  const [calibrationOpen, setCalibrationOpen] = useState(false);
-  const [framesOpen, setFramesOpen] = useState(false);
-  const [productionOpen, setProductionOpen] = useState(false);
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const [hardwareProvenanceOpen, setHardwareProvenanceOpen] = useState(false);
-  const [runtimeOnly, setRuntimeOnly] = useState(false);
-  const [aboutOpen, setAboutOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const {
+    pluginsOpen, setPluginsOpen, camerasOpen, setCamerasOpen, robotsOpen, setRobotsOpen, devicesOpen, setDevicesOpen,
+    jobsOpen, setJobsOpen, tracesOpen, setTracesOpen, traceRunId, setTraceRunId, commandOpen, setCommandOpen,
+    validationOpen, setValidationOpen, modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
+    tuningOpen, setTuningOpen, modulesOpen, setModulesOpen, calibrationOpen, setCalibrationOpen, framesOpen, setFramesOpen,
+    productionOpen, setProductionOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
+    aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen
+  } = useEditorPanels();
   const { mode: themeMode, toggle: toggleTheme } = useThemeMode();
-  const { screenToFlowPosition, getZoom, getViewport, setCenter, fitView } = useReactFlow();
+  const [runtimeOnly, setRuntimeOnly] = useState(false);
+  const { screenToFlowPosition, getZoom, setCenter, fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
   const initialFitDone = useRef(false);
   useEffect(() => {
@@ -201,21 +142,6 @@ function Editor() {
     const frame = requestAnimationFrame(() => { void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 }); });
     return () => cancelAnimationFrame(frame);
   }, [imagePreviewOpen, focusMode, fitView]);
-  const [messageApi, contextHolder] = message.useMessage();
-  // A04：远端已存在同名文档时，覆盖必须由用户显式确认（绝不静默覆盖他人修改）。
-  const [modalApi, modalContextHolder] = Modal.useModal();
-
-  // 缩放分级（far/mid/near）：直接写画布容器 dataset，不经 React 状态——拖画布不会触发整树重渲；
-  // CSS 按级别显隐端口文字/类型/摘要（Handle 恒在，连线落点不受影响）
-  const syncZoomLevel = useCallback((viewport: { zoom: number }) => {
-    const area = flowAreaRef.current;
-    if (!area) return;
-    const level = viewport.zoom >= 1.05 ? 'near' : viewport.zoom >= 0.6 ? 'mid' : 'far';
-    if (area.dataset.zoomLevel !== level) area.dataset.zoomLevel = level;
-  }, []);
-  useEffect(() => {
-    syncZoomLevel(getViewport());
-  }, [getViewport, syncZoomLevel]);
   const [connectionPicker, setConnectionPicker] = useState<ConnectionPicker>();
   const connectionPickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -246,36 +172,9 @@ function Editor() {
   );
   // 性能（2026-10-26）：拖拽时每个 pointermove 都会重建负载，原来每条边都 nodes.find + 端口 find，
   // 复杂度 O(E×N×P)。改成先建 Map，整体 O(N+E)。200 节点 / 300 边的实测见 docs 性能记录。
-  const workflowPayload = useMemo<WorkflowPayload>(() => {
-    const outputsByNode = new Map<string, Map<string, ReturnType<typeof getPorts>[number]>>();
-    for (const node of nodes) {
-      const ports = getPorts(node, 'outputs');
-      outputsByNode.set(node.id, new Map(ports.map((port) => [port.name, port])));
-    }
-    return {
-    id: designerWorkflowId,
-    name: designerWorkflowName,
-    nodes: nodes.map((node) => ({
-      id: node.id,
-      type: String(node.data.typeKey),
-      name: String(node.data.label ?? node.id),
-      position: node.position,
-      parameters: (node.data.parameters ?? {}) as Record<string, unknown>
-    })),
-    edges: edges.map((edge) => {
-      const sourcePort = outputsByNode.get(edge.source)?.get(edge.sourceHandle ?? '');
-      const kind = String(edge.data?.kind ?? (sourcePort?.dataType === 'Control' ? 'control' : 'data'));
-      return {
-        id: edge.id,
-        sourceNodeId: edge.source,
-        sourcePort: edge.sourceHandle ?? 'next',
-        targetNodeId: edge.target,
-        targetPort: edge.targetHandle ?? 'exec',
-        kind
-      };
-    })
-    };
-  }, [designerWorkflowId, designerWorkflowName, nodes, edges]);
+  const workflowPayload = useMemo<WorkflowPayload>(
+    () => buildWorkflowPayload(designerWorkflowId, designerWorkflowName, nodes, edges),
+    [designerWorkflowId, designerWorkflowName, nodes, edges]);
 
   // 性能（2026-10-26）：整份文档 JSON.stringify 实测 3.6ms / 268 KB（200 节点）。拖拽时每个
   // pointermove 都会改 position → 负载变化 → 每帧再序列化一次，16ms 的帧预算被吃掉近四分之一。
@@ -431,250 +330,25 @@ function Editor() {
   const shownBottom = layout.bottomCollapsed ? COLLAPSED_RESULT_BAR_HEIGHT : shownBottomBase;
   const presetSizes = LAYOUT_PRESETS[layout.preset === 'custom' ? 'edit' : layout.preset];
 
-  const refreshCatalog = useCallback(async () => {
-    try {
-      const response = await apiFetch(apiUrl('catalog'));
-      if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
-      const raw = validateCatalog(await response.json());
-      setRawCatalog(raw);
-      // 只在目录真的来自后端时重命名画布节点（沿用既有行为）；语言切换不触发本函数。
-      setNodes((current) => hydrateNodesFromCatalog(current, localizeCatalog(raw, langRef.current)));
-      setCatalogSource('runtime');
-      setCatalogHash(response.headers.get('X-VisionStudio-Catalog-Hash') ?? 'runtime');
-      setCatalogSchemaVersion(Number(response.headers.get('X-VisionStudio-Catalog-Schema') ?? fallbackCatalogSchemaVersion));
-      setCatalogError(undefined);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : '节点目录不可用';
-      setCatalogError(reason);
-      messageApi.warning('后端 Catalog 不可用；保留当前 Catalog（首次启动时使用自动生成 fallback）');
-    }
-
-    apiFetch(pluginEndpoints.list)
-      .then((r) => (r.ok ? r.json() : []))
-      // 契约漂移防御：网关错误体、代理返回的 JSON 对象都会走到这里。
-      // 非数组一旦进入 plugins 状态，工具栏标签的 plugins.filter 就会抛错，
-      // 而它在面板级错误边界之外——整棵编辑器会被顶层边界替换成错误页。
-      .then((data) => setPlugins(Array.isArray(data) ? data : []))
-      .catch(() => setPlugins([]));
-    apiFetch(apiUrl('plugins/sdk'))
-      .then((r) => (r.ok ? r.json() : undefined))
-      .then((data) => setPluginSdk(data))
-      .catch(() => setPluginSdk(undefined));
-  }, [messageApi, setNodes]);
-
-  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
-  const rescanPlugins = useCallback(async () => {
-    setPluginRescanning(true);
-    try {
-      const response = await apiFetch(apiUrl('plugins/rescan'), { method: 'POST' });
-      const body = await response.json().catch(() => undefined);
-      if (!response.ok) throw new Error(body?.detail ?? body?.error ?? `Plugin rescan failed (${response.status})`);
-      // 同上：body.plugins 可能是对象或缺省，不能让非数组进入状态。
-      setPlugins(Array.isArray(body?.plugins) ? body.plugins : []);
-      await refreshCatalog();
-      const loadedNow = Number(body?.loadedNow ?? 0);
-      const restartRequired = Number(body?.restartRequired ?? 0);
-      messageApi.success(`插件重新扫描完成 · 已加载 ${loadedNow}${restartRequired ? ` · 需要重启 ${restartRequired}` : ''}`);
-    } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : '插件重新扫描失败');
-    } finally { setPluginRescanning(false); }
-  }, [messageApi, refreshCatalog]);
-
-  useEffect(() => { refreshCatalog(); }, [refreshCatalog]);
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
-  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
-  const selectedCatalog = catalog.find((c) => c.type === selectedNode?.data.typeKey) ?? moduleCatalogFromNode(selectedNode);
   const configurationNode = nodes.find((node) => node.id === nodeConfigurationId);
   const configurationCatalog = catalog.find((item) => item.type === configurationNode?.data.typeKey) ?? moduleCatalogFromNode(configurationNode);
   const configurationPreviewBlockedReason = debugSession ? '请先结束当前调试会话，再测试暂存参数。'
     : configurationNode?.data.typeKey === 'module.call' ? '复用模块暂不支持单节点测试。'
     : configurationCatalog?.capabilities?.supportsRunNode === false ? '此节点不支持单节点测试，请应用后通过流程运行入口执行。' : undefined;
 
-  const onConnect = useCallback((connection: Connection) => {
-    const getNode = (id: string) => nodesRef.current.find(node => node.id === id);
-    const sourceNode = getNode(connection.source);
-    const sourcePort = getPorts(sourceNode, 'outputs').find((p) => p.name === connection.sourceHandle);
-    const verdict = graphConnectionVerdict(connection, getNode, edgesRef.current);
-    if (!verdict.allowed) {
-      messageApi.error(verdict.reason ?? '不允许的连接');
-      return;
-    }
 
-    const kind: 'control' | 'data' = sourcePort?.dataType === 'Control' ? 'control' : 'data';
-    pushHistory('连线');
-    setEdges((eds) => addEdge({
-      ...connection,
-      id: crypto.randomUUID(),
-      ...edgePresentation(kind)
-    }, eds));
-  }, [messageApi, pushHistory, setEdges]);
 
-  // React Flow 自带的删除通道（备用入口）：整批变更里出现 remove 时先记一步撤销
-  const handleNodesChange = useCallback<OnNodesChange>((changes) => {
-    if (changes.some((change) => change.type === 'remove')) pushHistory('删除节点');
-    onNodesChange(changes);
-  }, [onNodesChange, pushHistory]);
 
-  const handleEdgesChange = useCallback<OnEdgesChange>((changes) => {
-    if (changes.some((change) => change.type === 'remove')) pushHistory('删除连线');
-    onEdgesChange(changes);
-  }, [onEdgesChange, pushHistory]);
 
-  // 连接过程中由 React Flow 统一裁决：不允许的拖放不会建立连线
-  // （与端口高亮、onConnect 报错、validateWorkflow 共用 connectionVerdict，界面不会再“允许了又被校验拒”）
-  const isValidConnection = useCallback((connection: Edge | Connection) => {
-    if (!connection.source || !connection.target) return false;
-    return graphConnectionVerdict(connection, id => nodesRef.current.find(node => node.id === id), edgesRef.current).allowed;
-  }, []);
 
-  const rememberRecentNode = useCallback((typeKey: string) => {
-    setRecentNodeTypes((current) => {
-      const next = [typeKey, ...current.filter((x) => x !== typeKey)].slice(0, RECENT_NODES_LIMIT);
-      persistRecentNodeTypes(next);
-      return next;
-    });
-  }, []);
 
-  // 双击 / 回车添加节点时的落点：在屏幕坐标下用画布节点的真实矩形（DOM rect）判断是否重叠，
-  // 在可见区内按网格找既不与已有节点相交、又完整可见的空位（优先从选中节点右侧开始扫描），
-  // 确实没有空位时按已有节点数量斜向错位，保证新节点始终可见且不会被完全压住
-  const freeNodeSpot = useCallback((): { x: number; y: number } => {
-    const area = flowAreaRef.current?.getBoundingClientRect();
-    if (!area) return { x: 120, y: 120 };
 
-    const zoom = getZoom();
-    const width = NEW_NODE_WIDTH * zoom;
-    const height = NEW_NODE_HEIGHT * zoom;
-    const gap = SPOT_GAP * zoom;
-    const occupied = nodes
-      .map((node) => document.querySelector<HTMLElement>(`.react-flow__node[data-id="${node.id}"]`)?.getBoundingClientRect())
-      .filter((box): box is DOMRect => Boolean(box));
-    const free = (x: number, y: number) =>
-      occupied.every((box) => x + width + gap <= box.left || x >= box.right + gap || y + height + gap <= box.top || y >= box.bottom + gap);
-    const fits = (x: number, y: number) => x >= area.left && x + width <= area.right && y >= area.top && y + height <= area.bottom;
-
-    const origins: { x: number; y: number }[] = [];
-    const selected = nodes.find((node) => node.id === selectedId);
-    if (selected) {
-      const box = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${selected.id}"]`)?.getBoundingClientRect();
-      if (box) origins.push({ x: box.right + gap + 16, y: box.top });
-    }
-    origins.push({ x: area.left + gap, y: area.top + gap });
-
-    const stepX = width + gap;
-    const stepY = height + gap;
-    const columns = Math.max(1, Math.floor(area.width / stepX));
-    const rows = Math.max(1, Math.floor(area.height / stepY));
-
-    for (const origin of origins) {
-      for (let row = 0; row < rows; row += 1) {
-        for (let column = 0; column < columns; column += 1) {
-          const x = origin.x + column * stepX;
-          const y = origin.y + row * stepY;
-          if (fits(x, y) && free(x, y)) return screenToFlowPosition({ x, y });
-        }
-      }
-    }
-
-    const cascade = nodes.length % 6;
-    const x = Math.max(area.left, Math.min(area.right - width, area.left + gap + cascade * 26));
-    const y = Math.max(area.top, Math.min(area.bottom - height, area.top + gap + cascade * 20));
-    return screenToFlowPosition({ x, y });
-  }, [getZoom, nodes, screenToFlowPosition, selectedId]);
-
-  const addNode = useCallback((typeKey: string, position?: { x: number; y: number }, attachment?: NodeAttachment) => {
-    const item = catalog.find((x) => x.type === typeKey);
-    if (!item) return;
-    const defaults = makeDefaultParameters(item);
-    const nodeItem = withSwitchPorts(item, defaults);
-    if (attachment) {
-      const existing = nodesRef.current.find((node) => node.id === attachment.nodeId);
-      const side = attachment.direction === 'source' ? 'outputs' : 'inputs';
-      const port = getPorts(existing, side).find((port) => port.name === attachment.portName);
-      if (!existing || port?.dataType !== attachment.dataType || !compatiblePorts(nodeItem, attachment).some((port) => port.name === attachment.newPort)) {
-        messageApi.warning('原节点或端口已变化，请重新连接');
-        setConnectionPicker(undefined);
-        return;
-      }
-      if (attachment.direction === 'target' && edgesRef.current.some((edge) => edge.target === attachment.nodeId && edge.targetHandle === attachment.portName && edge.data?.kind === 'data')) {
-        messageApi.warning('该输入端口已有数据源，请先删除原连线');
-        return;
-      }
-    }
-
-    const newNode: Node = {
-      id: `${typeKey}-${crypto.randomUUID().slice(0, 8)}`,
-      type: 'vision',
-      className: 'node-added',
-      position: position ?? freeNodeSpot(),
-      data: {
-        typeKey,
-        label: item.displayName,
-        catalogDisplayName: item.displayName,
-        parameters: defaults,
-        ...catalogNodeData(nodeItem),
-        status: 'idle',
-        breakpoint: false
-      }
-    };
-    pushHistory(attachment ? '添加并连接节点' : '添加节点');
-    setNodes((current) => [
-      ...current.map((node) => (node.selected ? { ...node, selected: false } : node)),
-      { ...newNode, selected: true }
-    ]);
-    setSelectedId(newNode.id);
-    rememberRecentNode(typeKey);
-    if (attachment) {
-      const forward = attachment.direction === 'source';
-      setEdges((current) => addEdge({
-        id: crypto.randomUUID(),
-        source: forward ? attachment.nodeId : newNode.id,
-        sourceHandle: forward ? attachment.portName : attachment.newPort,
-        target: forward ? newNode.id : attachment.nodeId,
-        targetHandle: forward ? attachment.newPort : attachment.portName,
-        ...edgePresentation(attachment.dataType === 'Control' ? 'control' : 'data')
-      }, current));
-      setConnectionPicker(undefined);
-    }
-    void messageApi.success(`已添加「${item.displayName}」${attachment ? '并连接' : ''}`, 1.5);
-  }, [catalog, freeNodeSpot, messageApi, pushHistory, rememberRecentNode, setEdges, setNodes]);
-
-  const onConnectEnd = useCallback<OnConnectEnd>((event, state) => {
-    if (state.isValid || state.toNode || !state.fromNode || !state.fromHandle) return;
-    if (!(event.target as Element)?.closest('.react-flow__pane')) return;
-    const area = flowAreaRef.current?.getBoundingClientRect();
-    const point = 'changedTouches' in event ? event.changedTouches[0] : event;
-    if (!area || !point) return;
-    const direction = state.fromHandle.type;
-    const port = getPorts(state.fromNode, direction === 'source' ? 'outputs' : 'inputs').find((port) => port.name === state.fromHandle.id);
-    if (!port) return;
-    setNodeContextMenu(undefined);
-    setConnectionPicker({
-      nodeId: state.fromNode.id, portName: port.name, dataType: port.dataType, direction,
-      x: Math.max(8, Math.min(point.clientX - area.left, area.width - 308)),
-      y: Math.max(8, Math.min(point.clientY - area.top, area.height - 468)),
-      position: screenToFlowPosition({ x: point.clientX, y: point.clientY })
-    });
-  }, [screenToFlowPosition]);
-
-  const onDrop = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    addNode(event.dataTransfer.getData('application/vision-node'), screenToFlowPosition({ x: event.clientX, y: event.clientY }));
-  }, [addNode, screenToFlowPosition]);
 
   // 运行结果点行定位：选中该节点并把画布居中过去
   // 性能（2026-10-26）：focusNode 原来依赖 nodes，拖拽每个 pointermove 都换引用，
   // 导致下游 memo 化组件（RunPanel）每帧失效。改用 nodesRef，引用保持稳定。
-  const focusNode = useCallback((nodeId: string) => {
-    const node = nodesRef.current.find((item) => item.id === nodeId);
-    if (!node) return;
-    setSelectedId(nodeId);
-    setNodes((current) => current.map((item) => (item.selected === (item.id === nodeId) ? item : { ...item, selected: item.id === nodeId })));
-    const width = node.measured?.width ?? 200;
-    const height = node.measured?.height ?? 120;
-    setCenter(node.position.x + width / 2, node.position.y + height / 2, { zoom: 1.05, duration: 300 });
-  }, [setCenter, setNodes]);
 
   // 校验问题定位：节点直接选中并居中；连线高亮并居中到两端中点
   const locateIssue = (issue: WorkflowIssue) => {
@@ -697,7 +371,7 @@ function Editor() {
       }
     }
     if (issue.nodeId && nodes.some((node) => node.id === issue.nodeId)) {
-      focusNode(issue.nodeId);
+      graph.focusNode(issue.nodeId);
       setHighlightedEdgeId(undefined);
     }
   };
@@ -709,6 +383,14 @@ function Editor() {
     return selectedId && nodes.some((node) => node.id === selectedId) ? [selectedId] : [];
   }, [nodes, selectedId]);
   const selectedEdgeIds = useMemo(() => edges.filter((edge) => edge.selected).map((edge) => edge.id), [edges]);
+
+  // 画布图操作（连线 / 添加 / 删除 / 复制 / 对齐 / 定位）见 ./useEditorGraphOperations。
+  const graph = useEditorGraphOperations({
+    nodes, nodesRef, edgesRef, selectedRef, selectedId, selectedNode, selectedNodeIds, catalog,
+    setNodes, setEdges, setSelectedId, setRecentNodeTypes, setConnectionPicker, setNodeContextMenu,
+    messageApi, pushHistory, onNodesChange, onEdgesChange, flowAreaRef, getZoom,
+    screenToFlowPosition, setCenter, clipboardRef, pasteIndexRef
+  });
 
   // 节点查找：按显示名 / 类型 / id 匹配；高亮直接切 DOM 类名，避免大流程里每次输入都重建节点状态
   const searchMatches = useMemo(() => {
@@ -732,31 +414,6 @@ function Editor() {
     }
   }, [searchMatchIds, searchQuery]);
 
-  // 多选对齐：以选中集合的整体包围盒为基准（尺寸取 measured，未测量时按占位尺寸）
-  const alignSelection = useCallback((mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom') => {
-    const ids = new Set(selectedNodeIds);
-    if (ids.size < 2) return;
-    const targets = nodesRef.current.filter((node) => ids.has(node.id));
-    if (targets.length < 2) return;
-    const sizeOf = (node: Node) => ({ width: node.measured?.width ?? 200, height: node.measured?.height ?? 120 });
-    const left = Math.min(...targets.map((node) => node.position.x));
-    const right = Math.max(...targets.map((node) => node.position.x + sizeOf(node).width));
-    const top = Math.min(...targets.map((node) => node.position.y));
-    const bottom = Math.max(...targets.map((node) => node.position.y + sizeOf(node).height));
-    pushHistory('对齐节点');
-    setNodes((current) => current.map((node) => {
-      if (!ids.has(node.id)) return node;
-      const { width, height } = sizeOf(node);
-      const position = { ...node.position };
-      if (mode === 'left') position.x = left;
-      else if (mode === 'centerX') position.x = (left + right) / 2 - width / 2;
-      else if (mode === 'right') position.x = right - width;
-      else if (mode === 'top') position.y = top;
-      else if (mode === 'centerY') position.y = (top + bottom) / 2 - height / 2;
-      else if (mode === 'bottom') position.y = bottom - height;
-      return { ...node, position };
-    }));
-  }, [pushHistory, selectedNodeIds, setNodes]);
 
   const applyNodeParameters = (parameters: NodeParameters) => {
     if (!nodeConfigurationId || anyBusy || !nodesRef.current.some((node) => node.id === nodeConfigurationId)) return false;
@@ -807,7 +464,19 @@ function Editor() {
     },
   });
   const pendingGuard = workflowChanges.pending;
+  // 示例应用 / 整篇恢复 / 模块插入与升级见 ./useEditorWorkflowDocument。
+  const { applyDemo, restoreWorkflow, insertModule, upgradeSelectedModule } = useEditorWorkflowDocument({
+    catalog, nodesRef, selectedRef, selectedId, documentGenerationRef, workflowRevisionRef, markCleanOnNextChange, history,
+    setNodes, setEdges, setSelectedId, setHistoryVersion, setDesignerWorkflowId, setDesignerWorkflowName,
+    setDemoKey, setLastSavedAt, setHighlightedEdgeId, pushHistory, resetInspection, clearResult,
+    fitView, screenToFlowPosition, messageApi
+  });
+  const {
+    workflowPickerOpen, setWorkflowPickerOpen, savedWorkflows, workflowToLoad, setWorkflowToLoad,
+    workflowListLoading, workflowListError, workflowImport, openWorkflowPicker, loadSelectedSavedWorkflow
+  } = useWorkflowPicker({ designerWorkflowId, messageApi, prepare: workflowChanges.prepare });
   const guardingSave = saving || workflowChanges.busy;
+
 
   // 模板真实图数据只构建一次；目录变化时同步更新预览中的显示名。
   // 模板卡片/预览的派生数据内聚于 TemplateGalleryModal（巨型组件拆分，2026-10-23）。
@@ -839,62 +508,49 @@ function Editor() {
     updateLayout({ leftCollapsed: true, bottomCollapsed: true, bottomMaximized: false });
   };
 
-  // 命令面板（Ctrl/Cmd+K，2026-10-25）：把散在顶栏菜单、工具箱和按钮上的入口收成一个键盘入口。
-  // 命令与面板在这里登记；节点由面板内部复用工具箱的 searchTools 匹配。
-  const paletteTargets = useMemo<PaletteCommand[]>(() => [
-    { key: 'run', title: '运行流程', group: '命令', hint: 'Run', keywords: 'run execute' },
-    { key: 'validate', title: '校验流程', group: '命令', hint: 'Validate', keywords: 'validate check' },
-    { key: 'save', title: '保存工作流', group: '命令', hint: 'Ctrl+S', keywords: 'save' },
-    { key: 'fit', title: '适应画布', group: '命令', hint: 'Fit view', keywords: 'fit zoom 缩放' },
-    { key: 'focus', title: focusMode ? '退出专注画布' : '专注画布', group: '命令', keywords: 'focus fullscreen 专注' },
-    { key: 'theme', title: '切换深浅主题', group: '命令', keywords: 'theme dark light 主题' },
-    { key: 'lang', title: '切换界面语言 / Switch language', group: '命令', keywords: 'language lang 语言 english' },
-    { key: 'panel:calibration', title: '标定', group: '面板', keywords: 'calibration' },
-    { key: 'panel:traces', title: '运行追溯', group: '面板', keywords: 'trace' },
-    { key: 'panel:jobs', title: '配方管理', group: '面板', keywords: 'job recipe' },
-    { key: 'panel:validation', title: '数据集 / 批量验证', group: '面板', keywords: 'dataset validation' },
-    { key: 'panel:tuning', title: '参数调优', group: '面板', keywords: 'tuning' },
-    { key: 'panel:modules', title: '可复用模块', group: '面板', keywords: 'module' },
-    { key: 'panel:cameras', title: '相机采集', group: '面板', keywords: 'camera' },
-    { key: 'panel:robots', title: '机器人', group: '面板', keywords: 'robot' },
-    { key: 'panel:devices', title: '设备运行时', group: '面板', keywords: 'device plc' },
-    { key: 'panel:production', title: '生产运行', group: '面板', keywords: 'production' },
-    { key: 'panel:diagnostics', title: '诊断中心', group: '面板', keywords: 'diagnostics' },
-    { key: 'panel:plugins', title: '插件包管理', group: '面板', keywords: 'plugin' },
-    { key: 'panel:models', title: '外部训练包', group: '面板', keywords: 'model package' },
-    { key: 'panel:model-assets', title: '模型资产', group: '面板', keywords: 'model asset shape 资产' },
-    { key: 'panel:frames', title: '坐标系树', group: '面板', keywords: 'frame 坐标' },
-    { key: 'panel:provenance', title: '硬件溯源', group: '面板', keywords: 'provenance' }
-  ], [focusMode]);
-
-  const runPaletteCommand = (key: string) => {
-    switch (key) {
-      case 'run': void run(); return;
-      case 'validate': void validate(); return;
-      case 'save': void save(); return;
-      case 'fit': void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 }); return;
-      case 'focus': toggleFocusMode(); return;
-      case 'theme': toggleTheme(); return;
-      case 'lang': toggleLang(); return;
-      case 'panel:calibration': setCalibrationOpen(true); return;
-      case 'panel:traces': setTracesOpen(true); return;
-      case 'panel:jobs': setJobsOpen(true); return;
-      case 'panel:validation': setValidationOpen(true); return;
-      case 'panel:tuning': setTuningOpen(true); return;
-      case 'panel:modules': setModulesOpen(true); return;
-      case 'panel:cameras': setCamerasOpen(true); return;
-      case 'panel:robots': setRobotsOpen(true); return;
-      case 'panel:devices': setDevicesOpen(true); return;
-      case 'panel:production': setProductionOpen(true); return;
-      case 'panel:diagnostics': setDiagnosticsOpen(true); return;
-      case 'panel:plugins': setPluginsOpen(true); return;
-      case 'panel:models': setModelPackagesOpen(true); return;
-      case 'panel:model-assets': setModelAssetsOpen(true); return;
-      case 'panel:frames': setFramesOpen(true); return;
-      case 'panel:provenance': setHardwareProvenanceOpen(true); return;
-      default: return;
-    }
+  // 面板/弹窗开关集中成一份，供命令面板、顶栏菜单与收尾的挂载点复用。
+  const openers: PanelOpeners = {
+    setCalibrationOpen, setTracesOpen, setJobsOpen, setValidationOpen, setTuningOpen, setModulesOpen,
+    setCamerasOpen, setRobotsOpen, setDevicesOpen, setProductionOpen, setDiagnosticsOpen, setPluginsOpen,
+    setModelPackagesOpen, setModelAssetsOpen, setFramesOpen, setHardwareProvenanceOpen, setShortcutsOpen, setAboutOpen
   };
+  // 命令面板（Ctrl/Cmd+K，2026-10-25）：把散在顶栏菜单、工具箱和按钮上的入口收成一个键盘入口。
+  const paletteTargets = useMemo<PaletteCommand[]>(() => buildPaletteTargets(focusMode), [focusMode]);
+  const runCommand = (key: string) => runPaletteCommand(key, {
+    ...openers, run, validate, save,
+    focusMode,
+    fitView: () => void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 }),
+    toggleFocusMode, toggleTheme, toggleLang
+  });
+  // 顶栏二级入口：高频动作（校验 / 保存 / 运行）常驻，其余按领域归入四个下拉菜单。
+  // 动作名带上目标节点，让用户始终清楚“当前操作作用于谁”。
+  const selectedLabel = selectedId ? (nodeLabels[selectedId] ?? selectedId) : '';
+  const targetSuffix = selectedLabel ? `：${selectedLabel}` : '';
+  const debugMenuItems = buildDebugMenuItems({
+    debugSession, statusText: debugStatus.text, anyBusy, selectedId, selectedNode, targetSuffix,
+    allowSideEffects, hasSideEffectNodes, hasModuleCalls, breakpointCount: breakpoints.length, compileBusy
+  }, {
+    toggleBreakpoint: graph.toggleBreakpoint, continueDebugSession, runSelectedNodeInSession, endDebugSession,
+    runNode, runFromHere, setAllowSideEffects, startDebugSession, inspectDsl
+  });
+  const contextNode = nodeContextMenu ? nodes.find((node) => node.id === nodeContextMenu.nodeId) : undefined;
+  const contextNodeLabel = contextNode ? (nodeLabels[contextNode.id] ?? contextNode.id) : '';
+  const contextTargetSuffix = contextNodeLabel ? `：${contextNodeLabel}` : '';
+  const nodeContextMenuItems = buildNodeContextMenuItems(
+    { contextNode, contextTargetSuffix, anyBusy, debugSession, nodeContextMenu },
+    { openNodeConfiguration, runNode, runFromHere, toggleBreakpoint: graph.toggleBreakpoint, copySelection: graph.copySelection, deleteElements: graph.deleteElements }
+  );
+  const deviceMenuItems = buildDeviceMenuItems(openers);
+  const productionMenuItems = buildProductionMenuItems(openers);
+  const toolMenuItems = buildToolMenuItems({
+    catalogSource, catalogCount: catalog.length, catalogSchemaVersion, loadedPluginCount: plugins.filter((p) => p?.loaded).length,
+    history, themeMode, undo, redo, toggleTheme, openWorkflowPicker
+  }, openers);
+  const moreMenu = buildMoreMenu(
+    { showTemplates, openWorkflowPicker, applyLayoutPreset, layoutPreset: layout.preset },
+    debugMenuItems, deviceMenuItems, productionMenuItems, toolMenuItems
+  );
+
 
   // Ctrl/Cmd+K 是全局入口：面板打开、输入框聚焦时也要能用，所以不放进画布快捷键（那里会被 overlayOpen 挡住）。
   useEffect(() => {
@@ -911,199 +567,13 @@ function Editor() {
   // 切换示例 / 加载会整块替换流程图，存在未保存修改时先让用户选择
   const guardUnsaved = (label: string, run: () => void) => { void workflowChanges.request(label, run); };
 
-  const applyDemo = (key: DemoKey) => {
-    // A03/A04：整块替换文档即新代次——在途旧响应作废；并发基线失效（下次保存显式重建）。
-    documentGenerationRef.current += 1;
-    workflowRevisionRef.current = undefined;
-    const rawGraph = demos[key]();
-    const graph = { ...rawGraph, nodes: hydrateNodesFromCatalog(rawGraph.nodes, catalog) };
-    setDemoKey(key);
-    setDesignerWorkflowId(`demo-${key}`);
-    // 文档名不携带版本号（避免与品牌 V{APP_VERSION} 同屏互相矛盾），并复用分组里的中文用途名
-    setDesignerWorkflowName(`VisionStudio · ${DEMO_LABELS[key] ?? key}`);
-    setNodes(graph.nodes.map((node) => ({ ...node, data: { ...node.data, breakpoint: false } })));
-    setEdges(graph.edges);
-    setSelectedId(key === 'roi' ? 'threshold-1' : (graph.nodes[0]?.id ?? ''));
-    history.reset();
-    setHistoryVersion((version) => version + 1);
-    markCleanOnNextChange.current = true;
-    clearResult(); // 结果与图像（预览/逐节点目录）随 runId 代际一并失效，由 useRunImages 接管
-    setLastSavedAt(undefined);
-    resetInspection();
-    setHighlightedEdgeId(undefined);
-    setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
-  };
 
   // 结果应用（applyResult）、运行/调试执行（run / runNode / runFromHere / 调试会话）
   // 与图像资产加载已迁至独立模块 useRunController / useRunImages；本组件只保留装配与输入派生。
 
-  const toggleBreakpoint = () => {
-    if (!selectedId) return messageApi.warning('先选择一个节点');
-    setNodes((current) => current.map((node) =>
-      node.id === selectedId
-        ? { ...node, data: { ...node.data, breakpoint: !node.data.breakpoint } }
-        : node
-    ));
-  };
 
-  const restoreWorkflow = useCallback((workflow: WorkflowPayload, options?: { markClean?: boolean; preserveDocument?: boolean; editLabel?: string }) => {
-    // A03/A04：整块替换文档即新代次——在途旧响应作废；并发基线失效。
-    // 调用方如需绑定"本次实际加载"的修订基线，必须在 restore 之后重新设置（load 即如此）。
-    if (!isWorkflowDocument(workflow)) throw new Error('工作流文档结构无效');
-    const restoredNodes: Node[] = workflow.nodes.map((item) => {
-      // 已合并的旧节点类型在这里改写为规范类型并补齐参数，使旧流程仍可编辑与运行。
-      const migrated = migrateNodeType(item.type, item.parameters ?? undefined);
-      const meta = catalog.find((x) => x.type === migrated.type);
-      const parameters = migrated.parameters;
-      const nodeMeta = meta ? withSwitchPorts(meta, parameters) : undefined;
-      const module = migrated.type === 'module.call' ? moduleMetadata(parameters) : undefined;
-      return {
-        id: item.id,
-        type: 'vision',
-        position: item.position ?? { x: 100, y: 100 },
-        data: {
-          typeKey: migrated.type,
-          label: item.name ?? nodeMeta?.displayName ?? (migrated.type === 'module.call' ? String(parameters.moduleId ?? 'Reusable Module') : migrated.type),
-          parameters,
-          ...(module ? { inputs: module.inputs, outputs: module.outputs }
-            : nodeMeta ? catalogNodeData(nodeMeta) : { inputs: [], outputs: [] }),
-          moduleParameters: module?.moduleParameters ?? [],
-          moduleVersion: parameters.moduleVersion,
-          status: 'idle',
-          breakpoint: options?.preserveDocument
-            ? Boolean(nodesRef.current.find((node) => node.id === item.id && node.data.typeKey === migrated.type)?.data.breakpoint) : false
-        }
-      };
-    });
-    const restoredEdges: Edge[] = workflow.edges.map((item) => ({
-      id: item.id,
-      source: item.sourceNodeId,
-      sourceHandle: item.sourcePort,
-      target: item.targetNodeId,
-      targetHandle: item.targetPort,
-      ...edgePresentation(item.kind === 'control' ? 'control' : 'data')
-    }));
-    // 先完成图数据构建；无效模块元数据不能造成身份已切换、画布未更新的半应用状态。
-    if (options?.preserveDocument) pushHistory(options.editLabel ?? '应用流程编辑');
-    if (!options?.preserveDocument) {
-      documentGenerationRef.current += 1;
-      workflowRevisionRef.current = undefined;
-      setDesignerWorkflowId(workflow.id);
-      setDesignerWorkflowName(workflow.name);
-    }
-    setNodes(restoredNodes);
-    setEdges(restoredEdges);
-    setSelectedId(options?.preserveDocument && restoredNodes.some((node) => node.id === selectedRef.current) ? selectedRef.current : restoredNodes[0]?.id ?? '');
-    // 文档替换重建撤销时间线；调优/模块提取是同一文档的可撤销编辑。
-    if (!options?.preserveDocument) history.reset();
-    setHistoryVersion((version) => version + 1);
-    markCleanOnNextChange.current = options?.markClean !== false;
-    clearResult(); // 结果与图像（预览/逐节点目录）随 runId 代际一并失效，由 useRunImages 接管
-    if (!options?.preserveDocument) setLastSavedAt(undefined); // 文档替换后旧保存时间不再代表当前文档
-    resetInspection();
-    setHighlightedEdgeId(undefined);
-    if (!options?.preserveDocument) setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
-  }, [catalog, fitView, history, pushHistory, resetInspection, setEdges, setNodes]);
 
-  const insertModule = (version: WorkflowModuleVersion) => {
-    const position = screenToFlowPosition({ x: window.innerWidth * 0.48, y: window.innerHeight * 0.38 });
-    const parameters: Record<string, unknown> = {
-      moduleId: version.moduleId, moduleVersion: version.version, moduleHash: version.moduleHash,
-      __moduleInputs: version.inputs.map(({ name, dataType, required }) => ({ name, dataType, required })),
-      __moduleOutputs: version.outputs.map(({ name, dataType, required }) => ({ name, dataType, required })),
-      __moduleParameters: version.parameters
-    };
-    version.parameters.forEach((parameter) => { parameters[parameter.name] = parameter.defaultValue; });
-    const newNode: Node = {
-      id: `module-${version.moduleId.replace(/[^A-Za-z0-9_-]/g, '_')}-${crypto.randomUUID().slice(0, 8)}`, type: 'vision', position,
-      data: { typeKey: 'module.call', label: version.moduleId, parameters, inputs: parameters.__moduleInputs, outputs: parameters.__moduleOutputs, moduleParameters: version.parameters, moduleVersion: version.version, status: 'idle', breakpoint: false }
-    };
-    pushHistory('插入模块');
-    setNodes((current) => [...current, newNode]); setSelectedId(newNode.id); messageApi.success(`已插入模块 ${version.moduleId} V${version.version}`);
-  };
 
-  const upgradeSelectedModule = (version: WorkflowModuleVersion) => {
-    if (!selectedId) return;
-    pushHistory('升级模块版本');
-    setNodes((current) => current.map((node) => {
-      if (node.id !== selectedId || String(node.data.typeKey) !== 'module.call') return node;
-      const old = (node.data.parameters ?? {}) as Record<string, unknown>;
-      const parameters: Record<string, unknown> = {
-        moduleId: version.moduleId, moduleVersion: version.version, moduleHash: version.moduleHash,
-        __moduleInputs: version.inputs.map(({ name, dataType, required }) => ({ name, dataType, required })),
-        __moduleOutputs: version.outputs.map(({ name, dataType, required }) => ({ name, dataType, required })),
-        __moduleParameters: version.parameters
-      };
-      version.parameters.forEach((parameter) => { parameters[parameter.name] = old[parameter.name] ?? parameter.defaultValue; });
-      return { ...node, data: { ...node.data, label: version.moduleId, parameters, inputs: parameters.__moduleInputs, outputs: parameters.__moduleOutputs, moduleParameters: version.parameters, moduleVersion: version.version } };
-    }));
-    messageApi.success(`已将选中的模块调用升级到 ${version.moduleId} V${version.version}`);
-  };
-
-  const workflowImport = useWorkflowImport({ active: workflowPickerOpen, contextKey: workflowToLoad,
-    prepare: workflowChanges.prepare, error: (text) => { void messageApi.error(text); } });
-  const load = (requestedId: string) => workflowImport.load({
-    label: '加载已保存的工作流', url: workflows.byId(requestedId),
-    select: (data) => {
-      if (!isWorkflowDocument(data) || data.id !== requestedId) throw new Error('响应工作流与选中的文档不匹配');
-      return data;
-    },
-    options: (response) => ({ markClean: true, revision: response.headers.get('X-Workflow-Revision') ?? '' }),
-    onApplied: () => { setWorkflowPickerOpen(false); void messageApi.success('工作流已加载'); },
-  });
-
-  const openWorkflowPicker = async () => {
-    setWorkflowPickerOpen(true);
-    setWorkflowListLoading(true);
-    setWorkflowListError(undefined);
-    try {
-      const response = await apiFetch(workflows.list, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
-      if (!response.ok) throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
-      const items = await response.json() as WorkflowDocumentSummary[];
-      setSavedWorkflows(items);
-      setWorkflowToLoad((current) => items.some((item) => item.id === current)
-        ? current
-        : items.some((item) => item.id === designerWorkflowId) ? designerWorkflowId : items[0]?.id);
-    } catch (error) {
-      setWorkflowListError(error instanceof Error ? error.message : '已保存工作流列表加载失败');
-      setSavedWorkflows([]);
-      setWorkflowToLoad(undefined);
-    } finally { setWorkflowListLoading(false); }
-  };
-
-  const loadSelectedSavedWorkflow = () => { if (workflowToLoad) void load(workflowToLoad); };
-
-  // 复制当前选中集合到画布剪贴板（快捷键 Ctrl+C 与节点右键菜单共用）；返回是否真的复制了内容
-  const copySelection = useCallback(() => {
-    const ids = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
-    if (ids.size === 0 && selectedRef.current) ids.add(selectedRef.current);
-    if (ids.size === 0) return false;
-    clipboardRef.current = {
-      nodes: nodesRef.current.filter((node) => ids.has(node.id)).map((node) => ({ ...node, data: { ...node.data } })),
-      edges: edgesRef.current.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge }))
-    };
-    pasteIndexRef.current = 0;
-    void messageApi.success(`已复制 ${ids.size} 个节点`);
-    return true;
-  }, [messageApi]);
-
-  // 删除选中的节点与连线：连线可独立删除，节点删除时仍会一并清理其关联连线。
-  const deleteElements = useCallback((nodeIds: string[], edgeIds: string[]) => {
-    if (nodeIds.length === 0 && edgeIds.length === 0) return;
-    const nodeIdSet = new Set(nodeIds);
-    const edgeIdSet = new Set(edgeIds);
-    pushHistory(nodeIds.length > 0 && edgeIds.length > 0 ? '删除节点和连线' : nodeIds.length > 0 ? '删除节点' : '删除连线');
-    if (nodeIdSet.size > 0) setNodes((current) => current.filter((node) => !nodeIdSet.has(node.id)));
-    setEdges((current) => current.filter((edge) =>
-      !edgeIdSet.has(edge.id) && !nodeIdSet.has(edge.source) && !nodeIdSet.has(edge.target)
-    ));
-    setSelectedId((current) => (current && nodeIdSet.has(current) ? '' : current));
-    const deleted = [
-      nodeIds.length > 0 ? `${nodeIds.length} 个节点` : '',
-      edgeIds.length > 0 ? `${edgeIds.length} 条连线` : ''
-    ].filter(Boolean).join('和');
-    void messageApi.success(`已删除 ${deleted}`);
-  }, [messageApi, pushHistory, setEdges, setNodes]);
 
   // 快捷键处理器见 ./useEditorShortcuts（巨型组件拆分，2026-10-23）：
   // Ctrl/Cmd+S 保存、Ctrl/Cmd+F 查找、Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z（或 Ctrl+Y）重做、
@@ -1119,7 +589,7 @@ function Editor() {
     || hardwareProvenanceOpen || aboutOpen || shortcutsOpen
   );
   useEditorShortcuts({
-    nodeConfigurationId, overlayOpen, save, undo, redo, copySelection, deleteElements, pushHistory,
+    nodeConfigurationId, overlayOpen, save, undo, redo, copySelection: graph.copySelection, deleteElements: graph.deleteElements, pushHistory,
     setNodes, setEdges, setSelectedId, messageApi, nodes, selectedNodeIds, selectedEdgeIds,
     searchInputRef, clipboardRef, pasteIndexRef
   });
@@ -1153,119 +623,7 @@ function Editor() {
     messageApi.info('已丢弃本地草稿');
   };
 
-    const applyCalibrationParameters = (parameters: Record<string, unknown>) => {
-    const typeKey = String(selectedNode?.data.typeKey ?? '');
-    const supported = ['calibration.planar', 'calibration.cameraIntrinsics', 'image.undistort', 'calibration.handEye2D', 'calibration.handEye3D'];
-    if (!selectedId || !supported.includes(typeKey)) {
-      messageApi.warning('请先选择受支持的标定节点');
-      return;
-    }
-    setNodes((current) => current.map((node) =>
-      node.id === selectedId
-        ? { ...node, data: { ...node.data, parameters: { ...((node.data.parameters ?? {}) as Record<string, unknown>), ...parameters } } }
-        : node
-    ));
-    messageApi.success(`标定参数已写入节点（${typeKey}）`);
-  };
 
-  // 顶栏二级入口：高频动作（校验 / 保存 / 运行）常驻，其余按领域归入四个下拉菜单
-  // 动作名带上目标节点，让用户始终清楚“当前操作作用于谁”
-  const selectedLabel = selectedId ? (nodeLabels[selectedId] ?? selectedId) : '';
-  const targetSuffix = selectedLabel ? `：${selectedLabel}` : '';
-  const debugMenuItems: MenuProps['items'] = [
-    ...(debugSession ? [
-      { key: 'debug-state', label: `当前会话：${debugStatus.text}`, disabled: true },
-      { key: 'debug-continue', label: '继续调试', disabled: anyBusy || debugSession.status !== 'halted', onClick: () => void continueDebugSession() },
-      { key: 'debug-cached-node', label: `用缓存输入运行节点${targetSuffix}`, disabled: anyBusy || debugSession.status === 'faulted' || !selectedId, onClick: () => void runSelectedNodeInSession() },
-      { key: 'debug-end', label: '结束调试会话', danger: true, disabled: anyBusy, onClick: () => void endDebugSession() },
-      { type: 'divider' as const }
-    ] : []),
-    { key: 'breakpoint', label: `切换断点${targetSuffix}`, disabled: !selectedId, onClick: toggleBreakpoint },
-    { key: 'run-node', label: `运行节点${targetSuffix}`, disabled: anyBusy || Boolean(debugSession) || !selectedId || selectedNode?.data.typeKey === 'module.call', onClick: runNode },
-    { key: 'run-from-here', label: `从此处运行${targetSuffix}`, disabled: anyBusy || Boolean(debugSession) || !selectedId || selectedNode?.data.typeKey === 'module.call', onClick: runFromHere },
-    { type: 'divider' },
-    ...(hasSideEffectNodes ? [{ key: 'debug-side-effects', label: <Checkbox checked={allowSideEffects} disabled={anyBusy || Boolean(debugSession)} onChange={(event) => setAllowSideEffects(event.target.checked)}>允许真实设备写入</Checkbox> }] : []),
-    { key: 'debug-breakpoints', label: `开始断点调试${breakpoints.length ? `（${breakpoints.length}）` : ''}`, disabled: anyBusy || hasModuleCalls || Boolean(debugSession) || breakpoints.length === 0, onClick: () => void startDebugSession() },
-    { key: 'core-dsl', label: '查看核心 DSL', disabled: compileBusy, onClick: inspectDsl }
-  ];
-
-  // 节点右键菜单：高频动作就地可达，不必再去找顶栏菜单；副行（extra）显示对应快捷键
-  const contextNode = nodeContextMenu ? nodes.find((node) => node.id === nodeContextMenu.nodeId) : undefined;
-  const contextNodeLabel = contextNode ? (nodeLabels[contextNode.id] ?? contextNode.id) : '';
-  const contextTargetSuffix = contextNodeLabel ? `：${contextNodeLabel}` : '';
-  const nodeContextMenuItems: MenuProps['items'] = [
-    { key: 'configure', label: `配置节点${contextTargetSuffix}`, disabled: !contextNode, onClick: () => { if (contextNode) openNodeConfiguration(contextNode.id); } },
-    { key: 'view-image', label: `查看图像${contextTargetSuffix}`, disabled: !contextNode, onClick: () => { if (contextNode) openNodeConfiguration(contextNode.id, 'image'); } },
-    { key: 'run-node', label: `运行此节点${contextTargetSuffix}`, disabled: anyBusy || Boolean(debugSession) || !contextNode || contextNode.data.typeKey === 'module.call', onClick: runNode },
-    { key: 'run-from-here', label: `从此处运行${contextTargetSuffix}`, disabled: anyBusy || Boolean(debugSession) || !contextNode || contextNode.data.typeKey === 'module.call', onClick: runFromHere },
-    { key: 'breakpoint', label: `切换断点${contextTargetSuffix}`, disabled: !contextNode, onClick: toggleBreakpoint },
-    { type: 'divider' },
-    { key: 'copy', label: `复制节点${contextTargetSuffix}`, extra: 'Ctrl+C', onClick: copySelection },
-    { key: 'delete', label: `删除节点${contextTargetSuffix}`, extra: 'Del', danger: true, disabled: !contextNode, onClick: () => { if (nodeContextMenu) deleteElements([nodeContextMenu.nodeId], []); } }
-  ];
-
-  const deviceMenuItems: MenuProps['items'] = [
-    { key: 'cameras', label: '相机', onClick: () => setCamerasOpen(true) },
-    { key: 'robots', label: '机器人', onClick: () => setRobotsOpen(true) },
-    { key: 'devices', label: '设备 / PLC', onClick: () => setDevicesOpen(true) },
-    { type: 'divider' },
-    { key: 'calibration', label: '标定', onClick: () => setCalibrationOpen(true) },
-    { key: 'frames', label: '坐标系', onClick: () => setFramesOpen(true) },
-    { type: 'divider' },
-    { key: 'hardware', label: '硬件信息', onClick: () => setHardwareProvenanceOpen(true) },
-    { key: 'diagnostics', label: '诊断中心', onClick: () => setDiagnosticsOpen(true) }
-  ];
-
-  const productionMenuItems: MenuProps['items'] = [
-    { key: 'jobs', label: '配方管理', onClick: () => setJobsOpen(true) },
-    { key: 'traces', label: '运行追溯', onClick: () => setTracesOpen(true) },
-    { key: 'production', label: '生产运行', onClick: () => setProductionOpen(true) }
-  ];
-
-  const toolMenuItems: MenuProps['items'] = [
-    // 目录/插件规模从顶栏收进菜单，降低顶栏视觉权重
-    { type: 'group', label: `节点目录 · ${catalogSource === 'runtime' ? '运行时' : '本地'} ${catalog.length}（schema ${catalogSchemaVersion}）` },
-    { type: 'group', label: `插件 ${plugins.filter((p) => p?.loaded).length} 个已加载` },
-    { type: 'divider' },
-    { key: 'undo', label: `撤销${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`, disabled: !history.canUndo, onClick: undo },
-    { key: 'redo', label: `重做${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`, disabled: !history.canRedo, onClick: redo },
-    { key: 'shortcuts', label: '键盘快捷键…', onClick: () => setShortcutsOpen(true) },
-    { type: 'divider' },
-    { key: 'plugins', label: '插件', onClick: () => setPluginsOpen(true) },
-    { key: 'modules', label: '可复用模块', onClick: () => setModulesOpen(true) },
-    { key: 'tuning', label: '参数调优', onClick: () => setTuningOpen(true) },
-    { key: 'model-packages', label: '外部训练包', onClick: () => setModelPackagesOpen(true) },
-    { key: 'model-assets', label: '模型资产', onClick: () => setModelAssetsOpen(true) },
-    { key: 'validation', label: '数据集验证', onClick: () => setValidationOpen(true) },
-    { type: 'divider' },
-    { key: 'layout-edit', label: '布局：标准布局' },
-    { key: 'layout-image', label: '布局：宽画布' },
-    { key: 'layout-reset', label: '布局：复位为预设尺寸' },
-    { type: 'divider' },
-    { key: 'load', label: '加载已保存工作流', onClick: () => void openWorkflowPicker() },
-    { key: 'theme', label: themeMode === 'dark' ? '切换到浅色主题' : '切换到深色主题', onClick: toggleTheme },
-    { key: 'about', label: '关于 VisionStudio', onClick: () => setAboutOpen(true) }
-  ];
-
-  // 领域菜单先收进“更多”，更窄时再收起文件操作；流程名和执行动作独占第二行。
-  const moreMenu: MenuProps = {
-    items: [
-      { key: 'more-template', label: '从模板新建', onClick: showTemplates },
-      { key: 'more-open', label: '打开已有流程', onClick: () => void openWorkflowPicker() },
-      { type: 'divider' },
-      ...debugMenuItems,
-      ...deviceMenuItems,
-      ...productionMenuItems,
-      ...toolMenuItems
-    ],
-    selectable: true,
-    selectedKeys: layout.preset === 'custom' ? [] : [layout.preset],
-    onClick: ({ key }) => {
-      if (key === 'layout-edit') applyLayoutPreset('edit');
-      else if (key === 'layout-image') applyLayoutPreset('image');
-      else if (key === 'layout-reset') applyLayoutPreset(layout.preset === 'custom' ? 'edit' : layout.preset);
-    }
-  };
 
   if (runtimeOnly) return <>
     <ErrorBoundary variant="panel" scope="生产运行">
@@ -1278,6 +636,40 @@ function Editor() {
       <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
     </ErrorBoundary>
   </>;
+
+  const canvas: EditorCanvasAreaProps = {
+    layout, applyLayoutPreset, toggleFocusMode, focusMode, imagePreviewOpen, exitFocusMode, setImagePreviewOpen,
+    compactNodes, setCompactNodes, selectedNode, selectedId, openNodeConfiguration, selectedNodeIds,
+    alignSelection: graph.alignSelection, history, undo, redo, anyBusy, selectedEdgeIds,
+    deleteElements: graph.deleteElements, searchInputRef, searchQuery, setSearchQuery, searchOpen, setSearchOpen,
+    searchMatches, focusNode: graph.focusNode, fitView, nodes, edges, displayEdges, themeMode,
+    isValidConnection: graph.isValidConnection, handleNodesChange: graph.handleNodesChange,
+    handleEdgesChange: graph.handleEdgesChange, onConnect: graph.onConnect, setConnectionPicker,
+    onConnectEnd: graph.onConnectEnd, setDragging, pushHistory, setSelectedId, flowAreaRef,
+    onDrop: graph.onDrop, cancelLongPress, longPressRef, openNodeMenuAt, draftNotice, locale, restoreDraft,
+    discardDraft, showTemplates, openWorkflowPicker, connectionPicker, connectionPickerRef, catalog,
+    recentNodeTypes, addNode: graph.addNode, nodeContextMenu, setNodeContextMenu, nodeContextMenuItems,
+    designerWorkflowId, nodeLabels, result, resultStale, running, debugBusy
+  };
+
+  const overlays: EditorOverlaysProps = {
+    compiledDsl, closeDsl, workflowChanges, pendingGuard, guardingSave, commandOpen, setCommandOpen, catalog,
+    paletteTargets, runPaletteCommand: runCommand, addNode: graph.addNode, templateOpen, setTemplateOpen,
+    demoKey, guardUnsaved, applyDemo, openWorkflowPicker, workflowPickerOpen, setWorkflowPickerOpen,
+    savedWorkflows, workflowListLoading, workflowListError, workflowToLoad, setWorkflowToLoad,
+    loadSelectedSavedWorkflow, workflowImport, shortcutsOpen, setShortcutsOpen
+  };
+
+  const panels: EditorPanelsProps = {
+    camerasOpen, setCamerasOpen, robotsOpen, setRobotsOpen, devicesOpen, setDevicesOpen,
+    framesOpen, setFramesOpen, calibrationOpen, setCalibrationOpen, selectedNode, applyCalibrationParameters: graph.applyCalibrationParameters,
+    jobsOpen, setJobsOpen, workflowPayload, workflowChanges, applyResult,
+    tracesOpen, setTracesOpen, traceRunId, setTraceRunId, modelPackagesOpen, setModelPackagesOpen,
+    modelAssetsOpen, setModelAssetsOpen, validationOpen, setValidationOpen, tuningOpen, setTuningOpen,
+    catalog, selectedId, messageApi, modulesOpen, setModulesOpen, insertModule, upgradeSelectedModule,
+    productionOpen, setProductionOpen, diagnosticsOpen, setDiagnosticsOpen, aboutOpen, setAboutOpen,
+    hardwareProvenanceOpen, setHardwareProvenanceOpen, pluginsOpen, setPluginsOpen, refreshCatalog
+  };
 
   return (
     <div
@@ -1304,7 +696,7 @@ function Editor() {
       />
 
       <main className="workspace">
-        <aside className="left-panel"><Toolbox catalog={catalog} recentTypes={recentNodeTypes} onAddNode={(type) => addNode(type)} /></aside>
+        <aside className="left-panel"><Toolbox catalog={catalog} recentTypes={recentNodeTypes} onAddNode={(type) => graph.addNode(type)} /></aside>
         <SplitHandle
           axis="x"
           label="调整工具箱宽度"
@@ -1320,236 +712,7 @@ function Editor() {
           onToggleCollapse={() => updateLayout({ leftCollapsed: !layout.leftCollapsed })}
         />
 
-        <section className="center-panel">
-          <div className="workspace-toolbar">
-            <div className="canvas-toolbar" role="toolbar" aria-label="画布编辑工具">
-              <div className="canvas-search">
-                <Input
-                  ref={searchInputRef}
-                  size="small"
-                  allowClear
-                  className="canvas-search-input"
-                  placeholder="画布中查找（Ctrl+F）"
-                  value={searchQuery}
-                  onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true); }}
-                  onFocus={() => setSearchOpen(true)}
-                  onBlur={() => setSearchOpen(false)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && searchMatches.length > 0) {
-                      focusNode(searchMatches[0].id);
-                      setSearchOpen(false);
-                    }
-                    if (event.key === 'Escape') {
-                      setSearchQuery('');
-                      setSearchOpen(false);
-                    }
-                  }}
-                />
-                {searchOpen && searchQuery.trim() !== '' && (
-                  // 用 mousedown 阻止默认行为，点结果时输入框不失焦，onClick 才能拿到这一次点击
-                  <div className="canvas-search-results" onMouseDown={(event) => event.preventDefault()}>
-                    <div className="canvas-search-count">
-                      命中 {searchMatches.length} / {nodes.length}{searchMatches.length > 8 ? '（仅显示前 8 条）' : ''}
-                    </div>
-                    {searchMatches.slice(0, 8).map((node) => (
-                      <button
-                        key={node.id}
-                        type="button"
-                        className="canvas-search-item"
-                        title="定位并选中该节点"
-                        onClick={() => { focusNode(node.id); setSearchOpen(false); }}
-                      >
-                        <span className="canvas-search-label">{String(node.data.label ?? node.id)}</span>
-                        <small>{node.id}</small>
-                      </button>
-                    ))}
-                    {searchMatches.length === 0 && <div className="canvas-search-empty">无匹配节点</div>}
-                  </div>
-                )}
-              </div>
-              <span className="canvas-toolbar-divider" />
-              {/* 撤销/重做可见入口（P0）：高频编辑动作不再只藏在「工具」菜单与快捷键里；
-                  tooltip 带历史标签（如“撤销 · 连线”），运行中也随 anyBusy 一起禁用 */}
-              <Button size="small" className="canvas-history-button" disabled={!history.canUndo || anyBusy}
-                title={`撤销${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`} aria-label="撤销" onClick={undo}>↶</Button>
-              <Button size="small" className="canvas-history-button" disabled={!history.canRedo || anyBusy}
-                title={`重做${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`} aria-label="重做" onClick={redo}>↷</Button>
-              {selectedEdgeIds.length > 0 && <Button size="small" danger disabled={anyBusy}
-                aria-label={`删除选中连线 ${selectedEdgeIds.length} 条`}
-                title="删除选中的连线（Delete / Backspace）"
-                onClick={() => deleteElements([], selectedEdgeIds)}>删除连线 · {selectedEdgeIds.length}</Button>}
-              {selectedEdgeIds.length === 0 && <span className="canvas-edge-delete-hint" title="单击画布中的连线将其选中">连线：选中后按 Del 删除</span>}
-              <span className="canvas-toolbar-divider" />
-              <label className="canvas-compact-toggle" title="紧凑模式：压缩节点标题与端口间距，适合多端口的大型流程">
-                <Switch size="small" checked={compactNodes} onChange={setCompactNodes} />
-                <span>紧凑</span>
-              </label>
-              <Button size="small" disabled={!selectedNode} title="打开所选节点的参数、图像和详细说明（也可双击节点）" onClick={() => openNodeConfiguration(selectedId)}>节点配置</Button>
-              <Button size="small" type={imagePreviewOpen && !focusMode ? 'primary' : 'default'} aria-pressed={imagePreviewOpen && !focusMode} onClick={() => { if (focusMode) exitFocusMode(true); setImagePreviewOpen((open) => focusMode || !open); }}>图像预览</Button>
-            </div>
-
-            {selectedNodeIds.length >= 2 && (
-              <div className="canvas-align-toolbar" role="toolbar" aria-label="多选对齐工具">
-                <Tag style={{ marginInlineEnd: 0 }}>已选 {selectedNodeIds.length}</Tag>
-                <Button size="small" onClick={() => alignSelection('left')}>左对齐</Button>
-                <Button size="small" onClick={() => alignSelection('centerX')}>水平居中</Button>
-                <Button size="small" onClick={() => alignSelection('right')}>右对齐</Button>
-                <Button size="small" onClick={() => alignSelection('top')}>顶对齐</Button>
-                <Button size="small" onClick={() => alignSelection('centerY')}>垂直居中</Button>
-                <Button size="small" onClick={() => alignSelection('bottom')}>底对齐</Button>
-              </div>
-            )}
-
-            {/* 布局切换与编辑工具同处独立工具栏，结果区折叠后仍然可达。 */}
-            <div className="canvas-layout-toolbar">
-              <Button size="small" onClick={() => void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 })}
-                title="缩放并居中显示整个流程">适应画布</Button>
-              <Segmented
-                size="small"
-                value={layout.preset}
-                // 切预设即退出专注：由 applyLayoutPreset 统一处理（丢弃专注快照，布局完全由预设接管，P2）
-                onChange={(value) => { if (value !== 'custom') applyLayoutPreset(value as LayoutPreset); }}
-                options={[
-                  { label: '标准布局', value: 'edit' },
-                  { label: '宽画布', value: 'image' },
-                  ...(layout.preset === 'custom' ? [{ label: '自定义', value: 'custom' }] : [])
-                ]}
-              />
-              <Button
-                size="small"
-                type={focusMode ? 'primary' : 'default'}
-                onClick={toggleFocusMode}
-                title={focusMode ? '退出专注：还原进入前的面板布局' : '专注画布：收起工具箱与结果区'}
-              >
-                {focusMode ? '退出专注' : '专注'}
-              </Button>
-            </div>
-          </div>
-          <div className={`editor-content${imagePreviewOpen && !focusMode ? ' has-preview' : ''}`}>
-            {/* 触屏长按等价右键（2026-10-25）：React Flow 没有 onNodePointerDown，
-                用容器上的指针事件做委托；移动超过 10px 或抬起即取消，避免与拖拽/平移打架。 */}
-            <div className={`flow-area${compactNodes ? ' compact-nodes' : ''}`} style={{ position: 'relative' }} ref={flowAreaRef}
-              onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-              onPointerDown={(event) => {
-                if (event.pointerType !== 'touch') return;
-                const nodeElement = (event.target as HTMLElement).closest('.react-flow__node') as HTMLElement | null;
-                const nodeId = nodeElement?.getAttribute('data-id');
-                if (!nodeId) return;
-                cancelLongPress();
-                const { clientX, clientY } = event;
-                const timer = window.setTimeout(() => { longPressRef.current = undefined; openNodeMenuAt(nodeId, clientX, clientY); }, 500);
-                longPressRef.current = { timer, startX: clientX, startY: clientY };
-              }}
-              onPointerMove={(event) => {
-                const pending = longPressRef.current;
-                if (!pending) return;
-                if (Math.hypot(event.clientX - pending.startX, event.clientY - pending.startY) > 10) cancelLongPress();
-              }}
-              onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={cancelLongPress}>
-              {draftNotice && (
-                <div className="draft-recovery" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, width: 'min(640px, calc(100% - 24px))' }}>
-                  <Alert
-                    type="warning"
-                    showIcon
-                    title="检测到未保存的本地草稿"
-                    description={`${draftNotice.workflowName || draftNotice.workflowId || '未命名工作流'} · 保存于 ${new Date(draftNotice.savedAt).toLocaleString(locale)}`}
-                    action={(
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <Button size="small" type="primary" onClick={restoreDraft}>恢复草稿</Button>
-                        <Button size="small" onClick={discardDraft}>丢弃</Button>
-                      </div>
-                    )}
-                  />
-                </div>
-              )}
-
-              {/* 空画布引导（P1）：首屏/新流程时给出下一步动作 */}
-              {nodes.length === 0 && (
-                <div className="canvas-empty-state">
-                  <div className="canvas-empty-title">从左侧工具箱拖入节点，搭建你的第一条视觉流程</div>
-                  <div className="canvas-empty-actions">
-                    <Button size="small" type="primary" onClick={showTemplates}>从模板新建</Button>
-                    <Button size="small" onClick={() => void openWorkflowPicker()}>打开已有流程</Button>
-                  </div>
-                </div>
-              )}
-
-              <ReactFlow
-                nodes={nodes}
-                edges={displayEdges}
-                nodeTypes={nodeTypes}
-                colorMode={themeMode}
-                deleteKeyCode={null}
-                selectionKeyCode="Shift"
-                multiSelectionKeyCode={['Control', 'Meta', 'Shift']}
-                zoomOnDoubleClick={false}
-                isValidConnection={isValidConnection}
-                onNodesChange={handleNodesChange}
-                onEdgesChange={handleEdgesChange}
-                onConnect={onConnect}
-                // 连线进行中：临时恢复端口名（远缩放下也能确认落点）。写 dataset 而不是 className，避免与 React 的 className 互相覆盖
-                onConnectStart={() => {
-                  setConnectionPicker(undefined);
-                  if (flowAreaRef.current) flowAreaRef.current.dataset.connecting = 'true';
-                }}
-                onConnectEnd={(event, state) => {
-                  if (flowAreaRef.current) delete flowAreaRef.current.dataset.connecting;
-                  onConnectEnd(event, state);
-                }}
-                onMoveStart={() => { setConnectionPicker(undefined); cancelLongPress(); }}
-                onNodeDragStart={() => { cancelLongPress(); setDragging(true); pushHistory('移动节点'); }}
-                onNodeDragStop={() => setDragging(false)}
-                onSelectionDragStart={() => setDragging(true)}
-                onSelectionDragStop={() => setDragging(false)}
-                onNodeClick={(_, node) => setSelectedId(node.id)}
-                onNodeDoubleClick={(_, node) => openNodeConfiguration(node.id)}
-                onMove={(_, viewport) => syncZoomLevel(viewport)}
-                // 右键即选中：菜单里的“运行/断点”动作与用户所见目标一致
-                onNodeContextMenu={(event, node) => {
-                  event.preventDefault();
-                  cancelLongPress();
-                  openNodeMenuAt(node.id, event.clientX, event.clientY);
-                }}
-                fitView
-                fitViewOptions={{ padding: CANVAS_FIT_PADDING }}
-                // P2：右下角是画布唯一“空白处”——隐藏 React Flow 水印，避免与小地图按钮叠压
-                //（@xyflow/react v12 免费支持 proOptions.hideAttribution）
-                proOptions={{ hideAttribution: true }}
-                // 性能（2026-10-26）：只渲染视口内的节点与连线。大流程（100+ 节点）平移到局部时，
-                // 不再为视口外的节点维护 DOM 与 Konva/React 更新。
-                onlyRenderVisibleElements
-              >
-                <Background gap={18} size={1} />
-                <Controls />
-                <CanvasMiniMap nodeCount={nodes.length} />
-              </ReactFlow>
-
-              {/* 节点右键菜单：锚点为不可见占位，Dropdown 受控打开；点击菜单项或菜单外自动关闭 */}
-              {connectionPicker && (
-                <div className="connection-node-picker" ref={connectionPickerRef} style={{ left: connectionPicker.x, top: connectionPicker.y }} role="dialog" aria-label="添加兼容节点">
-                  <Toolbox catalog={catalog} recentTypes={recentNodeTypes} connection={connectionPicker}
-                    onClose={() => setConnectionPicker(undefined)}
-                    onAddNode={(type, port) => { if (port) addNode(type, connectionPicker.position, { ...connectionPicker, newPort: port }); }} />
-                </div>
-              )}
-              {nodeContextMenu && (
-                <Dropdown
-                  open
-                  trigger={['contextMenu']}
-                  menu={{ items: nodeContextMenuItems, onClick: () => setNodeContextMenu(undefined) }}
-                  onOpenChange={(open) => { if (!open) setNodeContextMenu(undefined); }}
-                >
-                  <div style={{ position: 'absolute', top: nodeContextMenu.y, left: nodeContextMenu.x, width: 1, height: 1 }} />
-                </Dropdown>
-              )}
-            </div>
-
-            {imagePreviewOpen && !focusMode && <WorkflowImagePreview key={designerWorkflowId} nodes={nodes} edges={edges} selectedId={selectedId}
-              nodeLabels={nodeLabels} result={result} stale={resultStale} running={running || debugBusy}
-              onClose={() => setImagePreviewOpen(false)} />}
-          </div>
-        </section>
-
+        <EditorCanvasArea {...canvas} />
       </main>
 
       {nodeConfigurationId && configurationNode && configurationCatalog && <NodeConfigurationDialog key={nodeConfigurationId} initialTab={configurationTab} open
@@ -1571,98 +734,14 @@ function Editor() {
         locateIssue={locateIssue}
         result={result}
         resultStale={resultStale}
-        focusNode={focusNode}
+        focusNode={graph.focusNode}
         onOpenTrace={(runId) => { setTraceRunId(runId); setTracesOpen(true); }}
         nodeLabels={nodeLabels}
         nodeTypeLabels={nodeTypeLabels}
       />
 
-      <Modal
-        open={compiledDsl !== undefined}
-        title="已编译的工作流 DSL"
-        width={860}
-        footer={null}
-        onCancel={closeDsl}
-      >
-        <pre className="dsl-view">{compiledDsl}</pre>
-      </Modal>
-
-      <Modal
-        open={pendingGuard !== undefined}
-        title="存在未保存的修改"
-        width={460}
-        closable={!guardingSave}
-        keyboard={!guardingSave}
-        maskClosable={!guardingSave}
-        onCancel={() => { if (!guardingSave) workflowChanges.cancel(); }}
-        footer={[
-          <Button key="cancel" disabled={guardingSave} onClick={workflowChanges.cancel}>取消</Button>,
-          <Button key="discard" danger disabled={guardingSave} onClick={workflowChanges.discard}>丢弃修改</Button>,
-          <Button
-            key="save"
-            type="primary"
-            loading={guardingSave}
-            onClick={() => void workflowChanges.saveAndContinue()}
-          >
-            保存并继续
-          </Button>
-        ]}
-      >
-        <p>当前工作流有未保存的修改，{pendingGuard?.label}前请选择如何处理：</p>
-      </Modal>
-
-      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} catalog={catalog}
-        targets={paletteTargets} onRunCommand={runPaletteCommand} onAddNode={(type) => addNode(type)} />
-
-      {/* P0-2：模板入口弹窗——分组/用途/预览，替换当前流程前显式确认；“打开已有流程”就近放置 */}
-      <TemplateGalleryModal open={templateOpen} onClose={() => setTemplateOpen(false)}
-        currentDemoKey={demoKey} catalog={catalog}
-        onApply={(key) => guardUnsaved('从模板新建', () => applyDemo(key))}
-        onOpenSaved={() => void openWorkflowPicker()} />
-
-      <WorkflowPickerModal open={workflowPickerOpen} onClose={() => setWorkflowPickerOpen(false)}
-        workflows={savedWorkflows} loading={workflowListLoading} error={workflowListError}
-        selected={workflowToLoad} onSelect={setWorkflowToLoad}
-        onLoad={loadSelectedSavedWorkflow} applying={workflowImport.loading} />
-
-      {/* 键盘快捷键一览（工具菜单）：快捷键此前只散落在悬停提示里，没有可查入口 */}
-      <ShortcutHelpModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-
-      <ErrorBoundary variant="panel" scope="相机" onDismiss={() => setCamerasOpen(false)}>
-        <CameraPanel open={camerasOpen} onClose={() => setCamerasOpen(false)} />
-      </ErrorBoundary>
-      <ErrorBoundary variant="panel" scope="机器人" onDismiss={() => setRobotsOpen(false)}>
-        <RobotPanel open={robotsOpen} onClose={() => setRobotsOpen(false)} />
-      </ErrorBoundary>
-      <ErrorBoundary variant="panel" scope="设备" onDismiss={() => setDevicesOpen(false)}>
-        <DevicePanel open={devicesOpen} onClose={() => setDevicesOpen(false)} />
-      </ErrorBoundary>
-      <LazyPanel open={framesOpen} label="图像帧" onClose={() => setFramesOpen(false)}><FrameTreePanel open onClose={() => setFramesOpen(false)} /></LazyPanel>
-      <LazyPanel open={calibrationOpen} label="标定" onClose={() => setCalibrationOpen(false)}><CalibrationPanel
-        open
-        onClose={() => setCalibrationOpen(false)}
-        canApplyToSelectedNode={['calibration.planar', 'calibration.cameraIntrinsics', 'image.undistort', 'calibration.handEye2D', 'calibration.handEye3D'].includes(String(selectedNode?.data.typeKey ?? ''))}
-        selectedNodeType={selectedNode ? String(selectedNode.data.typeKey) : undefined}
-        onApplyToSelectedNode={applyCalibrationParameters}
-      /></LazyPanel>
-      <LazyPanel open={jobsOpen} label="作业" onClose={() => setJobsOpen(false)}><JobPanel open onClose={() => setJobsOpen(false)} workflow={workflowPayload} prepareWorkflowChange={workflowChanges.prepare} onRunResult={applyResult} /></LazyPanel>
-      <LazyPanel open={tracesOpen} label="追溯" onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }}>
-        <TracePanel open initialRunId={traceRunId} onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }} />
-      </LazyPanel>
-      <LazyPanel open={modelPackagesOpen} label="模型包" onClose={() => setModelPackagesOpen(false)}><ModelPackagePanel open onClose={() => setModelPackagesOpen(false)} /></LazyPanel>
-      <LazyPanel open={modelAssetsOpen} label="模型资产" onClose={() => setModelAssetsOpen(false)}><ModelAssetPanel open onClose={() => setModelAssetsOpen(false)} /></LazyPanel>
-      <LazyPanel open={validationOpen} label="数据集验证" onClose={() => setValidationOpen(false)}><DatasetValidationPanel open onClose={() => setValidationOpen(false)} currentWorkflow={workflowPayload} /></LazyPanel>
-      <LazyPanel open={tuningOpen} label="参数调优" onClose={() => setTuningOpen(false)}><ParameterTuningPanel open onClose={() => setTuningOpen(false)} currentWorkflow={workflowPayload} catalog={catalog} initialNodeId={selectedId} prepareWorkflowChange={workflowChanges.prepare} onApplied={() => { setTuningOpen(false); messageApi.success('已将调优后的候选方案应用到设计器'); }} /></LazyPanel>
-      <LazyPanel open={modulesOpen} label="流程模块" onClose={() => setModulesOpen(false)}><WorkflowModulePanel open onClose={() => setModulesOpen(false)} currentWorkflow={workflowPayload} selectedNodeId={selectedId} selectedNodeType={String(selectedNode?.data.typeKey ?? '')} prepareWorkflowChange={workflowChanges.prepare} onInsertModule={insertModule} onUpgradeSelected={upgradeSelectedModule} /></LazyPanel>
-      <ErrorBoundary variant="panel" scope="生产运行" onDismiss={() => setProductionOpen(false)}>
-        <ProductionPanel open={productionOpen} onClose={() => setProductionOpen(false)} />
-      </ErrorBoundary>
-      <ErrorBoundary variant="panel" scope="诊断" onDismiss={() => setDiagnosticsOpen(false)}>
-        <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
-      </ErrorBoundary>
-      <LazyPanel open={aboutOpen} label="关于" onClose={() => setAboutOpen(false)}><AboutPanel open onClose={() => setAboutOpen(false)} /></LazyPanel>
-      <LazyPanel open={hardwareProvenanceOpen} label="硬件溯源" onClose={() => setHardwareProvenanceOpen(false)}><HardwareProvenancePanel open onClose={() => setHardwareProvenanceOpen(false)} /></LazyPanel>
-      <LazyPanel open={pluginsOpen} label="插件包" onClose={() => setPluginsOpen(false)}><PluginPackagePanel open onClose={() => setPluginsOpen(false)} onCatalogRefresh={refreshCatalog} /></LazyPanel>
+      <EditorOverlays {...overlays} />
+      <EditorPanels {...panels} />
     </div>
   );
 }

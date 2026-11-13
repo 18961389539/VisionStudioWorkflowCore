@@ -1,6 +1,7 @@
 # 节点级遥测（ActivitySource）
 
-引擎有 `RunObservability`、`RollingFileLogger` 和 `/api/health`，但它们回答的是"这一轮跑成没跑成"。
+引擎有 `RunObservability`、`RollingFileLogger` 和 `/api/health`（认证后读取；匿名探针 `/healthz` 只报
+status/ready/productionReady），但它们回答的是"这一轮跑成没跑成"。
 要回答"哪一类节点在拖慢整条流程""超时集中在哪个节点"，只能靠 `node-durations.json` 的累计分位数——
 拿不到单次执行的耗时，也没法跟外部 APM 对接。
 
@@ -71,6 +72,24 @@ ActivitySource.AddActivityListener(listener);
 
 导出到 OpenTelemetry 时把 `EngineTelemetry.SourceName` 加进 `AddSource(...)`，
 不要按 ActivitySource 的实例名去猜——名字改了要同步改这里，所以它是 `const`。
+
+## Prometheus 指标出口（2026-11-13）
+
+`GET /api/diagnostics/metrics`（Operator）按 Prometheus 0.0.4 文本格式暴露进程内可观测值，
+不需要额外 NuGet 依赖，也不改变任何埋点路径：
+
+| 指标 | 类型 | 来源 |
+|---|---|---|
+| `visionstudio_node_spans_captured_total` | counter | `NodeSpanBuffer.Snapshot().Captured` |
+| `visionstudio_node_duration_{p50,p95,max}_milliseconds{node_type}` | gauge | `NodeDurationStatistics` 最近 256 个样本 |
+| `visionstudio_node_duration_samples{node_type}` / `visionstudio_node_timeouts_window{node_type}` | gauge | 同上（窗口值，不是累计值） |
+| `visionstudio_production_*` | counter/gauge | 生产运行状态与周期计数 |
+| `visionstudio_audit_persist_failures_total` / `visionstudio_log_*_total` | counter | 审计/滚动日志失败台账 |
+| `visionstudio_script_worker_*` | counter/gauge | 脚本 Worker 重启、忙碌数、熔断 |
+| `visionstudio_camera_sdk_failures_total{driver,operation}` | counter | 相机 SDK 静默失败台账 |
+
+抓取端需要携带 Operator 会话（与其它诊断端点一致）：先 `POST /api/auth/login` 获取 Cookie，
+再带 Cookie 抓取。指标里不含参数值、图像或文件路径。
 
 ## 边界
 

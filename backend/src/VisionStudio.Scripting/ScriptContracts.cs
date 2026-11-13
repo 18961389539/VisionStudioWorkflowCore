@@ -309,7 +309,8 @@ public sealed class ScriptExecutionResult : IDisposable
     public double ExecuteMs { get; }
     public string SourceHash { get; }
 
-    internal Mat? TakeImage()
+    /// <summary>Transfers image ownership to the caller; Dispose will no longer release it.</summary>
+    public Mat? TakeImage()
     {
         var image = _image;
         _image = null;

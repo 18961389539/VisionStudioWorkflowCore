@@ -614,7 +614,9 @@ WHERE t.run_id=$run;
 
     public string? FindPreviewPath(string runId)
     {
-        using var connection = _db.OpenConnectionAsync().GetAwaiter().GetResult();
+        // 同步读路径：SqliteMetadataDatabase.OpenConnection 就是为这类"微秒级打开"准备的，
+        // 不再用 GetAwaiter().GetResult() 在线程池上阻塞异步打开。
+        using var connection = _db.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT preview_relative_path FROM run_traces WHERE run_id=$run AND has_preview=1;";
         command.Parameters.AddWithValue("$run", runId);
@@ -626,7 +628,7 @@ WHERE t.run_id=$run;
 
     public string? FindReplayInputPath(string runId)
     {
-        using var connection = _db.OpenConnectionAsync().GetAwaiter().GetResult();
+        using var connection = _db.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT replay_relative_path FROM run_traces WHERE run_id=$run AND has_replay_input=1;";
         command.Parameters.AddWithValue("$run", runId);

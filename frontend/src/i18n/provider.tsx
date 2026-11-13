@@ -8,6 +8,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { dateLocale, getInitialLang, localizeStatus, persistLang, translate, type Lang, type MessageKey, type MessageParams } from './index';
+import { hasCatalogData } from './catalog';
 
 export type I18nContextValue = {
   lang: Lang;
@@ -40,8 +41,24 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => getInitialLang());
   const langRef = useRef<Lang>(lang);
   langRef.current = lang; // render-phase update: `t()` must be correct in the same render that switches language
+  const catalogLoadToken = useRef(0);
 
   const setLang = useCallback((next: Lang) => {
+    // 中文词表按需加载：切到 zh 时等 chunk 就绪再切换，避免整棵树先渲染英文再重绘。
+    if (next === 'zh' && !hasCatalogData()) {
+      const token = ++catalogLoadToken.current;
+      void import('./catalog.zh').then(() => {
+        if (catalogLoadToken.current !== token) return;
+        setLangState('zh');
+        persistLang('zh');
+      }).catch(() => {
+        if (catalogLoadToken.current !== token) return;
+        setLangState('zh');
+        persistLang('zh');
+      });
+      return;
+    }
+    catalogLoadToken.current++;
     setLangState(next);
     persistLang(next);
   }, []);

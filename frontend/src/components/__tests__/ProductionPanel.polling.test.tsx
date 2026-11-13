@@ -2,6 +2,9 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductionPanel from '../ProductionPanel';
 
+// 生产状态由 /hubs/monitor 推送；本文件只验证轮询兜底与失败降级（2026-11-13 起 10 s）。
+vi.mock('../../useMonitorStream', () => ({ useMonitorSnapshot: () => undefined }));
+
 function okResponse(data: unknown): Response {
   return { ok: true, status: 200, json: async () => data } as Response;
 }
@@ -66,7 +69,7 @@ describe('ProductionPanel polling (R04)', () => {
     expect(screen.getByText(/数据更新于/)).toBeTruthy();
 
     // 第二次轮询返回 503：必须显示"数据已过期"并给出最后成功时间，绝不能再显示"数据更新于当前时间"。
-    await act(async () => { vi.advanceTimersByTime(1100); });
+    await act(async () => { vi.advanceTimersByTime(10_100); });
     await flush();
     const header = screen.getByText(/数据已过期|数据更新于/).textContent ?? '';
     expect(header).toContain('数据已过期');
@@ -89,7 +92,7 @@ describe('ProductionPanel polling (R04)', () => {
     }));
 
     render(<ProductionPanel open onClose={() => undefined} embedded />);
-    // 慢但健康的响应（3 秒 > 1 秒轮询间隔）：在途期间跳过 tick，绝不取消上一次请求。
+    // 慢但健康的响应（3 秒 < 10 秒轮询间隔）：在途期间跳过 tick，绝不取消上一次请求。
     await act(async () => { vi.advanceTimersByTime(3000); });
     expect(statusCalls).toBe(1);
 
@@ -97,7 +100,7 @@ describe('ProductionPanel polling (R04)', () => {
     await flush();
     expect(document.body.textContent).toContain('数据更新于'); // 慢响应最终显示为新鲜数据
 
-    await act(async () => { vi.advanceTimersByTime(1100); });
+    await act(async () => { vi.advanceTimersByTime(10_100); });
     await flush();
     expect(statusCalls).toBeGreaterThanOrEqual(2); // 完成后下一轮正常开始
   });

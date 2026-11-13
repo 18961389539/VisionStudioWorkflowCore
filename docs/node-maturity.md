@@ -37,6 +37,10 @@
 前端在发布对话框里把门禁渲染成"可继续的一步"：列出节点与理由 + 必勾选确认，而不是退化成
 "配方或发布条件已变化，请重新核对"——后者只会训练出"看到红字就再点一次"的习惯。
 
+> 2026-11-13：`script.csharp` 纳入 Preview。它是**进程内 trusted-code 运行时**——语法树 denylist
+> 只是纵深防御，不是 OS 沙箱；保存/运行/脚本编辑器接口已经限定工程师，发布时还必须显式确认。
+> 真正的强隔离（脚本下沉到 plugin worker 进程）是后续架构项，不在本次边界内。
+
 已知边界：`module.call` 引用的模块内部节点不在当前工作流的 `Nodes` 里，门禁不递归展开。模块自身
 发布走同一条 publish 路径，因此模块发布时已覆盖；门禁保证的是"这份工作流里写着的节点"。
 
@@ -51,7 +55,7 @@
 
 `inference.obb`、`inference.pose`、`inference.instanceSegmentation`
 
-**Preview（15）**——每条的理由都写在 `NodeMaturityCatalog.cs` 里，可对回文档原文：
+**Preview（16）**——每条的理由都写在 `NodeMaturityCatalog.cs` 里，可对回文档原文：
 
 `contour.fromMask`、`region.fromMask`（软掩码截断 8 位，组件数上限）、
 `device.serialPort`、`device.tcpRequest`、`device.udpMessage`（无长连接/TLS/重传，串口无硬件级测试）、
@@ -59,7 +63,8 @@
 `measure.gear`（只直齿）、`measure.profileFilter`、`measure.roughness`（只当趋势）、
 `measure.thread`（silhouette，中径是估计）、`tolerance.stackup`（RSS ±3σ 独立假设）、
 `recognition.barcodeQuality`（MOD 近似，不能出合规报告）、
-`output.database`（只追加、单条事务）、`value.counter`（5s 快照窗口）
+`output.database`（只追加、单条事务）、`value.counter`（5s 快照窗口）、
+`script.csharp`（进程内 trusted-code 运行时：语法树 denylist 是纵深防御，不是 OS 沙箱；发布含脚本的流程必须显式确认，导入的第三方流程按代码审批）
 
 ## 界面
 

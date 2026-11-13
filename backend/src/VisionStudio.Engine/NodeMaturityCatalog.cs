@@ -89,6 +89,9 @@ public static class NodeMaturityCatalog
             ["region.fromMask"] = new(NodeMaturity.Preview,
                 "掩码统一转 8 位：0–1 浮点软掩码会被截成 0/255；组件数沿用 VisionRegion 的 10000 上限（docs/mask-to-region-contour.md）。"),
 
+            ["script.csharp"] = new(NodeMaturity.Preview,
+                "进程内 trusted-code 运行时：语法树 denylist 是纵深防御，不是 OS 沙箱；脚本可调用未列入禁用表的 BCL/OpenCV API。发布含脚本的流程必须显式确认，导入的第三方流程按代码审批（目录长描述与 CSharpScriptRunner.cs 同步声明）。"),
+
             ["tolerance.stackup"] = new(NodeMaturity.Preview,
                 "RSS 按各环独立 ±3σ 假设，不处理相关环；增减环靠 sign 显式给出（docs/measurement-gap-nodes.md）。"),
 

@@ -5,13 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductionPanel from '../components/ProductionPanel';
 import { defaultProductionConfig as defaults } from '../productionConfig';
 
+// 推送通道单独测试；这里只覆盖轮询兜底（2026-11-13 起为 10 s）。
+vi.mock('../useMonitorStream', () => ({ useMonitorSnapshot: () => undefined }));
+
 const ok = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as Response;
 const empty = () => ({ ok: true, status: 204 }) as Response;
 const stopped = { state: 'Stopped', productionLocked: false, cycleCount: 0, okCount: 0, ngCount: 0,
   errorCount: 0, consecutiveFailures: 0, watchdogTrips: 0, lastDurationMs: 0 };
 const config = { ...defaults, jobId: 'A', maxRecoveryAttempts: 7 };
 const flush = async () => { await act(async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); }); };
-const tick = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); };
+const tick = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(10_000); }); };
 const cycleInput = () => screen.getByRole('spinbutton', { name: '周期延迟' });
 const saveButton = () => screen.getByRole('button', { name: '保存配置' });
 const startButton = () => screen.getByRole('button', { name: '启动生产' });

@@ -69,6 +69,7 @@
 | [`engine-telemetry.md`](engine-telemetry.md) | 节点级 `ActivitySource` 遥测：标签口径、span 建在校验之后的原因 |
 | [`frame-mat-pool.md`](frame-mat-pool.md) | 相机帧 `Mat` 复用池：归还点、容量上限、不清零的安全前提、`/api/health` 计数 |
 | [`golden-regression.md`](golden-regression.md) | 流程级金样回归：固定 PNG 夹具、容差口径、重新生成后要改什么 |
+| [`script-worker-isolation-plan.md`](script-worker-isolation-plan.md) | 脚本节点下沉 Worker 进程的改造方案（Phase 0/1/2/3 已实施）：进程隔离、Job Object 硬化、超时/内存/重启语义 |
 
 ## 5. 写文档的约定
 

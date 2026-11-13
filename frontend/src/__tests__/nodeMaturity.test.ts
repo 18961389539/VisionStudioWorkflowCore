@@ -28,9 +28,10 @@ describe('node maturity level', () => {
     expect(experimental).toEqual(['inference.instanceSegmentation', 'inference.obb', 'inference.pose']);
 
     const preview = items.filter((item) => maturityLevel(item) === 'preview').map((item) => item.type);
-    expect(preview).toHaveLength(15);
+    expect(preview).toHaveLength(16);
     expect(preview).toContain('measure.thread');
     expect(preview).toContain('value.counter');
+    expect(preview).toContain('script.csharp');
 
     // Stable 节点不写字段：目录 JSON 形状没有膨胀。
     const stableWithField = items.filter((item) => maturityLevel(item) === 'stable' && item.maturity != null);

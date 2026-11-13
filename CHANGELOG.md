@@ -84,6 +84,9 @@
   现场联调请使用 Testing 环境或真实设备。
 - 非 loopback 明文监听默认拒绝启动；隔离测试网需要显式设置
   `Security:AllowInsecureRemoteTransport=true`。
+- **健康检查拆分（2026-11-13）**：匿名探针改为 `GET /healthz`（仅 `status/ready/productionReady`）；
+  `GET /api/health` 需要登录，保留降级原因、阻断项与内部计数。现场监控、反向代理与编排的
+  健康检查请改用 `/healthz`，否则会收到 401。
 
 ### 回滚
 

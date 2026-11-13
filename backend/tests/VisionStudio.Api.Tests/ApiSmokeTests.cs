@@ -28,6 +28,12 @@ public sealed class ApiSmokeTests : IClassFixture<VisionStudioApiFactory>
         Assert.True(logging.TryGetProperty("writeFailures", out _));
         Assert.True(logging.TryGetProperty("flushFailures", out _));
         Assert.True(logging.TryGetProperty("drainTimeouts", out _));
+
+        // 相机厂商 SDK 的静默失败台账同样经 health 暴露（2026-11-13）。
+        Assert.Equal(JsonValueKind.Array, health.GetProperty("cameraSdk").ValueKind);
+
+        // 脚本 Worker 状态（Phase 2）：匿名 health 只暴露状态位，不暴露进程号/程序集路径。
+        Assert.Equal(JsonValueKind.Object, health.GetProperty("scriptWorker").ValueKind);
     }
 
     [Fact]

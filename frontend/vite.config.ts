@@ -47,6 +47,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
+    // 单元测试默认按中文渲染：预装 catalog.zh 词表，避免组件断言看到英文回落（2026-11-13）。
+    setupFiles: ['./src/testSetup.ts'],
     // 与 cacheDir 同理：Vitest 5 的 fsModuleCache 默认写 node_modules/.vitest-cache，
     // 单独指到系统临时目录，避免任何一处缓存清理撞上批量删除守卫。
     fsModuleCachePath: path.join(os.tmpdir(), 'visionstudio-vitest-module-cache'),

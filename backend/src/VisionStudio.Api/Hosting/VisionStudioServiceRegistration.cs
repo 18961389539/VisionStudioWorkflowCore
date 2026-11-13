@@ -14,6 +14,7 @@ using VisionStudio.Api.Diagnostics;
 using VisionStudio.Engine.Diagnostics;
 using VisionStudio.Engine;
 using VisionStudio.Api.Security;
+using Microsoft.Extensions.Options;
 using VisionStudio.Api.Media;
 using VisionStudio.Api.Provenance;
 using VisionStudio.Engine.Camera;
@@ -21,6 +22,7 @@ using VisionStudio.Engine.Device;
 using VisionStudio.Engine.Nodes;
 using VisionStudio.Engine.Robot;
 using VisionStudio.Engine.Runtime;
+using VisionStudio.Engine.Scripting;
 
 namespace VisionStudio.Api.Hosting;
 
@@ -285,6 +287,16 @@ public static class VisionStudioServiceRegistration
         services.AddBuiltInNodeExecutors();
         services.Configure<PluginWorkerOptions>(configuration.GetSection("PluginWorkers"));
         services.AddSingleton<PluginWorkerSupervisor>();
+        services.Configure<ScriptWorkerOptions>(configuration.GetSection("ScriptWorkers"));
+        services.AddSingleton<ScriptWorkerSupervisor>();
+        services.AddSingleton<InProcessScriptExecutionBackend>();
+        services.AddSingleton<IScriptExecutionBackend>(provider =>
+        {
+            var mode = provider.GetRequiredService<IOptions<ScriptWorkerOptions>>().Value.IsolationMode;
+            return mode == ScriptIsolationMode.WorkerProcess
+                ? provider.GetRequiredService<ScriptWorkerSupervisor>()
+                : provider.GetRequiredService<InProcessScriptExecutionBackend>();
+        });
         services.AddSingleton<PluginBenchmarkStore>();
         services.AddSingleton<PluginPerformanceBenchmarkService>();
         services.AddSingleton<PluginManager>();

@@ -11,6 +11,7 @@
     <ProjectReference Include="..\VisionStudio.Camera.Basler\VisionStudio.Camera.Basler.csproj" />
     <ProjectReference Include="..\VisionStudio.Camera.Hikrobot\VisionStudio.Camera.Hikrobot.csproj" />
     <ProjectReference Include="..\VisionStudio.Plugin.Worker\VisionStudio.Plugin.Worker.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\VisionStudio.Script.Worker\VisionStudio.Script.Worker.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <!-- 测试需要直接驱动内部采样/释放等生命周期路径（并发与故障注入场景无法经 HTTP 制造） -->
@@ -39,5 +40,16 @@
   </Target>
   <Target Name="PublishPluginWorker" AfterTargets="Publish">
     <MSBuild Projects="..\VisionStudio.Plugin.Worker\VisionStudio.Plugin.Worker.csproj" Targets="Publish" Properties="Configuration=$(Configuration);PublishDir=$(PublishDir)" />
+  </Target>
+  <Target Name="CopyScriptWorkerForBuild" AfterTargets="Build">
+    <ItemGroup>
+      <_ScriptWorkerBuildFiles Include="..\VisionStudio.Script.Worker\bin\$(Configuration)\net10.0\VisionStudio.Script.Worker.dll" />
+      <_ScriptWorkerBuildFiles Include="..\VisionStudio.Script.Worker\bin\$(Configuration)\net10.0\VisionStudio.Script.Worker.deps.json" />
+      <_ScriptWorkerBuildFiles Include="..\VisionStudio.Script.Worker\bin\$(Configuration)\net10.0\VisionStudio.Script.Worker.runtimeconfig.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ScriptWorkerBuildFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+  </Target>
+  <Target Name="PublishScriptWorker" AfterTargets="Publish">
+    <MSBuild Projects="..\VisionStudio.Script.Worker\VisionStudio.Script.Worker.csproj" Targets="Publish" Properties="Configuration=$(Configuration);PublishDir=$(PublishDir)" />
   </Target>
 </Project>

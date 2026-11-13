@@ -88,7 +88,8 @@ public sealed partial class BaslerPylonCameraDevice : ICameraDevice, ICameraTele
             StopCore();
             if (_camera is not null)
             {
-                try { _camera.GetType().GetMethod("Close", Type.EmptyTypes)?.Invoke(_camera, null); } catch { }
+                try { _camera.GetType().GetMethod("Close", Type.EmptyTypes)?.Invoke(_camera, null); }
+                catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "close", ex); }
             }
             ReleaseSdkObjects();
             _state = CameraState.Closed;
@@ -324,15 +325,24 @@ public sealed partial class BaslerPylonCameraDevice : ICameraDevice, ICameraTele
     {
         if (_streamGrabber is not null && _state == CameraState.Streaming)
         {
-            try { _streamGrabber.GetType().GetMethod("Stop", Type.EmptyTypes)?.Invoke(_streamGrabber, null); } catch { }
+            try { _streamGrabber.GetType().GetMethod("Stop", Type.EmptyTypes)?.Invoke(_streamGrabber, null); }
+            catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "stop-grabbing", ex); }
         }
         if (_state != CameraState.Closed && _state != CameraState.Faulted) _state = CameraState.Open;
     }
 
     private void ReleaseSdkObjects()
     {
-        if (_converter is IDisposable converter) { try { converter.Dispose(); } catch { } }
-        if (_camera is IDisposable camera) { try { camera.Dispose(); } catch { } }
+        if (_converter is IDisposable converter)
+        {
+            try { converter.Dispose(); }
+            catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "dispose-converter", ex); }
+        }
+        if (_camera is IDisposable camera)
+        {
+            try { camera.Dispose(); }
+            catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "dispose-camera", ex); }
+        }
         _converter = null; _streamGrabber = null; _camera = null; _cameraInfo = null; _assembly = null;
     }
 
@@ -347,7 +357,8 @@ public sealed partial class BaslerPylonCameraDevice : ICameraDevice, ICameraTele
 
     public async ValueTask DisposeAsync()
     {
-        try { await CloseAsync(); } catch { }
+        try { await CloseAsync(); }
+        catch (Exception ex) { CameraSdkDiagnostics.RecordFailure(Driver, "dispose", ex); }
         _gate.Dispose();
     }
 }

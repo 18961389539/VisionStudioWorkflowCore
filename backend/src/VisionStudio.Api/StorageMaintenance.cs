@@ -881,7 +881,8 @@ public sealed class StorageMaintenanceMiddleware(RequestDelegate next)
     {
         var path = request.Path;
         if (HttpMethods.IsGet(request.Method))
-            return path.Equals("/api/health", StringComparison.OrdinalIgnoreCase) ||
+            return path.Equals("/healthz", StringComparison.OrdinalIgnoreCase) ||
+                   path.Equals("/api/health", StringComparison.OrdinalIgnoreCase) ||
                    path.Equals("/api/auth/status", StringComparison.OrdinalIgnoreCase) ||
                    path.Equals("/api/storage/backups", StringComparison.OrdinalIgnoreCase);
         if (HttpMethods.IsPost(request.Method))
@@ -896,7 +897,8 @@ public sealed class StorageMaintenanceMiddleware(RequestDelegate next)
     {
         var path = request.Path;
         if (HttpMethods.IsGet(request.Method))
-            return path.Equals("/api/health", StringComparison.OrdinalIgnoreCase) ||
+            return path.Equals("/healthz", StringComparison.OrdinalIgnoreCase) ||
+                   path.Equals("/api/health", StringComparison.OrdinalIgnoreCase) ||
                    path.Equals("/api/auth/status", StringComparison.OrdinalIgnoreCase);
         if (HttpMethods.IsPost(request.Method))
             return path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase) ||
