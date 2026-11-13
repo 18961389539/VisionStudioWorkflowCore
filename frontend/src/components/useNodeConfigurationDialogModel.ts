@@ -16,13 +16,16 @@ import {
 import { fetchShapeModelBase64 } from '../modelAssets';
 import { imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { maturityLevel } from '../nodeMaturity';
-import { effectiveSampleWidth, normalizeCaliperCircleArc } from '../caliperCircleSampling';
 import { useShapeMatchWorkspace } from './useShapeMatchWorkspace';
 import {
-  connectedCircleGeometry, connectedSearchLineGeometry, geometrySourceImageFrameNodeIds,
-  mapMeasurementGeometry, rigidPixelTransform, roiSourceFrameNodeIdsForEdge,
-  transformEndpointImageFrameNodeIds, transformMappedImageFrameNodeIds, transformSourceLineage
+  connectedCircleGeometry, connectedSearchLineGeometry,
+  mapMeasurementGeometry, rigidPixelTransform
 } from './nodeConfigurationGeometry';
+import { classifyMeasurementNode, MEASUREMENT_NODE_TYPES, resolveMeasurementConnections } from './nodeConfigurationMeasurementConflicts';
+import {
+  buildMeasurementGeometry, fitGeometryToBounds,
+  measurementGeometryParameters as buildGeometryParameters, parameterNumber
+} from './nodeConfigurationMeasurementGeometryModel';
 import { apiFetch } from '../apiClient';
 import { diagnostics, runs } from '../endpoints';
 import {
@@ -135,9 +138,14 @@ export function useNodeConfigurationDialogModel(props: Props) {
   const [discardOpen, setDiscardOpen] = useState(false);
   const externalChange = parameterFingerprint(configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem)) !== parameterFingerprint(baseline);
   const locked = disabled || previewBusy;
+  // 节点类型分流集中到 classifyMeasurementNode：此前 isShapeMatch/isImageCrop/... 七处散落定义，
+  // 加一种节点类型要翻整个文件。
+  const kind = classifyMeasurementNode(catalogItem.type);
+  const { isShapeMatch, isImageCrop, isPerspective, isRoiTransform, isCaliperCircle, isCaliperEdge, isMetrology } = kind;
   const roiInputEdge = inputEdge(edges, node.id, 'roi');
-  const measurementNodeTypes = ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperArray', 'measure.caliperCircle'];
-  const measurementImageInputEdge = measurementNodeTypes.includes(catalogItem.type)
+  // 保持 string[] 而不是 readonly：它经 return 暴露给渲染层，下游按可变数组消费。
+  const measurementNodeTypes: string[] = [...MEASUREMENT_NODE_TYPES];
+  const measurementImageInputEdge = kind.isMeasurement
     ? inputEdge(edges, node.id, 'image')
     : undefined;
   const measurementImageSource = nodes.find((item) => item.id === measurementImageInputEdge?.source);
@@ -146,11 +154,10 @@ export function useNodeConfigurationDialogModel(props: Props) {
     ? cropMaskSources[0].node : undefined;
   const croppedRoiConnected = Boolean(directCropMaskSource
     && outputPortMatches(roiInputEdge, directCropMaskSource.id, 'croppedRoi'));
-  const croppedImageNeedsRoiWarning = Boolean(measurementNodeTypes.includes(catalogItem.type)
+  const croppedImageNeedsRoiWarning = Boolean(kind.isMeasurement
     && cropMaskSources.length > 0 && !croppedRoiConnected);
   const connectedInputPorts = catalogItem.inputs.filter((input) => hasInputEdge(edges, node.id, input.name)).map((input) => input.name);
   const connectedRoiInput = Boolean(roiInputEdge && connectedInputPorts.some((port) => port.toLowerCase() === 'roi'));
-  const isShapeMatch = catalogItem.type === 'match.shape';
   const modelAssetId = typeof draft.modelAssetId === 'string' ? draft.modelAssetId.trim() : '';
   const modelAssetVersion = Number(draft.modelAssetVersion ?? 0);
   const hydratedAssetRef = useRef('');
@@ -177,23 +184,6 @@ export function useNodeConfigurationDialogModel(props: Props) {
       .finally(() => { if (!cancelled) setAssetBusy(false); });
     return () => { cancelled = true; };
   }, [open, isShapeMatch, modelAssetId, modelAssetVersion, draft.trainedModelData, node.id, baseline]);
-  const isImageCrop = catalogItem.type === 'image.crop';
-  const isPerspective = catalogItem.type === 'image.perspective';
-  const isRoiTransform = catalogItem.type === 'roi.transform';
-  const isCaliperCircle = catalogItem.type === 'measure.caliperCircle';
-  const isCaliperEdge = ['measure.caliper', 'feature.edgeSubpixel'].includes(catalogItem.type);
-  const isMetrology = catalogItem.type === 'measure.metrology';
-  const roiImageInputPort = isRoiTransform ? 'debugImage'
-    : ['image.crop', 'image.perspective', 'region.fromRoi', ...measurementNodeTypes].includes(catalogItem.type) ? 'image' : undefined;
-  const roiImageInputEdge = roiImageInputPort ? inputEdge(edges, node.id, roiImageInputPort) : undefined;
-  const roiSourceImageFrameNodeIds = roiSourceFrameNodeIdsForEdge(roiInputEdge, nodes, edges, catalogItems);
-  const roiImageInputSourceNode = nodes.find((item) => item.id === roiImageInputEdge?.source);
-  const connectedRoiImageFrameMismatch = Boolean(roiSourceImageFrameNodeIds.length && roiImageInputEdge
-    && roiSourceImageFrameNodeIds.some((roiFrameNodeId) =>
-      !imageFramesSharePixelPreservingAncestor(roiFrameNodeId, roiImageInputEdge.source, nodes, edges, cropMaskFramePreservingNodeTypes)));
-  const connectedRoiImageFrameMismatchMessage = connectedRoiImageFrameMismatch
-    ? `上游 ROI 与目标图像“${String(roiImageInputSourceNode?.data.label ?? roiImageInputEdge!.source)}”不在同一像素坐标系。请将 ROI 与图像接到同一裁剪/变换分支；若目标图像来自裁剪节点，请连接该裁剪节点的 croppedRoi 输出。当前已阻止测试运行。`
-    : undefined;
   // match.shape 派生（模型数据/训练过期判定/样本计数等）见 useShapeMatchWorkspace。
   const templateSourceNodeId = edges.find((edge) => edge.target === node.id
     && (edge.targetHandle?.toLowerCase() === 'template' || edge.targetHandle?.toLowerCase().endsWith('template')))?.source;
@@ -207,82 +197,28 @@ export function useNodeConfigurationDialogModel(props: Props) {
   const cropClearUndoAvailable = Boolean(isImageCrop && !cropRoiInputConnected && cropClearUndo
     && cropClearUndo.afterFingerprint === draftFingerprint);
   const measurementFitUndoAvailable = Boolean(measurementFitUndo && measurementFitUndo.afterFingerprint === draftFingerprint);
-  const searchLineInputEdge = ['measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperArray', 'feature.edgeSubpixel'].includes(catalogItem.type)
-    ? inputEdge(edges, node.id, 'searchLine')
-    : undefined;
-  const circleInputEdge = isCaliperCircle
-    ? inputEdge(edges, node.id, 'circle')
-    : undefined;
-  const circleSourceNode = circleInputEdge ? nodes.find((item) => item.id === circleInputEdge.source) : undefined;
-  const transformInputEdge = ['measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperArray', 'measure.caliperCircle', 'feature.edgeSubpixel'].includes(catalogItem.type)
-    ? inputEdge(edges, node.id, 'transform')
-    : undefined;
-  const transformLineageNodes = transformSourceLineage(nodes, edges, transformInputEdge?.source);
-  const connectedGeometryEdge = circleInputEdge ?? searchLineInputEdge;
-  const connectedGeometryImageFrameNodeIds = geometrySourceImageFrameNodeIds(connectedGeometryEdge, nodes, edges, catalogItems);
-  const transformSourceImageFrames = transformInputEdge
-    ? transformEndpointImageFrameNodeIds(transformInputEdge.source, 'source', nodes, edges) : [];
-  const transformMappedImageFrames = transformMappedImageFrameNodeIds(transformLineageNodes, edges);
-  const connectedGeometryAlreadyInMappedFrame = Boolean(connectedGeometryImageFrameNodeIds.length && transformInputEdge
-    && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) => transformMappedImageFrames.some((mappedFrameNodeId) =>
-      imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, mappedFrameNodeId, nodes, edges, cropMaskFramePreservingNodeTypes))));
-  const connectedGeometryTransformSourceFrameMismatch = Boolean(connectedGeometryImageFrameNodeIds.length && transformSourceImageFrames.length
-    && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) => transformSourceImageFrames.every((sourceFrameNodeId) =>
-      !imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, sourceFrameNodeId, nodes, edges, cropMaskFramePreservingNodeTypes))));
-  const connectedGeometryImageFrameMismatch = Boolean(connectedGeometryImageFrameNodeIds.length && !transformInputEdge && measurementImageInputEdge
-    && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) =>
-      !imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, measurementImageInputEdge.source, nodes, edges, cropMaskFramePreservingNodeTypes)));
-  const directCorrectedCircleTransformConflict = isCaliperCircle && Boolean(circleInputEdge && transformInputEdge
-    && circleSourceNode?.data.typeKey === 'roi.transform'
-    && transformLineageNodes.some((source) => source.id === circleInputEdge.source));
-  const correctedCircleTransformConflict = directCorrectedCircleTransformConflict
-    || isCaliperCircle && connectedGeometryAlreadyInMappedFrame;
-  const correctedSearchLineTransformConflict = Boolean(searchLineInputEdge && transformInputEdge && connectedGeometryAlreadyInMappedFrame);
-  const connectedCircleImageFrameMismatch = Boolean(circleInputEdge && connectedGeometryImageFrameMismatch);
-  const connectedSearchLineImageFrameMismatch = Boolean(searchLineInputEdge && connectedGeometryImageFrameMismatch);
-  const connectedCircleTransformSourceMismatch = Boolean(circleInputEdge && connectedGeometryTransformSourceFrameMismatch);
-  const connectedSearchLineTransformSourceMismatch = Boolean(searchLineInputEdge && connectedGeometryTransformSourceFrameMismatch);
-  const measurementGeometryTransformConflict = correctedCircleTransformConflict || correctedSearchLineTransformConflict;
-  const measurementGeometryFrameMismatchConflict = connectedCircleImageFrameMismatch || connectedSearchLineImageFrameMismatch
-    || connectedCircleTransformSourceMismatch || connectedSearchLineTransformSourceMismatch;
-  const measurementGeometryConflict = measurementGeometryTransformConflict || measurementGeometryFrameMismatchConflict;
-  const correctedCircleTransformMessage = correctedCircleTransformConflict
-    ? directCorrectedCircleTransformConflict
-      ? '标称圆和 transform 都来自同一个定位修正 ROI。圆已经是当前图像坐标，请断开这个 transform 输入，避免重复位移；当前已阻止测试运行。'
-      : '上游圆已经处于 transform 的目标图像坐标系，再传入 transform 会重复映射。请断开 transform，或改接基准图像坐标的圆；当前已阻止测试运行。'
-    : undefined;
-  const correctedSearchLineTransformMessage = correctedSearchLineTransformConflict
-    ? '上游搜索线已经处于 transform 的目标图像坐标系，再传入 transform 会重复映射。请断开 transform，或改接基准图像坐标的搜索线；当前已阻止测试运行。'
-    : undefined;
-  const circleImageFrameMismatchMessage = connectedCircleImageFrameMismatch
-    ? '上游圆与当前测量图像不在同一像素坐标系。请将圆和图像接到同一裁剪/变换分支，或为基准图像圆连接匹配的 transform；当前已阻止测试运行。'
-    : undefined;
-  const searchLineImageFrameMismatchMessage = connectedSearchLineImageFrameMismatch
-    ? '上游搜索线与当前测量图像不在同一像素坐标系。请将线和图像接到同一裁剪/变换分支，或为基准图像线连接匹配的 transform；当前已阻止测试运行。'
-    : undefined;
-  const circleTransformSourceMismatchMessage = connectedCircleTransformSourceMismatch
-    ? '上游圆与 transform 的源图像坐标系不匹配。请连接来自 transform 源图像（或同坐标处理分支）的圆；当前已阻止测试运行。'
-    : undefined;
-  const searchLineTransformSourceMismatchMessage = connectedSearchLineTransformSourceMismatch
-    ? '上游搜索线与 transform 的源图像坐标系不匹配。请连接来自 transform 源图像（或同坐标处理分支）的线；当前已阻止测试运行。'
-    : undefined;
-  const measurementGeometryConflictMessage = correctedCircleTransformMessage ?? correctedSearchLineTransformMessage
-    ?? circleTransformSourceMismatchMessage ?? searchLineTransformSourceMismatchMessage
-    ?? circleImageFrameMismatchMessage ?? searchLineImageFrameMismatchMessage;
-  const referenceTransformNode = transformLineageNodes.find((source) => source.data.typeKey === 'roi.transform'
-    && typeof (source.data.parameters as NodeParameters | undefined)?.referenceImage === 'string'
-    && Boolean((source.data.parameters as NodeParameters).referenceImage));
-  const referenceTransformParameters = (referenceTransformNode?.data.parameters ?? {}) as NodeParameters;
-  const savedMeasurementReference = referenceTransformNode
-    ? { data: String(referenceTransformParameters.referenceImage), width: Number(referenceTransformParameters.referenceWidth ?? 0),
-      height: Number(referenceTransformParameters.referenceHeight ?? 0) }
-    : undefined;
-  const cropTransformNode = transformLineageNodes.find((source) => source.data.typeKey === 'image.crop');
-  const cropMeasurementReferenceEdge = cropTransformNode
-    ? inputEdge(edges, cropTransformNode.id, 'image')
-    : undefined;
-  const cropMeasurementReferenceNodeId = cropMeasurementReferenceEdge?.source;
-  const cropMeasurementReferencePortName = cropMeasurementReferenceEdge?.sourceHandle ?? 'image';
+  // 测量连接与坐标系一致性：判定顺序、提示文案的选择优先级都在 nodeConfigurationMeasurementConflicts。
+  // 这些判定此前只能靠整页渲染验证，提成纯函数后可单独覆盖「错配但不报错、结果静默偏移」这类情形。
+  const {
+    roiImageInputPort, roiImageInputEdge, roiSourceImageFrameNodeIds, roiImageInputSourceNode,
+    connectedRoiImageFrameMismatch, connectedRoiImageFrameMismatchMessage,
+    searchLineInputEdge, circleInputEdge, circleSourceNode, transformInputEdge, transformLineageNodes,
+    connectedGeometryEdge, connectedGeometryImageFrameNodeIds, transformSourceImageFrames, transformMappedImageFrames,
+    connectedGeometryAlreadyInMappedFrame, connectedGeometryTransformSourceFrameMismatch, connectedGeometryImageFrameMismatch,
+    directCorrectedCircleTransformConflict, correctedCircleTransformConflict, correctedSearchLineTransformConflict,
+    connectedCircleImageFrameMismatch, connectedSearchLineImageFrameMismatch,
+    connectedCircleTransformSourceMismatch, connectedSearchLineTransformSourceMismatch,
+    measurementGeometryTransformConflict, measurementGeometryFrameMismatchConflict, measurementGeometryConflict,
+    measurementGeometryConflictMessage,
+    correctedCircleTransformMessage, correctedSearchLineTransformMessage,
+    circleImageFrameMismatchMessage, searchLineImageFrameMismatchMessage,
+    circleTransformSourceMismatchMessage, searchLineTransformSourceMismatchMessage,
+    referenceTransformNode, referenceTransformParameters, savedMeasurementReference,
+    cropTransformNode, cropMeasurementReferenceEdge, cropMeasurementReferenceNodeId, cropMeasurementReferencePortName
+  } = resolveMeasurementConnections({
+    nodeId: node.id, nodes, edges, catalogItems, nodeType: catalogItem.type, kind,
+    framePreservingNodeTypes: cropMaskFramePreservingNodeTypes, roiInputEdge, measurementImageInputEdge
+  });
   const debugImageSourceId = isRoiTransform
     ? inputEdge(edges, node.id, 'debugImage')?.source
     : undefined;
@@ -471,23 +407,20 @@ export function useNodeConfigurationDialogModel(props: Props) {
         && imageSourceMatchesPort(imageViewerSource, node.id, 'image');
   const measurementImageFrameUnavailable = Boolean((canEditMeasurementGeometry || canDisplayConnectedSearchLine)
     && !measurementImageFrameReady && !imageCatalogLoading && imageViewerSource.url);
-  const geometryNumber = (key: string, fallback: number) => Number.isFinite(Number(draft[key])) ? Number(draft[key]) : fallback;
-  const measurementGeometry: MeasurementGeometry | undefined = (canEditMeasurementGeometry || canDisplayConnectedSearchLine) && measurementImageFrameReady
-    ? measurementGeometryType === 'line'
-      ? { type: 'line', start: connectedSearchLine?.start ?? { x: geometryNumber('startX', 120), y: geometryNumber('startY', 240) },
-        end: connectedSearchLine?.end ?? { x: geometryNumber('endX', 520), y: geometryNumber('endY', 240) },
-        profileWidth: effectiveSampleWidth(geometryNumber('sampleWidth', 5)), direction: String(draft.direction ?? 'strongest'),
-        ...(catalogItem.type === 'measure.caliperLine' || catalogItem.type === 'measure.caliperArray' ? { profileSpan: Math.max(0, geometryNumber('edgeLength', 0)),
-          profileCount: geometryNumber('caliperCount', 9) } : {}) }
-      : { type: 'circle', center: connectedCircle ? { x: connectedCircle.x, y: connectedCircle.y }
-          : { x: geometryNumber('centerX', 320), y: geometryNumber('centerY', 240) },
-        radius: connectedCircle?.radius ?? Math.max(0, geometryNumber('radius', 100)), band: Math.max(0, geometryNumber('radialBand', 8)),
-        angleStartDeg: geometryNumber('angleStartDeg', -180), angleEndDeg: geometryNumber('angleEndDeg', 180),
-        caliperCount: geometryNumber('caliperCount', 72), samplingMode: String(draft.samplingMode ?? 'count'),
-        angleStepDeg: geometryNumber('angleStepDeg', 5), profileWidth: effectiveSampleWidth(geometryNumber('sampleWidth', 5)),
-        searchDirection: String(draft.searchDirection ?? 'strongest'),
-        centerEditable: !circleInputEdge, radiusEditable: !circleInputEdge }
-    : undefined;
+  const geometryNumber = (key: string, fallback: number) => parameterNumber(draft, key, fallback);
+  // 几何构建/回写/适配三件事集中在 nodeConfigurationMeasurementGeometryModel：读写字段对称性
+  // 在那里一眼可查，此处只做编排。
+  const measurementGeometry = buildMeasurementGeometry({
+    draft,
+    catalogType: catalogItem.type,
+    measurementType: measurementGeometryType,
+    editable: canEditMeasurementGeometry,
+    displayableConnectedSearchLine: canDisplayConnectedSearchLine,
+    imageFrameReady: measurementImageFrameReady,
+    connectedSearchLine,
+    connectedCircle,
+    circleInputConnected: Boolean(circleInputEdge)
+  });
   const measurementInputReport = transformInputEdge
     ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]
     : undefined;
@@ -539,21 +472,14 @@ export function useNodeConfigurationDialogModel(props: Props) {
   } = measurementBoundsNotices({
     catalogType: catalogItem.type, geometry: mappedMeasurementGeometry, imageFrameReady: measurementImageFrameReady,
     width: measurementBoundsWidth, height: measurementBoundsHeight, boundsContext: measurementBoundsContext, geometryNumber });
+  // 回写：几何 → 参数。与 buildMeasurementGeometry 互为逆过程，实现在同一模块里对照。
   const measurementGeometryParameters = (current: NodeParameters, geometry: MeasurementGeometry,
-    options?: { preserveValues?: boolean }): NodeParameters => {
-    if (geometry.type === 'line') return { ...current, startX: geometry.start.x, startY: geometry.start.y,
-      endX: geometry.end.x, endY: geometry.end.y,
-      ...(geometry.profileWidth !== undefined ? { sampleWidth: geometry.profileWidth } : {}),
-      ...((catalogItem.type === 'measure.caliperLine' || catalogItem.type === 'measure.caliperArray') && geometry.profileSpan !== undefined ? { edgeLength: geometry.profileSpan } : {}) };
-    const startAngle = geometry.angleStartDeg ?? -180;
-    const endAngle = geometry.angleEndDeg ?? 180;
-    const normalizedArc = normalizeCaliperCircleArc(startAngle, endAngle);
-    return { ...current, ...(circleInputEdge ? {} : { centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius }),
-      ...(geometry.profileWidth !== undefined ? { sampleWidth: geometry.profileWidth } : {}),
-      angleStartDeg: options?.preserveValues ? startAngle : normalizedArc.start,
-      angleEndDeg: options?.preserveValues ? endAngle : normalizedArc.end,
-      radialBand: options?.preserveValues ? geometry.band ?? 0 : Math.max(1, Math.min(500, geometry.band ?? 1)) };
-  };
+    options?: { preserveValues?: boolean }): NodeParameters =>
+    buildGeometryParameters(current, geometry, {
+      catalogType: catalogItem.type,
+      circleInputConnected: Boolean(circleInputEdge),
+      preserveValues: options?.preserveValues
+    });
   const updateMeasurementGeometry = (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => {
     if (locked || !canEditMeasurementGeometry || !measurementImageFrameReady || showCurrentMeasurementImage) return;
     setDraft(current => measurementGeometryParameters(current, geometry, options));
@@ -563,36 +489,7 @@ export function useNodeConfigurationDialogModel(props: Props) {
     const width = measurementGeometryFrameKind === 'saved-reference' ? savedMeasurementReference?.width : imageViewerSource.width;
     const height = measurementGeometryFrameKind === 'saved-reference' ? savedMeasurementReference?.height : imageViewerSource.height;
     if (!width || !height || !Number.isFinite(width) || !Number.isFinite(height)) return;
-    if (measurementGeometry.type === 'line') {
-      const dx = measurementGeometry.end.x - measurementGeometry.start.x;
-      const dy = measurementGeometry.end.y - measurementGeometry.start.y;
-      const currentLength = Math.hypot(dx, dy);
-      const direction = currentLength > 1e-6 ? { x: dx / currentLength, y: dy / currentLength } : { x: 1, y: 0 };
-      const availableLength = Math.min(width / Math.max(Math.abs(direction.x), 1e-6),
-        height / Math.max(Math.abs(direction.y), 1e-6));
-      const length = Math.max(2, availableLength * 0.625);
-      const center = { x: width / 2, y: height / 2 };
-      const tangent = { x: -direction.y, y: direction.x };
-      const availableSpan = Math.min(width / Math.max(Math.abs(tangent.x), 1e-6),
-        height / Math.max(Math.abs(tangent.y), 1e-6)) * 0.625;
-      const profileSpan = measurementGeometry.profileSpan !== undefined && measurementGeometry.profileSpan > 0
-        ? Math.min(measurementGeometry.profileSpan, availableSpan) : measurementGeometry.profileSpan;
-      const fittedGeometry: MeasurementGeometry = { ...measurementGeometry,
-        start: { x: center.x - direction.x * length / 2, y: center.y - direction.y * length / 2 },
-        end: { x: center.x + direction.x * length / 2, y: center.y + direction.y * length / 2 },
-        ...(profileSpan === undefined ? {} : { profileSpan }) };
-      const next = measurementGeometryParameters(draft, fittedGeometry);
-      if (parameterFingerprint(next) === draftFingerprint) return;
-      setMeasurementFitUndo({ previous: cloneParameters(draft), afterFingerprint: parameterFingerprint(next) });
-      setDraft(next);
-      return;
-    }
-    const minDimension = Math.min(width, height);
-    const band = Math.max(1, Math.min(measurementGeometry.band ?? 8, minDimension * 0.15));
-    const maxRadius = Math.max(1, minDimension / 2 - band - 1);
-    const radius = Math.max(1, Math.min(minDimension / 4.8, maxRadius));
-    const fittedGeometry: MeasurementGeometry = { ...measurementGeometry, center: { x: width / 2, y: height / 2 }, radius, band };
-    const next = measurementGeometryParameters(draft, fittedGeometry);
+    const next = measurementGeometryParameters(draft, fitGeometryToBounds(measurementGeometry, width, height));
     if (parameterFingerprint(next) === draftFingerprint) return;
     setMeasurementFitUndo({ previous: cloneParameters(draft), afterFingerprint: parameterFingerprint(next) });
     setDraft(next);

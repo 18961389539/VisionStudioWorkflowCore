@@ -296,6 +296,39 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 验证：`tsc -b` 0 错误；`ImageViewer` 相关 86 项、全量 1256 项全绿；`size-budget` 通过；
 `oxlint --max-warnings 0` 通过。
 
+### P2-3 useNodeConfigurationDialogModel 763 → 660（本项完成）
+
+`NodeConfigurationDialog` 拆完后剩三块，其中「模型」763 行接近 800 目标线。拆法与上一项同一个思路：
+**不碰 `useState`/`useEffect` 编排，只把纯派生搬走。**
+
+| 新模块 | 行数 | 内容 |
+|---|---|---|
+| `nodeConfigurationMeasurementConflicts.ts` | 286 | 节点类型分流、搜索线/圆/transform 连接的坐标系一致性判定、六条细分提示文案 |
+| `nodeConfigurationMeasurementGeometryModel.ts` | 155 | 几何构建 / 回写参数 / 适应窗口计算 |
+
+两处值得记的判断：
+
+1. **坐标系判定是最该提出来的一块**。这类错配不会报错，只会让测量结果静默偏移；此前只能靠
+   `nodeConfiguration` 下的整页渲染测试间接覆盖，现在是纯函数，可以单独喂固定的 nodes/edges 断言。
+   判定顺序即提示优先级（先「重复映射」→ 再「源坐标系不匹配」→ 最后「与当前图像不同坐标系」），
+   同一个问题只给一条提示，避免面板堆五行红字。
+2. **几何构建与参数回写放在同一文件**。两者互为逆过程——`buildMeasurementGeometry` 读哪些键，
+   `measurementGeometryParameters` 就写哪些键。分开存放时「加了一个参数但只改了一半」不会有人发现。
+
+顺带把 `measurementNodeTypes` / `searchLineInputEdge` 里三处重复的节点类型数组收敛成
+`MEASUREMENT_NODE_TYPES` / `SEARCH_LINE_NODE_TYPES` 常量。
+
+**P2-4 / P2-5 判定为不做**：
+
+- `catalog.zh.ts` 2572 行、`catalogLabels.ts` 3779 行**被 `check-size-budget.py` 明确跳过**——
+  脚本注释写明「词表长度随节点数线性增长，按行数设限只会制造噪音」。再按域拆分只会增加
+  6 处 import 而换不到任何门禁收益。
+- `CameraPanel.tsx` 782 行已在 `targetMaxLines`（800）之内，且上一批刚做过一轮标签页组件化
+  （965 → 782），继续拆是收益递减。
+
+验证：`tsc -b` 0 错误；`nodeConfiguration` 10 文件 246 项全绿；全量 1256 项全绿；
+`size-budget` 与 `oxlint --max-warnings 0` 通过；`react/exhaustive-deps` 基线维持 63。
+
 ### P2-6 i18n 键设计
 
 `frontend/src/i18n/catalog.ts` 2,935 行，**以英文原文为键**（2,258 条）。改一句英文文案会静默丢掉对应中文。
