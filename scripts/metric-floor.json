@@ -1,9 +1,9 @@
 {
   "_comment": "度量下限（棘轮）：只许升不许降。下调必须与本次提交一起改这个文件，并在提交说明里写明删了什么、为什么。由 scripts/check-metric-floor.py 在质量门禁中校验。",
-  "_updated": "2026-11-12",
-  "_note": "本轮再上调到实测值 1382/491/103（原 1376/489/101）。新增来源：Engine +6 = 流程级金样回归 3 条（GoldenWorkflowRegressionTests）+ 帧 Mat 复用池 3 条（FrameMatPoolTests）；Api +2 = 诊断包（DiagnosticBundleTests）+ 登录失败锁定与解锁（SecurityTests）；前端 +2 个测试文件 = 契约对账覆盖率棘轮（apiContractParityCoverage）+ i18n 状态键守卫（i18nStatusKeys）。今后删测试必须同改本文件并说明原因。",
+  "_updated": "2026-11-13",
+  "_note": "本轮再上调到实测值 1382/491/103（原 1376/489/101）。新增来源：Engine +6 = 流程级金样回归 3 条（GoldenWorkflowRegressionTests）+ 帧 Mat 复用池 3 条（FrameMatPoolTests）；Api +2 = 诊断包（DiagnosticBundleTests）+ 登录失败锁定与解锁（SecurityTests）；前端 +2 个测试文件 = 契约对账覆盖率棘轮（apiContractParityCoverage）+ i18n 状态键守卫（i18nStatusKeys）。今后删测试必须同改本文件并说明原因。 2026-11-13（P3）：frontendTestFiles 103 → 113。其中 3 个来自 imageViewerMeasurementGeometry(1549 行) 拆成 4 个按主题的文件（6+24+32+24=86 项，与原文件完全一致），其余为历史累积的实测值。后端两项维持原下限（属未提交批次的申报范围，不在本次口径内）。",
   "catalogNodes": 242,
   "backendEngineTestMethods": 1382,
   "backendApiTestMethods": 491,
-  "frontendTestFiles": 103
+  "frontendTestFiles": 113
 }

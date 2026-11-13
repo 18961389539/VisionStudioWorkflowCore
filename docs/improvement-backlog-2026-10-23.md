@@ -329,6 +329,31 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 验证：`tsc -b` 0 错误；`nodeConfiguration` 10 文件 246 项全绿；全量 1256 项全绿；
 `size-budget` 与 `oxlint --max-warnings 0` 通过；`react/exhaustive-deps` 基线维持 63。
 
+### P3-6 测试文件膨胀：1549 行拆成 4 个（本项完成）
+
+`imageViewerMeasurementGeometry.test.tsx` 1549 行，是测试目录里的离群值（第二名 744 行）。
+测试文件不参与 `size-budget`（`SKIP_PARTS` 含 `__tests__`），但 86 个 `it` 挤在一个文件里，
+定位失败用例要滚很久。
+
+| 新文件 | 行数 | 项数 | 覆盖 |
+|---|---|---|---|
+| `imageViewerGeometryEditing.test.tsx` | 447 | 24 | 诊断光标、三点/直径圈选构建、撤销、多边形选区 |
+| `imageViewerCaliperHandles.test.tsx` | 529 | 32 | 投影宽度带、搜索跨距、圆弧角度控制点、几何绘制 |
+| `imageViewerDragAndCursor.test.tsx` | 406 | 24 | 圆弧/搜索线拖动、选区移动缩放、光标反馈 |
+| `imageViewerBrushRoi.test.tsx` | 166 | 6 | 笔刷选区、固定点数选区 |
+| **合计** | **1548** | **86** | 与原文件逐项一致 |
+
+**拆分的关键约束（踩过一次）**：`vi.mock('react-konva')` 是 hoisted，只对所在模块图生效——
+放在共享 helper 里对测试文件无效，所以每个文件各写一行
+`vi.mock('react-konva', async () => await import('./helpers/konvaMock'))`，
+Konva 替身与 ResizeObserver 桩提取到 `__tests__/helpers/`。
+
+切分方式选了「按连续行号段、保持原顺序」而不是「按主题重排」：重排需要逐条判断归属，
+漏一条或重一条都不会报错，只会让测试数悄悄变化——而测试数是门禁指标。
+实际切分时仍在两处边界切错（切在 `it` 中间），靠解析错误和条数比对（86 = 24+32+24+6）纠正。
+
+`scripts/metric-floor.json` 的 `frontendTestFiles` 随之上调到实测值 113（原 103）。
+
 ### P2-6 i18n 键设计
 
 `frontend/src/i18n/catalog.ts` 2,935 行，**以英文原文为键**（2,258 条）。改一句英文文案会静默丢掉对应中文。
