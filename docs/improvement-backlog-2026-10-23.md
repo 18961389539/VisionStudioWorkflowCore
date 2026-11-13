@@ -220,6 +220,24 @@ quality-gate 的 `timeout-minutes` 为 25，当前总时长未触及上限，但
 （`openapi-typescript 7.13.0` + `TypeScript 5.9.3` + `package-lock.json`），
 `npm run generate:api-types` 先 `npm ci` 再生成。
 
+**2026-11-13 PENDING 归零（本项完成）**：最后一条 `WorkflowModuleParameter` 补上断言。
+它此前只登记在 PENDING 里、不敢断言的原因只有一条——前端把 `parameters.type` 收窄成表单封闭联合，
+schema 是宽 string。做法是断言时把 `type` 摘掉、只断言其余字段全等：
+
+```ts
+export type Parity_WorkflowModuleParameter = BackendFitsFrontend<
+  Frontend.WorkflowModuleParameter,
+  Omit<Normalize<Schema<'WorkflowModuleParameter'>>, 'type'> & { type: ParameterDescriptor['type'] }>;
+```
+
+`apiContractParityCoverage.test.ts` 的 `PENDING` 清单随之清空，棘轮从 `≤1` 收紧到 `≤0`：
+**此后再出现同名 DTO 未对账会直接失败，没有"先登记再说"的缓冲带。**
+
+> 断言有效性做过反向探针：把前端 `internalNodeId` 临时改成 `number`，`tsc -b` 立刻报
+> `string is not assignable to number`（并连带 `WorkflowModuleVersion` / `ExtractWorkflowModuleResult`
+> 三处一起红，因为后者嵌套前者）。**注意 `tsc --noEmit -p tsconfig.json` 在本仓库是空转的**——
+> 根 `tsconfig.json` 只有 `files: []` + `references`，什么都不检查；必须用 `tsc -b`。
+
 **PowerShell 脚本编码约定（本轮踩坑）**：`scripts/*.ps1` 若含中文注释，文件**必须是带 BOM 的 UTF-8**。
 PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语法——表现为变量莫名是 `$null`、
 循环一次不执行、错误信息与代码不符。`export-openapi.ps1` 与 `quality-gate.ps1` 已补 BOM。
@@ -248,6 +266,36 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 `StorageMaintenance` 666（四个顶层类型各自成文件），`StorageBackupService` 305 / 恢复逻辑 621。
 拆分后 `backend/src` 已无超过默认上限 1200 行的文件；`Api.Tests` 538 项、`Engine.Tests` 2263 项全绿。
 
+**2026-11-13 第五批：ImageViewer 1026 → 792（前端最后一项，本项完成）**
+
+上一批的结论是「`ImageViewer` 的手势状态机刻意不拆——`onPointerDown/Move/Up` 共 267 行共享 20+ 个闭包状态，
+参数化收益不抵回归风险，先锁 1026 防反弹」。本轮换了思路：**不碰状态机本身，只把不依赖 React 的部分抽走。**
+
+| 新模块 | 行数 | 抽离的是什么 |
+|---|---|---|
+| `imageViewerHitTest.ts` | 119 | 命中检测（`hitRoiHandle` / `hitMeasurementHandle`），纯函数，屏幕距离判定 |
+| `imageViewerMeasurementDrag.ts` | 119 | 拖动位置解算（13 种拖动模式的边界条件），纯函数 |
+| `useViewerCursorStyle.ts` | 86 | 光标样式推导，与命中检测共用同一套判定 |
+| `ImageViewerToolbar.tsx` | 162 | 工具栏 |
+| `ImageViewerStage.tsx` | 195 | Konva 舞台，五层压盖顺序 |
+| `ImageViewerReadout.tsx` | 45 | 底部状态栏 |
+| `ImageViewerDrawingHint.tsx` | 55 | 绘制模式提示条 |
+
+状态机仍留在主组件共享闭包（`onPointerDown/Move/Up` 原样保留），主文件只剩
+状态 + 副作用 + 指针状态机 + 组装。**顺带把 `react/exhaustive-deps` 基线从 65 降到 63**——
+拆出去的 hook 依赖声明比原来的内联 `useMemo` 更干净。
+
+拆分中踩到的两个坑（都是"看起来等价、实际不等价"）：
+
+1. `applyMeasurementDrag` 必须同时接收**原始指针点**和**夹取后的点**：搜索线端点用前者
+   （允许拖到图像外，用于画超出视野的线），其余控制点用后者。第一版只传夹取后的点，
+   4 条投影宽度用例立刻全红。
+2. `effectiveSampleWidth` 在 `caliperCircleSampling` 而不是 `imageViewerUtils`；
+   `tsc -b` 之外的检查（如 `tsc -p`）抓不到——见上文的 `tsconfig.json` 空壳说明。
+
+验证：`tsc -b` 0 错误；`ImageViewer` 相关 86 项、全量 1256 项全绿；`size-budget` 通过；
+`oxlint --max-warnings 0` 通过。
+
 ### P2-6 i18n 键设计
 
 `frontend/src/i18n/catalog.ts` 2,935 行，**以英文原文为键**（2,258 条）。改一句英文文案会静默丢掉对应中文。
@@ -264,8 +312,8 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 
 **2026-11-13 收尾**：目录标签已分批迁到稳定键（`catalogLabels.ts` 的节点类型 / `类型.参数名` / 选项值），
 描述、参数描述、节点名、分类与分组由 `i18nStableKeys.test.ts` 守形态和悬空键；状态键由
-`i18nStatusKeys.test.ts` 守标识符形态。剩余缺口集中在端口显示名：本轮补了 31 条高频端口中文，
-并新增 `i18nPortCoverage.test.ts` 棘轮（当前存量 157 条，只减不增；新增端口必须同时补中文）。
+`i18nStatusKeys.test.ts` 守标识符形态。端口显示名在 2026-11-13 补齐剩余 157 条（累计覆盖全部内置端口，
+含齿轮/螺纹/粗糙度/位姿等测量域），`i18nPortCoverage.test.ts` 基线固定为 **0**：新增端口未补中文直接失败。
 `parameterGroups` 的英文短 token 是后端契约值（非自由文案），保留原样并由测试锁定唯一反查。
 
 ### P2-7 可观测性：ActivitySource
@@ -284,7 +332,12 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 
 ### P2-8 AlarmStore 全量 JSON 读写
 
-无保留上限、`/api/alarms` 无分页。长期运行会单调膨胀。**动作**：改为环形缓冲 + 分页查询，保留上限可配置。
+**2026-11-13 已完成**：保留上限（2000，活动报警不裁剪）与 `/api/alarms` 分页在 2026-10-26 已落地；
+本轮把存储从 `production/alarms.json` 整体迁到 `visionstudio.db` 的 `alarms` 表（schema v29），
+Raise/Recover/Ack 改为单行 SQL 写入 + 事务内裁剪，不再每次重写整个文件。旧 JSON 由 AlarmStore
+首次使用时导入并归档为 `alarms.json.migrated-<时间戳>`，契约与 `AlarmRecord` 字段不变。
+
+原记录（已过时）：无保留上限、`/api/alarms` 无分页。长期运行会单调膨胀。**动作**：改为环形缓冲 + 分页查询，保留上限可配置。
 
 ---
 

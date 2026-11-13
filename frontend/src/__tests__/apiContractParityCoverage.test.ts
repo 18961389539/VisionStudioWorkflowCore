@@ -25,12 +25,16 @@ const paritySource = sources['../generated/apiContractParity.ts'];
  * 这个测试守的是"缺口只许变小"：
  * - 同名 DTO 必须有 `Parity_<Name>`（或特殊命名的 *Parity 类型），否则失败；
  * - 列在 PENDING 里的必须仍然未覆盖——补上断言后要删掉；
- * - PENDING 只许变短（当前 1 条）。
+ * - PENDING 只许变短（当前 0 条）。
+ *
+ * 2026-11-13 收尾：最后一条 `WorkflowModuleParameter` 已补断言（摘掉刻意收窄的 `type`
+ * 后断言其余字段全等），PENDING 归零。此后再出现同名 DTO 未对账会直接失败，
+ * 没有"先登记再说"的缓冲带了。
  */
 const COVERED_BY_SPECIAL_TYPE = new Set(['NodeCatalogItem', 'NodeRunReport', 'ParameterDescriptor', 'RunTraceRecord']);
 
 /** 已确认尚未对账的同名 DTO。补一条 Parity_ 就从这里删一条；只许减不许增。 */
-const PENDING = new Set(['WorkflowModuleParameter']);
+const PENDING = new Set<string>();
 
 function namesIn(source: string, pattern: RegExp): Set<string> {
   const names = new Set<string>();
@@ -55,6 +59,6 @@ describe('契约对账覆盖率', () => {
     expect(stale, 'PENDING 里的名字已被覆盖或已改名，请从清单删除').toEqual([]);
 
     // 棘轮：只许变短。数字变了要在提交说明里写明补了哪些 DTO。
-    expect(PENDING.size).toBeLessThanOrEqual(1);
+    expect(PENDING.size).toBeLessThanOrEqual(0);
   });
 });

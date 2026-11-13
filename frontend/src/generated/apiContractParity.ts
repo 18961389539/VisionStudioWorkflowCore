@@ -140,6 +140,16 @@ type NormalizeExtractWorkflowModuleResult<T> = Omit<Normalize<T>, 'module' | 've
 };
 export type Parity_WorkflowModuleDescriptor = BackendFitsFrontend<Frontend.WorkflowModuleDescriptor, NormalizeWorkflowModuleDescriptor<Schema<'WorkflowModuleDescriptor'>>>;
 export type Parity_WorkflowModuleVersion = BackendFitsFrontend<Frontend.WorkflowModuleVersion, NormalizeWorkflowModuleVersion<Schema<'WorkflowModuleVersion'>>>;
+/**
+ * 模块参数是最后一个此前只登记在 PENDING 里的同名 DTO。不能直接整型断言的原因只有一条：
+ * 前端复用节点参数表单的封闭联合驱动 `type`，而 schema 是宽 string。摘掉 `type` 后
+ * 其余字段（含 `defaultValue: JsonElement` → `unknown`）后端都能喂给前端，
+ * 因此这里断言「除 type 外的全等」，`type` 的收窄由 UI 侧 tsc 保证。
+ */
+export type Parity_WorkflowModuleParameter = BackendFitsFrontend<
+  Frontend.WorkflowModuleParameter,
+  Omit<Normalize<Schema<'WorkflowModuleParameter'>>, 'type'> & { type: ParameterDescriptor['type'] }
+>;
 export type Parity_ExtractWorkflowModuleResult = BackendFitsFrontend<Frontend.ExtractWorkflowModuleResult, NormalizeExtractWorkflowModuleResult<Schema<'ExtractWorkflowModuleResult'>>>;
 export type Parity_InvestigationCaseSummary = BackendFitsFrontend<Frontend.InvestigationCaseSummary, Normalize<Schema<'InvestigationCaseSummary'>>>;
 export type Parity_InvestigationCaseDetail = BackendFitsFrontend<Frontend.InvestigationCaseDetail, Normalize<Schema<'InvestigationCaseDetail'>>>;

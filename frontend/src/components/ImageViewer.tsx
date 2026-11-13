@@ -1,24 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, InputNumber, Segmented, Select, Space, Switch, Tooltip } from 'antd';
 import type Konva from 'konva';
-import { Circle, Group, Image as KonvaImage, Layer, Line, Stage, Text } from 'react-konva';
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
 import { parameterFingerprint, roiConfigurationIssue } from '../nodeConfigurationState';
 import { createPixelBuffer, readPixel } from '../imagePixels';
-import { buildCaliperCircleAngles, circleArcSpan, effectiveSampleWidth, normalizeCaliperAngle, normalizeCaliperCircleArc } from '../caliperCircleSampling';
+import { buildCaliperCircleAngles, effectiveSampleWidth, normalizeCaliperCircleArc } from '../caliperCircleSampling';
 import { circleArcThroughThreePoints, circleThroughThreePoints } from '../circleConstruction';
-import { clamp, clipSegmentToImage, nearestDiagnosticSpoke, CaliperDiagnosticShape, caliperLineProfileSpanHandles,
-  caliperLineProfileWidthHandle, caliperCircleProfileWidthHandle, caliperCircleArcHandles, caliperCircleBandHandles,
-  circleRadiusHandle, radialResizeCursor, closestHandle, polygonHandleIndices, boundedMeasurementPoint,
-  polygonPreviewPoints, maxInteractiveCircleRadius, clampCircleCenter,
-  clampCaliperCircleCenter, normalizeRect, pointInsideRoi, pointInsidePolygon, brushRoiBounds,
-  polygonRoiBounds, clampRoiMove, applyRoiDrag, OverlayShape, useHtmlImage, readPixelated, persistPixelated,
-  HANDLE_HIT, MAX_POLYGON_HANDLES, MIN_EDGE_HANDLE_SPAN
+import { clamp, clipSegmentToImage, nearestDiagnosticSpoke, caliperCircleProfileWidthHandle,
+  maxInteractiveCircleRadius, normalizeRect, pointInsideRoi, brushRoiBounds, boundedMeasurementPoint,
+  polygonRoiBounds, clampRoiMove, applyRoiDrag, useHtmlImage, readPixelated, persistPixelated
 } from './imageViewerUtils';
+import { applyMeasurementDrag } from './imageViewerMeasurementDrag';
 import type { Point, ViewState, RoiDragMode, MeasurementDragMode, CircleDrawMode, ToolMode, RoiMoveBounds, CaliperDiagnosticSelection } from './imageViewerTypes';
 import type { MeasurementGeometry } from './imageViewerUtils';
-import { MeasurementGeometryShape, RoiShape, RoiHandles, BrushRoiShape } from './imageViewerUtils';
+import { hitMeasurementHandle, hitRoiHandle } from './imageViewerHitTest';
 import { useViewerViewport } from './useViewerViewport';
+import { useViewerCursorStyle } from './useViewerCursorStyle';
+import { ImageViewerToolbar } from './ImageViewerToolbar';
+import { ImageViewerStage } from './ImageViewerStage';
+import { ImageViewerReadout } from './ImageViewerReadout';
+import { ImageViewerDrawingHint } from './ImageViewerDrawingHint';
 export type { MeasurementGeometry } from './imageViewerUtils';
 export { buildCaliperCircleAngles } from '../caliperCircleSampling';
 
@@ -218,7 +218,6 @@ export default function ImageViewer({
       onMeasurementGeometryChange(measurementUndoEntry.previous, { preserveValues: true });
   };
 
-
   const imagePoint = useCallback((screen: Point): Point => ({
     x: (screen.x - view.x) / view.scale,
     y: (screen.y - view.y) / view.scale
@@ -230,71 +229,6 @@ export default function ImageViewer({
   const pointer = (): Point | undefined => {
     const p = stageRef.current?.getPointerPosition();
     return p ? { x: p.x, y: p.y } : undefined;
-  };
-
-  /** 命中选区控制点（屏幕距离判定）：返回拖动模式 */
-  const hitRoiHandle = (target: VisionRoi, screen: Point): RoiDragMode | undefined => {
-    if (target.type === 'Rectangle') {
-      const handles: [RoiDragMode, Point][] = [
-        ['nw', { x: target.x, y: target.y }], ['ne', { x: target.x + target.width, y: target.y }],
-        ['sw', { x: target.x, y: target.y + target.height }], ['se', { x: target.x + target.width, y: target.y + target.height }]
-      ];
-      if (target.height * view.scale >= MIN_EDGE_HANDLE_SPAN) {
-        handles.push(['w', { x: target.x, y: target.y + target.height / 2 }],
-          ['e', { x: target.x + target.width, y: target.y + target.height / 2 }]);
-      }
-      if (target.width * view.scale >= MIN_EDGE_HANDLE_SPAN) {
-        handles.push(['n', { x: target.x + target.width / 2, y: target.y }],
-          ['s', { x: target.x + target.width / 2, y: target.y + target.height }]);
-      }
-      return closestHandle(handles, screen, view);
-    }
-    if (target.type === 'Circle') {
-      const handle = circleRadiusHandle({ x: target.x, y: target.y }, target.radius, actualWidth, actualHeight);
-      return closestHandle([['e', handle]], screen, view);
-    }
-    if (target.type === 'Brush') return undefined;
-    return closestHandle(polygonHandleIndices(target.points.length)
-      .map((vertexIndex): [RoiDragMode, Point] => [`vertex:${vertexIndex}`, target.points[vertexIndex]]), screen, view);
-  };
-
-  const hitMeasurementHandle = (target: MeasurementGeometry, screen: Point): MeasurementDragMode | undefined => {
-    const near = (point: Point) => Math.hypot(screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale)) <= HANDLE_HIT;
-    if (target.type === 'line') {
-      const profileHandles = target.profileCount !== undefined
-        ? caliperLineProfileSpanHandles(target, actualWidth, actualHeight) : undefined;
-      const candidates: [MeasurementDragMode, Point][] = [['start', target.start], ['end', target.end]];
-      if (profileHandles) candidates.push(['profileStart', profileHandles.start], ['profileEnd', profileHandles.end]);
-      const widthHandle = caliperLineProfileWidthHandle(target, actualWidth, actualHeight);
-      if (widthHandle) candidates.push(['profileWidth', widthHandle]);
-      const endpoint = closestHandle(candidates, screen, view);
-      if (endpoint) return endpoint;
-      const dx = target.end.x - target.start.x, dy = target.end.y - target.start.y;
-      const lengthSquared = dx * dx + dy * dy;
-      const cursor = imagePoint(screen);
-      const t = lengthSquared > 0 ? clamp(((cursor.x - target.start.x) * dx + (cursor.y - target.start.y) * dy) / lengthSquared, 0, 1) : 0;
-      const closest = { x: target.start.x + t * dx, y: target.start.y + t * dy };
-      if (near(closest)) return 'moveLine';
-      return undefined;
-    }
-    const arcHandles = caliperCircleArcHandles(target, view.scale, actualWidth, actualHeight);
-    const bandHandles = caliperCircleBandHandles(target, view.scale, actualWidth, actualHeight);
-    const candidates: [MeasurementDragMode, Point][] = [];
-    const angles = buildCaliperCircleAngles(target);
-    const widthHandle = caliperCircleProfileWidthHandle(target, angles, actualWidth, actualHeight);
-    if (target.centerEditable !== false) candidates.push(['center', target.center]);
-    if (target.radiusEditable !== false) candidates.push(['radius', circleRadiusHandle(target.center, target.radius, actualWidth, actualHeight)]);
-    if (widthHandle) candidates.push(['profileWidth', widthHandle.point]);
-    if (arcHandles?.start) candidates.push(['angleStart', arcHandles.start]);
-    if (arcHandles?.end) candidates.push(['angleEnd', arcHandles.end]);
-    if (bandHandles) candidates.push(['innerBand', bandHandles.inner], ['outerBand', bandHandles.outer]);
-    const closest = closestHandle(candidates, screen, view);
-    if (closest) return closest;
-    const cursor = imagePoint(screen);
-    if (target.centerEditable !== false
-      && Math.abs(Math.hypot(cursor.x - target.center.x, cursor.y - target.center.y) - target.radius) * view.scale <= HANDLE_HIT)
-      return 'moveCircle';
-    return undefined;
   };
 
   const onWheel = (event: Konva.KonvaEventObject<WheelEvent>) => {
@@ -422,7 +356,7 @@ export default function ImageViewer({
       return;
     }
     if (measurementGeometryEditable && measurementGeometry) {
-      const handle = hitMeasurementHandle(measurementGeometry, p);
+      const handle = hitMeasurementHandle(measurementGeometry, p, view, actualWidth, actualHeight);
       if (handle) {
         const profileWidthAngle = handle === 'profileWidth' && measurementGeometry.type === 'circle'
           ? caliperCircleProfileWidthHandle(measurementGeometry, buildCaliperCircleAngles(measurementGeometry), actualWidth, actualHeight)?.angle
@@ -433,7 +367,7 @@ export default function ImageViewer({
     }
     // 平移模式负责编辑已有 ROI；绘制工具始终新建/替换选区，避免 ROI 内部点击被吞成移动。
     if (roi && roiEnabled && tool === 'pan') {
-      const handle = hitRoiHandle(roi, p);
+      const handle = hitRoiHandle(roi, p, view, actualWidth, actualHeight);
       if (handle) {
         roiDrag.current = { mode: handle, origin: roi, start: imagePoint(p) };
         return;
@@ -492,84 +426,10 @@ export default function ImageViewer({
     }
     if (geometryDrag.current) {
       const { mode, origin, start, profileWidthAngle } = geometryDrag.current;
-      const current = { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) };
-      if (origin.type === 'line') {
-        if (mode === 'start' || mode === 'end') {
-          setMeasurementDraft({ ...origin, [mode]: boundedMeasurementPoint(ip) });
-        } else if (mode === 'profileWidth') {
-          const dx = origin.end.x - origin.start.x, dy = origin.end.y - origin.start.y;
-          const length = Math.hypot(dx, dy);
-          if (length > 0) {
-            const normal = { x: -dy / length, y: dx / length };
-            const delta = (current.x - start.x) * normal.x + (current.y - start.y) * normal.y;
-            setMeasurementDraft({ ...origin, profileWidth: effectiveSampleWidth(clamp((origin.profileWidth ?? 1) + 2 * delta, 1, 99)) });
-          }
-        } else if (mode === 'profileStart' || mode === 'profileEnd') {
-          const dx = origin.end.x - origin.start.x, dy = origin.end.y - origin.start.y;
-          const length = Math.hypot(dx, dy);
-          if (length > 0) {
-            const tangent = { x: -dy / length, y: dx / length };
-            const delta = (current.x - start.x) * tangent.x + (current.y - start.y) * tangent.y;
-            const direction = mode === 'profileStart' ? -1 : 1;
-            const initialSpan = origin.profileSpan && origin.profileSpan > 0 ? origin.profileSpan : length;
-            const profileSpan = Math.abs(delta) < 1e-9 ? origin.profileSpan
-              : clamp(initialSpan + direction * 2 * delta, 1, 10_000);
-            setMeasurementDraft({ ...origin, profileSpan });
-          }
-        } else {
-          // Keep clipped search lines draggable: constrain their bounds to keep some
-          // overlap with the image, while allowing endpoints to remain outside.
-          const minX = Math.min(origin.start.x, origin.end.x), maxX = Math.max(origin.start.x, origin.end.x);
-          const minY = Math.min(origin.start.y, origin.end.y), maxY = Math.max(origin.start.y, origin.end.y);
-          const dx = clamp(current.x - start.x, -maxX, actualWidth - minX);
-          const dy = clamp(current.y - start.y, -maxY, actualHeight - minY);
-          setMeasurementDraft({ ...origin, start: { x: origin.start.x + dx, y: origin.start.y + dy }, end: { x: origin.end.x + dx, y: origin.end.y + dy } });
-        }
-      } else if (mode === 'profileWidth') {
-        const angle = profileWidthAngle ?? origin.angleStartDeg ?? -180;
-        const radians = normalizeCaliperAngle(angle) * Math.PI / 180;
-        const normal = { x: -Math.sin(radians), y: Math.cos(radians) };
-        const delta = (current.x - start.x) * normal.x + (current.y - start.y) * normal.y;
-        setMeasurementDraft({ ...origin, profileWidth: effectiveSampleWidth(clamp((origin.profileWidth ?? 1) + 2 * delta, 1, 99)) });
-      } else if (mode === 'center' || mode === 'moveCircle') {
-        const center = mode === 'center' ? current : {
-          x: origin.center.x + current.x - start.x,
-          y: origin.center.y + current.y - start.y
-        };
-        setMeasurementDraft({ ...origin, center: mode === 'center' ? {
-          x: clampCircleCenter(center.x, origin.radius, actualWidth),
-          y: clampCircleCenter(center.y, origin.radius, actualHeight)
-        } : clampCaliperCircleCenter(center, origin.radius, origin.band ?? 0, actualWidth, actualHeight) });
-      } else if (mode === 'radius') {
-        const startDistance = Math.hypot(start.x - origin.center.x, start.y - origin.center.y);
-        const currentDistance = Math.hypot(current.x - origin.center.x, current.y - origin.center.y);
-        setMeasurementDraft({ ...origin, radius: clamp(origin.radius + currentDistance - startDistance, 1, 10_000_000) });
-      } else if (mode === 'angleStart' || mode === 'angleEnd') {
-        const rawStartAngle = origin.angleStartDeg ?? -180;
-        const rawEndAngle = origin.angleEndDeg ?? 180;
-        const normalizedArc = normalizeCaliperCircleArc(rawStartAngle, rawEndAngle);
-        const startAngle = Math.abs(rawStartAngle) <= 1_000_000 ? rawStartAngle : normalizedArc.start;
-        const arcEndAngle = startAngle + circleArcSpan(rawStartAngle, rawEndAngle).span;
-        const pointerAngle = Math.atan2(current.y - origin.center.y, current.x - origin.center.x) * 180 / Math.PI;
-        const lower = mode === 'angleStart' ? arcEndAngle - 359.5 : startAngle + 0.5;
-        const upper = mode === 'angleStart' ? arcEndAngle - 0.5 : startAngle + 359.5;
-        let adjustedAngle = pointerAngle + 360 * Math.round(((lower + upper) / 2 - pointerAngle) / 360);
-        if (adjustedAngle < lower) adjustedAngle += 360;
-        if (adjustedAngle > upper) adjustedAngle -= 360;
-        adjustedAngle = clamp(adjustedAngle, lower, upper);
-        setMeasurementDraft(mode === 'angleStart'
-          ? { ...origin, angleStartDeg: adjustedAngle }
-          : { ...origin, angleEndDeg: adjustedAngle });
-      } else if (mode === 'innerBand' || mode === 'outerBand') {
-        const initialBand = Math.max(0, Math.min(500, origin.band ?? 0));
-        const startDistance = Math.hypot(start.x - origin.center.x, start.y - origin.center.y);
-        const currentDistance = Math.hypot(current.x - origin.center.x, current.y - origin.center.y);
-        const initialInner = Math.max(0, origin.radius - initialBand);
-        const band = mode === 'innerBand'
-          ? clamp(origin.radius - Math.max(0, initialInner + currentDistance - startDistance), 1, 500)
-          : clamp(initialBand + currentDistance - startDistance, 1, 500);
-        setMeasurementDraft({ ...origin, band });
-      }
+      const next = applyMeasurementDrag({ origin, mode, start, pointer: ip,
+        current: { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) },
+        profileWidthAngle, imageWidth: actualWidth, imageHeight: actualHeight });
+      if (next) setMeasurementDraft(next);
       return;
     }
     if (brushStroke.current) {
@@ -758,46 +618,40 @@ export default function ImageViewer({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [geometryDrawMode]);
 
-  const cursorStyle = useMemo(() => {
-    if (caliperDiagnosticSelection) return panStart.current ? 'grabbing' : 'crosshair';
-    if (geometryDrawMode) return 'crosshair';
-    if (panStart.current || roiDrag.current || geometryDrag.current) return 'grabbing';
-    if (cursorScreen) {
-      if (measurementGeometryEditable && measurementGeometry) {
-        const handle = hitMeasurementHandle(measurementGeometry, cursorScreen);
-        if (handle === 'radius' && measurementGeometry.type === 'circle')
-          return radialResizeCursor(measurementGeometry.center,
-            circleRadiusHandle(measurementGeometry.center, measurementGeometry.radius, actualWidth, actualHeight));
-        if (handle === 'profileWidth') return 'move';
-        if (handle === 'innerBand' || handle === 'outerBand') return 'ns-resize';
-        if ((handle === 'profileStart' || handle === 'profileEnd') && measurementGeometry.type === 'line') {
-          const dx = measurementGeometry.end.x - measurementGeometry.start.x;
-          const dy = measurementGeometry.end.y - measurementGeometry.start.y;
-          if (Math.abs(dy) > Math.abs(dx) * 1.5) return 'ew-resize';
-          if (Math.abs(dx) > Math.abs(dy) * 1.5) return 'ns-resize';
-          return (-dy) * dx >= 0 ? 'nwse-resize' : 'nesw-resize';
-        }
-        if (handle) return 'move';
-      }
-      if (roi && roiEnabled && tool === 'pan') {
-        const handle = hitRoiHandle(roi, cursorScreen);
-        if (handle && roi.type === 'Circle')
-          return radialResizeCursor({ x: roi.x, y: roi.y }, circleRadiusHandle({ x: roi.x, y: roi.y }, roi.radius, actualWidth, actualHeight));
-        if (handle === 'nw' || handle === 'se') return 'nwse-resize';
-        if (handle === 'ne' || handle === 'sw') return 'nesw-resize';
-        if (handle === 'w' || handle === 'e') return 'ew-resize';
-        if (handle === 'n' || handle === 's') return 'ns-resize';
-        if (handle?.startsWith('vertex:')) return 'move';
-        const imageCursor = imagePoint(cursorScreen);
-        if ((roi.type === 'Rectangle' || roi.type === 'Circle') && pointInsideRoi(roi, imageCursor)) return 'move';
-        // Match the visible, cached preview contour without ray-casting every source vertex
-        // on every pointer move; pointer-down still checks the full ROI for exact movement.
-        if (roi.type === 'Polygon' && pointInsidePolygon(polygonPreviewPoints(roi.points), imageCursor)) return 'move';
-      }
-    }
-    return tool === 'pan' ? 'grab' : 'crosshair';
-  }, [actualHeight, actualWidth, cursorScreen, geometryDrawMode, measurementGeometry, measurementGeometryEditable, caliperDiagnosticSelection,
-    roi, roiEnabled, tool, view]);
+  // 切换到新工具前清掉所有进行中的手势：半截的笔迹/多边形/草稿如果跨工具残留，
+  // 下一次 pointerup 会把它误当成新工具的提交。
+  const changeTool = (value: ToolMode) => {
+    polygonPoints.current = [];
+    brushStroke.current = undefined;
+    setBrushPreview(undefined);
+    gestureStart.current = undefined;
+    geometryGestureStart.current = undefined;
+    geometryDrag.current = undefined;
+    setGeometryDrawMode(false);
+    setMeasurementDraft(undefined);
+    setCircleConstructionPoints([]);
+    setCircleConstructionIssue(undefined);
+    roiDrag.current = undefined;
+    setRoiDragOffset(undefined);
+    setDraft(undefined);
+    setTool(value);
+  };
+
+  const cursorStyle = useViewerCursorStyle({
+    caliperDiagnosticSelection,
+    geometryDrawMode,
+    isPanning: Boolean(panStart.current),
+    isDragging: Boolean(roiDrag.current || geometryDrag.current),
+    cursorScreen,
+    measurementGeometry,
+    measurementGeometryEditable,
+    roi,
+    roiEnabled,
+    tool,
+    view,
+    imageWidth: actualWidth,
+    imageHeight: actualHeight
+  });
 
   // 覆盖层按节点筛选：不选=显示全部；选了=只显示所选节点的覆盖层
   const overlayNodeIds = useMemo(() => {
@@ -816,211 +670,123 @@ export default function ImageViewer({
 
   return (
     <div className={'vision-viewer' + (geometryDrawMode && measurementGeometry?.type === 'circle' ? ' is-drawing-circle' : '')}>
-      <div className="viewer-toolbar">
-        <Space size={5} wrap>
-          {showRoiTools && <Segmented
-            size="small"
-            value={tool}
-            onChange={(value) => { polygonPoints.current = []; brushStroke.current = undefined; setBrushPreview(undefined); gestureStart.current = undefined;
-              geometryGestureStart.current = undefined; geometryDrag.current = undefined; setGeometryDrawMode(false); setMeasurementDraft(undefined);
-              setCircleConstructionPoints([]); setCircleConstructionIssue(undefined);
-              roiDrag.current = undefined; setRoiDragOffset(undefined); setDraft(undefined); setTool(value as ToolMode); }}
-            options={[
-              { value: 'pan', label: <Tooltip title="平移画布；拖动已有选区可移动，矩形/圆形可缩放，多边形可编辑顶点">平移</Tooltip> },
-              ...(roiPointLimit ? [
-                { value: 'polygon', disabled: !roiEnabled, label: <Tooltip title={`依次点击 ${roiPointLimit} 个角点；最后一个点自动闭合`}>多边形</Tooltip> }
-              ] : [
-                { value: 'rect', disabled: !roiEnabled, label: <Tooltip title="拖动绘制矩形，并替换当前选区">矩形</Tooltip> },
-                { value: 'circle', disabled: !roiEnabled, label: <Tooltip title="拖动绘制圆形，并替换当前选区">圆形</Tooltip> },
-                { value: 'polygon', disabled: !roiEnabled, label: <Tooltip title="逐点绘制多边形，并替换当前选区；双击完成">多边形</Tooltip> },
-                { value: 'brush', disabled: !roiEnabled, label: <Tooltip title="笔刷：按住鼠标拖动绘制选区">笔刷</Tooltip> },
-                { value: 'eraser', disabled: !roiEnabled || roi?.type !== 'Brush', label: <Tooltip title="橡皮：按住鼠标拖动擦除">橡皮</Tooltip> }
-              ])
-            ]}
-          />}
-          {showRoiTools && roi?.type === 'Polygon' && roi.points.length > MAX_POLYGON_HANDLES && <Tooltip
-            title="复杂多边形轮廓最多抽样 8192 个点预览，控制点最多抽样 32 个；在预览选区内部拖动可整体移动，执行仍使用完整 ROI。全部顶点可在属性面板分页编辑。">
-            <span className="viewer-roi-handle-hint">复杂多边形 · 预览与控制点抽样</span>
-          </Tooltip>}
-          {showRoiTools && <span className="viewer-toolbar-divider" />}
-          {showRoiTools && (tool === 'brush' || tool === 'eraser') && <span className="viewer-brush-size">
-            <span title="笔刷直径（图像像素）">笔宽</span>
-            <InputNumber aria-label="笔刷直径" size="small" min={1} max={512} step={1} value={brushWidth}
-              disabled={!roiEnabled} onChange={(value) => setBrushWidth(clamp(Number(value ?? 1), 1, 512))} />
-            <span>px</span>
-          </span>}
-          {showRoiTools && roiUndoAvailable && <Button size="small" onClick={undoRoiEdit}
-            title="撤销最近一次在画布上完成的选区编辑">{roi?.type === 'Brush' ? '撤销笔迹' : '撤销选区编辑'}</Button>}
-          {canDrawMeasurementGeometry && <>
-            <span className="viewer-toolbar-divider" />
-            <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
-              onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setCircleConstructionPoints([]);
-                setCircleConstructionIssue(undefined); setGeometryDrawMode(value => !value); setTool('pan'); }}
-              title={geometryDrawMode ? '退出绘制模式' : measurementGeometry.type === 'circle'
-                ? '可选择圆心+半径、直径两端、三点定圆或三点选弧；三点选弧会同时确定圆和测量角度范围。橙色调整圆心/半径，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带，粉色调整投影宽度'
-                : measurementGeometry.profileCount !== undefined
-                  ? '蓝色起点、紫色终点固定表示参数端点；箭头表示选边顺序（最强为双向）。青色控制点调整采样跨度，粉色控制点调整投影宽度。拖动端点或线段可微调搜索线'
-                  : '蓝色起点、紫色终点固定表示参数端点；箭头表示选边顺序（最强为双向）。粉色控制点调整投影宽度。拖动端点或线段可微调搜索线'}>
-              {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
-            </Button>
-          </>}
-          {geometryDrawMode && measurementGeometry?.type === 'circle' && <Segmented size="small" aria-label="标称圆圈选方式"
-            value={circleDrawMode} options={[{ label: '圆心+半径', value: 'center' },
-              { label: '直径两端', value: 'diameter' }, { label: '三点定圆', value: 'threePoints' },
-              { label: '三点选弧', value: 'threePointArc' }]}
-            onChange={value => {
-              setCircleDrawMode(value as CircleDrawMode); setCircleConstructionPoints([]); setCircleConstructionIssue(undefined);
-              setMeasurementDraft(undefined); geometryGestureStart.current = undefined;
-            }} />}
-          {measurementUndoAvailable && <Button size="small" onClick={undoMeasurementEdit}
-            title="撤销最近一次在画布上完成的卡尺几何编辑">撤销测量编辑</Button>}
-          {measurementGeometry?.profileWidth !== undefined && <span className="viewer-profile-width-hint"
-            title="浅蓝色窄带表示每条卡尺沿垂直于搜索方向的实际灰度投影宽度">浅蓝色采样带 · {measurementGeometry.profileWidth} px</span>}
-          {measurementGeometry?.type === 'line' && <Button size="small" onClick={focusSearchLine}
-            disabled={!clipSegmentToImage(measurementGeometry.start, measurementGeometry.end, actualWidth, actualHeight)}
-            title="放大并居中显示图像内的搜索线与投影带，不改变测量参数">定位搜索线</Button>}
-          <Button size="small" onClick={fit}>适应窗口</Button>
-          <Button size="small" onClick={oneToOne}>原始比例</Button>
-          {showRoiTools && roiClearable && <Button size="small" danger disabled={!roi || !roiEnabled} onClick={clearRoi}>清除选区</Button>}
-          <span className="viewer-toolbar-divider" />
-          <span className="viewer-toggle" title="像素化（默认）：放大时按真实像素方块显示，便于逐像素核对；关闭则使用平滑插值（缩小总览更顺眼）">像素化 <Switch size="small" checked={pixelated} onChange={setPixelated} /></span>
-          <span className="viewer-toggle">显示覆盖层 <Switch size="small" checked={showOverlay} onChange={setShowOverlay} /></span>
-          {/* 覆盖层按节点筛选：仅当存在多个节点来源时才有意义（单节点输出视图 App 已按节点过滤） */}
-          {overlayNodeIds.length > 1 && (
-            <Select
-              size="small"
-              mode="multiple"
-              allowClear
-              maxTagCount={1}
-              style={{ minWidth: 118, maxWidth: 190 }}
-              placeholder="覆盖层：全部节点"
-              title="按节点筛选覆盖层（可多选）"
-              value={overlayFilter}
-              onChange={setOverlayFilter}
-              options={overlayNodeIds.map((id) => ({ value: id, label: nodeLabels?.[id] ?? id }))}
-            />
-          )}
-        </Space>
-      </div>
-      {geometryDrawMode && measurementGeometry?.type === 'line' && <div className="viewer-drawing-hint" aria-label="搜索线绘制提示">
-        <div className="viewer-drawing-instructions"><span role="status">从起点拖到终点，松开完成；搜索线至少 2 px，Esc 取消。</span></div>
-        <div className="viewer-drawing-feedback">{measurementDraft?.type === 'line' ? <output aria-label="搜索线绘制尺寸" aria-live="off">
-          长度 {Math.hypot(measurementDraft.end.x - measurementDraft.start.x, measurementDraft.end.y - measurementDraft.start.y).toFixed(2)} px
-          {' · '}方向 {(Math.atan2(measurementDraft.end.y - measurementDraft.start.y, measurementDraft.end.x - measurementDraft.start.x) * 180 / Math.PI).toFixed(1)}°
-        </output> : <span>极性按起点 → 终点解释；投影长度和选边顺序在重绘后保留。</span>}</div>
-      </div>}
-      {geometryDrawMode && measurementGeometry?.type === 'circle' && <div className="viewer-drawing-hint" aria-label="标称圆圈选提示">
-        <div className="viewer-drawing-instructions"><span role="status">{isThreePointDrawing
-          ? circleDrawMode === 'threePointArc'
-            ? `点选圆弧第 ${circleConstructionPoints.length + 1}/3 点：端点 → 经过点 → 另一端；Esc 取消。`
-            : `沿目标圆边缘点选第 ${circleConstructionPoints.length + 1}/3 点；尽量分散选点，Esc 取消。`
-          : circleDrawMode === 'diameter'
-            ? '从圆边缘拖到直径另一端，松开完成；Esc 取消。'
-            : '从圆心拖到目标边缘，松开完成；Esc 取消。'}</span>
-        {isThreePointDrawing && <Button size="small" disabled={circleConstructionPoints.length === 0} onClick={() => {
-          setCircleConstructionPoints(points => points.slice(0, -1)); setMeasurementDraft(undefined); setCircleConstructionIssue(undefined);
-        }}>撤回上一点</Button>}</div>
-        <div className="viewer-drawing-feedback">{circleConstructionIssue ? <span role="alert">{circleConstructionIssue}</span>
-        : measurementDraft?.type === 'circle' ? <output aria-label="圈选尺寸" aria-live="off">
-          圆心 ({measurementDraft.center.x.toFixed(2)}, {measurementDraft.center.y.toFixed(2)}) · 半径 {measurementDraft.radius.toFixed(2)} px
-          {circleDrawMode === 'threePointArc' && ` · 圆弧 ${circleArcSpan(measurementDraft.angleStartDeg ?? -180, measurementDraft.angleEndDeg ?? 180).span.toFixed(1)}°`}
-        </output> : <span>{circleDrawMode === 'threePointArc' ? '自动选择经过第 2 点的圆弧；完成后可旋转或反选圆弧。' : '完成圈选后可继续拖动圆心、半径和搜索带。'}</span>}</div>
-      </div>}
+      <ImageViewerToolbar
+        showRoiTools={showRoiTools}
+        roiEnabled={roiEnabled}
+        roiPointLimit={roiPointLimit}
+        roiClearable={roiClearable}
+        roi={roi}
+        tool={tool}
+        onToolChange={changeTool}
+        roiUndoAvailable={roiUndoAvailable}
+        onUndoRoiEdit={undoRoiEdit}
+        brushWidth={brushWidth}
+        onBrushWidthChange={setBrushWidth}
+        canDrawMeasurementGeometry={Boolean(canDrawMeasurementGeometry)}
+        geometryDrawMode={geometryDrawMode}
+        measurementGeometry={measurementGeometry}
+        onToggleGeometryDrawMode={() => {
+          setMeasurementDraft(undefined);
+          geometryGestureStart.current = undefined;
+          setCircleConstructionPoints([]);
+          setCircleConstructionIssue(undefined);
+          setGeometryDrawMode(value => !value);
+          setTool('pan');
+        }}
+        circleDrawMode={circleDrawMode}
+        onCircleDrawModeChange={(value) => {
+          setCircleDrawMode(value);
+          setCircleConstructionPoints([]);
+          setCircleConstructionIssue(undefined);
+          setMeasurementDraft(undefined);
+          geometryGestureStart.current = undefined;
+        }}
+        measurementUndoAvailable={measurementUndoAvailable}
+        onUndoMeasurementEdit={undoMeasurementEdit}
+        focusSearchLineDisabled={!measurementGeometry || measurementGeometry.type !== 'line'
+          || !clipSegmentToImage(measurementGeometry.start, measurementGeometry.end, actualWidth, actualHeight)}
+        onFocusSearchLine={focusSearchLine}
+        onFit={fit}
+        onOneToOne={oneToOne}
+        onClearRoi={clearRoi}
+        pixelated={pixelated}
+        onPixelatedChange={setPixelated}
+        showOverlay={showOverlay}
+        onShowOverlayChange={setShowOverlay}
+        overlayNodeIds={overlayNodeIds}
+        overlayFilter={overlayFilter}
+        onOverlayFilterChange={setOverlayFilter}
+        nodeLabels={nodeLabels}
+      />
+      {geometryDrawMode && (measurementGeometry?.type === 'line' || measurementGeometry?.type === 'circle')
+        && <ImageViewerDrawingHint
+          kind={measurementGeometry.type}
+          threePoint={isThreePointDrawing}
+          circleDrawMode={circleDrawMode}
+          constructionPoints={circleConstructionPoints}
+          constructionIssue={circleConstructionIssue}
+          measurementDraft={measurementDraft}
+          onUndoConstructionPoint={() => {
+            setCircleConstructionPoints(points => points.slice(0, -1));
+            setMeasurementDraft(undefined);
+            setCircleConstructionIssue(undefined);
+          }}
+        />}
 
-      <div ref={hostRef} className={`viewer-stage ${loading ? 'is-loading' : ''}`} style={{ cursor: cursorStyle }}>
-        {!previewUrl && !failed && <div className="image-placeholder">
-          <span>{emptyHint}</span>
-          {emptyAction && <Button size="small" type="primary" disabled={emptyAction.disabled} title={emptyAction.title} onClick={emptyAction.onClick}>{emptyAction.label}</Button>}
-        </div>}
-        {failed && <div className="image-placeholder error">图像加载失败：预览不可用或已被清理</div>}
-        {previewUrl && !failed && (
-          <Stage
-            ref={stageRef}
-            width={size.width}
-            height={size.height}
-            onWheel={onWheel}
-            onMouseDown={onPointerDown}
-            onTouchStart={onStageTouchStart}
-            onMouseMove={onPointerMove}
-            onTouchMove={onStageTouchMove}
-            onMouseUp={onPointerUp}
-            onTouchEnd={onStageTouchEnd}
-            onClick={onClick}
-            onDblClick={commitPolygon}
-            onMouseLeave={() => { setCursor(undefined); }}
-          >
-            <Layer imageSmoothingEnabled={!pixelated}>
-              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                {image && <KonvaImage image={image} width={actualWidth} height={actualHeight} listening={false} />}
-              </Group>
-            </Layer>
-            <Layer>
-              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                {showOverlay && visibleOverlays.map((o) => <OverlayShape key={`${o.nodeId ?? ''}-${o.id}`} overlay={o} scale={view.scale} />)}
-              </Group>
-            </Layer>
-            {measurementGeometry && <Layer>
-              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                <MeasurementGeometryShape geometry={measurementDraft ?? measurementGeometry} scale={view.scale} editable={measurementGeometryEditable && !geometryDrawMode}
-                  imageWidth={actualWidth} imageHeight={actualHeight} />
-                {circleConstructionPoints.length > 0 && <Group listening={false}>
-                  <Line points={[...circleConstructionPoints, ...(cursor ? [cursor] : [])].flatMap(point => [point.x, point.y])}
-                    stroke="#fa8c16" strokeWidth={1 / view.scale} dash={[4 / view.scale, 4 / view.scale]} />
-                  {circleConstructionPoints.map((point, index) => <Group key={index}>
-                    <Circle name={`circle-construction-point-${index}`} x={point.x} y={point.y} radius={4 / view.scale}
-                      fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / view.scale} />
-                    <Text x={point.x + 7 / view.scale} y={point.y - 14 / view.scale}
-                      text={circleDrawMode === 'threePointArc' ? ['端点 1', '经过点', '端点 2'][index] : `${index + 1}`}
-                      fill="#fa8c16" fontSize={12 / view.scale} />
-                  </Group>)}
-                </Group>}
-              </Group>
-            </Layer>}
-            {showOverlay && measurementMarkers.length > 0 && <Layer>
-              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                {measurementMarkers.map(marker => <OverlayShape key={marker.id} overlay={marker} scale={view.scale} />)}
-              </Group>
-            </Layer>}
-            {caliperDiagnosticSelection && <Layer>
-              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                <CaliperDiagnosticShape selection={caliperDiagnosticSelection} scale={view.scale} />
-              </Group>
-            </Layer>}
-            <Layer>
-              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                {roiDragOffset && (roi?.type === 'Brush' || roi?.type === 'Polygon')
-                  ? <Group x={roiDragOffset.x} y={roiDragOffset.y}>
-                    <RoiShape roi={roi} scale={view.scale} />
-                    {roi.type === 'Polygon' && roiEnabled && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
-                  </Group>
-                  : <>
-                    {brushPreview || roi?.type === 'Brush'
-                      ? <>
-                        <BrushRoiShape strokes={roi?.type === 'Brush' ? roi.strokes : []} activeStroke={brushPreview} />
-                        {draft?.type !== 'Brush' && <RoiShape roi={draft} scale={view.scale} draft />}
-                      </>
-                      : <>
-                        <RoiShape roi={roi} scale={view.scale} />
-                        <RoiShape roi={draft} scale={view.scale} draft />
-                      </>}
-                  </>}
-                {roi && roiEnabled && tool === 'pan' && !draft && !brushPreview && !roiDragOffset
-                  && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
-              </Group>
-            </Layer>
-          </Stage>
-        )}
-        {loading && <div className="viewer-loading">运行中…</div>}
-      </div>
-      <div className="viewer-readout" role="group" aria-label="图像状态栏">
-        <span className="viewer-image-size">{actualWidth > 0 ? `${actualWidth} × ${actualHeight}` : '无图像'}</span>
-        <span className="viewer-zoom">{Math.round(view.scale * 100)}%</span>
-        <span className="viewer-pixel-readout">{cursor && image ? <>
-          <span>X {Math.floor(cursor.x)} · Y {Math.floor(cursor.y)}</span>
-          <span>{pixel ? `${pixel.grayscale ? `灰度 ${pixel.r}` : `RGB (${pixel.r}, ${pixel.g}, ${pixel.b})`}${pixel.a < 255 ? ` · A ${pixel.a}` : ''}` : pixelBuffer === null ? '像素值不可用' : ''}</span>
-        </> : <span className="viewer-pixel-placeholder">移动鼠标查看像素</span>}</span>
-        <span className="viewer-roi-target" title={roiEnabled ? `选区编辑作用于：${roiTargetLabel || '当前图像'}` : '只读：该节点/该图像不支持编辑选区（未开启 ROI 能力、正在查看预览图像或图像尚未产出）'}>{roiEnabled ? `选区 → ${roiTargetLabel || '当前图像'}` : '只读 · 不可编辑选区'}</span>
-      </div>
+      <ImageViewerStage
+        hostRef={hostRef}
+        stageRef={stageRef}
+        size={size}
+        view={view}
+        image={image}
+        imageWidth={actualWidth}
+        imageHeight={actualHeight}
+        pixelated={pixelated}
+        cursorStyle={cursorStyle}
+        loading={Boolean(loading)}
+        previewUrl={previewUrl}
+        failed={failed}
+        emptyHint={emptyHint}
+        emptyAction={emptyAction}
+        showOverlay={showOverlay}
+        visibleOverlays={visibleOverlays}
+        measurementGeometry={measurementGeometry}
+        measurementDraft={measurementDraft}
+        measurementGeometryEditable={measurementGeometryEditable}
+        geometryDrawMode={geometryDrawMode}
+        circleConstructionPoints={circleConstructionPoints}
+        circleDrawMode={circleDrawMode}
+        cursor={cursor}
+        measurementMarkers={measurementMarkers}
+        caliperDiagnosticSelection={caliperDiagnosticSelection}
+        roi={roi}
+        roiEnabled={roiEnabled}
+        tool={tool}
+        draft={draft}
+        brushPreview={brushPreview}
+        roiDragOffset={roiDragOffset}
+        onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onStageTouchStart={onStageTouchStart}
+        onPointerMove={onPointerMove}
+        onStageTouchMove={onStageTouchMove}
+        onPointerUp={onPointerUp}
+        onStageTouchEnd={onStageTouchEnd}
+        onClick={onClick}
+        onDblClick={commitPolygon}
+        onMouseLeave={() => { setCursor(undefined); }}
+      />
+      <ImageViewerReadout
+        imageWidth={actualWidth}
+        imageHeight={actualHeight}
+        scale={view.scale}
+        cursor={cursor}
+        image={image}
+        pixel={pixel}
+        pixelUnavailable={pixelBuffer === null}
+        roiEnabled={roiEnabled}
+        roiTargetLabel={roiTargetLabel}
+      />
     </div>
   );
 }
