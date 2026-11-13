@@ -38,7 +38,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('backend/**/*.csproj', 'backend/**/Directory.Packages.props') }}
@@ -89,7 +89,7 @@ jobs:
       # %USERPROFILE%\AppData\Local\ms-playwright。key 跟 package-lock 走，
       # 依赖版本不变时不再每轮重新下载完整 Chromium（约 130 MiB）。
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/AppData/Local/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
