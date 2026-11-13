@@ -340,7 +340,7 @@
     "BilateralFilter"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "ChannelMixNode",
     "Transform"
   ],
@@ -390,42 +390,42 @@
     "Threshold"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "QualityMetricsNode",
     "Absdiff"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "QualityMetricsNode",
     "Add"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "QualityMetricsNode",
     "CvtColor"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "QualityMetricsNode",
     "Laplacian"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "QualityMetricsNode",
     "Multiply"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "QualityMetricsNode",
     "Sobel"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "WhiteBalanceNode",
     "Merge"
   ],
   [
-    "PreprocessGapNodes.cs",
+    "PreprocessGapNodes.Color.cs",
     "WhiteBalanceNode",
     "Split"
   ],

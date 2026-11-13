@@ -11,13 +11,14 @@ import { clamp, clipSegmentToImage, nearestDiagnosticSpoke, CaliperDiagnosticSha
   caliperLineProfileWidthHandle, caliperCircleProfileWidthHandle, caliperCircleArcHandles, caliperCircleBandHandles,
   circleRadiusHandle, radialResizeCursor, closestHandle, polygonHandleIndices, boundedMeasurementPoint,
   polygonPreviewPoints, maxInteractiveCircleRadius, clampCircleCenter,
-  clampCaliperCircleCenter, normalizeRect, roiBounds, pointInsideRoi, pointInsidePolygon, brushRoiBounds,
+  clampCaliperCircleCenter, normalizeRect, pointInsideRoi, pointInsidePolygon, brushRoiBounds,
   polygonRoiBounds, clampRoiMove, applyRoiDrag, OverlayShape, useHtmlImage, readPixelated, persistPixelated,
   HANDLE_HIT, MAX_POLYGON_HANDLES, MIN_EDGE_HANDLE_SPAN
 } from './imageViewerUtils';
 import type { Point, ViewState, RoiDragMode, MeasurementDragMode, CircleDrawMode, ToolMode, RoiMoveBounds, CaliperDiagnosticSelection } from './imageViewerTypes';
 import type { MeasurementGeometry } from './imageViewerUtils';
 import { MeasurementGeometryShape, RoiShape, RoiHandles, BrushRoiShape } from './imageViewerUtils';
+import { useViewerViewport } from './useViewerViewport';
 export type { MeasurementGeometry } from './imageViewerUtils';
 export { buildCaliperCircleAngles } from '../caliperCircleSampling';
 
@@ -81,8 +82,6 @@ export default function ImageViewer({
   const roi = useMemo(() => inputRoi && !roiConfigurationIssue(inputRoi, 'ROI', 1024) ? inputRoi : undefined, [inputRoi]);
   const hostRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
-  const [size, setSize] = useState({ width: 400, height: 260 });
-  const [view, setView] = useState<ViewState>({ scale: 1, x: 0, y: 0 });
   const [tool, setTool] = useState<ToolMode>('pan');
   const [cursorScreen, setCursor] = useState<Point>();
   const [showOverlay, setShowOverlay] = useState(true);
@@ -109,13 +108,17 @@ export default function ImageViewer({
   const polygonPoints = useRef<OverlayPoint[]>([]);
   const brushStroke = useRef<{ baseStrokes: VisionRoiBrushStroke[]; activeStroke: VisionRoiBrushStroke } | undefined>(undefined);
   const [brushPreview, setBrushPreview] = useState<VisionRoiBrushStroke>();
-  const lastFocusTick = useRef(focusTick ?? 0);
   const pointerUpHandler = useRef<() => void>(() => undefined);
   const pointerCancelHandler = useRef<() => void>(() => undefined);
   const pointerMoveHandler = useRef<() => void>(() => undefined);
   const { image, failed } = useHtmlImage(previewUrl);
   const actualWidth = imageWidth || image?.naturalWidth || 0;
   const actualHeight = imageHeight || image?.naturalHeight || 0;
+  // 视口（缩放/平移/适配目标）由独立 hook 持有：它需要跨渲染保住"适配意图"，
+  // 混在手势状态机里最容易在改交互时被无意重置。
+  const { size, view, setView, fit, oneToOne, focusSearchLine } = useViewerViewport({
+    hostRef, actualWidth, actualHeight, roi, focusTick, measurementGeometry
+  });
   const canDrawMeasurementGeometry = measurementGeometryEditable && measurementGeometry && (measurementGeometry.type === 'line'
     || measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false);
   const cursorPoint = cursorScreen ? { x: (cursorScreen.x - view.x) / view.scale, y: (cursorScreen.y - view.y) / view.scale } : undefined;
@@ -215,77 +218,6 @@ export default function ImageViewer({
       onMeasurementGeometryChange(measurementUndoEntry.previous, { preserveValues: true });
   };
 
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    const observer = new ResizeObserver(([entry]) => {
-      const r = entry.contentRect;
-      setSize({ width: Math.max(10, r.width), height: Math.max(10, r.height) });
-    });
-    observer.observe(host);
-    return () => observer.disconnect();
-  }, []);
-
-  // 视图适配目标：fit=全图，定位选区=ROI 包围盒。容器尺寸变化时保持同一目标重适配，
-  // 避免“适应窗口”式重置覆盖刚触发的定位意图
-  const fitTargetRef = useRef<{ x: number; y: number; width: number; height: number } | undefined>(undefined);
-  const setViewToTarget = (target: { x: number; y: number; width: number; height: number }, pad: number) => {
-    // 留白按容器尺寸自适应：容器很矮（如底部面板展开时）时固定留白会挤掉大部分可用空间
-    const effPad = Math.min(pad, Math.min(size.width, size.height) * 0.12);
-    const scale = clamp(Math.min((size.width - effPad * 2) / target.width, (size.height - effPad * 2) / target.height), 0.02, 30);
-    setView({
-      scale,
-      x: size.width / 2 - (target.x + target.width / 2) * scale,
-      y: size.height / 2 - (target.y + target.height / 2) * scale
-    });
-  };
-
-  const fit = () => {
-    if (!actualWidth || !actualHeight) return;
-    fitTargetRef.current = { x: 0, y: 0, width: actualWidth, height: actualHeight };
-    setViewToTarget(fitTargetRef.current, 12);
-  };
-
-  const oneToOne = () => {
-    if (!actualWidth || !actualHeight) return;
-    fitTargetRef.current = { x: 0, y: 0, width: actualWidth, height: actualHeight };
-    setView({ scale: 1, x: (size.width - actualWidth) / 2, y: (size.height - actualHeight) / 2 });
-  };
-
-  const focusSearchLine = () => {
-    if (measurementGeometry?.type !== 'line') return;
-    const segment = clipSegmentToImage(measurementGeometry.start, measurementGeometry.end, actualWidth, actualHeight);
-    if (!segment) return;
-    const margin = 48 + (measurementGeometry.profileWidth ?? 0) / 2;
-    const x = Math.max(0, Math.min(segment.start.x, segment.end.x) - margin);
-    const y = Math.max(0, Math.min(segment.start.y, segment.end.y) - margin);
-    fitTargetRef.current = { x, y,
-      width: Math.max(2, Math.min(actualWidth, Math.max(segment.start.x, segment.end.x) + margin) - x),
-      height: Math.max(2, Math.min(actualHeight, Math.max(segment.start.y, segment.end.y) + margin) - y) };
-    setViewToTarget(fitTargetRef.current, 24);
-  };
-
-  // 图像（尺寸）变化：目标重置为全图并适配
-  useEffect(() => {
-    if (!actualWidth || !actualHeight) return;
-    fitTargetRef.current = { x: 0, y: 0, width: actualWidth, height: actualHeight };
-    setViewToTarget(fitTargetRef.current, 12);
-  }, [actualWidth, actualHeight]);
-
-  // 容器尺寸变化：按当前目标（全图或 ROI）重新适配
-  useEffect(() => {
-    if (!fitTargetRef.current) return;
-    setViewToTarget(fitTargetRef.current, 12);
-  }, [size.width, size.height]);
-
-  // 定位选区：属性面板每次触发递增 focusTick，这里把视图适配到当前 ROI 包围盒
-  useEffect(() => {
-    if (focusTick === undefined || focusTick === lastFocusTick.current) return;
-    lastFocusTick.current = focusTick;
-    if (!roi) return;
-    fitTargetRef.current = roiBounds(roi);
-    setViewToTarget(fitTargetRef.current, 28);
-  }, [focusTick, roi, size.width, size.height]);
 
   const imagePoint = useCallback((screen: Point): Point => ({
     x: (screen.x - view.x) / view.scale,

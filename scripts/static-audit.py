@@ -41,6 +41,23 @@ def read_family(rel_glob: str) -> str:
     return '\n'.join(p.read_text(encoding='utf-8') for p in parts)
 
 
+# 节点目录条目已按领域分到 Engine/Catalogs/<Domain>/ 下，不再平铺在 Engine 根目录。
+# 目录组合方(NodeCatalog.ValueFlow.cs)仍用 `XxxCatalog.Items` 引用它们，所以这里按**文件名**
+# 在 Engine 子树里解析，而不是假设文件就在根上——否则目录化之后每次都会报
+# "Required file missing"，而缺文件只会让契约检查静默少扫一批节点。
+_engine_root = ROOT / 'backend/src/VisionStudio.Engine'
+
+def read_engine_source(name: str) -> str:
+    direct = _engine_root / f'{name}.cs'
+    if direct.is_file():
+        return direct.read_text(encoding='utf-8')
+    matches = sorted(_engine_root.rglob(f'{name}.cs'))
+    if not matches:
+        fail(f'Required Engine source missing: {name}.cs')
+        return ''
+    return '\n'.join(p.read_text(encoding='utf-8') for p in matches)
+
+
 # Root-level process documents (architecture notes / migration guides) are no longer kept in the
 # repository. Document checks are advisory: when a document is present its content is still
 # validated; when absent the check is skipped with a note instead of failing the gate.
@@ -110,7 +127,7 @@ endpoint_sources = '\n'.join(p.read_text(encoding='utf-8') for p in (ROOT/'backe
 catalog = read_family('backend/src/VisionStudio.Engine/NodeCatalog*.cs')
 # NodeCatalog composes batch catalogs; inspect only helpers actually referenced by Items.
 for helper in sorted(set(re.findall(r'\b(\w+Catalog)\.Items\b', catalog))):
-    catalog += '\n' + read_safe(f'backend/src/VisionStudio.Engine/{helper}.cs')
+    catalog += '\n' + read_engine_source(helper)
 frontend_catalog_source = read_safe('frontend/src/catalog.ts')
 generated_catalog_doc = json.loads(read_safe('frontend/src/generated/catalog.generated.json'))
 generated_catalog_items = generated_catalog_doc.get('items', [])
@@ -528,7 +545,9 @@ required = [
     'MIGRATION_V033_TO_V034.md',
     'CAMERA_SYNCHRONIZATION.md',
     'MIGRATION_V034_TO_V035.md',
-    'backend/src/VisionStudio.Api/CameraSynchronization.cs',
+    'backend/src/VisionStudio.Api/CameraSynchronizationContracts.cs',
+    'backend/src/VisionStudio.Api/CameraSynchronizationStores.cs',
+    'backend/src/VisionStudio.Api/CameraSynchronizationService.cs',
     'backend/src/VisionStudio.Api/Endpoints/CameraSynchronizationEndpoints.cs',
     'backend/tests/VisionStudio.Api.Tests/CameraSynchronizationTests.cs',
     'backend/src/VisionStudio.Api/OfflineReplay.cs',
@@ -975,7 +994,7 @@ if 'bool Simulated' not in read_safe('backend/src/VisionStudio.Engine/Robot/Robo
 ok('V0.24 RBAC + PBKDF2 local users + revocable sessions + audit trail present')
 
 # V0.25 RuntimeDependencyManifest / production provenance
-trace_store_dependency=read_safe('backend/src/VisionStudio.Api/TraceabilityStore.cs')
+trace_store_dependency=read_family('backend/src/VisionStudio.Api/TraceabilityStore*.cs')
 dependency_source=read_family('backend/src/VisionStudio.Api/RuntimeDependencies*.cs')
 job_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs')
 trace_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/TraceEndpoints.cs')
@@ -1007,7 +1026,7 @@ ok('V0.25 RuntimeDependencyManifest + publication/trace provenance + production 
 
 # Retained V0.35 multi-camera PTP + Action Command synchronization runtime
 sync_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/CameraContracts.cs')
-sync_runtime=read_safe('backend/src/VisionStudio.Api/CameraSynchronization.cs')
+sync_runtime=read_family('backend/src/VisionStudio.Api/CameraSynchronization*.cs')
 sync_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraSynchronizationEndpoints.cs')
 basler_sync=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerCameraSynchronization.cs')
 hik_sync=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraSynchronization.cs')
@@ -1152,7 +1171,7 @@ if '/api/production/synchronization-guard' not in endpoint_sources: fail('V0.44 
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
 for token in ['ResolveGroupIds_FindsImmediateAndScheduledSynchronizationGroups','Evaluate_MissingLiveCameras_IsRecoverableTransportFault','Evaluate_DisabledGuard_DoesNotInspectSynchronizationDependencies']:
     if token not in sync_guard_tests: fail(f'V0.44 synchronization guard regression test missing: {token}')
-if 'synchronizationHealthGuardEnabled' not in read_safe('frontend/src/types.ts'): fail('V0.44 frontend sync guard type surface missing')
+if 'synchronizationHealthGuardEnabled' not in read_safe('frontend/src/types.ts') + read_safe('frontend/src/productionConfig.ts'): fail('V0.44 frontend sync guard type surface missing')
 doc_present('MIGRATION_V043_TO_V044.md')
 ok('V0.44 Production synchronization Action/frame/skew/sequence health guard + reconnect hysteresis present')
 
@@ -1160,7 +1179,7 @@ ok('V0.44 Production synchronization Action/frame/skew/sequence health guard + r
 camera_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/CameraContracts.cs')
 basler_transport=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerTransportTelemetry.cs')
 hik_transport=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotTransportTelemetry.cs')
-camera_sync=read_safe('backend/src/VisionStudio.Api/CameraSynchronization.cs')
+camera_sync=read_family('backend/src/VisionStudio.Api/CameraSynchronization*.cs')
 camera_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs')
 camera_ui=read_safe('frontend/src/components/CameraPanel.tsx')
 frontend_types=read_safe('frontend/src/types.ts')

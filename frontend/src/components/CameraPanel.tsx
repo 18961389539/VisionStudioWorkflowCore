@@ -1,26 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Statistic, Switch, Table, Tabs, Tag, Typography, Upload, message } from 'antd';
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import type { CameraAdapterDescriptor, CameraCommissioningProfile, CameraCommissioningSnapshot, CameraDescriptor, CameraDiscoveredDevice, CameraFeatureDescriptor, CameraFeatureProfileRecord, CameraOutputPixelFormat, CameraSettings, CameraTriggerMode, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
+import type { CameraAdapterDescriptor, CameraCommissioningProfile, CameraCommissioningSnapshot, CameraDescriptor, CameraDiscoveredDevice, CameraFeatureDescriptor, CameraFeatureProfileRecord, CameraSettings, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { responseErrorMessage } from '../apiErrors';
 import { apiFetch, cachedGet, invalidateCache, RequestToken } from '../apiClient';
 import { apiUrl, cameras as cameraEndpoints, cameraSync, cameraFeatureProfiles, media } from '../endpoints';
 import { useMonitorSnapshot } from '../useMonitorStream';
+import CameraAcquisitionTab from './CameraAcquisitionTab';
+import CameraDiagnosticsTab from './CameraDiagnosticsTab';
+import CameraMediaTab from './CameraMediaTab';
+import CameraRegistrationTab from './CameraRegistrationTab';
+import CameraSyncTab from './CameraSyncTab';
+import { acquisitionColor, stateColor, type SyncGroupFormValues } from './cameraPanelShared';
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
 const CAMERA_POLL_TIMEOUT_MS = 5000;
 
 type Props = { open: boolean; onClose: () => void };
 
-// 同步组表单只提交可编辑字段；configurationHash/createdAt/updatedAt 由后端维护。
-type SyncGroupFormValues = Omit<CameraSynchronizationGroup, 'id' | 'configurationHash' | 'createdAt' | 'updatedAt'> & { id?: string };
-
-const stateColor: Record<string, string> = { Closed: 'default', Open: 'blue', Streaming: 'green', Faulted: 'red' };
-const acquisitionColor: Record<string, string> = { Stopped: 'default', Starting: 'processing', Stopping: 'processing', StopUnconfirmed: 'red', Running: 'green', WaitingTrigger: 'gold', Reconnecting: 'orange', Faulted: 'red' };
-const labelColor: Record<string, string> = { Unlabeled: 'default', OK: 'green', NG: 'red', Review: 'gold' };
-const labelText: Record<string, string> = { Unlabeled: '未标注', OK: '合格', NG: '不合格', Review: '待复核' };
-const formatBytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 / 1024).toFixed(1)} MiB`;
+// 2026-11-13：五个标签页已抽成独立组件（采集/同步/诊断/设备注册/媒体库），
+// 表单值类型、媒体展示常量与状态色统一放在 cameraPanelShared.ts，避免两处口径漂移。
+// 「参数」页仍内联：它把 selected + commissioningForm + 功能浏览器三者的状态绑在一起，
+// 抽出去要传 20+ 个回调，反而更难读。
 
 async function responseError(response: Response, fallback: string) {
   try {
@@ -618,35 +620,13 @@ export default function CameraPanel({ open, onClose }: Props) {
           <Tabs
             defaultActiveKey="acquisition"
             items={[
-              { key: 'acquisition', label: '采集', children: (<>
-          {/* ── 采集：设置 + 关键指标（底层计数器见“诊断”） ── */}
-          {selected ? <>
-            <Typography.Title level={5}>采集设置</Typography.Title>
-            <Form form={settingsForm} layout="vertical" onFinish={saveSettings}><div className="camera-settings-grid">
-              <Form.Item label="曝光时间（μs）" name="exposureUs"><InputNumber min={selected.capabilities.minExposureUs} max={selected.capabilities.maxExposureUs} disabled={!selected.capabilities.exposure} style={{ width: '100%' }} /></Form.Item>
-              <Form.Item label="增益（dB）" name="gainDb"><InputNumber min={selected.capabilities.minGainDb} max={selected.capabilities.maxGainDb} step={0.1} disabled={!selected.capabilities.gain} style={{ width: '100%' }} /></Form.Item>
-              <Form.Item label="目标帧率" name="targetFps"><InputNumber min={0.2} max={selected.capabilities.maxFps} step={0.5} disabled={!selected.capabilities.frameRate} style={{ width: '100%' }} /></Form.Item>
-              <Form.Item label="触发模式" name="triggerMode"><Select<CameraTriggerMode> options={[{ value: 'Continuous', label: '连续采集' }, { value: 'Software', label: '软件触发', disabled: !selected.capabilities.softwareTrigger }, { value: 'External', label: '外部触发', disabled: !selected.capabilities.externalTrigger }]} /></Form.Item>
-              <Form.Item label="主机输出格式" name="outputPixelFormat"><Select<CameraOutputPixelFormat> options={(selected.capabilities.outputPixelFormats ?? ['Auto', 'Mono8', 'Bgr8']).map((value) => ({ value, label: value === 'Bgr8' ? 'BGR8' : value }))} /></Form.Item>
-              <Form.Item label="外部触发线路" name="externalTriggerSource"><Select options={['Line0', 'Line1', 'Line2', 'Line3'].map((value) => ({ value, label: value }))} disabled={editedTriggerMode !== 'External'} /></Form.Item>
-            </div><Button htmlType="submit" loading={busy === `${selected.id}:settings`}>应用设置</Button></Form>
-
-            <div className="camera-stats-grid">
-              <Statistic title="帧率" value={selected.acquisition.actualFps} precision={1} suffix="fps" />
-              <Statistic title="丢帧" value={selected.acquisition.ringOverwrites + selected.acquisition.driverDroppedFrames} />
-              <Statistic title="已发布帧数" value={selected.acquisition.framesPublished} />
-              <Statistic title="重连次数" value={selected.acquisition.reconnectCount} />
-            </div>
-            <Space wrap style={{ marginBottom: 8 }}>
-              <Tag color={stateColor[selected.state] ?? 'default'}>设备 {localizeStatus(selected.state)}</Tag>
-              <Tag color={acquisitionColor[selected.acquisition.acquisitionState] ?? 'default'}>采集 {localizeStatus(selected.acquisition.acquisitionState)}</Tag>
-              <Tag>相机原生：{selected.acquisition.nativePixelFormat ?? '—'}</Tag>
-              <Tag>主机输出：{selected.settings.outputPixelFormat}</Tag>
-            </Space>
-            {selected.acquisition.runtimeError && <Alert type="warning" showIcon title={selected.acquisition.runtimeError} style={{ marginBottom: 8 }} />}
-            {selected.acquisition.transport?.error && <Alert type="info" showIcon title={selected.acquisition.transport.error} style={{ marginBottom: 8 }} />}
-          </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在左侧选择一台相机" />}
-              </>) },
+              { key: 'acquisition', label: '采集', children: <CameraAcquisitionTab
+                busy={busy}
+                selected={selected}
+                settingsForm={settingsForm}
+                saveSettings={saveSettings}
+                editedTriggerMode={editedTriggerMode}
+              /> },
               { key: 'parameters', label: '参数', children: (<>
           {/* ── 参数：厂商调试配置（触发 / 闪光灯 / 功能浏览器） ── */}
           {selected && ['basler-pylon', 'hikrobot-mvs'].includes(selected.driver) ? <>
@@ -704,258 +684,95 @@ export default function CameraPanel({ open, onClose }: Props) {
             </>}
           </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={selected ? '该相机驱动无厂商调试配置（仅 Basler / Hikrobot 支持）' : '请在左侧选择一台相机'} />}
               </>) },
-              { key: 'sync', label: '同步', children: (<>
-          <Typography.Title level={5}>多相机同步</Typography.Title>
-          <Alert type="info" showIcon title="PTP + GigE Vision Action Command" description="创建使用相同驱动的同步组，为每台相机设置一致的 Action 密钥，将 TriggerSource 设为 Action1，然后发送立即或定时广播。系统优先使用设备 / PTP 时间戳计算偏差；设备时间戳不可用时才回退到主机接收时间。" style={{ marginBottom: 10 }} />
-          <Space wrap style={{ marginBottom: 8 }}>
-            <Select allowClear placeholder="选择已保存的同步组" value={selectedSyncId} onChange={setSelectedSyncId} style={{ minWidth: 240 }} options={syncGroups.map((x) => ({ value: x.id, label: `${x.name} · ${x.cameraIds.length} 台相机` }))} />
-            <Button onClick={() => refreshSyncGroups()}>刷新分组</Button>
-            <Button onClick={() => refreshSyncStatus()} disabled={!selectedSyncId}>刷新状态</Button>
-            <Button type="primary" onClick={() => runSyncTrigger(false)} disabled={!selectedSyncId} loading={busy === 'sync-trigger'}>立即触发</Button>
-            <Button onClick={() => runSyncTrigger(true)} disabled={!selectedSyncId} loading={busy === 'sync-schedule'}>定时触发</Button>
-          </Space>
-          {syncStatus && <>
-            <Space wrap style={{ marginBottom: 8 }}>
-              <Tag color={syncStatus.ready ? 'green' : 'red'}>{syncStatus.ready ? '就绪' : '未就绪'}</Tag>
-              <Tag color={syncStatus.ptpReady ? 'green' : 'gold'}>PTP {syncStatus.ptpReady ? '已就绪' : '未锁定'}</Tag>
-              <Tag>同步偏差 {syncStatus.latestSkewUs == null ? '—' : `${syncStatus.latestSkewUs.toFixed(1)} µs`} · {localizeStatus(syncStatus.timestampBasis)}</Tag>
-              <Tag>配置哈希 {syncStatus.group.configurationHash.slice(0, 12)}</Tag>
-            </Space>
-            {syncStatus.error && <Alert type="warning" showIcon title={syncStatus.error} style={{ marginBottom: 8 }} />}
-            <Table size="small" rowKey="cameraId" dataSource={syncStatus.members} pagination={false} columns={[
-              { title: '相机', dataIndex: 'cameraId' },
-              { title: 'PTP 状态', render: (_: unknown, row: CameraSynchronizationGroupStatus['members'][number]) => <Tag color={['Locked','Slave','Master'].includes(row.timeSync.state) ? 'green' : 'gold'}>{localizeStatus(row.timeSync.state)}</Tag> },
-              { title: '时钟偏移', render: (_: unknown, row: CameraSynchronizationGroupStatus['members'][number]) => row.timeSync.offsetFromMasterNs == null ? '—' : `${row.timeSync.offsetFromMasterNs} ns` },
-              { title: '帧序号', render: (_: unknown, row: CameraSynchronizationGroupStatus['members'][number]) => row.latestFrame ? `#${row.latestFrame.sequence}` : '—' }
-            ]} />
-          </>}
-          {syncCapture && <Alert style={{ marginTop: 8 }} type={syncCapture.withinTolerance ? 'success' : 'warning'} showIcon title={`${syncCapture.scheduled ? '定时' : '立即'}采集 · 同步偏差 ${syncCapture.triggerSkewUs.toFixed(1)} µs（${localizeStatus(syncCapture.timestampBasis)}）`} description={`已确认设备数：${syncCapture.command.acknowledgedDevices}；允许偏差：${syncCapture.maxAllowedSkewUs.toFixed(1)} µs`} />}
-          <Space wrap style={{ marginTop: 10, marginBottom: 6 }}><Typography.Text strong>同步调试</Typography.Text><Button size="small" onClick={() => refreshSyncStatistics()} disabled={!selectedSyncId}>刷新统计</Button></Space>
-          {syncStatistics && <>
-            <Alert
-              showIcon
-              type={syncStatistics.commissioning.status === 'Pass' ? 'success' : syncStatistics.commissioning.status === 'Fail' ? 'error' : 'info'}
-              title={`调试评估：${syncStatistics.commissioning.status === 'InsufficientData' ? '数据不足' : localizeStatus(syncStatistics.commissioning.status)}`}
-              description={syncStatistics.commissioning.reasons.join(' ')}
-              style={{ marginBottom: 8 }}
-            />
-            <div className="camera-settings-grid">
-              <Statistic title="样本数" value={syncStatistics.totalRuns} suffix={`/ ${syncStatistics.commissioning.minimumSamples} 个最低样本`} />
-              <Statistic title="完成率" value={syncStatistics.completionRate * 100} precision={1} suffix="%" />
-              <Statistic title="偏差合格率" value={syncStatistics.tolerancePassRate * 100} precision={1} suffix="%" />
-              <Statistic title="偏差 P50" value={syncStatistics.p50SkewUs ?? 0} precision={1} suffix="µs" />
-              <Statistic title="偏差 P95" value={syncStatistics.p95SkewUs ?? 0} precision={1} suffix="µs" />
-              <Statistic title="偏差 P99" value={syncStatistics.p99SkewUs ?? 0} precision={1} suffix="µs" />
-              <Statistic title="最大偏差" value={syncStatistics.maxSkewUs ?? 0} precision={1} suffix="µs" />
-              <Statistic title="耗时 P95" value={syncStatistics.p95DurationMs ?? 0} precision={1} suffix="毫秒" />
-            </div>
-            <Typography.Text type="secondary">PTP 计时：{syncStatistics.devicePtpRuns} 次 · 主机接收时间回退：{syncStatistics.hostArrivalRuns} 次 · 失败：{syncStatistics.failedRuns} 次 · 已取消：{syncStatistics.cancelledRuns} 次</Typography.Text>
-          </>}
-              </>) },
-              { key: 'diagnostics', label: '诊断', children: (<>
-          {/* 底层采集计数器与厂商传输遥测：属于高级诊断，从主区域收起 */}
-          {selected && <>
-            <div className="camera-stats-grid">
-              <Statistic title="已发布帧数" value={selected.acquisition.framesPublished} />
-              <Statistic title="环形缓冲区覆盖数" value={selected.acquisition.ringOverwrites} />
-              <Statistic title="驱动丢帧数" value={selected.acquisition.driverDroppedFrames} />
-              <Statistic title="帧超时次数" value={selected.acquisition.frameTimeouts} />
-              <Statistic title="采集错误数" value={selected.acquisition.acquisitionErrors} />
-              <Statistic title="重连次数" value={selected.acquisition.reconnectCount} />
-            </div>
-            {selected.acquisition.transport && <>
-              <Typography.Title level={5}>厂商传输遥测</Typography.Title>
-              <Space wrap style={{ marginBottom: 8 }}>
-                <Tag color={selected.acquisition.transport.native ? 'green' : 'default'}>{selected.acquisition.transport.native ? 'SDK 原生计数器' : '不可用'}</Tag>
-                <Tag>{selected.acquisition.transport.source}</Tag>
-                {selected.acquisition.transport.throughputMbps != null && <Tag color="blue">{selected.acquisition.transport.throughputMbps.toFixed(1)} Mbit/s</Tag>}
-                {selected.acquisition.transport.receivedBytes != null && <Tag>{formatBytes(selected.acquisition.transport.receivedBytes)}</Tag>}
-                {selected.acquisition.transport.receivedFrames != null && <Tag>接收帧数 {selected.acquisition.transport.receivedFrames}</Tag>}
-                {selected.acquisition.transport.lostFrames != null && <Tag color={selected.acquisition.transport.lostFrames > 0 ? 'red' : 'green'}>丢失帧数 {selected.acquisition.transport.lostFrames}</Tag>}
-                {selected.acquisition.transport.failedFrames != null && <Tag color={selected.acquisition.transport.failedFrames > 0 ? 'red' : 'green'}>失败帧数 {selected.acquisition.transport.failedFrames}</Tag>}
-                {selected.acquisition.transport.bufferUnderruns != null && <Tag color={selected.acquisition.transport.bufferUnderruns > 0 ? 'red' : 'green'}>缓冲区欠载 {selected.acquisition.transport.bufferUnderruns}</Tag>}
-                {selected.acquisition.transport.lostPackets != null && <Tag color={selected.acquisition.transport.lostPackets > 0 ? 'orange' : 'green'}>丢包数 {selected.acquisition.transport.lostPackets}</Tag>}
-                {selected.acquisition.transport.failedPackets != null && <Tag color={selected.acquisition.transport.failedPackets > 0 ? 'orange' : 'green'}>失败包数 {selected.acquisition.transport.failedPackets}</Tag>}
-                {selected.acquisition.transport.resendRequests != null && <Tag>重发请求数 {selected.acquisition.transport.resendRequests}</Tag>}
-                {selected.acquisition.transport.resentPackets != null && <Tag>已重发包数 {selected.acquisition.transport.resentPackets}</Tag>}
-                {selected.acquisition.transport.resynchronizations != null && <Tag color={selected.acquisition.transport.resynchronizations > 0 ? 'red' : 'green'}>重新同步次数 {selected.acquisition.transport.resynchronizations}</Tag>}
-              </Space>
-            </>}
-          </>}
-          <Space wrap style={{ marginTop: 10, marginBottom: 6 }}><Typography.Text strong>PTP 计时诊断</Typography.Text><Button size="small" onClick={() => refreshSyncPtpDiagnostics()} disabled={!selectedSyncId}>刷新 PTP</Button></Space>
-          {syncPtpDiagnostics && <>
-            <div className="camera-settings-grid">
-              <Statistic title="PTP 证据运行数" value={syncPtpDiagnostics.runsWithPtpEvidence} />
-              <Statistic title="PTP 未就绪次数" value={syncPtpDiagnostics.ptpNotReadyRuns} />
-              <Statistic title="主时钟不一致次数" value={syncPtpDiagnostics.inconsistentMasterClockRuns} />
-              <Statistic title="偏移绝对值 P95" value={syncPtpDiagnostics.p95MaxAbsOffsetNs ?? 0} precision={0} suffix="ns" />
-              <Statistic title="最大偏移绝对值" value={syncPtpDiagnostics.maxAbsOffsetNs ?? 0} suffix="ns" />
-              <Statistic title="偏移与同步偏差相关系数" value={syncPtpDiagnostics.offsetSkewPearsonCorrelation ?? 0} precision={3} />
-            </div>
-            <Table size="small" rowKey="cameraId" dataSource={syncPtpDiagnostics.cameras} pagination={false} columns={[
-              { title: '相机', dataIndex: 'cameraId' },
-              { title: 'PTP 就绪率', render: (_: unknown, row: CameraSynchronizationPtpDiagnostics['cameras'][number]) => `${row.readySamples}/${row.samples} (${(row.readyRate * 100).toFixed(1)}%)` },
-              { title: '偏移绝对值 P95', render: (_: unknown, row: CameraSynchronizationPtpDiagnostics['cameras'][number]) => row.p95AbsOffsetNs == null ? '—' : `${row.p95AbsOffsetNs.toFixed(0)} ns` },
-              { title: '最大偏移绝对值', render: (_: unknown, row: CameraSynchronizationPtpDiagnostics['cameras'][number]) => row.maxAbsOffsetNs == null ? '—' : `${row.maxAbsOffsetNs} ns` },
-              { title: '主时钟变更次数', dataIndex: 'masterClockChanges' }
-            ]} />
-          </>}
-
-          <Space wrap style={{ marginTop: 12, marginBottom: 6 }}><Typography.Text strong>GigE 网络调试</Typography.Text><Button size="small" onClick={() => refreshGigEDiagnostics()} disabled={!selectedSyncId}>刷新网络诊断</Button><Button type="primary" size="small" onClick={startGigENetworkTest} disabled={!selectedSyncId || syncTests.some((x) => x.status === 'Queued' || x.status === 'Running')} loading={busy === 'gige-test-start'}>运行 {syncTestIterations} 轮 GigE 测试</Button></Space>
-          {gigeDiagnostics && <>
-            <Alert showIcon type={gigeDiagnostics.assessment.status === 'Pass' ? 'success' : gigeDiagnostics.assessment.status === 'Fail' ? 'error' : 'info'} title={`GigE 网络：${gigeDiagnostics.assessment.status === 'InsufficientData' ? '数据不足' : localizeStatus(gigeDiagnostics.assessment.status)}`} description={gigeDiagnostics.assessment.reasons.join(' ')} style={{ marginBottom: 8 }} />
-            <div className="camera-settings-grid">
-              <Statistic title="证据运行数" value={gigeDiagnostics.assessment.evidenceRuns} suffix={`/ ${gigeDiagnostics.assessment.minimumEvidenceRuns}`} />
-              <Statistic title="网卡峰值负载" value={(gigeDiagnostics.assessment.peakNicUtilization ?? 0) * 100} precision={1} suffix="%" />
-              <Statistic title="帧异常率" value={(gigeDiagnostics.assessment.aggregateFrameIssueRate ?? 0) * 100} precision={3} suffix="%" />
-              <Statistic title="数据包异常率" value={(gigeDiagnostics.assessment.aggregatePacketIssueRate ?? 0) * 100} precision={3} suffix="%" />
-              <Statistic title="重发请求率" value={(gigeDiagnostics.assessment.aggregateResendRequestRate ?? 0) * 100} precision={3} suffix="%" />
-            </div>
-            <Table size="small" rowKey="cameraId" dataSource={gigeDiagnostics.cameras} pagination={false} columns={[
-              { title: '相机', dataIndex: 'cameraId' },
-              { title: 'IP / 网卡', render: (_: unknown, row: GigENetworkDiagnostics['cameras'][number]) => `${row.cameraIpAddress ?? '—'} / ${row.nicName ?? '未映射'}` },
-              { title: '链路速率', render: (_: unknown, row: GigENetworkDiagnostics['cameras'][number]) => row.nicSpeedMbps == null ? '—' : `${row.nicSpeedMbps.toFixed(0)} Mbit/s` },
-              { title: '数据包大小', render: (_: unknown, row: GigENetworkDiagnostics['cameras'][number]) => row.packetSizeBytes == null ? '—' : `${row.packetSizeBytes} 字节` },
-              { title: '包间延迟', render: (_: unknown, row: GigENetworkDiagnostics['cameras'][number]) => row.interPacketDelayTicks == null ? '—' : `${row.interPacketDelayTicks} 个时钟周期` },
-              { title: '吞吐量', render: (_: unknown, row: GigENetworkDiagnostics['cameras'][number]) => row.currentThroughputMbps == null ? '—' : `${row.currentThroughputMbps.toFixed(1)} Mbit/s` },
-              { title: '遥测来源', render: (_: unknown, row: GigENetworkDiagnostics['cameras'][number]) => <Tag color={row.nativeTransportTelemetry ? 'green' : 'gold'}>{row.nativeTransportTelemetry ? '原生' : '回退'}</Tag> }
-            ]} />
-            {gigeDiagnostics.nicLoads.length > 0 && <Table size="small" rowKey="nicId" dataSource={gigeDiagnostics.nicLoads} pagination={false} columns={[
-              { title: '网卡', dataIndex: 'nicName' },
-              { title: '相机', render: (_: unknown, row: GigENetworkDiagnostics['nicLoads'][number]) => row.cameraIds.join(', ') },
-              { title: '链路速率 / MTU', render: (_: unknown, row: GigENetworkDiagnostics['nicLoads'][number]) => `${row.speedMbps.toFixed(0)} Mbit/s / MTU ${row.mtuBytes ?? '—'}` },
-              { title: '相机负载', render: (_: unknown, row: GigENetworkDiagnostics['nicLoads'][number]) => `${row.currentCameraThroughputMbps.toFixed(1)} Mbit/s（${(row.currentUtilization * 100).toFixed(1)}%）` },
-              { title: '状态', render: (_: unknown, row: GigENetworkDiagnostics['nicLoads'][number]) => <Tag color={row.level === 'Critical' ? 'red' : row.level === 'Warning' ? 'gold' : 'green'}>{localizeStatus(row.level)}</Tag> }
-            ]} />}
-            <Alert type="info" showIcon title="网络调优建议" description={gigeDiagnostics.assessment.recommendations.join(' ')} style={{ marginTop: 8 }} />
-          </>}
-
-          <Space wrap style={{ marginTop: 12, marginBottom: 6 }}><Typography.Text strong>自动调试测试</Typography.Text></Space>
-          <Space wrap style={{ marginBottom: 8 }}>
-            <Select value={syncTestIterations} onChange={setSyncTestIterations} style={{ width: 130 }} options={[20, 100, 500].map((value) => ({ value, label: `${value} 个周期` }))} />
-            <Switch checked={syncTestScheduled} onChange={setSyncTestScheduled} checkedChildren="定时" unCheckedChildren="立即" />
-            <Button type="primary" onClick={startSyncTest} disabled={!selectedSyncId || syncTests.some((x) => x.status === 'Queued' || x.status === 'Running')} loading={busy === 'sync-test-start'}>开始测试</Button>
-            <Button size="small" onClick={() => refreshSyncTests()} disabled={!selectedSyncId}>刷新</Button>
-          </Space>
-          <Table<CameraSynchronizationCommissioningTest> size="small" rowKey="testId" dataSource={syncTests} pagination={{ pageSize: 4, size: 'small' }} columns={[
-            { title: '开始时间', dataIndex: 'startedAt', width: 165, render: (value: string) => new Date(value).toLocaleString('zh-CN') },
-            { title: '模式', width: 90, render: (_: unknown, row) => row.scheduled ? '定时' : '立即' },
-            { title: '进度', width: 130, render: (_: unknown, row) => `${row.completedIterations} / ${row.requestedIterations}` },
-            { title: '状态', width: 110, render: (_: unknown, row) => <Tag color={row.status === 'Completed' ? (row.report?.statistics.commissioning.passed ? 'green' : 'red') : row.status === 'Running' ? 'processing' : row.status === 'Failed' ? 'red' : row.status === 'Interrupted' ? 'orange' : 'default'}>{localizeStatus(row.status)}</Tag> },
-            { title: '结果', render: (_: unknown, row) => row.report ? `${localizeStatus(row.report.statistics.commissioning.status)} · P99 ${row.report.statistics.p99SkewUs?.toFixed(1) ?? '—'} µs · 完成率 ${(row.report.statistics.completionRate * 100).toFixed(1)}%` : (row.error ?? '—') },
-            { title: '操作', width: 210, render: (_: unknown, row) => <Space size={4}>{(row.status === 'Running' || row.status === 'Queued') && <Button size="small" danger onClick={() => cancelSyncTest(row.testId)}>取消</Button>}{row.report && <><Button size="small" onClick={() => openSyncTestHtml(row.testId)}>查看</Button><Button size="small" onClick={() => exportSyncTestHtml(row.testId)}>HTML</Button><Button size="small" onClick={() => exportSyncTestReport(row.testId)}>JSON</Button><Button size="small" onClick={() => exportGigENetworkReport(row.testId)}>GigE</Button></>}</Space> }
-          ]} />
-
-          <Space wrap style={{ marginTop: 10, marginBottom: 6 }}><Typography.Text strong>最近同步运行记录</Typography.Text><Button size="small" onClick={() => { refreshSyncRuns(); refreshSyncStatistics(true); refreshSyncPtpDiagnostics(true); refreshGigEDiagnostics(true); }} disabled={!selectedSyncId}>刷新历史</Button></Space>
-          <Table<CameraSynchronizationRunRecord> size="small" rowKey="runId" dataSource={syncRuns} pagination={{ pageSize: 5, size: 'small' }} columns={[
-            { title: '完成时间', dataIndex: 'completedAt', width: 175, render: (value: string) => new Date(value).toLocaleString('zh-CN') },
-            { title: '来源', dataIndex: 'source', width: 90 },
-            { title: '模式', width: 90, render: (_: unknown, row) => row.scheduled ? '定时' : '立即' },
-            { title: '同步偏差', width: 110, render: (_: unknown, row) => row.triggerSkewUs == null ? '—' : `${row.triggerSkewUs.toFixed(1)} µs` },
-            { title: '结果', width: 100, render: (_: unknown, row) => <Tag color={row.outcome === 'Completed' && row.withinTolerance ? 'green' : row.outcome === 'Completed' ? 'gold' : 'red'}>{row.outcome === 'Completed' ? (row.withinTolerance ? '在容差内' : '超出容差') : localizeStatus(row.outcome)}</Tag> },
-            { title: 'PTP 就绪', width: 120, render: (_: unknown, row) => row.ptpSnapshots.length === 0 ? '—' : `${row.ptpSnapshots.filter((x) => ['Locked','Slave','Master'].includes(x.state)).length}/${row.ptpSnapshots.length} 台` },
-            { title: '帧', render: (_: unknown, row) => row.frames.map((x) => `${x.cameraId}#${x.sequence}`).join(' · ') }
-          ]} />
-
-          <Form form={syncForm} layout="vertical" onFinish={saveSyncGroup} initialValues={{ id: 'sync-group-1', name: 'Synchronized Cameras', driver: 'basler-pylon', cameraIds: [], deviceKey: 1, groupKey: 1, groupMask: -1, broadcastAddress: '255.255.255.255', requirePtpLocked: true, maxPtpOffsetNs: 1000000, maxTriggerSkewUs: 100, scheduledLeadTimeMs: 100 }}>
-            <div className="camera-file-form">
-              <Form.Item label="分组 ID" name="id" rules={[{ required: true }]}><Input /></Form.Item>
-              <Form.Item label="名称" name="name" rules={[{ required: true }]}><Input /></Form.Item>
-            </div>
-            <div className="camera-file-form">
-              <Form.Item label="驱动" name="driver" rules={[{ required: true }]}><Select options={adapters.filter((x) => x.isSdkAvailable).map((x) => ({ value: x.driver, label: `${x.vendor} · ${x.driver}` }))} /></Form.Item>
-              <Form.Item label="相机" name="cameraIds" rules={[{ required: true }]}><Select mode="multiple" options={cameras.filter((x) => x.driver.includes('basler') || x.driver.includes('hikrobot')).map((x) => ({ value: x.id, label: `${x.name} · ${x.driver}` }))} /></Form.Item>
-            </div>
-            <div className="camera-settings-grid">
-              <Form.Item label="设备密钥" name="deviceKey"><InputNumber style={{ width: '100%' }} /></Form.Item>
-              <Form.Item label="组密钥" name="groupKey"><InputNumber style={{ width: '100%' }} /></Form.Item>
-              <Form.Item label="组掩码" name="groupMask"><InputNumber style={{ width: '100%' }} /></Form.Item>
-              <Form.Item label="定时提前量（毫秒）" name="scheduledLeadTimeMs"><InputNumber min={10} max={60000} style={{ width: '100%' }} /></Form.Item>
-              <Form.Item label="最大 PTP 偏移（ns）" name="maxPtpOffsetNs"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-              <Form.Item label="最大触发偏差（µs）" name="maxTriggerSkewUs"><InputNumber min={0.01} style={{ width: '100%' }} /></Form.Item>
-            </div>
-            <Form.Item label="广播地址" name="broadcastAddress"><Input /></Form.Item>
-            <Form.Item label="要求 PTP 锁定" name="requirePtpLocked" valuePropName="checked"><Switch /></Form.Item>
-            <Button htmlType="submit" loading={busy === 'sync-save'}>保存同步组</Button>
-          </Form>
-
-              </>) },
-              { key: 'registration', label: '设备注册', children: (<>
-          <Typography.Title level={5}>厂商相机</Typography.Title>
-          <Alert type="info" showIcon title="运行时加载的 SDK 适配器" description="Basler pylon 和 Hikrobot MVS 将通过本机已安装的 SDK 进行发现。VisionStudio 不会重新分发厂商 DLL。" style={{ marginBottom: 10 }} />
-          <Space wrap style={{ marginBottom: 8 }}>
-            {adapters.map((adapter) => <Tag key={adapter.driver} color={adapter.isSdkAvailable ? 'green' : 'red'}>{adapter.vendor}：{adapter.isSdkAvailable ? 'SDK 已就绪' : 'SDK 不可用'}</Tag>)}
-          </Space>
-          <div className="media-filter-row">
-            <Select value={discoverDriver} onChange={(value) => { setDiscoverDriver(value); setDiscovered([]); setSelectedDiscovered(undefined); }} options={adapters.map((x) => ({ value: x.driver, label: `${x.vendor} · ${x.driver}`, disabled: !x.isSdkAvailable }))} />
-            <Button loading={busy === 'discover-vendor'} onClick={discoverVendor}>发现设备</Button>
-          </div>
-          {adapters.find((x) => x.driver === discoverDriver && !x.isSdkAvailable)?.sdkError && <Alert type="warning" showIcon title={adapters.find((x) => x.driver === discoverDriver)?.sdkError} style={{ marginBottom: 8 }} />}
-          <Table<CameraDiscoveredDevice> size="small" rowKey="deviceKey" dataSource={discovered} pagination={{ pageSize: 4, size: 'small' }} onRow={(row) => ({ onClick: () => selectDiscovered(row) })} rowClassName={(row) => row.deviceKey === selectedDiscovered?.deviceKey ? 'camera-selected-row' : ''} columns={[
-            { title: '厂商', dataIndex: 'vendor', width: 82 }, { title: '型号', dataIndex: 'model', width: 145 }, { title: '序列号', dataIndex: 'serialNumber', width: 145 },
-            { title: '名称 / IP', render: (_: unknown, row) => row.userDefinedName || row.ipAddress || '—', ellipsis: true }, { title: '传输层', dataIndex: 'transport', width: 70 }
-          ]} />
-          {selectedDiscovered && <Form form={vendorForm} layout="vertical" onFinish={registerVendor}>
-            <Form.Item name="driver" hidden><Input /></Form.Item><Form.Item name="serialNumber" hidden><Input /></Form.Item><Form.Item name="userDefinedName" hidden><Input /></Form.Item><Form.Item name="deviceKey" hidden><Input /></Form.Item>
-            <div className="camera-file-form"><Form.Item label="运行时 ID" name="id" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="名称" name="name"><Input /></Form.Item></div>
-            <Form.Item label="环形缓冲区容量" name="ringCapacity"><InputNumber min={2} max={64} style={{ width: '100%' }} /></Form.Item>
-            <Button type="primary" htmlType="submit" loading={busy === 'register-vendor'}>注册 {selectedDiscovered.vendor} 相机</Button>
-          </Form>}
-
-          <Typography.Title level={5}>注册文件相机</Typography.Title>
-          <Alert type="info" showIcon title="仅支持沙箱媒体来源" description="文件相机接受媒体库中的 media:// 引用。绝对主机路径、UNC 路径和 ../ 路径跳转均会被拒绝。" style={{ marginBottom: 10 }} />
-          <Form form={form} layout="vertical" onFinish={registerFile} initialValues={{ id: 'file-1', name: 'File Camera 1' }}>
-            <div className="camera-file-form"><Form.Item label="编号" name="id" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="名称" name="name"><Input /></Form.Item></div>
-            <Form.Item label="媒体集合或图像" name="source" rules={[{ required: true }]}><Select showSearch options={sourceOptions} placeholder="media://offline 或已导入的图像" /></Form.Item>
-            <Button htmlType="submit" loading={busy === 'register'}>注册</Button>
-          </Form>
-
-              </>) },
-              { key: 'media', label: '媒体库', children: (<>
-          <Typography.Title level={5}>媒体库</Typography.Title>
-          <Space wrap style={{ marginBottom: 8 }}>
-            <Tag color="blue">{mediaStatus?.collectionCount ?? 0} 个集合</Tag><Tag>{mediaStatus?.itemCount ?? 0} 张图像</Tag><Tag color="red">{mediaStatus?.ngItemCount ?? 0} 个 NG</Tag><Tag>{formatBytes(mediaStatus?.totalBytes ?? 0)} / {formatBytes(mediaStatus?.maxLibraryBytes ?? 0)}</Tag>
-          </Space>
-          <div className="media-create-row"><Input value={newCollection} onChange={(e) => setNewCollection(e.target.value)} placeholder="新建集合" onPressEnter={createCollection} /><Button loading={busy === 'create-collection'} onClick={createCollection}>创建</Button></div>
-          <div className="media-upload-grid">
-            <Select value={uploadCollection} onChange={setUploadCollection} options={collections.map((x) => ({ value: x.name, label: x.name }))} placeholder="选择集合" />
-            <Select value={uploadLabel} onChange={setUploadLabel} options={['Unlabeled', 'OK', 'NG', 'Review'].map((x) => ({ value: x, label: labelText[x] }))} />
-          </div>
-          <Upload.Dragger multiple accept=".bmp,.png,.jpg,.jpeg,.tif,.tiff" fileList={uploadFiles} beforeUpload={() => false} onChange={({ fileList }) => setUploadFiles(fileList)} onRemove={(file) => { setUploadFiles((list) => list.filter((x) => x.uid !== file.uid)); return true; }}>
-            <p>将图像拖到此处，或点击选择文件</p><p className="ant-upload-hint">导入的图像将保存在配置的媒体根目录中。</p>
-          </Upload.Dragger>
-          <Button type="primary" style={{ marginTop: 8 }} disabled={!uploadCollection || uploadFiles.length === 0} loading={busy === 'media-import'} onClick={importMedia}>导入 {uploadFiles.length || ''} 张图像</Button>
-          <div className="media-filter-row">
-            <Select allowClear placeholder="全部集合" value={mediaCollection} onChange={setMediaCollection} options={collections.map((x) => ({ value: x.name, label: x.name }))} />
-            <Select allowClear placeholder="全部标签" value={mediaLabel} onChange={setMediaLabel} options={['Unlabeled', 'OK', 'NG', 'Review'].map((x) => ({ value: x, label: labelText[x] }))} />
-            <Button onClick={() => { setMediaPage(1); void refreshMedia(false, 1, mediaPageSize); }}>扫描</Button>
-          </div>
-          <Table<MediaItemDescriptor> size="small" rowKey="relativePath" dataSource={mediaItems} pagination={{
-            current: mediaPage,
-            pageSize: mediaPageSize,
-            total: mediaTotal,
-            size: 'small',
-            showSizeChanger: true,
-            pageSizeOptions: [20, 50, 100],
-            showTotal: (total) => `共 ${total} 项`,
-            onChange: (page, pageSize) => {
-              setMediaPage(page);
-              setMediaPageSize(pageSize);
-              void refreshMedia(false, page, pageSize);
-            }
-          }} onRow={(row) => ({ onClick: () => setSelectedMedia(row) })} rowClassName={(row) => row.relativePath === selectedMedia?.relativePath ? 'camera-selected-row' : ''} columns={[
-            { title: '标签', dataIndex: 'label', width: 86, render: (value: string) => <Tag color={labelColor[value]}>{labelText[value] ?? value}</Tag> },
-            { title: '图像', dataIndex: 'name', ellipsis: true }, { title: '集合', dataIndex: 'collection', width: 110 }, { title: '大小', width: 80, render: (_: unknown, row) => formatBytes(row.bytes) },
-            { title: '', width: 70, render: (_: unknown, row) => <Popconfirm title="确定删除此媒体项吗？" okText="删除" cancelText="取消" onConfirm={() => deleteMedia(row)}><Button size="small" danger loading={busy === `delete:${row.relativePath}`}>删除</Button></Popconfirm> }
-          ]} />
-
-          {/* 所选媒体预览：与媒体库同属一个任务上下文 */}
-          <div className="media-preview-panel">
-            <div className="media-preview-title"><strong>所选媒体</strong><span>{selectedMedia?.source ?? '—'}</span></div>
-            {selectedMedia ? <img className="media-preview-image" src={media.preview(selectedMedia.relativePath)} alt={selectedMedia.name} /> : <div className="media-preview-empty">选择最近样本或 NG 样本进行预览</div>}
-            {selectedMedia && <Space wrap><Tag color={labelColor[selectedMedia.label]}>{labelText[selectedMedia.label] ?? selectedMedia.label}</Tag><Button size="small" onClick={() => form.setFieldsValue({ source: selectedMedia.source })}>用作文件相机来源</Button></Space>}
-          </div>
-              </>) }
+              { key: 'sync', label: '同步', children: <CameraSyncTab
+                busy={busy}
+                selectedSyncId={selectedSyncId}
+                setSelectedSyncId={setSelectedSyncId}
+                syncGroups={syncGroups}
+                refreshSyncGroups={refreshSyncGroups}
+                refreshSyncStatus={refreshSyncStatus}
+                runSyncTrigger={runSyncTrigger}
+                syncStatus={syncStatus}
+                syncCapture={syncCapture}
+                syncStatistics={syncStatistics}
+                refreshSyncStatistics={refreshSyncStatistics}
+              /> },
+              { key: 'diagnostics', label: '诊断', children: <CameraDiagnosticsTab
+                busy={busy}
+                selected={selected}
+                adapters={adapters}
+                cameras={cameras}
+                selectedSyncId={selectedSyncId}
+                syncForm={syncForm}
+                saveSyncGroup={saveSyncGroup}
+                syncPtpDiagnostics={syncPtpDiagnostics}
+                refreshSyncPtpDiagnostics={refreshSyncPtpDiagnostics}
+                gigeDiagnostics={gigeDiagnostics}
+                refreshGigEDiagnostics={refreshGigEDiagnostics}
+                startGigENetworkTest={startGigENetworkTest}
+                syncTestIterations={syncTestIterations}
+                setSyncTestIterations={setSyncTestIterations}
+                syncTests={syncTests}
+                syncTestScheduled={syncTestScheduled}
+                setSyncTestScheduled={setSyncTestScheduled}
+                startSyncTest={startSyncTest}
+                refreshSyncTests={refreshSyncTests}
+                cancelSyncTest={cancelSyncTest}
+                openSyncTestHtml={openSyncTestHtml}
+                exportSyncTestHtml={exportSyncTestHtml}
+                exportSyncTestReport={exportSyncTestReport}
+                exportGigENetworkReport={exportGigENetworkReport}
+                syncRuns={syncRuns}
+                refreshSyncRuns={refreshSyncRuns}
+                refreshSyncStatistics={refreshSyncStatistics}
+              /> },
+              { key: 'registration', label: '设备注册', children: <CameraRegistrationTab
+                busy={busy}
+                adapters={adapters}
+                discoverDriver={discoverDriver}
+                setDiscoverDriver={setDiscoverDriver}
+                setDiscovered={setDiscovered}
+                setSelectedDiscovered={setSelectedDiscovered}
+                discoverVendor={discoverVendor}
+                discovered={discovered}
+                selectDiscovered={selectDiscovered}
+                selectedDiscovered={selectedDiscovered}
+                vendorForm={vendorForm}
+                registerVendor={registerVendor}
+                form={form}
+                registerFile={registerFile}
+                sourceOptions={sourceOptions}
+              /> },
+              { key: 'media', label: '媒体库', children: <CameraMediaTab
+                busy={busy}
+                mediaStatus={mediaStatus}
+                newCollection={newCollection}
+                setNewCollection={setNewCollection}
+                createCollection={createCollection}
+                uploadCollection={uploadCollection}
+                setUploadCollection={setUploadCollection}
+                collections={collections}
+                uploadLabel={uploadLabel}
+                setUploadLabel={setUploadLabel}
+                uploadFiles={uploadFiles}
+                setUploadFiles={setUploadFiles}
+                importMedia={importMedia}
+                deleteMedia={deleteMedia}
+                mediaCollection={mediaCollection}
+                setMediaCollection={setMediaCollection}
+                mediaLabel={mediaLabel}
+                setMediaLabel={setMediaLabel}
+                mediaItems={mediaItems}
+                mediaPage={mediaPage}
+                setMediaPage={setMediaPage}
+                mediaPageSize={mediaPageSize}
+                setMediaPageSize={setMediaPageSize}
+                mediaTotal={mediaTotal}
+                refreshMedia={refreshMedia}
+                setSelectedMedia={setSelectedMedia}
+                selectedMedia={selectedMedia}
+                applyMediaAsFileCameraSource={(source) => form.setFieldsValue({ source })}
+              /> }
             ]}
           />
         </section>

@@ -1,13 +1,13 @@
 {
   "_comment": "文件规模预算（棘轮）：只许降不许升。新增文件超过 defaultMaxLines 直接失败；已有条目必须 <= 记录值，降下来后应同步下调记录值。不计入统计：生成物、测试、i18n 词表（按节点数线性增长的数据表）。",
   "_updated": "2026-11-13",
-  "_note": "首版基线取自 2026-11-12 实测。JLVisionMatching 已于 10ce9fb 拆到 973 行，2026-11-13 又把 Execute 拆到 342 行主文件（参数记录 375 / 编排 508，同前缀最大分部 508）。VisionWorkflowCompiler(1740)/NodeCatalog(1622)/ProductionRuntime(1498) 已纯移动拆完，最大分部 584 行，三条预算移除。2026-11-13：RuntimeDependencies 按资源域拆分为 Capture/Hardware/Calibrations/Validation 四个 partial，主文件降至 254 行；types.ts 通过 ContractDto 派生收敛到 1050 行（57 个类型直接派生）；InferenceNodes / MeasurementGapNodes / SubpixelNodes 按域纯移动拆分，最大分部 741 行；App.tsx 拆到 681 行、NodeConfigurationDialog 拆到 312 行（渲染层 499 / 模型 763）。目标值 800 行。2026-11-13 第二批：SchemaMigrations 按「迁移执行 / SQL 常量」拆分，CSharpScriptRunner 按「运行+校验 / 编辑器辅助」拆分，TraceabilityStore 按「模型 / 存储 / 附件维护 / 后台清理」拆分，StorageMaintenance 按四个顶层类型拆分，StorageBackupService 按「备份 / 恢复」拆分；五组全部进入显式预算。",
+  "_note": "首版基线取自 2026-11-12 实测。JLVisionMatching 已于 10ce9fb 拆到 973 行，2026-11-13 又把 Execute 拆到 342 行主文件（参数记录 375 / 编排 508，同前缀最大分部 508）。VisionWorkflowCompiler(1740)/NodeCatalog(1622)/ProductionRuntime(1498) 已纯移动拆完，最大分部 584 行，三条预算移除。2026-11-13：RuntimeDependencies 按资源域拆分为 Capture/Hardware/Calibrations/Validation 四个 partial，主文件降至 254 行；types.ts 通过 ContractDto 派生收敛到 1050 行（57 个类型直接派生）；InferenceNodes / MeasurementGapNodes / SubpixelNodes 按域纯移动拆分，最大分部 741 行；App.tsx 拆到 681 行、NodeConfigurationDialog 拆到 312 行（渲染层 499 / 模型 763）。目标值 800 行。2026-11-13 第二批：SchemaMigrations 按「迁移执行 / SQL 常量」拆分，CSharpScriptRunner 按「运行+校验 / 编辑器辅助」拆分，TraceabilityStore 按「模型 / 存储 / 附件维护 / 后台清理」拆分，StorageMaintenance 按四个顶层类型拆分，StorageBackupService 按「备份 / 恢复」拆分；五组全部进入显式预算。2026-11-13 第三批（目录化 + 剩余超标文件）：Engine 根目录 32 个 *Catalog.cs（Batch2~5/P0/P1 批次命名）按领域移入 Catalogs/{ImageProcessing,Geometry,Recognition,Flow,Precision,JlVision,Scripting}，namespace 不变、纯移动，Engine 根从 59 个 .cs 降到 27 个；DefectAnalysisNodes(931→349/346/254)、PreprocessGapNodes(818→430/395)、CameraSynchronization(848→82/305/482) 按类边界纯移动拆分，三个后端超标文件全部降到目标值内；CameraPanel(965→782) 把「采集/同步/诊断/设备注册/媒体库」五个标签页抽成独立组件，表单值类型与状态色移入 cameraPanelShared.ts；ImageViewer(1094→1026) 只抽出视口/适配逻辑（useViewerViewport），余下手势状态机刻意不拆——onPointerDown/Move/Up 共 267 行共享 20+ 个闭包状态，参数化收益不抵回归风险，先锁 1026 防反弹。同批修复 static-audit 的两处「拆分即漏检」：节点目录按文件名在 Engine 子树递归解析（原按根目录单层路径，目录化后会报 missing 并少扫节点），TraceabilityStore 与 CameraSynchronization 的 token 检查改读 partial 家族（前者在上一批拆分后已静默漏检 3 个 replay token）。",
   "defaultMaxLines": 1200,
   "targetMaxLines": 800,
   "budgets": {
     "backend/src/VisionStudio.Api/RuntimeDependencies.cs": 254,
     "frontend/src/types.ts": 984,
-    "backend/src/VisionStudio.Api/SchemaMigrations.cs": 359,
+    "backend/src/VisionStudio.Api/SchemaMigrations.cs": 314,
     "backend/src/VisionStudio.Api/SchemaMigrations.Sql.cs": 760,
     "backend/src/VisionStudio.Scripting/CSharpScriptRunner.cs": 716,
     "backend/src/VisionStudio.Scripting/CSharpScriptRunner.Authoring.cs": 402,
@@ -15,6 +15,8 @@
     "backend/src/VisionStudio.Api/TraceabilityStore.Artifacts.cs": 237,
     "backend/src/VisionStudio.Api/StorageMaintenance.cs": 666,
     "backend/src/VisionStudio.Api/StorageBackupService.cs": 305,
-    "backend/src/VisionStudio.Api/StorageBackupService.Restore.cs": 621
+    "backend/src/VisionStudio.Api/StorageBackupService.Restore.cs": 621,
+    "frontend/src/components/CameraPanel.tsx": 782,
+    "frontend/src/components/ImageViewer.tsx": 1026
   }
 }

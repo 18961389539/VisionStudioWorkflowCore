@@ -82,7 +82,7 @@ def main() -> None:
         [('or "measure.contourThickness" or "measure.metrology") return "jlvision";', 'or "measure.contourThickness" or "measure.metrology" or "jlvision.imageOp") return "jlvision";')],
     )
     patch(
-        "backend/src/VisionStudio.Engine/Batch5PrecisionCatalog.cs",
+        "backend/src/VisionStudio.Engine/Catalogs/Precision/Batch5PrecisionCatalog.cs",
         [
             (
                 'new("pyramidLevels", "Pyramid Levels", "number", 0, 0, 8, 1, Group: "Training", Description: "0 selects automatic pyramid depth; 1–8 fixes the coarse-to-fine levels used for training and search. More levels can speed up large-image search but may miss small features."),',
