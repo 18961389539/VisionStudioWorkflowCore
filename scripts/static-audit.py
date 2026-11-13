@@ -418,16 +418,16 @@ required = [
     'backend/tests/VisionStudio.Engine.Tests/FaultInjectionTests.cs',
     'backend/tests/VisionStudio.Engine.Tests/WorkflowPropertyTests.cs',
     'backend/tests/VisionStudio.Engine.Tests/SoakStabilityTests.cs',
-    'backend/tests/VisionStudio.Api.Tests/PersistenceConcurrencyTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Storage/PersistenceConcurrencyTests.cs',
     'backend/tests/VisionStudio.Api.Tests/OpenApiContractTests.cs',
-    'backend/tests/VisionStudio.Api.Tests/ProductionRuntimeTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Production/ProductionRuntimeTests.cs',
     'backend/coverage.runsettings',
     'contracts/api-required-endpoints.json',
     'scripts/check-coverage.py',
     'scripts/soak-test.ps1',
     'scripts/soak-test.sh',
     '.github/workflows/soak-gate.yml',
-    'backend/src/VisionStudio.Api/ProductionRuntime.cs',
+    'backend/src/VisionStudio.Api/Production/ProductionRuntime.cs',
     'backend/src/VisionStudio.Api/AlarmStore.cs',
     'backend/src/VisionStudio.Engine/WorkflowFingerprint.cs',
     'backend/tests/VisionStudio.Engine.Tests/WorkflowFingerprintTests.cs',
@@ -435,9 +435,9 @@ required = [
     'frontend/src/components/ProductionPanel.tsx',
     'scripts/publish-runtime.ps1',
     'scripts/publish-runtime.sh',
-    'backend/src/VisionStudio.Api/SqliteMetadataDatabase.cs',
-    'backend/src/VisionStudio.Api/LegacyStorageMigration.cs',
-    'backend/tests/VisionStudio.Api.Tests/SqliteStorageTests.cs',
+    'backend/src/VisionStudio.Api/Storage/SqliteMetadataDatabase.cs',
+    'backend/src/VisionStudio.Api/Storage/LegacyStorageMigration.cs',
+    'backend/tests/VisionStudio.Api.Tests/Storage/SqliteStorageTests.cs',
     'backend/src/VisionStudio.Engine/Runtime/VisionNodeRuntime.cs',
     'backend/src/VisionStudio.Engine/Runtime/VisionPipelineExecutor.cs',
     'backend/src/VisionStudio.Engine/Runtime/VisionPipelineStep.cs',
@@ -460,7 +460,7 @@ required = [
     'backend/src/VisionStudio.Api/Security/VisionStudioAuthenticationHandler.cs',
     'backend/src/VisionStudio.Api/Security/Audit.cs',
     'backend/src/VisionStudio.Api/Endpoints/SecurityEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/SecurityTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Operations/SecurityTests.cs',
     'frontend/src/security.tsx',
     'SECURITY_ARCHITECTURE.md',
     'MIGRATION_V023_TO_V024.md',
@@ -477,7 +477,7 @@ required = [
     'backend/src/VisionStudio.Api/Diagnostics/DiagnosticsCenterService.cs',
     'backend/src/VisionStudio.Api/Diagnostics/DiagnosticsHub.cs',
     'backend/src/VisionStudio.Api/Endpoints/DiagnosticsEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/DiagnosticsTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Operations/DiagnosticsTests.cs',
     'frontend/src/components/DiagnosticsPanel.tsx',
     'DIAGNOSTICS_ARCHITECTURE.md',
     'MIGRATION_V025_TO_V026.md',
@@ -491,9 +491,9 @@ required = [
     'CATALOG_ARCHITECTURE.md',
     'MIGRATION_V026_TO_V027.md',
     'backend/src/VisionStudio.Api/SchemaMigrations.cs',
-    'backend/src/VisionStudio.Api/StorageMaintenance.cs',
-    'backend/src/VisionStudio.Api/StorageBackupService.cs',
-    'backend/tests/VisionStudio.Api.Tests/StorageMaintenanceTests.cs',
+    'backend/src/VisionStudio.Api/Storage/StorageMaintenance.cs',
+    'backend/src/VisionStudio.Api/Storage/StorageBackupService.cs',
+    'backend/tests/VisionStudio.Api.Tests/Storage/StorageMaintenanceTests.cs',
     'frontend/src/components/StoragePanel.tsx',
     'STORAGE_MAINTENANCE.md',
     'MIGRATION_V027_TO_V028.md',
@@ -504,14 +504,14 @@ required = [
     'MIGRATION_V028_TO_V029.md',
     'backend/src/VisionStudio.Api/Media/MediaLibraryService.cs',
     'backend/src/VisionStudio.Api/Endpoints/MediaEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/MediaLibraryTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Assets/MediaLibraryTests.cs',
     'MEDIA_LIBRARY.md',
     'MIGRATION_V029_TO_V030.md',
     'backend/src/VisionStudio.Engine/Provenance/HardwareProvenance.cs',
     'backend/src/VisionStudio.Api/Provenance/HardwareProvenanceStore.cs',
     'backend/src/VisionStudio.Api/Provenance/HardwareProvenanceService.cs',
     'backend/src/VisionStudio.Api/Endpoints/HardwareProvenanceEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/HardwareProvenanceTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Camera/HardwareProvenanceTests.cs',
     'frontend/src/components/HardwareProvenancePanel.tsx',
     'HARDWARE_PROVENANCE.md',
     'MIGRATION_V030_TO_V031.md',
@@ -530,61 +530,61 @@ required = [
     'backend/src/VisionStudio.Camera.Hikrobot/HikrobotSdkReflection.cs',
     'backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraAdapterProvider.cs',
     'backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs',
-    'backend/src/VisionStudio.Api/CameraAdapterOptions.cs',
+    'backend/src/VisionStudio.Api/Camera/CameraAdapterOptions.cs',
     'backend/tests/VisionStudio.Engine.Tests/CameraAcquisitionTests.cs',
     'CAMERA_VENDOR_ADAPTERS.md',
     'MIGRATION_V032_TO_V033.md',
     'backend/src/VisionStudio.Engine/Camera/CameraFeatureProfiles.cs',
     'backend/src/VisionStudio.Camera.Basler/BaslerCameraFeatures.cs',
     'backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs',
-    'backend/src/VisionStudio.Api/CameraFeatureProfileStore.cs',
+    'backend/src/VisionStudio.Api/Camera/CameraFeatureProfileStore.cs',
     'backend/src/VisionStudio.Api/Endpoints/CameraFeatureProfileEndpoints.cs',
     'backend/tests/VisionStudio.Engine.Tests/CameraFeatureProfileTests.cs',
-    'backend/tests/VisionStudio.Api.Tests/CameraFeatureProfileStoreTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Camera/CameraFeatureProfileStoreTests.cs',
     'CAMERA_COMMISSIONING.md',
     'MIGRATION_V033_TO_V034.md',
     'CAMERA_SYNCHRONIZATION.md',
     'MIGRATION_V034_TO_V035.md',
-    'backend/src/VisionStudio.Api/CameraSynchronizationContracts.cs',
-    'backend/src/VisionStudio.Api/CameraSynchronizationStores.cs',
-    'backend/src/VisionStudio.Api/CameraSynchronizationService.cs',
+    'backend/src/VisionStudio.Api/Camera/CameraSynchronizationContracts.cs',
+    'backend/src/VisionStudio.Api/Camera/CameraSynchronizationStores.cs',
+    'backend/src/VisionStudio.Api/Camera/CameraSynchronizationService.cs',
     'backend/src/VisionStudio.Api/Endpoints/CameraSynchronizationEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/CameraSynchronizationTests.cs',
-    'backend/src/VisionStudio.Api/OfflineReplay.cs',
+    'backend/tests/VisionStudio.Api.Tests/Camera/CameraSynchronizationTests.cs',
+    'backend/src/VisionStudio.Api/Operations/OfflineReplay.cs',
     'backend/src/VisionStudio.Api/Endpoints/ReplayEndpoints.cs',
     'frontend/src/components/ReplayDebuggerPanel.tsx',
     'OFFLINE_REPLAY_DEBUGGER.md',
     'MIGRATION_V046_TO_V047.md',
-    'backend/src/VisionStudio.Api/DatasetValidation.cs',
+    'backend/src/VisionStudio.Api/Operations/DatasetValidation.cs',
     'backend/src/VisionStudio.Api/Endpoints/DatasetValidationEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/DatasetValidationTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Operations/DatasetValidationTests.cs',
     'frontend/src/components/DatasetValidationPanel.tsx',
     'DATASET_BATCH_VALIDATION.md',
     'MIGRATION_V047_TO_V048.md',
-    'backend/src/VisionStudio.Api/ParameterTuning.cs',
+    'backend/src/VisionStudio.Api/Workflow/ParameterTuning.cs',
     'backend/src/VisionStudio.Api/Endpoints/ParameterTuningEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/ParameterTuningTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Recipe/ParameterTuningTests.cs',
     'frontend/src/components/ParameterTuningPanel.tsx',
     'PARAMETER_TUNING.md',
     'MIGRATION_V048_TO_V049.md',
-    'backend/src/VisionStudio.Api/ProductRecipeStore.cs',
+    'backend/src/VisionStudio.Api/Workflow/ProductRecipeStore.cs',
     'backend/src/VisionStudio.Api/Endpoints/ProductRecipeEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/ProductRecipeLifecycleTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Recipe/ProductRecipeLifecycleTests.cs',
     'PRODUCT_RECIPE_LIFECYCLE.md',
     'MIGRATION_V049_TO_V050.md',
-    'backend/src/VisionStudio.Api/RecipeParameterization.cs',
+    'backend/src/VisionStudio.Api/Workflow/RecipeParameterization.cs',
     'backend/src/VisionStudio.Api/Endpoints/RecipeParameterEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/RecipeParameterBindingTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Recipe/RecipeParameterBindingTests.cs',
     'RECIPE_PARAMETER_BINDING.md',
     'MIGRATION_V050_TO_V051.md',
-    'backend/src/VisionStudio.Api/WorkflowModules.cs',
+    'backend/src/VisionStudio.Api/Workflow/WorkflowModules.cs',
     'backend/src/VisionStudio.Api/Endpoints/WorkflowModuleEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Workflow/WorkflowModuleTests.cs',
     'frontend/src/components/WorkflowModulePanel.tsx',
     'REUSABLE_WORKFLOW_MODULES.md',
     'MIGRATION_V051_TO_V052.md',
     'backend/src/VisionStudio.Api/Endpoints/PluginEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/PluginSdkV2Tests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Plugin/PluginSdkV2Tests.cs',
     'backend/src/VisionStudio.Plugin.Sample/plugin.json',
     'PLUGIN_SDK_2.md',
     'MIGRATION_V052_TO_V053.md',
@@ -592,26 +592,26 @@ required = [
     'MIGRATION_V054_TO_V055.md',
     'backend/src/VisionStudio.Engine/PluginWorkerSharedMemoryStore.cs',
     'MIGRATION_V055_TO_V056.md',
-    'backend/src/VisionStudio.Api/PluginWorkerPerformance.cs',
+    'backend/src/VisionStudio.Api/Plugin/PluginWorkerPerformance.cs',
     'PLUGIN_WORKER_PROFILING.md',
     'MIGRATION_V056_TO_V057.md',
-    'backend/src/VisionStudio.Api/PluginPerformanceBenchmark.cs',
+    'backend/src/VisionStudio.Api/Plugin/PluginPerformanceBenchmark.cs',
     'backend/src/VisionStudio.Api/Endpoints/PluginBenchmarkEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/PluginPerformanceBenchmarkTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Plugin/PluginPerformanceBenchmarkTests.cs',
     'PLUGIN_PERFORMANCE_BENCHMARK.md',
     'MIGRATION_V057_TO_V058.md',
-    'backend/src/VisionStudio.Api/PluginBenchmarkCi.cs',
+    'backend/src/VisionStudio.Api/Plugin/PluginBenchmarkCi.cs',
     'backend/src/VisionStudio.Benchmark.Cli/VisionStudio.Benchmark.Cli.csproj',
     'backend/src/VisionStudio.Benchmark.Cli/Program.cs',
-    'backend/tests/VisionStudio.Api.Tests/PluginBenchmarkCiTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Plugin/PluginBenchmarkCiTests.cs',
     'PLUGIN_BENCHMARK_CI.md',
     'MIGRATION_V058_TO_V059.md',
     'scripts/plugin-benchmark-gate.ps1',
     'scripts/plugin-benchmark-gate.sh',
     '.github/workflows/plugin-performance-gate.yml',
-    'backend/src/VisionStudio.Api/InvestigationCases.cs',
+    'backend/src/VisionStudio.Api/Operations/InvestigationCases.cs',
     'backend/src/VisionStudio.Api/Endpoints/InvestigationEndpoints.cs',
-    'backend/tests/VisionStudio.Api.Tests/InvestigationCaseTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/Operations/InvestigationCaseTests.cs',
     'frontend/src/components/InvestigationPanel.tsx',
     'INVESTIGATION_CASES.md',
     'MIGRATION_V061_TO_V062.md',
@@ -679,7 +679,7 @@ ok('V0.29 recursive structured IR + keyed branch state + branch visualization pr
 media_service=read_safe('backend/src/VisionStudio.Api/Media/MediaLibraryService.cs')
 media_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/MediaEndpoints.cs')
 file_camera=read_safe('backend/src/VisionStudio.Engine/Camera/FileCameraDevice.cs')
-media_tests=read_safe('backend/tests/VisionStudio.Api.Tests/MediaLibraryTests.cs')
+media_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Assets/MediaLibraryTests.cs')
 camera_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs')
 frontend_camera=read_safe('frontend/src/components/CameraPanel.tsx')
 for token in ['media://','ResolveSource','NormalizeRelative','EnsureNoReparseTraversal','MaxImportBytes','MaxBatchBytes','MaxLibraryBytes','EnsureImportCapacity','ValidateImageSignature','ImportAsync','ListCollections','ListItems']:
@@ -707,7 +707,7 @@ hardware_contracts=read_safe('backend/src/VisionStudio.Engine/Provenance/Hardwar
 hardware_store=read_safe('backend/src/VisionStudio.Api/Provenance/HardwareProvenanceStore.cs')
 hardware_service=read_safe('backend/src/VisionStudio.Api/Provenance/HardwareProvenanceService.cs')
 hardware_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/HardwareProvenanceEndpoints.cs')
-hardware_tests=read_safe('backend/tests/VisionStudio.Api.Tests/HardwareProvenanceTests.cs')
+hardware_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Camera/HardwareProvenanceTests.cs')
 hardware_frontend=read_safe('frontend/src/components/HardwareProvenancePanel.tsx')
 for token in ['HardwareProvenanceData','IHardwareProvenanceProvider','SerialNumber','FirmwareVersion','ControllerVersion','ProgramHash']:
     if token not in hardware_contracts: fail(f'V0.31 hardware contract token missing: {token}')
@@ -768,7 +768,7 @@ basler_provider=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerPylonCam
 hik_adapter=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs')
 hik_provider=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraAdapterProvider.cs')
 camera_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs')
-camera_options=read_safe('backend/src/VisionStudio.Api/CameraAdapterOptions.cs')
+camera_options=read_safe('backend/src/VisionStudio.Api/Camera/CameraAdapterOptions.cs')
 camera_ui=read_safe('frontend/src/components/CameraPanel.tsx')
 camera_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/CameraAcquisitionTests.cs')
 for token in ['CameraOutputPixelFormat','ICameraTelemetryProvider','CameraDiscoveredDevice','ICameraAdapterProvider','ExternalTriggerSource']:
@@ -815,11 +815,11 @@ camera_profile_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/Camer
 camera_profile_hash=read_safe('backend/src/VisionStudio.Engine/Camera/CameraFeatureProfiles.cs')
 basler_features=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerCameraFeatures.cs')
 hik_features=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs')
-profile_store=read_safe('backend/src/VisionStudio.Api/CameraFeatureProfileStore.cs')
+profile_store=read_safe('backend/src/VisionStudio.Api/Camera/CameraFeatureProfileStore.cs')
 profile_schema=read_family('backend/src/VisionStudio.Api/SchemaMigrations*.cs')
 profile_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraFeatureProfileEndpoints.cs')
 profile_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/CameraFeatureProfileTests.cs')
-profile_store_tests=read_safe('backend/tests/VisionStudio.Api.Tests/CameraFeatureProfileStoreTests.cs')
+profile_store_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Camera/CameraFeatureProfileStoreTests.cs')
 for token in ['CameraFeatureDescriptor','CameraCommissioningProfile','CameraCommissioningCapabilities','ICameraFeatureProvider','CommissioningProfileHash']:
     if token not in camera_profile_contracts: fail(f'V0.34 commissioning contract missing: {token}')
 for token in ['SHA256.HashData','AdvancedFeatures','SchemaVersion != 1','PacketSizeBytes']:
@@ -852,7 +852,7 @@ sample_csproj=read_safe('backend/src/VisionStudio.Plugin.Sample/VisionStudio.Plu
 plugin_contracts=read_safe('backend/src/VisionStudio.Abstractions/PluginContracts.cs')
 execution_contracts=read_safe('backend/src/VisionStudio.Abstractions/ExecutionContracts.cs')
 plugin_registry=read_safe('backend/src/VisionStudio.Engine/PluginSdk.cs')
-plugin_manager=read_safe('backend/src/VisionStudio.Api/PluginManager.cs')
+plugin_manager=read_safe('backend/src/VisionStudio.Api/Plugin/PluginManager.cs')
 node_dispatcher=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionNodeDispatcher.cs')
 if '<PackageReference' in abstractions_csproj: fail('VisionStudio.Abstractions must not have third-party package references')
 if 'VisionStudio.Abstractions' not in engine_csproj: fail('Engine does not reference VisionStudio.Abstractions')
@@ -939,7 +939,7 @@ schema_migration_source=read_family('backend/src/VisionStudio.Api/SchemaMigratio
 # "Current schema version" assertions read the live implementation instead of a frozen literal.
 _current_schema_match = re.search(r'CurrentVersion\s*=\s*(\d+)', schema_migration_source)
 CURRENT_SCHEMA_TOKEN = f'CurrentVersion = {_current_schema_match.group(1)}' if _current_schema_match else 'CurrentVersion = 0'
-security_schema=read_safe('backend/src/VisionStudio.Api/SqliteMetadataDatabase.cs') + '\n' + schema_migration_source
+security_schema=read_safe('backend/src/VisionStudio.Api/Storage/SqliteMetadataDatabase.cs') + '\n' + schema_migration_source
 for token in ['security_users','security_sessions','audit_events',CURRENT_SCHEMA_TOKEN]:
     if token not in security_schema: fail(f'V0.24 security schema missing: {token}')
 for token in ['Rfc2898DeriveBytes.Pbkdf2','CryptographicOperations.FixedTimeEquals','SHA256.HashData','At least one enabled Administrator must remain']:
@@ -994,12 +994,12 @@ if 'bool Simulated' not in read_safe('backend/src/VisionStudio.Engine/Robot/Robo
 ok('V0.24 RBAC + PBKDF2 local users + revocable sessions + audit trail present')
 
 # V0.25 RuntimeDependencyManifest / production provenance
-trace_store_dependency=read_family('backend/src/VisionStudio.Api/TraceabilityStore*.cs')
+trace_store_dependency=read_family('backend/src/VisionStudio.Api/Trace/TraceabilityStore*.cs')
 dependency_source=read_family('backend/src/VisionStudio.Api/RuntimeDependencies*.cs')
 job_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs')
 trace_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/TraceEndpoints.cs')
-production_source=read_family('backend/src/VisionStudio.Api/ProductionRuntime*.cs')
-job_store_source=read_safe('backend/src/VisionStudio.Api/JobStore.cs')
+production_source=read_family('backend/src/VisionStudio.Api/Production/ProductionRuntime*.cs')
+job_store_source=read_safe('backend/src/VisionStudio.Api/Operations/JobStore.cs')
 for token in ['RuntimeDependencyManifest','EngineRuntimeDependency','PluginRuntimeDependency','CameraRuntimeDependency','DeviceRuntimeDependency','RobotRuntimeDependency','CalibrationRuntimeDependency','ManifestHash','CaptureAsync','ValidateAsync','ValidateOrThrowAsync']:
     if token not in dependency_source: fail(f'Runtime dependency manifest implementation missing: {token}')
 for token in ['registration.Source','AssemblySha256','cameraId','deviceId','robotId','assetId','assetVersion','ConfigurationHash']:
@@ -1026,13 +1026,13 @@ ok('V0.25 RuntimeDependencyManifest + publication/trace provenance + production 
 
 # Retained V0.35 multi-camera PTP + Action Command synchronization runtime
 sync_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/CameraContracts.cs')
-sync_runtime=read_family('backend/src/VisionStudio.Api/CameraSynchronization*.cs')
+sync_runtime=read_family('backend/src/VisionStudio.Api/Camera/CameraSynchronization*.cs')
 sync_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraSynchronizationEndpoints.cs')
 basler_sync=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerCameraSynchronization.cs')
 hik_sync=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraSynchronization.cs')
 basler_adapter=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraAdapterProvider.cs')
 hik_adapter=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraAdapterProvider.cs')
-sync_tests=read_safe('backend/tests/VisionStudio.Api.Tests/CameraSynchronizationTests.cs')
+sync_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Camera/CameraSynchronizationTests.cs')
 for token in ['ICameraSynchronizationProvider','ICameraActionCommandProvider','CameraTimeSynchronizationStatus','CameraActionCommandRequest','DeviceTimestampNs','DeviceTickFrequencyHz','ScheduledRequiresTickFrequency']:
     if token not in sync_contracts: fail(f'V0.35 camera synchronization contract missing: {token}')
 for token in ['camera_sync_groups','CameraSynchronizationGroupStore','CameraSynchronizationService','MaxTriggerSkewUs','ScheduledDeviceTimeNs','device-ptp']:
@@ -1091,14 +1091,14 @@ for rel in ['FRAMESET_WORKFLOW.md','MIGRATION_V035_TO_V036.md']:
 # 2026-11-12：App.tsx 拆分后模板选择器落在 components/TemplateGalleryModal.tsx，
 # DEMO_GROUPS 定义在 appEditorShared 并由该组件消费；App.tsx 只剩入口。
 # 断言改指向真实消费方，避免"功能还在、断言失效"的假失败。
-if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') \
+if 'frameSet: frameSetDemo' not in read_family('frontend/src/demos/*.ts') \
         or 'DEMO_GROUPS' not in read_safe('frontend/src/components/TemplateGalleryModal.tsx') \
         or 'TemplateGalleryModal' not in frontend_app:
     fail('V0.36 frontend synchronized FrameSet demo is missing')
 ok('V0.36 first-class synchronized FrameSet workflow primitive + zero-copy extraction present')
 
 # V0.40 automatic synchronization commissioning test
-commissioning_source=read_safe('backend/src/VisionStudio.Api/CameraSynchronizationCommissioning.cs')
+commissioning_source=read_safe('backend/src/VisionStudio.Api/Camera/CameraSynchronizationCommissioning.cs')
 for token in ['camera_sync_commissioning_tests','CameraSynchronizationCommissioningService','RequestedIterations','CompletedIterations','commissioning:{current.TestId}','ApplicationStopping','CancelAsync','CameraSynchronizationCommissioningReport']:
     if token not in commissioning_source and token not in schema_migration_source: fail(f'V0.40 commissioning token missing: {token}')
 for route in ['/api/camera-sync/groups/{id}/commissioning-tests','/api/camera-sync/commissioning-tests/{testId}/cancel','/api/camera-sync/commissioning-tests/{testId}/report']:
@@ -1144,10 +1144,10 @@ doc_present('MIGRATION_V041_TO_V042.md')
 ok('V0.42 per-run PTP evidence + timing diagnostics + report v4 trend present')
 
 # V0.43 Production PTP drift guard
-ptp_guard=read_safe('backend/src/VisionStudio.Api/ProductionPtpDriftGuard.cs')
-production_runtime=read_family('backend/src/VisionStudio.Api/ProductionRuntime*.cs')
+ptp_guard=read_safe('backend/src/VisionStudio.Api/Production/ProductionPtpDriftGuard.cs')
+production_runtime=read_family('backend/src/VisionStudio.Api/Production/ProductionRuntime*.cs')
 production_ui=read_safe('frontend/src/components/ProductionPanel.tsx')
-ptp_guard_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ProductionPtpDriftGuardTests.cs')
+ptp_guard_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Production/ProductionPtpDriftGuardTests.cs')
 for token in ['PtpDriftGuardEnabled','PtpGuardWindowRuns','PtpGuardMinimumEvidenceRuns','PtpGuardMinimumReadyRate','PtpGuardCheckEveryCycles']:
     if token not in production_runtime: fail(f'V0.43 production PTP guard config missing: {token}')
 for token in ['PROD-PTP-NOT-READY','PROD-PTP-DRIFT','PROD-PTP-MASTER-CLOCK','ComputePtpDiagnostics','ResolveRequirements']:
@@ -1160,8 +1160,8 @@ doc_present('MIGRATION_V042_TO_V043.md')
 ok('V0.43 Production PTP start gate + sliding-window drift/master-clock guard present')
 
 # V0.44 Production synchronization health guard
-sync_guard=read_safe('backend/src/VisionStudio.Api/ProductionSynchronizationHealthGuard.cs')
-sync_guard_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ProductionSynchronizationHealthGuardTests.cs')
+sync_guard=read_safe('backend/src/VisionStudio.Api/Production/ProductionSynchronizationHealthGuard.cs')
+sync_guard_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Production/ProductionSynchronizationHealthGuardTests.cs')
 for token in ['SynchronizationHealthGuardEnabled','SynchronizationGuardWindowRuns','SynchronizationGuardMaximumFailureRate','SynchronizationGuardMaximumFrameTimeoutRate','SynchronizationGuardMaxConsecutiveSkewViolations','SynchronizationGuardUnhealthyChecksToFault','SynchronizationGuardHealthyChecksToRecover']:
     if token not in production_runtime: fail(f'V0.44 synchronization guard config missing: {token}')
 for token in ['PROD-SYNC-CAMERA-NOT-READY','PROD-SYNC-ACTION','PROD-SYNC-ACTION-ACK','PROD-SYNC-FRAME-TIMEOUT','PROD-SYNC-SKEW','PROD-SYNC-FRAME-LOSS','LiveRecoverableOnly','EstimateSequenceGaps']:
@@ -1179,7 +1179,7 @@ ok('V0.44 Production synchronization Action/frame/skew/sequence health guard + r
 camera_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/CameraContracts.cs')
 basler_transport=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerTransportTelemetry.cs')
 hik_transport=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotTransportTelemetry.cs')
-camera_sync=read_family('backend/src/VisionStudio.Api/CameraSynchronization*.cs')
+camera_sync=read_family('backend/src/VisionStudio.Api/Camera/CameraSynchronization*.cs')
 camera_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs')
 camera_ui=read_safe('frontend/src/components/CameraPanel.tsx')
 frontend_types=read_safe('frontend/src/types.ts')
@@ -1206,14 +1206,14 @@ for token in ['CameraTransportTelemetry','transportSnapshots']:
     if token not in frontend_types: fail(f'V0.45 frontend transport telemetry type missing: {token}')
 if 'ComputeNativeTransport_PrefersVendorCountersAndCalculatesWindowDeltas' not in sync_guard_tests:
     fail('V0.45 vendor transport delta regression test missing')
-if 'V044RuntimeConfig_UpgradesMissingNativeTransportGuardFieldsToV045Defaults' not in read_safe('backend/tests/VisionStudio.Api.Tests/ProductionRuntimeTests.cs'):
+if 'V044RuntimeConfig_UpgradesMissingNativeTransportGuardFieldsToV045Defaults' not in read_safe('backend/tests/VisionStudio.Api.Tests/Production/ProductionRuntimeTests.cs'):
     fail('V0.45 V0.44 runtime config compatibility regression test missing')
 doc_present('MIGRATION_V044_TO_V045.md')
 ok('V0.45 Basler/Hikrobot vendor transport telemetry + persisted run evidence + native-first Production Guard present')
 
 # V0.46 GigE network commissioning + host NIC capacity diagnostics
-gige_source=read_safe('backend/src/VisionStudio.Api/GigENetworkCommissioning.cs')
-gige_tests=read_safe('backend/tests/VisionStudio.Api.Tests/GigENetworkDiagnosticsTests.cs')
+gige_source=read_safe('backend/src/VisionStudio.Api/Camera/GigENetworkCommissioning.cs')
+gige_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Camera/GigENetworkDiagnosticsTests.cs')
 for token in ['NetworkInterface.GetAllNetworkInterfaces','GetIPStatistics','SpeedMbps','MtuBytes','SameSubnet','BuildTransportTrend','PeakNicUtilization','PacketSizeBytes','InterPacketDelayTicks']:
     if token not in gige_source: fail(f'V0.46 GigE network diagnostics token missing: {token}')
 for token in ['gige-network-diagnostics','gige-network-tests']:
@@ -1229,7 +1229,7 @@ doc_present('MIGRATION_V045_TO_V046.md')
 ok('V0.46 host NIC mapping + bandwidth/resend diagnostics + one-click GigE commissioning test present')
 
 # V0.47 Offline Replay + Workflow Debugger
-replay_source=read_safe('backend/src/VisionStudio.Api/OfflineReplay.cs')
+replay_source=read_safe('backend/src/VisionStudio.Api/Operations/OfflineReplay.cs')
 replay_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/ReplayEndpoints.cs')
 replay_ui=read_safe('frontend/src/components/ReplayDebuggerPanel.tsx')
 models_source=read_safe('backend/src/VisionStudio.Engine/Models.cs')
@@ -1247,7 +1247,7 @@ for token in ['new(11, "V0.47 offline replay artifacts"','ApplyOfflineReplayArti
     if token not in schema_migration_source: fail(f'V0.47 schema v11 replay migration missing: {token}')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
 if 'OfflineReplay_ReexecutesSoftwareWorkflow_AndReturnsNodeSnapshots' not in api_smoke: fail('V0.47 replay API regression test missing')
-sqlite_tests=read_safe('backend/tests/VisionStudio.Api.Tests/SqliteStorageTests.cs')
+sqlite_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Storage/SqliteStorageTests.cs')
 if 'V047ReplayInput_IsPersistedAsDedicatedPngArtifact_AndSchemaIsV11' not in sqlite_tests: fail('V0.47 replay artifact persistence regression test missing')
 v47_settings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json'))
 if 'OkReplaySampleEvery' not in v47_settings.get('TraceRetention', {}): fail('V0.47 replay sampling configuration missing')
@@ -1255,10 +1255,10 @@ ok('V0.47 persisted replay inputs + deterministic offline debugger + node input/
 
 
 # V0.48 Dataset / Batch Validation
-dataset_source=read_safe('backend/src/VisionStudio.Api/DatasetValidation.cs')
+dataset_source=read_safe('backend/src/VisionStudio.Api/Operations/DatasetValidation.cs')
 dataset_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/DatasetValidationEndpoints.cs')
 dataset_ui=read_safe('frontend/src/components/DatasetValidationPanel.tsx')
-dataset_tests=read_safe('backend/tests/VisionStudio.Api.Tests/DatasetValidationTests.cs')
+dataset_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Operations/DatasetValidationTests.cs')
 for token in ['DatasetValidationStore','DatasetValidationService','ValidationRunSummary','FALSE_OK','FALSE_NG','P95DurationMs','TopologyHash','SourceKind','MEDIA','TRACE']:
     if token not in dataset_source: fail(f'V0.48 dataset validation token missing: {token}')
 for token in ['/api/validation/datasets','/api/validation/datasets/{datasetId}/items','/api/validation/datasets/{datasetId}/runs','/api/validation/runs/{runId}','/api/validation/runs/{runId}/cancel']:
@@ -1275,10 +1275,10 @@ ok('V0.48 persistent labeled datasets + Trace/Media batch validation + false OK/
 
 
 # V0.49 Parameter Tuning Workspace
-tuning_source=read_safe('backend/src/VisionStudio.Api/ParameterTuning.cs')
+tuning_source=read_safe('backend/src/VisionStudio.Api/Workflow/ParameterTuning.cs')
 tuning_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/ParameterTuningEndpoints.cs')
 tuning_ui=read_safe('frontend/src/components/ParameterTuningPanel.tsx')
-tuning_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ParameterTuningTests.cs')
+tuning_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Recipe/ParameterTuningTests.cs')
 for token in ['ParameterTuningService','ParameterTuningPreviewRequest','persistTrace: false','RunNode','FALSE_OK','FALSE_NG']:
     if token not in tuning_source: fail(f'V0.49 tuning service token missing: {token}')
 for token in ['/api/tuning/preview']:
@@ -1291,9 +1291,9 @@ if 'persistTrace = true' not in replay_source or 'if (persistTrace)' not in repl
 ok('V0.49 transient single-image tuning + catalog-driven controls + ROI + persisted Dataset validation candidates present')
 
 # V0.50 Product / Recipe lifecycle
-product_recipe_source=read_safe('backend/src/VisionStudio.Api/ProductRecipeStore.cs')
+product_recipe_source=read_safe('backend/src/VisionStudio.Api/Workflow/ProductRecipeStore.cs')
 product_recipe_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/ProductRecipeEndpoints.cs')
-product_recipe_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ProductRecipeLifecycleTests.cs')
+product_recipe_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Recipe/ProductRecipeLifecycleTests.cs')
 for token in ['ProductDescriptor','ValidationAcceptancePolicy','LinkValidationAsync','CloneRecipeAsync','DiffAsync','False OK']:
     if token not in product_recipe_source: fail(f'V0.50 product recipe token missing: {token}')
 for token in ['/api/recipes','/api/jobs/{id}/clone','/validation-candidates','/validation']:
@@ -1308,9 +1308,9 @@ ok('V0.50 Product → Recipe → validated immutable version → publish lifecyc
 
 
 # V0.51 Recipe Parameter Binding
-parameter_source=read_safe('backend/src/VisionStudio.Api/RecipeParameterization.cs')
+parameter_source=read_safe('backend/src/VisionStudio.Api/Workflow/RecipeParameterization.cs')
 parameter_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/RecipeParameterEndpoints.cs')
-parameter_tests=read_safe('backend/tests/VisionStudio.Api.Tests/RecipeParameterBindingTests.cs')
+parameter_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Recipe/RecipeParameterBindingTests.cs')
 for token in ['RecipeParameterStore','ResolvedRecipeParameterization','ResolveForJobAsync','product_parameter_values','recipe_parameter_values','IsCompatible']:
     if token not in parameter_source: fail(f'V0.51 parameter binding token missing: {token}')
 for token in ['/api/jobs/{id}/parameters','/api/jobs/{id}/parameterization/resolve','/api/jobs/{id}/versions/{version:int}/parameterization']:
@@ -1326,9 +1326,9 @@ ok('V0.51 Product/Recipe parameter drafts → frozen binding snapshot → effect
 
 
 # V0.52 Reusable Workflow Modules / Subflow
-module_source=read_safe('backend/src/VisionStudio.Api/WorkflowModules.cs')
+module_source=read_safe('backend/src/VisionStudio.Api/Workflow/WorkflowModules.cs')
 module_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/WorkflowModuleEndpoints.cs')
-module_tests=read_safe('backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs')
+module_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Workflow/WorkflowModuleTests.cs')
 module_ui=read_safe('frontend/src/components/WorkflowModulePanel.tsx')
 for token in ['WorkflowModuleStore','WorkflowModuleExpander','WorkflowModuleAuthoringService','ModuleAwareVisionWorkflowRunner','module.call','ModuleHash','ExpandAsync','DeleteAuthoringRollbackAsync']:
     if token not in module_source: fail(f'V0.52 reusable module token missing: {token}')
@@ -1349,7 +1349,7 @@ ok('V0.52 immutable typed Subflow/Reusable Module extraction + expansion + versi
 
 # V0.53 Software Plugin SDK 2.0
 plugin_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginEndpoints.cs')
-plugin_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginSdkV2Tests.cs')
+plugin_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Plugin/PluginSdkV2Tests.cs')
 plugin_lifetime_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/PluginLifetimeTests.cs')
 plugin_manifest=json.loads(read_safe('backend/src/VisionStudio.Plugin.Sample/plugin.json'))
 for token in ['VisionPluginSdk','IVisionPluginV2','VisionPluginCompatibility','VisionPluginToolIdentity','PerNode','WithToolIdentity']:
@@ -1376,9 +1376,9 @@ ok('V0.53 manifest-based SDK 2.0 + PerNode lifetime + safe runtime discovery + t
 
 
 # V0.54 signed plugin packaging / install / rollback
-plugin_package_source=read_safe('backend/src/VisionStudio.Api/PluginPackageManagement.cs')
+plugin_package_source=read_safe('backend/src/VisionStudio.Api/Plugin/PluginPackageManagement.cs')
 plugin_package_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginPackageEndpoints.cs')
-plugin_package_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginPackageManagementTests.cs')
+plugin_package_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Plugin/PluginPackageManagementTests.cs')
 plugin_packager=read_safe('backend/src/VisionStudio.Plugin.Packager/Program.cs')
 plugin_package_ui=read_safe('frontend/src/components/PluginPackagePanel.tsx')
 for token in ['PluginPackageSignatureManifest','TrustedPluginPublisher','RequireTrustedSignature','ComputeContentHash','VerifySignature','PrepareRuntimePluginRoot','active-pointers.json','Pending','publisher.cer','signature.json']:
@@ -1402,14 +1402,14 @@ ok('V0.54 signed .vspkg preflight + trusted publisher + version repository + pen
 # V0.55 out-of-process plugin worker
 worker_contracts=read_safe('backend/src/VisionStudio.Abstractions/PluginWorkerContracts.cs')
 worker_wire=read_safe('backend/src/VisionStudio.Abstractions/PluginWorkerWire.cs')
-worker_supervisor=read_safe('backend/src/VisionStudio.Api/PluginWorkerSupervisor.cs')
+worker_supervisor=read_safe('backend/src/VisionStudio.Api/Plugin/PluginWorkerSupervisor.cs')
 # Phase 0 脚本 Worker 改造（2026-11-13）：进程池/客户端已纯移动到 Workers/WorkerProcessPool.cs。
 # 审计守的是"这套运行时能力还在"，不是"某个特定文件里还有这些字"。
 worker_pool=read_safe('backend/src/VisionStudio.Api/Workers/WorkerProcessPool.cs')
 worker_runtime=worker_supervisor + '\n' + worker_pool
 worker_program=read_safe('backend/src/VisionStudio.Plugin.Worker/Program.cs')
 worker_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginWorkerEndpoints.cs')
-worker_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginWorkerTests.cs')
+worker_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Plugin/PluginWorkerTests.cs')
 for token in ['VisionPluginIsolationMode','WorkerProcess','PluginWorkerDiscovery','PluginWorkerExecutionResult','ProtocolVersion']:
     if token not in worker_contracts: fail(f'V0.55 worker contract token missing: {token}')
 for token in ['NamedPipeServerStream','ExecutionTimeoutMs','MaxWorkingSetMb','MaxRestartsPerMinute','Kill(entireProcessTree: true)','CircuitOpen']:
@@ -1487,7 +1487,7 @@ for token in ['IScriptExecutionBackend','InProcessScriptExecutionBackend','_back
 script_backends=read_safe('backend/src/VisionStudio.Engine/Scripting/ScriptExecutionBackends.cs')
 for token in ['InProcessScriptExecutionBackend','CSharpScriptRunner.RunAsync','ScriptExecutionOutcome']:
     if token not in script_backends: fail(f'Phase 2 in-process script backend missing: {token}')
-script_supervisor=read_safe('backend/src/VisionStudio.Api/ScriptWorkerSupervisor.cs')
+script_supervisor=read_safe('backend/src/VisionStudio.Api/Plugin/ScriptWorkerSupervisor.cs')
 for token in ['ScriptIsolationMode','WorkerProcess','WorkerPool','PluginWorkerValueCodec','ExecutionTimeoutMs']:
     if token not in script_supervisor: fail(f'Phase 2 script worker supervisor missing: {token}')
 if 'Configure<ScriptWorkerOptions>' not in host_registration or 'IScriptExecutionBackend' not in host_registration:
@@ -1525,7 +1525,7 @@ ok('Phase 3 Production worker default + Windows Job Object memory/process/kill-o
 
 
 # V0.57 Worker performance profiler + advisory adaptive pool recommendation
-worker_performance=read_safe('backend/src/VisionStudio.Api/PluginWorkerPerformance.cs')
+worker_performance=read_safe('backend/src/VisionStudio.Api/Plugin/PluginWorkerPerformance.cs')
 worker_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginWorkerEndpoints.cs')
 for token in ['Version = 3','PluginWorkerTiming','Timing { get; init; }']:
     if token not in worker_contracts: fail(f'V0.57 worker timing protocol token missing: {token}')
@@ -1550,9 +1550,9 @@ ok('V0.57 stage-level worker performance profiler + advisory 1/2/4 pool recommen
 
 
 # V0.58 repeatable Dataset-backed worker benchmark + regression gate
-benchmark_source=read_safe('backend/src/VisionStudio.Api/PluginPerformanceBenchmark.cs')
+benchmark_source=read_safe('backend/src/VisionStudio.Api/Plugin/PluginPerformanceBenchmark.cs')
 benchmark_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginBenchmarkEndpoints.cs')
-benchmark_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginPerformanceBenchmarkTests.cs')
+benchmark_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Plugin/PluginPerformanceBenchmarkTests.cs')
 for token in ['PluginBenchmarkRegressionPolicy','PluginBenchmarkPoolResult','PluginBenchmarkRecommendation','PluginBenchmarkRegressionGate','RunBenchmarkAsync','DatasetId','ValidationRunId','BaselineRunId','ThroughputPerSecond','ObservedWorkingSetBytes','MaximumP95RegressionPercent','MinimumThroughputRatio']:
     if token not in benchmark_source and token not in worker_supervisor: fail(f'V0.58 benchmark token missing: {token}')
 for route in ['/api/plugin-benchmarks','/api/plugin-benchmarks/{runId}','/api/plugin-benchmarks/{runId}/cancel']:
@@ -1570,9 +1570,9 @@ ok('V0.58 repeatable Dataset benchmark + temporary 1/2/4 pools + persisted regre
 
 
 # V0.59 portable CI benchmark spec + headless runner + deterministic exit codes
-benchmark_ci=read_safe('backend/src/VisionStudio.Api/PluginBenchmarkCi.cs')
+benchmark_ci=read_safe('backend/src/VisionStudio.Api/Plugin/PluginBenchmarkCi.cs')
 benchmark_cli=read_safe('backend/src/VisionStudio.Benchmark.Cli/Program.cs')
-benchmark_ci_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginBenchmarkCiTests.cs')
+benchmark_ci_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Plugin/PluginBenchmarkCiTests.cs')
 benchmark_ci_doc=(ROOT/'PLUGIN_BENCHMARK_CI.md').read_text(encoding='utf-8') if doc_present('PLUGIN_BENCHMARK_CI.md') else ''
 for token in ['PluginBenchmarkBaselineSnapshot','BaselineSnapshot','portableBaseline','BaselinePluginVersion','BaselinePluginAssemblySha256']:
     if token not in benchmark_source: fail(f'V0.59 portable baseline token missing: {token}')
@@ -1595,15 +1595,15 @@ ok('V0.59 portable baseline CI spec + headless benchmark runner + deterministic 
 
 
 # V0.60 exact run timeline + node latency baseline observability
-observability_source=read_safe('backend/src/VisionStudio.Api/RunObservability.cs')
-trace_store=read_family('backend/src/VisionStudio.Api/TraceabilityStore*.cs') + '\n' + read_safe('backend/src/VisionStudio.Api/TraceRetentionHostedService.cs')
+observability_source=read_safe('backend/src/VisionStudio.Api/Production/RunObservability.cs')
+trace_store=read_family('backend/src/VisionStudio.Api/Trace/TraceabilityStore*.cs') + '\n' + read_safe('backend/src/VisionStudio.Api/Trace/TraceRetentionHostedService.cs')
 models=read_safe('backend/src/VisionStudio.Engine/Models.cs')
 workflow_data=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowData.cs')
 node_runtime=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionNodeRuntime.cs')
 schema=read_family('backend/src/VisionStudio.Api/SchemaMigrations*.cs')
 trace_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/TraceEndpoints.cs')
 observability_ui=read_safe('frontend/src/components/RunObservabilityPanel.tsx')
-observability_tests=read_safe('backend/tests/VisionStudio.Api.Tests/RunObservabilityTests.cs')
+observability_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Production/RunObservabilityTests.cs')
 for token in ['ExecutionSequence','StartOffsetMs','EndOffsetMs']:
     if token not in models: fail(f'V0.60 node timeline field missing: {token}')
 for token in ['BeginExecutionTimeline','BeginNodeObservation','CurrentExecutionOffsetMs']:
@@ -1625,9 +1625,9 @@ ok('V0.60 exact run timeline + historical node-latency observability present')
 
 
 # V0.61 trace comparison + deterministic failure signatures
-trace_analysis_source=read_safe('backend/src/VisionStudio.Api/TraceAnalysis.cs')
+trace_analysis_source=read_safe('backend/src/VisionStudio.Api/Trace/TraceAnalysis.cs')
 trace_analysis_ui=read_safe('frontend/src/components/TraceAnalysisPanel.tsx')
-trace_analysis_tests=read_safe('backend/tests/VisionStudio.Api.Tests/TraceAnalysisTests.cs')
+trace_analysis_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Trace/TraceAnalysisTests.cs')
 replay_debugger_ui=read_safe('frontend/src/components/ReplayDebuggerPanel.tsx')
 for token in ['RunTraceComparison','TraceNodeDelta','FailureSignatureAnalysis','AutoPreviousOk','ExecutionFailure','QualityNG','PerformanceRegression','HashFingerprint']:
     if token not in trace_analysis_source: fail(f'V0.61 trace analysis token missing: {token}')
@@ -1645,10 +1645,10 @@ ok('V0.61 nearest-OK trace comparison + deterministic recurring failure signatur
 
 
 # V0.62 persistent investigation cases + signature trend dashboard
-investigation_source=read_safe('backend/src/VisionStudio.Api/InvestigationCases.cs')
+investigation_source=read_safe('backend/src/VisionStudio.Api/Operations/InvestigationCases.cs')
 investigation_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/InvestigationEndpoints.cs')
 investigation_ui=read_safe('frontend/src/components/InvestigationPanel.tsx')
-investigation_tests=read_safe('backend/tests/VisionStudio.Api.Tests/InvestigationCaseTests.cs')
+investigation_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Operations/InvestigationCaseTests.cs')
 for token in ['InvestigationCaseService','Open", "Investigating", "Resolved", "Verified", "Closed','CaseKey','reopenCount','Resolution note is required','Verification note is required','InvestigationTrendDashboard']:
     if token not in investigation_source: fail(f'V0.62 investigation domain token missing: {token}')
 for route in ['/api/investigations','/api/investigations/trends','/api/investigations/for-trace/{runId}','/api/investigations/from-trace/{runId}','/api/investigations/{id}']:
@@ -1685,10 +1685,10 @@ if 'Category!=Soak' not in qsh or 'check-coverage.py' not in qsh: fail('Quality 
 
 
 # Retained V0.20 storage semantics
-trace_store=read_family('backend/src/VisionStudio.Api/TraceabilityStore*.cs') + '\n' + read_safe('backend/src/VisionStudio.Api/TraceRetentionHostedService.cs')
-job_store=read_safe('backend/src/VisionStudio.Api/JobStore.cs')
-cal_store=read_safe('backend/src/VisionStudio.Api/CalibrationWorkspace.cs')
-sqlite_db=read_safe('backend/src/VisionStudio.Api/SqliteMetadataDatabase.cs')
+trace_store=read_family('backend/src/VisionStudio.Api/Trace/TraceabilityStore*.cs') + '\n' + read_safe('backend/src/VisionStudio.Api/Trace/TraceRetentionHostedService.cs')
+job_store=read_safe('backend/src/VisionStudio.Api/Operations/JobStore.cs')
+cal_store=read_safe('backend/src/VisionStudio.Api/Calibration/CalibrationWorkspace.cs')
+sqlite_db=read_safe('backend/src/VisionStudio.Api/Storage/SqliteMetadataDatabase.cs')
 if 'SearchOption.AllDirectories' in trace_store: fail('TraceabilityStore still performs recursive directory scans')
 for token in ['run_traces','job_versions','calibration_versions','journal_mode=WAL','foreign_keys=ON']:
     if token not in (sqlite_db + trace_store + job_store + cal_store): fail(f'Missing SQLite storage token: {token}')
@@ -1705,8 +1705,8 @@ ok('V0.20 SQLite storage semantics retained')
 
 # V0.28 explicit schema migrations + local backup/restore + capacity guard
 schema_migrations=read_family('backend/src/VisionStudio.Api/SchemaMigrations*.cs')
-storage_maintenance=read_family('backend/src/VisionStudio.Api/StorageMaintenance*.cs') + '\n' + read_family('backend/src/VisionStudio.Api/StorageCapacity*.cs')
-storage_backup=read_family('backend/src/VisionStudio.Api/StorageBackupService*.cs')
+storage_maintenance=read_family('backend/src/VisionStudio.Api/Storage/StorageMaintenance*.cs') + '\n' + read_family('backend/src/VisionStudio.Api/Storage/StorageCapacity*.cs')
+storage_backup=read_family('backend/src/VisionStudio.Api/Storage/StorageBackupService*.cs')
 storage_panel=read_safe('frontend/src/components/StoragePanel.tsx')
 for token in [CURRENT_SCHEMA_TOKEN,'schema_migration_history','BaselineHistoryAsync','VerifyHistoryChecksumsAsync','SHA256.HashData','BeginTransaction(deferred: false)']:
     if token not in schema_migrations: fail(f'V0.28 migration runner missing: {token}')
@@ -1755,7 +1755,7 @@ ok('V0.26 unified Asset Health/Event model + SignalR Diagnostics Center present'
 # V0.27 backend-authoritative Catalog + generated frontend fallback
 catalog_snapshot=read_safe('backend/src/VisionStudio.Engine/CatalogSnapshot.cs')
 catalog_exporter=read_safe('backend/src/VisionStudio.CatalogExporter/Program.cs')
-demos_source=read_safe('frontend/src/demos.ts')
+demos_source=read_family('frontend/src/demos/*.ts')
 system_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/SystemEndpoints.cs')
 if generated_catalog_doc.get('schemaVersion') != 1: fail('Generated catalog schemaVersion must be 1')
 generated_hash=generated_catalog_doc.get('hash','')
@@ -1791,7 +1791,7 @@ ok('V0.27 backend-authoritative runtime Catalog + generated offline fallback pre
 
 # 节点成熟度发布门禁（2026-11-12）：成熟度此前只是工具箱里的徽标，点"发布"没有任何阻力，
 # 发布之后这条信息也消失了。门禁必须留在 publish 路径上，且回滚不受影响。
-maturity_gate=read_safe('backend/src/VisionStudio.Api/NodeMaturityGate.cs')
+maturity_gate=read_safe('backend/src/VisionStudio.Api/Workflow/NodeMaturityGate.cs')
 maturity_catalog=read_safe('backend/src/VisionStudio.Engine/NodeMaturityCatalog.cs')
 job_endpoints_source=read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs')
 for token in ['NodeMaturityCatalog.Declarations', 'AcknowledgementRequired', 'NODE_MATURITY_ACK_REQUIRED']:

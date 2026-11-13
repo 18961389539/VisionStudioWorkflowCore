@@ -18,7 +18,7 @@
 | 调用点钉住版本与哈希，哈希不符直接拒绝 | `WorkflowModuleExpander.ExpandOneLevelAsync` |
 | 调用级参数覆盖内部参数（`模块参数名 → 内部节点.参数`） | `ResolveParameterOverrides` |
 | 编译期内联展开（`实例ID::内部ID` 前缀、嵌套最多 12 层） | `WorkflowModuleExpander.ExpandAsync` |
-| 运行前统一展开 | `ModuleAwareVisionWorkflowRunner`（包装 `WorkflowCoreVisionRunner`），以及 `/api/workflows/run`、`/api/jobs`、调试会话、配方发布等入口 |
+| 运行前统一展开 | `ModuleAwareVisionWorkflowRunner`（包装 `WorkflowCoreVisionRunner`），以及 `/api/run`、`/api/jobs`、调试会话、配方发布等入口 |
 | 提取前先验证宿主可编译，避免把坏图写进模块库 | `ExtractAsync` 内 `ExpandAsync` + `Compile` |
 | 前端面板：插入模块、升级到新版本、选中模块节点 | `frontend/src/components/WorkflowModulePanel.tsx` + `App.tsx` 的 `insertModule` / `upgradeSelectedModule` |
 
@@ -43,7 +43,7 @@
 ## 本轮补的验证
 
 既有 `WorkflowModuleTests` 覆盖到"提取 → 钉版本 → 展开 → **编译**"，缺最后一步。新增
-`backend/tests/VisionStudio.Api.Tests/ModuleCallExecutionTests.cs`：
+`backend/tests/VisionStudio.Api.Tests/Workflow/ModuleCallExecutionTests.cs`：
 
 | 用例 | 断言 |
 |---|---|

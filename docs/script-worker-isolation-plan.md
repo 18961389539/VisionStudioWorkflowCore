@@ -82,8 +82,8 @@ CSharpScriptNode.ExecuteAsync
 | 新增 | `backend/src/VisionStudio.Script.Worker/VisionStudio.Script.Worker.csproj` | 引用 `VisionStudio.Engine`、`VisionStudio.Scripting` |
 | 新增 | `backend/src/VisionStudio.Script.Worker/Program.cs` | 解析 `--worker-kind script`，注册 `script.csharp`，循环处理 `execute` |
 | 新增 | `backend/src/VisionStudio.Api/Workers/WorkerProcessPool.cs` | 从 `PluginWorkerSupervisor` 抽出 `WorkerPool`/`WorkerClient`（纯移动，行为不变） |
-| 新增 | `backend/src/VisionStudio.Api/ScriptWorkerSupervisor.cs` | 脚本 Worker 池：启动、状态、重启、执行 |
-| 新增 | `backend/src/VisionStudio.Api/ScriptExecutionBackends.cs` | 进程内/Worker 两个后端实现 |
+| 新增 | `backend/src/VisionStudio.Api/Plugin/ScriptWorkerSupervisor.cs` | 脚本 Worker 池：启动、状态、重启、执行 |
+| 新增 | `backend/src/VisionStudio.Engine/Scripting/ScriptExecutionBackends.cs` | 进程内/Worker 两个后端实现 |
 | 新增 | `backend/src/VisionStudio.Engine/Scripting/ScriptExecutionOutcome.cs` | 后端中立结果 DTO（含 owned Mat） |
 | 修改 | `backend/src/VisionStudio.Engine/Nodes/CSharpScriptNode.cs` | 构造函数注入 `IScriptExecutionBackend`，调用点替换 |
 | 修改 | `backend/src/VisionStudio.Api/Hosting/VisionStudioServiceRegistration.cs` | 注册 `ScriptWorkerOptions`、supervisor、按配置选择后端 |
