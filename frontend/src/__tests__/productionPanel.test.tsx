@@ -8,7 +8,7 @@ import { defaultProductionConfig as defaults } from '../productionConfig';
 // 推送通道单独测试；这里只覆盖轮询兜底（2026-11-13 起为 10 s）。
 vi.mock('../useMonitorStream', () => ({ useMonitorSnapshot: () => undefined }));
 
-const ok = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as Response;
+const ok = (data: unknown, etag = '"config-test"') => ({ ok: true, status: 200, headers: new Headers({ ETag: etag }), json: async () => data }) as Response;
 const empty = () => ({ ok: true, status: 204 }) as Response;
 const stopped = { state: 'Stopped', productionLocked: false, cycleCount: 0, okCount: 0, ngCount: 0,
   errorCount: 0, consecutiveFailures: 0, watchdogTrips: 0, lastDurationMs: 0 };
@@ -25,13 +25,14 @@ function deferred<T>() {
   return { promise, resolve };
 }
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
-function mount(override?: (base: Fetcher) => Fetcher) {
+function mount(override?: (base: Fetcher) => Fetcher, props?: { kiosk?: boolean }) {
   let remote = { ...config };
+  let revision = '"config-test"';
   let status = { ...stopped };
   const base: Fetcher = async (url, init) => {
-    if (url === '/api/production/config' && init?.method === 'PUT') { remote = JSON.parse(String(init.body)); return ok(remote); }
+    if (url === '/api/production/config' && init?.method === 'PUT') { remote = JSON.parse(String(init.body)); return ok(remote, revision); }
     if (url === '/api/production/start') { status = { ...status, state: 'Running', productionLocked: true }; return ok(status); }
-    if (url.endsWith('/config')) return ok(remote);
+    if (url.endsWith('/config')) return ok(remote, revision);
     if (url.endsWith('/status')) return ok(status);
     if (url.endsWith('/pending')) return empty();
     return ok(url === '/api/jobs' ? [{ id: 'A', name: '检测配方', publishedVersion: 1 }] : []);
@@ -39,11 +40,20 @@ function mount(override?: (base: Fetcher) => Fetcher) {
   const fetchMock = vi.fn(override ? override(base) : base);
   vi.stubGlobal('fetch', fetchMock);
   return {
-    ...render(<ConfigProvider theme={{ token: { motion: false } }}><ProductionPanel open embedded onClose={vi.fn()} /></ConfigProvider>),
-    fetchMock, setRemote: (value: typeof config) => { remote = value; },
+    ...render(<ConfigProvider theme={{ token: { motion: false } }}><ProductionPanel open embedded onClose={vi.fn()} {...props} /></ConfigProvider>),
+    fetchMock, setRemote: (value: typeof config, nextRevision = revision) => { remote = value; revision = nextRevision; },
   };
 }
-async function openConfig() { await flush(); fireEvent.click(screen.getByRole('tab', { name: '生产配置' })); await flush(); }
+async function openConfig() {
+  await flush();
+  // 配置类标签收在「配置」分组里，默认停在「运行」分组
+  if (!screen.queryByRole('tab', { name: '生产配置' })) {
+    fireEvent.click(screen.getByRole('radio', { name: '配置' }));
+    await flush();
+  }
+  fireEvent.click(screen.getByRole('tab', { name: '生产配置' }));
+  await flush();
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -53,6 +63,28 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('生产配置编辑与运行入口', () => {
+  it('停止等待超过 20 秒仍接收结果，故障响应不会显示已停止', async () => {
+    const pending = deferred<Response>();
+    let signal: AbortSignal | undefined;
+    let current = { ...stopped, state: 'Running', productionLocked: true, lastError: '' };
+    mount((base) => (url, init) => {
+      if (url.endsWith('/status')) return Promise.resolve(ok(current));
+      if (url.endsWith('/stop')) { signal = init?.signal ?? undefined; return pending.promise; }
+      return base(url, init);
+    });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /^停\s*止$/ }));
+    const confirmation = screen.getByText('停止生产运行').closest('.ant-popconfirm')!;
+    fireEvent.click(within(confirmation as HTMLElement).getByRole('button', { name: /^停\s*止$/ }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(21_000); });
+    expect(signal?.aborted).toBe(false);
+
+    current = { ...current, state: 'Faulted', lastError: '停止超时，执行仍在收尾' };
+    await act(async () => { pending.resolve(ok(current)); });
+    expect(screen.getAllByText(current.lastError).length).toBeGreaterThan(0);
+    expect(screen.queryByText('生产已停止')).not.toBeInTheDocument();
+  });
+
   it('轮询更新监控，不覆盖输入；未保存时禁用启动，保存后使用已保存配置', async () => {
     const { fetchMock } = mount();
     await openConfig();
@@ -70,6 +102,7 @@ describe('生产配置编辑与运行入口', () => {
     expect(screen.queryByText('生产配置有未保存修改')).toBeNull();
     expect(startButton()).toBeEnabled();
     const saved = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')!;
+    expect(new Headers(saved[1]?.headers).get('If-Match')).toBe('"config-test"');
     expect(JSON.parse(String(saved[1]!.body))).toMatchObject({ cycleDelayMs: 120, jobId: 'A', maxRecoveryAttempts: 7 });
     fireEvent.click(startButton());
     await flush();
@@ -119,6 +152,48 @@ describe('生产配置编辑与运行入口', () => {
     await flush();
     expect(cycleInput()).toHaveValue('45');
     expect(startButton()).toBeEnabled();
+  });
+
+  it('合并不同字段后保留两边改动，点击保存时才携带最新修订提交', async () => {
+    const { fetchMock, setRemote } = mount();
+    await openConfig();
+    await changeDelay(120);
+    setRemote({ ...config, maxRecoveryAttempts: 8 }, '"revision-2"');
+    await tick();
+    expect(saveButton()).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '合并到最新配置' }));
+    await flush();
+    expect(cycleInput()).toHaveValue('120');
+    expect(startButton()).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+
+    fireEvent.click(saveButton());
+    await flush();
+    const write = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')?.[1];
+    expect(new Headers(write?.headers).get('If-Match')).toBe('"revision-2"');
+    expect(JSON.parse(String(write?.body))).toMatchObject({ cycleDelayMs: 120, maxRecoveryAttempts: 8 });
+    expect(startButton()).toBeEnabled();
+  });
+
+  it('同一字段的冲突需要选择，继续收到更新后要求重新核对', async () => {
+    const { setRemote } = mount();
+    await openConfig();
+    await changeDelay(120);
+    setRemote({ ...config, cycleDelayMs: 45 });
+    await tick();
+    const mergeButton = () => screen.getByRole('button', { name: '合并到最新配置' });
+    expect(mergeButton()).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: '保留草稿值' }));
+    expect(mergeButton()).toBeEnabled();
+
+    setRemote({ ...config, cycleDelayMs: 50 });
+    await tick();
+    expect(mergeButton()).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: '使用服务端值' }));
+    fireEvent.click(mergeButton());
+    await flush();
+    expect(cycleInput()).toHaveValue('50');
+    expect(saveButton()).toBeDisabled();
   });
 
   it.each(['before-edit', 'after-edit'])('保存响应慢于轮询（%s）时仍保留改回原值的输入，并要求再次保存', async (order) => {
@@ -214,5 +289,134 @@ describe('生产配置编辑与运行入口', () => {
     expect(dialog).toBeInTheDocument();
     expect(cancel).toBeEnabled();
     expect(screen.getAllByText('resolution target changed').length).toBeGreaterThan(0);
+  });
+});
+
+describe('生产面板标签分组', () => {
+  it('默认停在运行组，配置类标签收进配置组', async () => {
+    mount();
+    await flush();
+    expect(screen.getByRole('tab', { name: '运行监控' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '生产配置' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('radio', { name: '配置' }));
+    await flush();
+    expect(screen.getByRole('tab', { name: '生产配置' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'PTP 保护' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '运行监控' })).toBeNull();
+  });
+
+  it('在配置组里切回运行组时落到第一个运行标签，不会停在已隐藏的标签上', async () => {
+    mount();
+    await flush();
+    fireEvent.click(screen.getByRole('radio', { name: '配置' }));
+    await flush();
+    fireEvent.click(screen.getByRole('tab', { name: 'PTP 保护' }));
+    await flush();
+    fireEvent.click(screen.getByRole('radio', { name: '运行' }));
+    await flush();
+    expect(screen.getByRole('tab', { name: '运行监控' })).toHaveAttribute('aria-selected', 'true');
+  });
+});
+
+describe('操作员告警卡', () => {
+  it('严重告警时标出严重级并显示最近一条内容', async () => {
+    mount((base) => async (url, init) => {
+      if (url.includes('/operator-layout')) return ok({ title: null, widgets: ['Result', 'Counts', 'Alarms'] });
+      if (url.endsWith('/alarms/summary')) return ok({ activeCount: 3, criticalCount: 2, pendingCount: 1, latestActiveMessage: '安全门被打开' });
+      return base(url, init);
+    });
+    await flush();
+    fireEvent.click(screen.getByRole('tab', { name: '操作员' }));
+    await flush();
+    const card = document.querySelector('[data-widget="Alarms"]') as HTMLElement;
+    expect(card).not.toBeNull();
+    expect(card.getAttribute('data-severity')).toBe('critical');
+    expect(within(card).getByText('安全门被打开')).toBeInTheDocument();
+    expect(within(card).getByText('待确认 1 · 严重 2')).toBeInTheDocument();
+  });
+
+  it('无告警时不给严重级颜色，只说明无活动告警', async () => {
+    mount((base) => async (url, init) => {
+      if (url.includes('/operator-layout')) return ok({ title: null, widgets: ['Result', 'Counts', 'Alarms'] });
+      if (url.endsWith('/alarms/summary')) return ok({ activeCount: 0, criticalCount: 0, pendingCount: 0, latestActiveMessage: null });
+      return base(url, init);
+    });
+    await flush();
+    fireEvent.click(screen.getByRole('tab', { name: '操作员' }));
+    await flush();
+    const card = document.querySelector('[data-widget="Alarms"]') as HTMLElement;
+    expect(card.getAttribute('data-severity')).toBeNull();
+    expect(within(card).getByText('无活动告警')).toBeInTheDocument();
+  });
+
+  it('告警统计读取失败时不保留上一轮的严重级', async () => {
+    let fail = false;
+    mount((base) => async (url, init) => {
+      if (url.includes('/operator-layout')) return ok({ title: null, widgets: ['Result', 'Counts', 'Alarms'] });
+      if (url.endsWith('/alarms/summary')) return fail
+        ? { ok: false, status: 503, json: async () => ({ detail: 'alarm store offline' }) } as Response
+        : ok({ activeCount: 3, criticalCount: 2, pendingCount: 1, latestActiveMessage: '安全门被打开' });
+      return base(url, init);
+    });
+    await flush();
+    fireEvent.click(screen.getByRole('tab', { name: '操作员' }));
+    await flush();
+    expect((document.querySelector('[data-widget="Alarms"]') as HTMLElement).getAttribute('data-severity')).toBe('critical');
+
+    fail = true;
+    await tick();
+    const card = document.querySelector('[data-widget="Alarms"]') as HTMLElement;
+    expect(card.getAttribute('data-severity')).toBeNull();
+    expect(within(card).getByText('告警统计未确认')).toBeInTheDocument();
+  });
+});
+
+describe('车间大屏形态（kiosk）', () => {
+  it('只渲染操作员工作台：没有标签栏、没有布局编辑入口', async () => {
+    mount(undefined, { kiosk: true });
+    await flush();
+    // 标签栏是误触来源，kiosk 下必须整条消失
+    expect(screen.queryByRole('tablist')).toBeNull();
+    expect(screen.getByRole('region', { name: '操作员工作台' })).toBeInTheDocument();
+    expect(screen.getByText('最近判定')).toBeInTheDocument();
+    // 工程师入口不随大屏暴露
+    expect(screen.queryByRole('button', { name: '配置操作员界面' })).toBeNull();
+    // 页面标题让位给工作台本身
+    expect(screen.queryByText('VisionStudio · 生产运行')).toBeNull();
+  });
+
+  it('状态读取失败时保留上次数值并标注过期，而不是抹成破折号', async () => {
+    let fail = false;
+    const running = { ...stopped, state: 'Running', productionLocked: true,
+      cycleCount: 12480, okCount: 12351, ngCount: 129, lastDurationMs: 186.4,
+      lastDisposition: 'NG', lastCycleAt: new Date().toISOString() };
+    mount((base) => async (url, init) => {
+      if (url.endsWith('/status')) return fail
+        ? { ok: false, status: 503, json: async () => ({ detail: 'gateway down' }) } as Response
+        : ok(running);
+      return base(url, init);
+    });
+    await flush();
+    fireEvent.click(screen.getByRole('tab', { name: '操作员' }));
+    await flush();
+    expect(screen.getByText(/12,480/)).toBeInTheDocument();
+
+    fail = true;
+    await tick();
+    // 关键：数字仍是最后一次读数（车间里破折号会被读成“今天零产量”）
+    expect(screen.getByText(/12,480/)).toBeInTheDocument();
+    expect(screen.getAllByText(/数据已过期/).length).toBeGreaterThan(0);
+
+    fail = false;
+    await tick();
+    expect(screen.queryByText(/数据已过期/)).toBeNull();
+  });
+
+  it('非 kiosk 仍保留标签栏与布局编辑入口（回归）', async () => {
+    mount();
+    await flush();
+    expect(screen.getByRole('tablist')).toBeInTheDocument();
+    expect(screen.getByText('VisionStudio · 生产运行')).toBeInTheDocument();
   });
 });

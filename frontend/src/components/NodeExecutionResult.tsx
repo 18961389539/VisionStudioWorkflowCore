@@ -6,8 +6,8 @@ import MatchingAutoTuneReport from './MatchingAutoTuneReport';
 import { portDisplayName } from '../i18n/catalog';
 import { pickSummaryKeys } from '../summaryText';
 
-const measurementNodeTypes = new Set(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.contourThickness', 'measure.caliperLine', 'measure.caliperCircle']);
-const geometryResultNodeTypes = new Set(['image.crop', 'roi.transform', ...measurementNodeTypes]);
+const measurementNodeTypes = new Set(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.contourThickness', 'measure.caliperLine', 'measure.caliperCircle', 'measure.profileFilter', 'measure.roughness']);
+const geometryResultNodeTypes = new Set(['image.crop', 'roi.transform', 'tolerance.stackup', ...measurementNodeTypes]);
 
 function measurementNotFoundMessage(type: string, summary: Record<string, unknown> | undefined) {
   if (!measurementNodeTypes.has(type) || summary?.found !== false) return undefined;
@@ -22,6 +22,10 @@ function measurementNotFoundMessage(type: string, summary: Record<string, unknow
     return noEdgeMessages[type] ?? '搜索范围内没有达到最小对比度的边缘。请检查搜索几何、最小对比度、边缘极性、搜索方向和 ROI。';
   }
   const messages: Record<string, string> = {
+    'insufficient-points': '输入轮廓或点集的有效点不足。请检查输入和轮廓索引。',
+    'profile-input-gap-exceeded': '原始点投影后的最大间距超过设定上限。请补足轮廓采样后再运行。',
+    'insufficient-gaussian-support': '轮廓太短，丢弃受端部影响的样本后没有足够的可用区间。请检查轮廓长度和截止波长。',
+    'insufficient-evaluation-samples': '实际评定区间少于 3 个样本。请检查评定长度与采样步距。',
     'missing-or-insufficient-contour': '内轮廓或外轮廓缺失，或不足 3 个有效点。请检查输入列表和轮廓索引。',
     'open-contour': '壁厚测量需要闭合轮廓。当前输入为开放路径，请连接完整的内外边界。',
     'self-intersecting-contour': '输入轮廓存在自交或自接触，无法可靠定义内外关系。请检查轮廓提取结果。',
@@ -231,6 +235,9 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
   const reports = (result?.nodeReports ?? []).filter((report) => report.nodeId === nodeId);
   const report = reports[reports.length - 1];
   const notFound = Boolean(report?.success && report.summary.found === false && measurementNodeTypes.has(catalog.type));
+  const idempotencyConflict = catalog.type === 'output.database' && report?.success && report.summary.idempotencyConflict === true;
+  const fuseCameraIds = catalog.type === 'image.fuse' && report?.success && Array.isArray(report.summary.cameraIds)
+    ? report.summary.cameraIds.filter((id): id is string => typeof id === 'string') : [];
   const notFoundMessage = measurementNotFoundMessage(catalog.type, report?.summary);
   const reportErrorMessage = report?.error ? executionErrorMessage(catalog, report.error) : undefined;
   const reportSummaryKeys = report && geometryResultNodeTypes.has(catalog.type)
@@ -269,6 +276,7 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
       {report && <>{notFound
         ? <Tag color="warning">未找到有效结果</Tag>
         : <Tag color={report.success ? 'success' : 'error'}><ExecutionStatus status={report.success ? (report.phase === 'Warmup' ? 'warmup' : 'ok') : 'error'} label={`${requestError ? '上次' : ''}${report.success ? (report.phase === 'Warmup' ? '预热成功' : '执行成功') : '执行失败'}`} /></Tag>}
+        {idempotencyConflict && <Tag color="warning">幂等冲突</Tag>}
         <span>{report.durationMs.toFixed(2)} 毫秒</span></>}
       {!result && !requestError && <span>尚无结果</span>}
       {result && !report && <Tag color={result.success ? 'default' : 'error'}>{result.success ? '本节点未执行' : '运行失败'}</Tag>}
@@ -283,11 +291,30 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
       {report?.error && <Alert type="error" showIcon title={reportErrorMessage ? '节点执行失败' : report.error}
         description={reportErrorMessage && <div><p>{reportErrorMessage}</p><details><summary>查看原始诊断</summary><pre>{report.error}</pre></details></div>} />}
       {notFoundMessage && <Alert type="warning" showIcon title="节点已运行，但未检出目标" description={notFoundMessage} />}
+      {idempotencyConflict && <Alert type="warning" showIcon title="结果落库发生幂等冲突"
+        description="本次提交的业务键或结果与首条记录不同。已保留并返回首条记录。" />}
+      {(catalog.type === 'measure.profileFilter' || catalog.type === 'measure.roughness') && report?.success && report.summary.kernelTruncated === true
+        && <Alert type="warning" showIcon title="轮廓长度限制了高斯核"
+          description="轮廓长度不足以覆盖指定截止波长对应的完整滤波核。报告已标记此结果。" />}
+      {catalog.type === 'measure.roughness' && report?.success && report.summary.rzSamplingLengths === 0
+        && <Alert type="info" showIcon title="Rz 采用整段峰谷差"
+          description="实际评定窗口不足以划分五个取样段。" />}
+      {catalog.type === 'tolerance.stackup' && report?.success && report.summary.gateEnabled === true
+        && report.summary.withinTolerance === false && <Alert type="warning" showIcon title="尺寸链超出目标公差"
+          description={report.summary.gateMode === 'interval' ? '计算区间至少有一端越界。' : '闭合名义值越界。'} />}
+      {catalog.type === 'recognition.barcodeQuality' && report?.success && report.summary.decodeStatus === 'unverified'
+        && <Alert type="warning" showIcon title="条码解码未验证"
+          description={report.summary.warning
+            ? '当前使用旧配方的兼容策略，仍可输出判定。将条码识别的 found 接到 decodeOk，再选择「要求解码结果」。'
+            : '如需合格判定，请启用等级，并将条码识别的 found 接到 decodeOk。'} />}
       {catalog.type === 'measure.contourThickness' && report?.success && report.summary.found === true
         && report.summary.withinTolerance === false && <Alert type="warning" showIcon title="壁厚超出公差"
           description="已得到有效测量结果，但壁厚超出设定范围。请查看红色测量线和最薄处标注。" />}
       {report && <>
         <MatchingAutoTuneReport summary={report.summary} />
+        {fuseCameraIds.length > 0 && <div className="node-result-scalars">
+          <span><b>参与融合的相机</b> {fuseCameraIds.join('、')}</span>
+        </div>}
         {prominentSummaryKeys.length > 0 && <div className="node-result-scalars" aria-label="关键测量结果">
           {prominentSummaryKeys.map(key => <span key={key}><b>{portDisplayName(key)}</b> {valueText(report.summary[key])}</span>)}
         </div>}

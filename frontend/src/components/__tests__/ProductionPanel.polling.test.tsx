@@ -6,8 +6,10 @@ import ProductionPanel from '../ProductionPanel';
 vi.mock('../../useMonitorStream', () => ({ useMonitorSnapshot: () => undefined }));
 
 function okResponse(data: unknown): Response {
-  return { ok: true, status: 200, json: async () => data } as Response;
+  return { ok: true, status: 200, headers: new Headers({ 'X-Total-Count': '0', ETag: '"config-test"' }), json: async () => data } as Response;
 }
+
+const emptyAlarmSummary = { activeCount: 0, criticalCount: 0, latestActiveMessage: null, pendingCount: 0 };
 
 function failedResponse(status: number, body: unknown = {}): Response {
   return { ok: false, status, json: async () => body } as Response;
@@ -60,6 +62,7 @@ describe('ProductionPanel polling (R04)', () => {
         return Promise.resolve(statusCalls === 1 ? okResponse(statusBody) : failedResponse(503, { detail: 'Restart required', code: 'restart_required' }));
       }
       if (url.includes('/api/production/device-actions/pending')) return Promise.resolve(failedResponse(204));
+      if (url.endsWith('/api/alarms/summary')) return Promise.resolve(okResponse(emptyAlarmSummary));
       if (url.includes('/api/jobs') || url.includes('/api/alarms')) return Promise.resolve(okResponse([]));
       return Promise.resolve(okResponse({}));
     }));
@@ -87,6 +90,7 @@ describe('ProductionPanel polling (R04)', () => {
         if (statusCalls === 1) return new Promise<Response>((resolve) => { resolveFirst = resolve; });
         return Promise.resolve(okResponse(statusBody));
       }
+      if (url.endsWith('/api/alarms/summary')) return Promise.resolve(okResponse(emptyAlarmSummary));
       if (url.includes('/api/jobs') || url.includes('/api/alarms')) return Promise.resolve(okResponse([]));
       return Promise.resolve(okResponse({}));
     }));
@@ -110,6 +114,7 @@ describe('ProductionPanel polling (R04)', () => {
     vi.stubGlobal('fetch', vi.fn((url: string) => {
       if (url.includes('/api/production/status')) return Promise.resolve(failedResponse(401, { detail: 'session expired' }));
       if (url.includes('/api/production/device-actions/pending')) return Promise.resolve(failedResponse(204));
+      if (url.endsWith('/api/alarms/summary')) return Promise.resolve(okResponse(emptyAlarmSummary));
       if (url.includes('/api/jobs') || url.includes('/api/alarms')) return Promise.resolve(okResponse([]));
       return Promise.resolve(okResponse({}));
     }));

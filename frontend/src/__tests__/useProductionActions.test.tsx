@@ -31,7 +31,7 @@ describe('生产操作生命周期', () => {
     expect(fetch).toHaveBeenCalledOnce();
     expect(result.current.busy.has('save')).toBe(true);
     await act(async () => { pending.resolve(response({ saved: true })); await first; });
-    expect(value.onSuccess).toHaveBeenCalledWith({ saved: true });
+    expect(value.onSuccess).toHaveBeenCalledWith({ saved: true }, expect.objectContaining({ status: 200 }));
     expect(messages.success).toHaveBeenCalledOnce();
     expect(refresh).toHaveBeenCalledOnce();
     expect(result.current.busy.size).toBe(0);
@@ -59,7 +59,7 @@ describe('生产操作生命周期', () => {
     act(() => { void result.current.call(start); void result.current.call(stop); });
     await act(async () => { stopResponse.resolve(response({ state: 'Stopped' })); });
     await act(async () => { startResponse.resolve(response({ state: 'Running' })); });
-    expect(stop.onSuccess).toHaveBeenCalledWith({ state: 'Stopped' });
+    expect(stop.onSuccess).toHaveBeenCalledWith({ state: 'Stopped' }, expect.objectContaining({ status: 200 }));
     expect(start.onSuccess).not.toHaveBeenCalled();
     expect(messages.success).toHaveBeenCalledTimes(1);
     expect(result.current.busy.size).toBe(0);
@@ -126,7 +126,7 @@ describe('生产操作生命周期', () => {
     expect(result.current.busy.has('save')).toBe(true);
     expect(value.onSuccess).not.toHaveBeenCalled();
     await act(async () => { next.resolve(response({ saved: 'new' })); });
-    expect(value.onSuccess).toHaveBeenCalledWith({ saved: 'new' });
+    expect(value.onSuccess).toHaveBeenCalledWith({ saved: 'new' }, expect.objectContaining({ status: 200 }));
     expect(messages.success).toHaveBeenCalledOnce();
   });
 

@@ -100,7 +100,7 @@ public sealed partial class StorageBackupService
         _options = options.Value;
         _safetyStore = safetyStore;
         _intentStore = intentStore;
-        var data = VisionStudioDataRoot.Resolve(env.ContentRootPath);
+        var data = database.DataRoot;
         _artifactRoot = Path.Combine(data, "artifacts");
         _backupRoot = Path.Combine(data, "backups");
         _tempRoot = Path.Combine(data, ".storage-maintenance");
@@ -108,7 +108,7 @@ public sealed partial class StorageBackupService
         _systemSections =
         [
             // R05：媒体段与 MediaLibraryService 共用同一根解析（含 `MediaLibrary:RootPath` 覆盖）。
-            ("media", VisionStudioDataRoot.ResolveMediaRoot(env.ContentRootPath, configuration.GetValue<string>("MediaLibrary:RootPath"))),
+            ("media", VisionStudioDataRoot.ResolveMediaRoot(env.ContentRootPath, configuration.GetValue<string>("MediaLibrary:RootPath"), configuration)),
             ("devices", Path.Combine(data, "devices")),
             ("provenance", Path.Combine(data, "provenance")),
             ("production-config", _productionConfigRoot),

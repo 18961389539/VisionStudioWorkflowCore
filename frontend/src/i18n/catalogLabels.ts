@@ -145,9 +145,11 @@ export const parameterLabels: Record<string, string> = {
   'contour.filter.windowY': '筛选窗口 Y（-1 为关闭）',
   'contour.fromMask.approximation': '轮廓近似',
   'contour.fromMask.invert': '反转掩膜',
+  'contour.fromMask.maskMode': '掩码模式',
   'contour.fromMask.maxContours': '最大轮廓数',
   'contour.fromMask.maxPoints': '单轮廓点上限',
   'contour.fromMask.minArea': '最小面积',
+  'contour.fromMask.probabilityThreshold': '概率阈值',
   'contour.fromMask.retrieval': '轮廓范围',
   'contour.fromMask.threshold': '掩膜阈值',
   'contour.fromPoints.closed': '闭合轮廓',
@@ -336,6 +338,9 @@ export const parameterLabels: Record<string, string> = {
   'device.writeVisionResult.missingCoordinatePolicy': '缺失坐标处理',
   'device.writeVisionResult.resultOkTag': '结果 OK 标签',
   'device.writeVisionResult.resultReadyTag': '结果就绪标签',
+  'device.writeVisionResult.xValidTag': 'X 坐标有效标签',
+  'device.writeVisionResult.yValidTag': 'Y 坐标有效标签',
+  'device.writeVisionResult.rValidTag': 'R 坐标有效标签',
   'device.writeVisionResult.rTag': 'R 标签',
   'device.writeVisionResult.xTag': 'X 标签',
   'device.writeVisionResult.yTag': 'Y 标签',
@@ -534,6 +539,7 @@ export const parameterLabels: Record<string, string> = {
   'image.flatFieldCorrect.targetMean': '目标灰度（0 为自动）',
   'image.flip.emptyPolicy': '空图像策略',
   'image.flip.mode': '镜像方向',
+  'image.fuse.alignmentPolicy': '对齐策略',
   'image.fuse.maxPixels': '最大输入像素数',
   'image.fuse.mode': '融合模式',
   'image.fuse.sourceMode': '输入来源',
@@ -547,9 +553,11 @@ export const parameterLabels: Record<string, string> = {
   'image.load.colorMode': '颜色模式',
   'image.load.index': '帧序号',
   'image.load.indexPolicy': '越界策略',
+  'image.load.manifestJson': '回放清单',
   'image.load.maxMegabytes': '文件大小上限',
   'image.load.path': '路径',
   'image.load.pathMode': '路径模式',
+  'image.load.pageIndex': 'TIFF 页索引',
   'image.load.recursive': '包含子目录',
   'image.morphology.iterations': '迭代次数',
   'image.morphology.kernelHeight': '结构元素高度',
@@ -965,6 +973,8 @@ export const parameterLabels: Record<string, string> = {
   'match.feature.scaleMaxPercent': '最大尺度',
   'match.feature.scaleMinPercent': '最小尺度',
   'match.feature.templatePath': '模板文件',
+  'match.feature.templateAssetId': '模板图资产',
+  'match.feature.templateAssetVersion': '模板图资产版本',
   'match.feature.transformType': '变换类型',
   'match.homography.confidence': '置信度',
   'match.homography.maxIterations': '最大迭代次数',
@@ -1251,6 +1261,7 @@ export const parameterLabels: Record<string, string> = {
   'measure.profileFilter.endEffect': '端部处理',
   'measure.profileFilter.index': '索引（从 0 开始）',
   'measure.profileFilter.sampleStep': '采样步距',
+  'measure.profileFilter.maxInputGap': '最大输入间距（0=关）',
   'measure.regionIntensity.diagnosticsLevel': '诊断级别',
   'measure.regionIntensity.emptyPolicy': '空区域处理',
   'measure.regionIntensity.maxCv': '最大变异系数（0 为关闭）',
@@ -1266,6 +1277,8 @@ export const parameterLabels: Record<string, string> = {
   'measure.roughness.index': '轮廓序号（0 起）',
   'measure.roughness.maxRa': 'Ra 上限（0=关）',
   'measure.roughness.sampleStep': '采样步距',
+  'measure.roughness.endEffect': '端部处理',
+  'measure.roughness.maxInputGap': '最大输入间距（0=关）',
   'measure.roundness.index': '索引（从 0 开始）',
   'measure.roundness.maxDeviation': '最大径向范围（0 为关闭）',
   'measure.roundness.minCoverageDeg': '最小角度覆盖范围',
@@ -1282,6 +1295,8 @@ export const parameterLabels: Record<string, string> = {
   'measure.wallThickness.tolerance': '容差',
   'output.database.dataset': '数据集',
   'output.database.key': '业务键',
+  'output.database.idempotencyKey': '幂等键',
+  'output.database.idempotencyConflictPolicy': '幂等冲突策略',
   'output.database.maxPayloadBytes': '最大载荷字节',
   'output.exportResult.appendNewline': '追加结尾换行',
   'output.exportResult.conflictPolicy': '冲突策略',
@@ -1369,6 +1384,7 @@ export const parameterLabels: Record<string, string> = {
   'recognition.barcode.tryInverted': '尝试反色识别',
   'recognition.barcodeQuality.cellSizePx': '单元尺寸',
   'recognition.barcodeQuality.cols': '模块列数',
+  'recognition.barcodeQuality.decodePolicy': '解码判定策略',
   'recognition.barcodeQuality.enableGrade': '输出等级',
   'recognition.barcodeQuality.gridMode': '网格模式',
   'recognition.barcodeQuality.minGrade': '最低合格等级',
@@ -1399,6 +1415,8 @@ export const parameterLabels: Record<string, string> = {
   'region.fromContour.index': '轮廓序号（0 起）',
   'region.fromContour.invert': '取反',
   'region.fromMask.invert': '反转掩膜',
+  'region.fromMask.maskMode': '掩码模式',
+  'region.fromMask.probabilityThreshold': '概率阈值',
   'region.fromMask.threshold': '掩膜阈值',
   'region.fromRange.emptyPolicy': '空结果策略',
   'region.fromRange.invert': '反选',
@@ -1523,7 +1541,8 @@ export const parameterLabels: Record<string, string> = {
   'tolerance.runout.unit': '单位标注',
   'tolerance.stackup.contributionsJson': '尺寸链 JSON',
   'tolerance.stackup.method': '计算方法',
-  'tolerance.stackup.targetNominal': '目标名义值（0=关）',
+  'tolerance.stackup.gateMode': '判定方式',
+  'tolerance.stackup.targetNominal': '目标名义值',
   'tolerance.stackup.tolerance': '公差',
   'tolerance.stackup.unit': '单位标签',
   'value.arithmetic.clampMax': '钳位上限',
@@ -1531,6 +1550,7 @@ export const parameterLabels: Record<string, string> = {
   'value.arithmetic.onNonFinite': '非有限值策略',
   'value.arithmetic.op': '运算',
   'value.counter.counterId': '计数器 ID',
+  'value.counter.durability': '持久化方式',
   'value.counter.resetOnFail': '不合格时复位',
   'value.counter.resetOnPass': '合格时复位',
   'value.counter.scope': '作用域',
@@ -1574,6 +1594,8 @@ export const parameterLabels: Record<string, string> = {
   'value.string.trimSide': '去空白方向',
   'value.string.useRegex': '使用正则',
 };
+
+const maskModeLabels = { byte: '8 位灰度', probability: '浮点概率' };
 
 export const optionLabels: Record<string, Record<string, Record<string, string>>> = {
   'calibration.cameraIntrinsics': {
@@ -1752,6 +1774,7 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
     },
   },
   'contour.fromMask': {
+    'maskMode': maskModeLabels,
     'approximation': {
       'none': '无',
       'simple': '简化',
@@ -2262,6 +2285,11 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
     },
   },
   'image.fuse': {
+    'alignmentPolicy': {
+      'sameFrame': '要求同一图像坐标系',
+      'prealigned': '使用已配准输入',
+      'legacy': '兼容旧配方（跳过对齐校验）',
+    },
     'mode': {
       'max': '最大值（最亮）',
       'mean': '均值（随机噪声 / √N）',
@@ -2297,6 +2325,7 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
       'auto': '自动识别',
       'directory': '目录',
       'file': '文件',
+      'manifest': '已保存清单',
     },
   },
   'image.morphology': {
@@ -3353,6 +3382,13 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
       'profile': '牙顶在输入侧',
     },
   },
+  'output.database': {
+    'idempotencyConflictPolicy': {
+      'reuse': '复用首条记录',
+      'warn': '告警后复用',
+      'fail': '冲突时报错',
+    },
+  },
   'output.exportResult': {
     'conflictPolicy': {
       'fail': '失败',
@@ -3488,6 +3524,10 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
     },
   },
   'recognition.barcodeQuality': {
+    'decodePolicy': {
+      'requireDecode': '要求解码结果',
+      'legacy': '兼容旧配方（未验证也可输出判定）',
+    },
     'gridMode': {
       'cellsize': '按单元尺寸（px）',
       'modules': '按模块行列',
@@ -3557,6 +3597,9 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
       'rectangularity': '矩形度',
       'width': '宽度',
     },
+  },
+  'region.fromMask': {
+    'maskMode': maskModeLabels,
   },
   'region.fromRange': {
     'emptyPolicy': {
@@ -3680,7 +3723,17 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
       'radial': '径向（圆柱面）',
     },
   },
+  'measure.roughness': {
+    'endEffect': {
+      'discard': '丢弃受端部影响的样本',
+      'reflect': '镜像保留全长',
+    },
+  },
   'tolerance.stackup': {
+    'gateMode': {
+      'interval': '整段计算区间',
+      'nominal': '仅名义值',
+    },
     'method': {
       'rss': '统计法（RSS）',
       'worstCase': '最坏情况（算术）',
@@ -3705,6 +3758,10 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
     },
   },
   'value.counter': {
+    'durability': {
+      'snapshot': '周期快照',
+      'durable': '按事件持久化',
+    },
     'scope': {
       'run': '单次运行（每轮重置）',
       'workflow': '工作流（跨 run 保留）',

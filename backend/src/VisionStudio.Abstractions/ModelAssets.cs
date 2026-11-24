@@ -17,4 +17,7 @@ public interface IModelAssetSource
 
     /// <summary>读取指定资产版本的模型字节；资产/版本不存在或已删除时返回 null。</summary>
     byte[]? TryRead(string assetId, int version);
+
+    /// <summary>Read an image asset used as a matching template.</summary>
+    byte[]? TryReadTemplate(string assetId, int version) => TryRead(assetId, version);
 }

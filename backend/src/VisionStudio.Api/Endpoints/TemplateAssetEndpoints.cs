@@ -1,6 +1,7 @@
 using System.Text.Json;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Api.Endpoints;
 
@@ -8,7 +9,7 @@ public sealed record TemplateAssetReference(string WorkflowId, string NodeId);
 
 /// <summary>
 /// 模板图资产端点（P2）。与模型资产同一套语义：版本不可变、字节内容寻址、删除前扫描引用。
-/// 模板图不参与生产发布清单的 pin（它随流程文档走），因此这里没有 export/import。
+/// 匹配节点使用的模板版本也进入生产发布依赖清单。
 /// </summary>
 public static class TemplateAssetEndpoints
 {
@@ -67,10 +68,10 @@ public static class TemplateAssetEndpoints
             if (workflow is null) continue;
             foreach (var node in workflow.Nodes)
             {
-                if (!node.Type.Equals("match.template", StringComparison.OrdinalIgnoreCase) || node.Parameters is null) continue;
+                if (!MatchingTemplateAsset.SupportsNode(node.Type) || node.Parameters is null) continue;
                 if (!node.Parameters.TryGetValue("templateAssetId", out var value)) continue;
                 var text = value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
-                if (string.Equals(text, assetId, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(text?.Trim(), assetId, StringComparison.OrdinalIgnoreCase))
                     references.Add(new TemplateAssetReference(workflow.Id, node.Id));
             }
         }

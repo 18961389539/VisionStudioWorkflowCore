@@ -38,8 +38,10 @@ public static class InferenceStats
                 sumX[s.ClassId] / s.PixelCount, sumY[s.ClassId] / s.PixelCount)).ToArray();
     }
 
-    /// <summary>Deterministic BGR palette for segmentation overlays. Class 0 is the
-    /// background and is never tinted; other classes cycle a fixed colour table.</summary>
+    /// <summary>Deterministic BGR palette for inference overlays, indexed by class slot.
+    /// Slot 0 is the background sentinel and is never tinted; callers pass classId + 1 so
+    /// class 0 receives the first colour. Detection, pose, and both segmentation overlays
+    /// share this mapping, so one class id has one colour across nodes.</summary>
     public static (byte B, byte G, byte R) SegmentationColorBgr(int classId)
     {
         (byte B, byte G, byte R)[] palette =
@@ -456,69 +458,51 @@ public static class InferenceStats
     }
 
     /// <summary>
-    /// Compose one instance mask from prototype tensor [maskDim, protoH, protoW] and coefficients,
-    /// then crop to the box (in proto / input pixels) and nearest-neighbour resample into an output buffer
-    /// of outH×outW. Returns a binary 0/255 mask. Ultralytics-style: sigmoid(coeffs · prototypes).
+    /// Compose one instance mask from prototype tensor [maskDim, protoH, protoW] and coefficients.
+    /// The class-probability combo (sigmoid(coeffs · prototypes)) runs only inside the box in proto
+    /// space; every output pixel then samples that box through <paramref name="mapping"/> and is
+    /// thresholded, so no full-resolution float buffers are allocated. Ultralytics crop_mask
+    /// semantics: proto cells outside the box read as 0. Returns a binary 0/255 mask at
+    /// mapping.SourceWidth × mapping.SourceHeight.
     /// </summary>
-    public static byte[] ComposeYoloSegMask(float[] prototypes, int maskDim, int protoH, int protoW, float[] coeffs, double boxLeft, double boxTop, double boxRight, double boxBottom, int inputWidth, int inputHeight, int outWidth, int outHeight, float maskThreshold = 0.5f, bool letterbox = false)
+    public static byte[] ComposeYoloSegMask(float[] prototypes, int maskDim, int protoH, int protoW, float[] coeffs, double boxLeft, double boxTop, double boxRight, double boxBottom, LetterboxMapping mapping, float maskThreshold = 0.5f)
     {
         if (prototypes.Length != maskDim * protoH * protoW) throw new InvalidOperationException("Prototype buffer size does not match maskDim*protoH*protoW.");
         if (coeffs.Length != maskDim) throw new InvalidOperationException("Mask coefficient count must equal maskDim.");
-        if (inputWidth < 1 || inputHeight < 1 || outWidth < 1 || outHeight < 1) throw new InvalidOperationException("Mask sizes must be positive.");
-        // Linear combo at proto resolution
-        var proto = new float[protoH * protoW];
-        for (var y = 0; y < protoH; y++)
-        for (var x = 0; x < protoW; x++)
-        {
-            var sum = 0f;
-            var pix = y * protoW + x;
-            for (var m = 0; m < maskDim; m++) sum += coeffs[m] * prototypes[m * protoH * protoW + pix];
-            proto[pix] = 1f / (1f + MathF.Exp(-sum)); // sigmoid
-        }
-        // Map box from input pixels into proto pixels
-        var scaleX = (double)protoW / inputWidth; var scaleY = (double)protoH / inputHeight;
+        // Map the box from input pixels into proto pixels
+        var scaleX = (double)protoW / mapping.InputWidth; var scaleY = (double)protoH / mapping.InputHeight;
         var left = (int)Math.Clamp(Math.Floor(Math.Min(boxLeft, boxRight) * scaleX), 0, protoW - 1);
         var top = (int)Math.Clamp(Math.Floor(Math.Min(boxTop, boxBottom) * scaleY), 0, protoH - 1);
         var right = (int)Math.Clamp(Math.Ceiling(Math.Max(boxLeft, boxRight) * scaleX), left + 1, protoW);
         var bottom = (int)Math.Clamp(Math.Ceiling(Math.Max(boxTop, boxBottom) * scaleY), top + 1, protoH);
-        // Zero outside the box in proto space (Ultralytics crop_mask)
-        for (var y = 0; y < protoH; y++)
-        for (var x = 0; x < protoW; x++)
-            if (x < left || x >= right || y < top || y >= bottom) proto[y * protoW + x] = 0;
+        var boxWidth = right - left;
+        var boxHeight = bottom - top;
 
-        // Nearest upsample proto -> input size, then map input -> out (caller may already be source size).
-        // When letterbox=true, out is source resolution and samples through Ultralytics-style pad undoing
-        // (same math as detection MapX/MapY), not a naive stretch.
-        var inputMask = new float[inputHeight * inputWidth];
-        for (var y = 0; y < inputHeight; y++)
-        for (var x = 0; x < inputWidth; x++)
+        // Linear combo only over the box; output pixels outside it sample the implicit zero.
+        var boxProbability = new float[boxWidth * boxHeight];
+        for (var y = top; y < bottom; y++)
+        for (var x = left; x < right; x++)
         {
-            var px = Math.Clamp((int)(x * scaleX), 0, protoW - 1);
-            var py = Math.Clamp((int)(y * scaleY), 0, protoH - 1);
-            inputMask[y * inputWidth + x] = proto[py * protoW + px];
+            var sum = 0f;
+            var pix = y * protoW + x;
+            for (var m = 0; m < maskDim; m++) sum += coeffs[m] * prototypes[m * protoH * protoW + pix];
+            boxProbability[(y - top) * boxWidth + (x - left)] = 1f / (1f + MathF.Exp(-sum)); // sigmoid
         }
-        var result = new byte[outHeight * outWidth];
-        if (letterbox)
+
+        var result = new byte[mapping.SourceHeight * mapping.SourceWidth];
+        for (var y = 0; y < mapping.SourceHeight; y++)
         {
-            var lbScale = Math.Min((double)inputWidth / outWidth, (double)inputHeight / outHeight);
-            var padX = (inputWidth - outWidth * lbScale) / 2.0;
-            var padY = (inputHeight - outHeight * lbScale) / 2.0;
-            for (var y = 0; y < outHeight; y++)
-            for (var x = 0; x < outWidth; x++)
+            var iy = Math.Clamp((int)mapping.ToInputY(y), 0, mapping.InputHeight - 1);
+            var py = Math.Clamp((int)(iy * scaleY), 0, protoH - 1);
+            var rowInBox = py >= top && py < bottom;
+            for (var x = 0; x < mapping.SourceWidth; x++)
             {
-                var ix = Math.Clamp((int)(x * lbScale + padX), 0, inputWidth - 1);
-                var iy = Math.Clamp((int)(y * lbScale + padY), 0, inputHeight - 1);
-                result[y * outWidth + x] = inputMask[iy * inputWidth + ix] >= maskThreshold ? (byte)255 : (byte)0;
-            }
-        }
-        else
-        {
-            for (var y = 0; y < outHeight; y++)
-            for (var x = 0; x < outWidth; x++)
-            {
-                var ix = Math.Clamp((int)((double)x * inputWidth / outWidth), 0, inputWidth - 1);
-                var iy = Math.Clamp((int)((double)y * inputHeight / outHeight), 0, inputHeight - 1);
-                result[y * outWidth + x] = inputMask[iy * inputWidth + ix] >= maskThreshold ? (byte)255 : (byte)0;
+                var ix = Math.Clamp((int)mapping.ToInputX(x), 0, mapping.InputWidth - 1);
+                var px = Math.Clamp((int)(ix * scaleX), 0, protoW - 1);
+                var probability = rowInBox && px >= left && px < right
+                    ? boxProbability[(py - top) * boxWidth + (px - left)]
+                    : 0f;
+                result[y * mapping.SourceWidth + x] = probability >= maskThreshold ? (byte)255 : (byte)0;
             }
         }
         return result;

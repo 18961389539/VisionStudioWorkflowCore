@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "1f5510d2b530e708f0a0f261f9a4cc47592a99084ca343932475d6b47e1fe25f",
+  "hash": "5d44847ce0ec21d609421209c660496189b55517464fcf0d075f7aeb1a04ce59",
   "items": [
     {
       "type": "image.acquire",
@@ -378,6 +378,16 @@
           "required": true
         },
         {
+          "name": "pageIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "manifestJson",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -395,7 +405,7 @@
           "type": "text",
           "defaultValue": "",
           "group": "Source",
-          "description": "Image file or folder. The path input overrides it. Reads are limited to the host-authorized read roots (data root, media root, VisionStudio:ReplayInputRoots).",
+          "description": "Image file or folder under a host-authorized replay read root.",
           "overriddenByPorts": [
             "path"
           ]
@@ -417,10 +427,36 @@
             {
               "label": "Folder",
               "value": "directory"
+            },
+            {
+              "label": "Saved Manifest",
+              "value": "manifest"
             }
           ],
           "group": "Source",
-          "description": "Auto treats an existing directory as a frame sequence and everything else as a single file."
+          "description": "Saved manifest mode reads a folder using the saved order and checks the selected image's hash."
+        },
+        {
+          "name": "manifestJson",
+          "label": "Replay Manifest",
+          "type": "textarea",
+          "defaultValue": "",
+          "group": "Source",
+          "description": "Version 1 JSON with ordered relative image paths and SHA-256 hashes. Generate it from a folder in node configuration.",
+          "visibleWhen": {
+            "parameter": "pathMode",
+            "values": [
+              "manifest"
+            ]
+          }
+        },
+        {
+          "name": "captureManifest",
+          "label": "Capture Manifest",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Source",
+          "internal": true
         },
         {
           "name": "index",
@@ -431,8 +467,11 @@
           "max": 1000000,
           "step": 1,
           "group": "Source",
-          "description": "Zero-based frame index used in folder mode; the sequence input overrides it. File mode requires 0.",
-          "integer": true
+          "description": "Zero-based image file index. The sequence input overrides it. File mode requires 0.",
+          "integer": true,
+          "overriddenByPorts": [
+            "sequence"
+          ]
         },
         {
           "name": "indexPolicy",
@@ -450,7 +489,7 @@
             }
           ],
           "group": "Source",
-          "description": "Out-of-range behaviour in folder mode: fail names the frame count, wrap takes index modulo the frame count."
+          "description": "Fail on an out-of-range index or wrap it modulo the number of image files."
         },
         {
           "name": "recursive",
@@ -480,7 +519,19 @@
             }
           ],
           "group": "Decode",
-          "description": "preserve keeps the stored depth and channel count (16-bit stays 16-bit); gray converts to single channel; color forces 3 channels."
+          "description": "Preserve stored depth and channels, decode grayscale, or produce three color channels."
+        },
+        {
+          "name": "pageIndex",
+          "label": "TIFF Page Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Decode",
+          "description": "Zero-based page index within the selected TIFF. Other formats require 0.",
+          "integer": true
         },
         {
           "name": "maxMegabytes",
@@ -492,10 +543,10 @@
           "step": 1,
           "unit": "MB",
           "group": "Limits",
-          "description": "Reject files larger than this before decoding, so a wrong path cannot exhaust memory."
+          "description": "Reject larger files before decoding."
         }
       ],
-      "description": "Read one image from disk for offline validation, teaching and sample batches without registering a file camera. Folder mode enumerates png/bmp/jpg/jpeg/tif/tiff in natural order (img2 before img10) so a batch run is reproducible, and the sequence input selects the frame — typically wired from flow.repeat.index. Every read is authorized by the host replay resolver: paths outside the data root, media root or VisionStudio:ReplayInputRoots are rejected, because a workflow document is importable and must not be able to read arbitrary local files. Files above maxMegabytes are rejected before decoding; undecodable files fail with the file name.",
+      "description": "Read a single image from an authorized file, a naturally sorted folder, or a saved replay manifest. The manifest fixes the file order and detects changed bytes. TIFF pages are selected independently of the file index.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4716,6 +4767,24 @@
       ],
       "parameters": [
         {
+          "name": "maskMode",
+          "label": "Mask Mode",
+          "type": "select",
+          "defaultValue": "byte",
+          "options": [
+            {
+              "label": "8-bit Grayscale",
+              "value": "byte"
+            },
+            {
+              "label": "Float Probability",
+              "value": "probability"
+            }
+          ],
+          "group": "Mask",
+          "description": "Select the existing 8-bit grayscale conversion or threshold a single-channel float probability image directly."
+        },
+        {
           "name": "threshold",
           "label": "Mask Threshold",
           "type": "number",
@@ -4724,8 +4793,31 @@
           "max": 255,
           "step": 1,
           "group": "Mask",
-          "description": "Pixels at or above this level belong to the region; 1 means any non-zero pixel.",
+          "description": "Pixels at or above this level are foreground. 1 selects all non-zero pixels.",
+          "visibleWhen": {
+            "parameter": "maskMode",
+            "values": [
+              "byte"
+            ]
+          },
           "integer": true
+        },
+        {
+          "name": "probabilityThreshold",
+          "label": "Probability Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Mask",
+          "description": "Compare float32 or float64 probabilities in their original 0 to 1 value range. Values at or above the threshold are foreground.",
+          "visibleWhen": {
+            "parameter": "maskMode",
+            "values": [
+              "probability"
+            ]
+          }
         },
         {
           "name": "invert",
@@ -4733,7 +4825,7 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Mask",
-          "description": "Swap foreground and background."
+          "description": "Swap foreground and background after thresholding."
         },
         {
           "name": "retrieval",
@@ -4807,7 +4899,7 @@
           "integer": true
         }
       ],
-      "description": "Extract contours straight from a mask image, so a segmentation mask can feed measurement and fitting without going through region.toDetections. Threshold and invert match region.fromMask exactly, so the same mask behaves identically on both outputs. External retrieval drops holes; With holes keeps parent links between retained contours. Speckle is removed by minArea; maxContours and maxPoints are hard budgets that fail loudly instead of truncating.",
+      "description": "Extract contours from an 8-bit mask or a float probability map. Threshold and inversion use the same rules as region.fromMask. External retrieval drops holes. With holes keeps parent links between retained contours. minArea removes speckle, and exceeding the configured contour or point limit fails the node.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -12918,12 +13010,38 @@
           "description": "Tag receiving the rotation R in degrees; empty disables that write."
         },
         {
+          "name": "xValidTag",
+          "label": "X Validity Tag",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Mapping",
+          "description": "Optional PLC tag for the X validity flag. True when an upstream X value was written; false for skipped, disabled or substituted X."
+        },
+        {
+          "name": "yValidTag",
+          "label": "Y Validity Tag",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Mapping",
+          "description": "Optional PLC tag for the Y validity flag. True when an upstream Y value was written; false for skipped, disabled or substituted Y."
+        },
+        {
+          "name": "rValidTag",
+          "label": "R Validity Tag",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Mapping",
+          "description": "Optional PLC tag for the R validity flag. True when an upstream R value was written; false for skipped, disabled or substituted R.",
+          "advanced": true
+        },
+        {
           "name": "autoConnect",
           "label": "Auto Connect",
           "type": "boolean",
           "defaultValue": true,
           "group": "Device",
-          "description": "Connect the device first when it is disconnected."
+          "description": "Connect the device first when it is disconnected.",
+          "advanced": true
         },
         {
           "name": "missingCoordinatePolicy",
@@ -12945,10 +13063,11 @@
             }
           ],
           "group": "Coordinates",
-          "description": "When a coordinate tag is set but its input is not connected, defaults to skip; an empty tag always disables the field. Only coordinates actually written produce x/y/r; xWritten/yWritten/rWritten report whether each coordinate was written."
+          "description": "When a coordinate tag is set but its input is not connected, defaults to skip; an empty tag always disables the field. Only coordinates actually written produce x/y/r; xWritten/yWritten/rWritten report whether each coordinate was written.",
+          "advanced": true
         }
       ],
-      "description": "Writes in order Ready=0, OK/NG and enabled coordinates, Ready=1. An empty coordinate tag disables that field; a missing input is skipped, rejected, or written as zero according to the policy. Validation completes before writing and duplicate tags are rejected. tagsWritten counts actual write operations (including the two Ready writes), not distinct tags. The legacy payloadFormat/onOverflow parameters are no longer used.",
+      "description": "Writes in order Ready=0, OK/NG and enabled coordinates, configured coordinate validity flags, Ready=1. A missing input is skipped, rejected, or written as zero according to the policy. An optional validity tag tells the PLC whether the corresponding value came from this result's upstream input. Duplicate or invalid tags are rejected before writing. tagsWritten includes both Ready writes. Dispatch errors report the failed phase and the last confirmed tag.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -16085,10 +16204,10 @@
       "parameters": [
         {
           "name": "casesJson",
-          "label": "Cases (JSON string array)",
+          "label": "Cases (JSON array)",
           "type": "textarea",
           "defaultValue": "[\"OK\",\"NG\"]",
-          "description": "JSON array of 1-16 non-empty unique case labels; malformed JSON or duplicates fail deterministically."
+          "description": "JSON array of 1-16 cases with unique non-empty labels and unique port IDs from case1 through case16. Older arrays of labels use sequential port IDs."
         },
         {
           "name": "trimValues",
@@ -16107,7 +16226,7 @@
           "description": "Compare case-insensitively. Labels that differ only by case then collide and are rejected instead of silently matching the first one."
         }
       ],
-      "description": "Choose one matching path. casesJson entries map in order to case1-caseN; only configured case ports are exposed on the node. Match is exact by default; trimValues/ignoreCase relax it for scanner and OCR text. Unmatched values take the default path and report matched=false. Converge all configured paths at Flow Merge. Emits case count and JSON diagnostics.",
+      "description": "Choose one matching path. Each branch keeps its port ID when renamed or reordered. Match is exact by default; trimValues/ignoreCase relax it for scanner and OCR text. Unmatched values take the default path and report matched=false. Converge all configured paths at the corresponding Flow Merge ports. Emits case count and JSON diagnostics.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -21017,6 +21136,11 @@
           "required": true
         },
         {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
           "name": "count",
           "dataType": "Integer",
           "required": true
@@ -21032,13 +21156,18 @@
           "required": true
         },
         {
+          "name": "maskClassOffset",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
           "name": "overlay",
           "dataType": "Image",
           "required": true
         },
         {
           "name": "instances",
-          "dataType": "String",
+          "dataType": "Json",
           "required": true
         },
         {
@@ -21311,9 +21440,9 @@
           "name": "includeMaskRuns",
           "label": "Include Per-Instance Masks",
           "type": "boolean",
-          "defaultValue": true,
+          "defaultValue": false,
           "group": "Output",
-          "description": "Include each binary mask in instances JSON as row-major alternating background/foreground run lengths. Turn off to reduce payload size; the combined class mask remains available.",
+          "description": "Default off. Embed each binary mask in instances JSON as row-major alternating background/foreground run lengths. The combined class mask remains available either way; turn this on only when a script needs per-instance overlap.",
           "advanced": true
         },
         {
@@ -21329,7 +21458,7 @@
           "advanced": true
         }
       ],
-      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. For semantic masks use inference.segmentation; for rotated boxes use inference.obb; for keypoints use inference.pose. count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
+      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite storing classId + maskClassOffset (1 here, so 0 is background); overlay colours are keyed by class id, matching inference.segmentation and inference.detection. instances is a Json document with maskWidth/maskHeight at the top level and one entry per instance (index/classId/label/score/box/area); with includeMaskRuns (default off) it also carries maskRunOrder and each entry gains maskRuns as row-major alternating background/foreground run lengths, so overlapping masks stay independent. result carries only the decode summary, not a second copy of the instance payload. contours carries one outer ring per instance (its largest ring when a mask fragments, thinned to at most 2000 points) with Index aligned to detections Index; an instance whose mask is empty yields a zero-area contour. For semantic masks use inference.segmentation; for rotated boxes use inference.obb; for keypoints use inference.pose. count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -22040,6 +22169,11 @@
           "required": true
         },
         {
+          "name": "maskClassOffset",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
           "name": "overlay",
           "dataType": "Image",
           "required": true
@@ -22256,7 +22390,7 @@
           "description": "Fraction of pixels whose winning score is below this value is reported as lowConfidenceFraction. For yolo26-semantic, scores are treated as 1.0."
         }
       ],
-      "description": "Semantic segmentation only. layout=logits: [1,C,H,W] argmax mask. layout=yolo26-semantic: YOLO26-sem ONNX class map [1,H,W]/[H,W]/[1,1,H,W] (argmax already applied). Emits label mask, colour overlay, per-class stats. For YOLO instance masks (yolo26n-seg) use inference.instanceSegmentation.",
+      "description": "Semantic segmentation only. layout=logits: [1,C,H,W] argmax mask. layout=yolo26-semantic: YOLO26-sem ONNX class map [1,H,W]/[H,W]/[1,1,H,W] (argmax already applied). Emits label mask, colour overlay, per-class stats. Mask pixels store classId + maskClassOffset (0 here, so pixel 0 is background and is never tinted); overlay colours are keyed by class id, so a class keeps one colour across inference.segmentation, inference.instanceSegmentation, and inference.detection. For YOLO instance masks (yolo26n-seg) use inference.instanceSegmentation.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -22641,7 +22775,33 @@
           "type": "text",
           "defaultValue": "",
           "group": "Template",
-          "description": "Used when the template input port is not connected (absolute path, or relative to the host working directory). A connected template port overrides it.",
+          "description": "Fallback when the image port is disconnected and the node has no template asset.",
+          "overriddenByPorts": [
+            "template"
+          ]
+        },
+        {
+          "name": "templateAssetId",
+          "label": "Template Image Asset",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Template",
+          "description": "Use this template image asset when the template port is disconnected.",
+          "overriddenByPorts": [
+            "template"
+          ]
+        },
+        {
+          "name": "templateAssetVersion",
+          "label": "Template Image Version",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Template",
+          "description": "Select a positive immutable version when using a template image asset.",
+          "integer": true,
           "overriddenByPorts": [
             "template"
           ]
@@ -22735,7 +22895,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Matching",
-          "description": "A correspondence within this distance of the model counts as an inlier. Keep it near the expected keypoint localisation error (2-4 px typical)."
+          "description": "A correspondence within this distance of the model counts as an inlier. Keep it near the expected keypoint localisation error (2-4 px typical).",
+          "advanced": true
         },
         {
           "name": "minMatches",
@@ -22746,7 +22907,8 @@
           "max": 500,
           "step": 1,
           "group": "Gates",
-          "description": "Minimum ratio-test matches required before RANSAC runs. Below it the node returns found=false with reason=too-few-matches."
+          "description": "Minimum ratio-test matches required before RANSAC runs. Below it the node returns found=false with reason=too-few-matches.",
+          "advanced": true
         },
         {
           "name": "minInliers",
@@ -30073,6 +30235,12 @@
           "outputPort": "center"
         }
       ],
+      "minimumConnectedInputs": [
+        {
+          "dataType": "Point2D",
+          "count": 3
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -30229,6 +30397,12 @@
         {
           "source": "FittedPoints",
           "outputPort": "line"
+        }
+      ],
+      "minimumConnectedInputs": [
+        {
+          "dataType": "Point2D",
+          "count": 2
         }
       ],
       "declaresActions": true,
@@ -31716,6 +31890,26 @@
           "required": false
         },
         {
+          "name": "actualSampleStep",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "maxObservedInputGap",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "usableLength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "kernelTruncated",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
           "name": "length",
           "dataType": "Double",
           "required": true
@@ -31769,7 +31963,19 @@
           "step": 0.1,
           "unit": "px",
           "group": "Filter",
-          "description": "Arc-length resampling before filtering. The cutoff must stay well above this step or the filter cannot resolve the wavelength."
+          "description": "Maximum axial spacing for the uniform resampling grid. The actual spacing is reported in actualSampleStep."
+        },
+        {
+          "name": "maxInputGap",
+          "label": "Maximum Input Gap (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "Reject a profile when adjacent projected input points are farther apart than this distance. 0 disables the check."
         },
         {
           "name": "endEffect",
@@ -31787,7 +31993,7 @@
             }
           ],
           "group": "Filter",
-          "description": "Gaussian filtering shortens the usable profile by half a cutoff at each end. Reflect keeps the full length; discard drops the ends honestly instead of inventing data."
+          "description": "Reflect keeps the full profile using mirrored samples at the ends. Discard uses only samples with full Gaussian kernel support."
         },
         {
           "name": "closed",
@@ -31797,7 +32003,7 @@
           "description": "Treat the polyline as closed when sampling (repeats the first point implicitly)."
         }
       ],
-      "description": "Splits a sampled profile into waviness and residual with an ISO 16610-21 Gaussian filter, emitting both as PointLists so downstream roughness or tolerance.profile can consume them. Wire: contours -> waviness/residual. The mean line is the least-squares axis, so the input must be a nominally straight edge; curved surfaces need a nominal first. Units: pixels.",
+      "description": "Splits a nominally straight sampled edge into waviness and residual using a Gaussian filter on an axial grid. Reports the usable pixel span, actual sample spacing, largest input gap and whether the kernel had to be shortened. Discard mode requires full support at the retained points.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -32033,6 +32239,36 @@
           "required": true
         },
         {
+          "name": "actualSampleStep",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "maxObservedInputGap",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rzSamplingLengths",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "kernelTruncated",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "gateEnabled",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "withinTolerance",
           "dataType": "Boolean",
           "required": true
@@ -32081,7 +32317,7 @@
           "step": 0.1,
           "unit": "px",
           "group": "Filter",
-          "description": "Trailing window actually evaluated; 0 uses the whole profile. Rz averages 5 sampling lengths, so shorter windows report fewer sub-lengths."
+          "description": "Maximum length of the trailing evaluation window. 0 uses the full usable span. The result reports the span between the first and last evaluated samples."
         },
         {
           "name": "sampleStep",
@@ -32093,7 +32329,37 @@
           "step": 0.1,
           "unit": "px",
           "group": "Filter",
-          "description": "Arc-length resampling before filtering. Must stay well below cutoffWavelength."
+          "description": "Maximum axial spacing for uniform resampling before filtering."
+        },
+        {
+          "name": "maxInputGap",
+          "label": "Maximum Input Gap (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "Reject a profile when adjacent projected input points are farther apart than this distance. 0 disables the check."
+        },
+        {
+          "name": "endEffect",
+          "label": "End Handling",
+          "type": "select",
+          "defaultValue": "reflect",
+          "options": [
+            {
+              "label": "Reflect ends",
+              "value": "reflect"
+            },
+            {
+              "label": "Discard ends",
+              "value": "discard"
+            }
+          ],
+          "group": "Filter",
+          "description": "Reflect keeps the full profile using mirrored samples at the ends. Discard uses only samples with full Gaussian kernel support."
         },
         {
           "name": "maxRa",
@@ -32108,7 +32374,7 @@
           "description": "Optional gate: withinTolerance reports ra <= limit. 0 disables it."
         }
       ],
-      "description": "Amplitude roughness parameters of a sampled profile: Ra, Rq, Rz, Rp, Rv and Rmax after an ISO 16610-21 Gaussian mean-line removal. Wire: contours (or pointList) -> ra/rz/rmax. Rz averages the 5 sampling lengths required by ISO 4287; with a shorter window it averages what fits. Image-based values are only as good as the edge sampling, so report them as a trend, not a substitute for a stylus. Units follow the input coordinates.",
+      "description": "Estimates roughness trends in pixels from a nominally straight sampled image edge. Reports the evaluated sample span and Gaussian end handling. Rz averages five segments when enough samples are available. In a shorter window it reports the whole-window range with rzSamplingLengths=0.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -34111,6 +34377,11 @@
           "required": true
         },
         {
+          "name": "pitchDiameterMethod",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "threadAngleDeg",
           "dataType": "Double",
           "required": true
@@ -34201,7 +34472,7 @@
           "description": "Arc-length resampling along the profile before crest detection."
         }
       ],
-      "description": "Image-based thread inspection against a supplied axis: pitch from crest spacing, major/minor diameter from the radial extrema, average thread angle from the flank slopes. Wire: contours + axis Line2D -> pitch/majorDiameter/threadAngleDeg. Optically this is a silhouette measurement: it cannot see the pitch diameter root, so pitchDiameter is the (major+minor)/2 estimate. Units: pixels.",
+      "description": "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. pitchDiameter is an estimate in pixels. pitchDiameterMethod identifies the arithmetic mean of the major and minor diameters. The tolerance flag applies to pitch consistency.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -34312,6 +34583,31 @@
           "required": true
         },
         {
+          "name": "gateMode",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "gateEnabled",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "evaluatedDeviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "limitModel",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "contributionsJson",
           "dataType": "String",
           "required": true
@@ -34357,18 +34653,36 @@
             }
           ],
           "group": "Chain",
-          "description": "Worst case adds every tolerance (100% interchangeability). RSS assumes independent +-3 sigma contributors and gives the statistical limit, which is what a process capability claim needs."
+          "description": "Worst case combines all signed tolerance bounds. RSS estimates symmetric limits around nominal assuming independent contributors with each full tolerance width treated as six sigma."
+        },
+        {
+          "name": "gateMode",
+          "label": "Acceptance Basis",
+          "type": "select",
+          "defaultValue": "nominal",
+          "options": [
+            {
+              "label": "Nominal Only",
+              "value": "nominal"
+            },
+            {
+              "label": "Full Calculated Interval",
+              "value": "interval"
+            }
+          ],
+          "group": "Limits",
+          "description": "Check either the chain nominal or both calculated bounds against the target tolerance."
         },
         {
           "name": "targetNominal",
-          "label": "Target Nominal (0=off)",
+          "label": "Target Nominal",
           "type": "number",
           "defaultValue": 0,
           "min": -1000000,
           "max": 1000000,
           "step": 0.001,
           "group": "Limits",
-          "description": "Drawing nominal the chain should close at. The gate compares nominal against it; left at 0 with tolerance 0 the gate stays open."
+          "description": "Center of the acceptance interval. Zero is a valid target."
         },
         {
           "name": "tolerance",
@@ -34379,7 +34693,7 @@
           "max": 1000000,
           "step": 0.001,
           "group": "Limits",
-          "description": "Allowed absolute gap between nominal and targetNominal, in the chain's unit (see Unit Label). 0 disables the gate."
+          "description": "Allowed absolute deviation from the target in the chain's unit. 0 disables the gate."
         },
         {
           "name": "unit",
@@ -34387,10 +34701,10 @@
           "type": "text",
           "defaultValue": "mm",
           "group": "Reporting",
-          "description": "Label only, no conversion (1..16 chars). Set it to whatever unit the contributions are in."
+          "description": "Report the unit used by the inputs. Up to 16 characters. Values are used as supplied."
         }
       ],
-      "description": "Closes a 1D dimension chain: worst-case (arithmetic) or statistical (RSS, +-3 sigma) limits, the resulting upper/lower limit, closure margin against a target and per-contributor share. Wire: optional a..f to replace the first six nominals. Every existing tolerance.* node evaluates ONE feature against ONE tolerance; this node is the only place where several contributions are combined.",
+      "description": "Combines a one-dimensional tolerance chain using worst-case or RSS limits. Reports the limit model, which values were checked against the target, the resulting margin and the input unit. Optional inputs a through f replace the first six nominal values.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -36044,6 +36358,11 @@
           "name": "key",
           "dataType": "String",
           "required": false
+        },
+        {
+          "name": "idempotencyKey",
+          "dataType": "String",
+          "required": false
         }
       ],
       "outputs": [
@@ -36063,6 +36382,21 @@
           "required": true
         },
         {
+          "name": "reused",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "idempotencyConflict",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "warningCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -36080,7 +36414,7 @@
           "type": "text",
           "defaultValue": "results",
           "group": "Storage",
-          "description": "Logical dataset name used to group records (for example 'caliper-width' or 'ng-parts'); at most 96 characters."
+          "description": "Logical dataset name used to group records; at most 96 characters."
         },
         {
           "name": "key",
@@ -36088,10 +36422,43 @@
           "type": "text",
           "defaultValue": "",
           "group": "Storage",
-          "description": "Optional business key such as a part serial or batch number, so records can be looked up per unit. The key input overrides it; at most 256 characters.",
+          "description": "Optional business key for lookup by part or batch; at most 256 characters.",
           "overriddenByPorts": [
             "key"
           ]
+        },
+        {
+          "name": "idempotencyKey",
+          "label": "Idempotency Key",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Storage",
+          "description": "Optional key scoped to the dataset, at most 256 characters. Reuse it for retries of one operation and use a different key for each new operation. Blank always appends.",
+          "overriddenByPorts": [
+            "idempotencyKey"
+          ]
+        },
+        {
+          "name": "idempotencyConflictPolicy",
+          "label": "Idempotency Conflict Policy",
+          "type": "select",
+          "defaultValue": "reuse",
+          "options": [
+            {
+              "label": "Reuse First Record",
+              "value": "reuse"
+            },
+            {
+              "label": "Warn and Reuse",
+              "value": "warn"
+            },
+            {
+              "label": "Fail on Conflict",
+              "value": "fail"
+            }
+          ],
+          "group": "Storage",
+          "description": "Applies when an idempotency key is set. Warn and Fail compare the normalized business key and the exact serialized result with the first record. All policies keep the first record."
         },
         {
           "name": "maxPayloadBytes",
@@ -36105,7 +36472,7 @@
           "description": "Reject payloads above this size instead of writing a truncated record."
         }
       ],
-      "description": "Append the connected value as one record in the host result store, so results reach a database without a separate receiver service. The payload is serialized exactly like output.exportResult JSON ({type,value}; images degrade to their size) and tagged with the run id and node id. Requires the host to provide IResultRecordStore: without it the node fails instead of silently dropping results, because a silent drop only surfaces during reconciliation. Dataset and key are validated (96/256 characters) and the payload size is capped before writing; a failing write reports the record id so the operator can check for a half written row.",
+      "description": "Stores the connected value in the host store. Within a dataset, an idempotency key identifies one operation. Retries return the first record ID and byte count. With Warn and Reuse, a changed business key or result sets idempotencyConflict and emits a warning. Fail on Conflict rejects a changed retry. A blank idempotency key always appends. The separate business key supports lookup by part and may repeat. Images are stored as dimensions.",
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,
@@ -37649,7 +38016,29 @@
             }
           ],
           "group": "Fusion",
-          "description": "images reads image1..image8. frameSet reads every camera image of a camera.syncCapture FrameSet in camera-id order, so a multi-camera stack needs one wire instead of eight; the two sources are mutually exclusive."
+          "description": "images reads image1..image8. frameSet reads the camera images of a synchronized FrameSet in camera-ID order. FrameSet synchronization aligns capture times. Choose one input source."
+        },
+        {
+          "name": "alignmentPolicy",
+          "label": "Alignment Policy",
+          "type": "select",
+          "defaultValue": "sameFrame",
+          "options": [
+            {
+              "label": "Require Common Image Frame",
+              "value": "sameFrame"
+            },
+            {
+              "label": "Use Prealigned Inputs",
+              "value": "prealigned"
+            },
+            {
+              "label": "Legacy (No Alignment Check)",
+              "value": "legacy"
+            }
+          ],
+          "group": "Fusion",
+          "description": "Require Common Image Frame checks that all inputs declare the same known image coordinate frame. Use Prealigned Inputs only after verifying the images align in a common reference. Legacy mode preserves older pixelwise workflows without checking their frames."
         },
         {
           "name": "mode",
@@ -37689,7 +38078,7 @@
           "description": "Hard cap on the input area. Median holds every input plus the output in memory, so a full-resolution stack multiplies quickly."
         }
       ],
-      "description": "Fuse 2..8 aligned frames pixel by pixel: mean, median, min or max. Wire: image1..image8 -> image, or sourceMode=frameSet + frameSet (synchronized capture) -> image. All inputs must share size, channel count and depth - a mismatched stack fails instead of producing a smeared result. Accumulation runs in float32 and converts back to the source depth with saturation. Median is 8-bit only and noticeably slower than mean; use it when transient specks matter more than cycle time.",
+      "description": "Fuse registered images pixel by pixel using mean, median, min or max. Images must share size, channel count and depth. Connect two to eight individual image inputs or one synchronized FrameSet. For raw camera images, extract each frame, register and warp it to a shared reference grid, then connect the aligned images to the individual inputs. The default alignment policy checks known coordinate frame metadata, and FrameSet diagnostics list the camera IDs. Mean accumulates in float32 and converts back to the source depth with saturation. Median supports 8-bit inputs.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -40711,7 +41100,10 @@
               "psfMotion",
               "psfDefocus"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "image"
+          ]
         },
         {
           "name": "height",
@@ -40729,7 +41121,10 @@
               "psfMotion",
               "psfDefocus"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "image"
+          ]
         },
         {
           "name": "blur",
@@ -42830,7 +43225,7 @@
             }
           ],
           "group": "Mode",
-          "description": "manual uses Threshold; adaptive uses local mean/Gaussian; otsu picks a global level."
+          "description": "Manual uses the configured threshold. Adaptive uses a local mean or Gaussian window. Otsu picks one level from the ROI pixels, or from the full image when no ROI is set."
         },
         {
           "name": "inputBitDepth",
@@ -42977,7 +43372,7 @@
           "internal": true
         }
       ],
-      "description": "Binary threshold with one cut level: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 (or by the declared inputBitDepth) to an 8-bit binary image; manual/Otsu also emit the threshold value. A ROI limits the Otsu and adaptive statistics to the ROI bounding box and makes the foreground ratio relative to the ROI area; pixels outside the ROI are cleared. Emits the foreground pixel ratio so binarization drift is visible, and raises a warning with an Otsu suggestion when a manual level selects almost nothing or almost everything. Need a 100..200 band instead of one cut? Use region.fromRange — it keeps the source bit depth and returns a Region; this node answers \"above/below one level\" and returns an Image. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
+      "description": "Binary segmentation in manual, local adaptive, or Otsu mode. All modes convert color to gray and scale UInt16 by 1/257 (or by the declared inputBitDepth) to produce an 8-bit binary image. Manual and Otsu emit the threshold value. Otsu and the manual-mode suggestion use only the pixels covered by the ROI, or the full image when no ROI is set. Adaptive preserves each pixel's local window. The foreground ratio uses the ROI pixel count, and pixels outside the ROI are cleared. Manual mode warns and shows an Otsu suggestion when almost no pixels or almost all pixels are selected. For a range such as 100..200, use region.fromRange to preserve the input bit depth and return a Region.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -44481,6 +44876,11 @@
           "required": true
         },
         {
+          "name": "decodeStatus",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "grade",
           "dataType": "String",
           "required": false
@@ -44527,7 +44927,7 @@
             }
           ],
           "group": "Grid",
-          "description": "How the module grid is derived. Module rows/cols is exact for matrix codes; cell size works when only the module pitch is known; whole ROI computes symbol contrast only."
+          "description": "How the module grid is derived. Use rows and columns for a known matrix size, cell size for known module pitch, or whole ROI for contrast only."
         },
         {
           "name": "rows",
@@ -44538,7 +44938,7 @@
           "max": 256,
           "step": 1,
           "group": "Grid",
-          "description": "Number of module rows in the symbol (for example 20 for a 20x20 DataMatrix).",
+          "description": "Number of module rows in the symbol.",
           "visibleWhen": {
             "parameter": "gridMode",
             "values": [
@@ -44589,7 +44989,31 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Grading",
-          "description": "Emit grade/numericGrade/pass. Disable when you only need the raw metrics and do not want a grade in reports."
+          "description": "Enable indicator grade and the optional pass output."
+        },
+        {
+          "name": "decodePolicy",
+          "label": "Decode Policy",
+          "type": "select",
+          "defaultValue": "requireDecode",
+          "options": [
+            {
+              "label": "Require Decode Result",
+              "value": "requireDecode"
+            },
+            {
+              "label": "Legacy: Allow Unverified Pass",
+              "value": "legacy"
+            }
+          ],
+          "group": "Grading",
+          "description": "Require decodeOk for a pass output. Legacy mode allows a pass output without decode verification and records a warning.",
+          "visibleWhen": {
+            "parameter": "enableGrade",
+            "values": [
+              "true"
+            ]
+          }
         },
         {
           "name": "minGrade",
@@ -44615,7 +45039,7 @@
             }
           ],
           "group": "Grading",
-          "description": "Minimum acceptable indicator grade; pass is true when the computed grade is at least this letter.",
+          "description": "Minimum acceptable indicator grade when a pass output is available.",
           "visibleWhen": {
             "parameter": "enableGrade",
             "values": [
@@ -44624,7 +45048,7 @@
           }
         }
       ],
-      "description": "Measure three ISO/IEC 15415 parameters from one image: symbol contrast (Rmax-Rmin in the ROI), a module modulation proxy (worst module deviation from the global mid level) and axial non-uniformity (left/right and top/bottom half contrast ratio). The grade is the worst of those plus decode: wire decodeOk from recognition.barcode so an undecodable symbol grades F immediately. Scope is explicit: this is an **indicator grade**, not a certified ISO report - fixed pattern damage, unused error correction, grid non-uniformity and calibrated lighting are out of scope, and certified compliance still needs a dedicated verifier. The ROI should be tightened around the symbol; specular hotspots inflate Rmax. Grid mode whole computes only symbol contrast.",
+      "description": "Measures symbol contrast, a module modulation proxy and axial non-uniformity to provide an indicator grade. Connect recognition.barcode.found to decodeOk for a pass or fail decision. decodeStatus is decoded, failed or unverified. A failed decode gives grade F; an unverified symbol still has image metrics and an indicator grade. Use a dedicated verifier for certification. Whole ROI mode computes contrast only.",
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,
@@ -47017,6 +47441,24 @@
       ],
       "parameters": [
         {
+          "name": "maskMode",
+          "label": "Mask Mode",
+          "type": "select",
+          "defaultValue": "byte",
+          "options": [
+            {
+              "label": "8-bit Grayscale",
+              "value": "byte"
+            },
+            {
+              "label": "Float Probability",
+              "value": "probability"
+            }
+          ],
+          "group": "Mask",
+          "description": "Select the existing 8-bit grayscale conversion or threshold a single-channel float probability image directly."
+        },
+        {
           "name": "threshold",
           "label": "Mask Threshold",
           "type": "number",
@@ -47025,8 +47467,31 @@
           "max": 255,
           "step": 1,
           "group": "Mask",
-          "description": "Pixels at or above this level belong to the region; 1 means any non-zero pixel, which is the usual case for segmentation masks.",
+          "description": "Pixels at or above this level are foreground. 1 selects all non-zero pixels.",
+          "visibleWhen": {
+            "parameter": "maskMode",
+            "values": [
+              "byte"
+            ]
+          },
           "integer": true
+        },
+        {
+          "name": "probabilityThreshold",
+          "label": "Probability Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Mask",
+          "description": "Compare float32 or float64 probabilities in their original 0 to 1 value range. Values at or above the threshold are foreground.",
+          "visibleWhen": {
+            "parameter": "maskMode",
+            "values": [
+              "probability"
+            ]
+          }
         },
         {
           "name": "invert",
@@ -47034,10 +47499,10 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Mask",
-          "description": "Swap foreground and background, for models or defects that encode the object as dark instead of bright."
+          "description": "Swap foreground and background after thresholding."
         }
       ],
-      "description": "Turn a mask image (for example the mask output of ONNX segmentation) directly into a Region instead of thresholding it again with region.fromRange. The mask is split into 8-connected components, so downstream region.properties / region.filter counts real blobs rather than one merged area; the binary mask is echoed on the image port and area reports the foreground pixel count. found is false when the mask is empty.",
+      "description": "Convert an 8-bit mask or a float probability map into 8-connected regions. The image output echoes a binary 0/255 mask and area counts its foreground pixels. found is false when the mask has no foreground.",
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,
@@ -51934,6 +52399,17 @@
           "name": "reset",
           "dataType": "Boolean",
           "required": false
+        },
+        {
+          "name": "eventId",
+          "dataType": "String",
+          "required": false,
+          "requiredWhen": {
+            "parameter": "durability",
+            "values": [
+              "durable"
+            ]
+          }
         }
       ],
       "outputs": [
@@ -51960,6 +52436,11 @@
         {
           "name": "rate",
           "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "reused",
+          "dataType": "Boolean",
           "required": true
         },
         {
@@ -51992,6 +52473,24 @@
           "step": 1,
           "group": "Counter",
           "description": "Added to count on every execution; use -1 for a remaining-parts countdown."
+        },
+        {
+          "name": "durability",
+          "label": "Persistence",
+          "type": "select",
+          "defaultValue": "snapshot",
+          "options": [
+            {
+              "label": "Periodic Snapshot",
+              "value": "snapshot"
+            },
+            {
+              "label": "Durable per Event",
+              "value": "durable"
+            }
+          ],
+          "group": "Counter",
+          "description": "Durable mode uses workflow scope and a non-empty eventId. Reuse it for retries of the same operation. Debug runs preview the change."
         },
         {
           "name": "scope",
@@ -52028,7 +52527,7 @@
           "description": "Clear the counter when the pass input is false, then count this execution. Use it for a consecutive-OK or no-fault streak."
         }
       ],
-      "description": "Cross-run counter with yield statistics. Wire: optional pass + reset -> count/total/passCount/failCount/rate. Reset is evaluated before incrementing, so the part that triggers the reset counts as the first item, not the zeroth. State lives in the host counter store keyed by workflow (default) or run, is thread-safe for parallel branches, and is snapshotted to data/runtime/counters.json every 5s so shift totals survive a restart; the node itself requires the store to be registered and fails fast when it is missing. Deterministic=false because the result depends on execution history.",
+      "description": "Cross-run counter with yield statistics. Reset runs before incrementing. Snapshot mode uses the host's periodic snapshots. Durable mode commits each new event ID within a workflow and counter ID before reporting success. A retry returns the original result with reused=true.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

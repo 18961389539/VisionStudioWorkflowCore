@@ -5,9 +5,16 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
-public sealed class CaliperWidthNode : IVisionNodeExecutor
+public sealed class CaliperWidthNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "measure.caliperWidth";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        MeasurementDefinitionValidation.SearchLine(node, catalog, connectedInputs);
+        MeasurementDefinitionValidation.WidthLimits(node, catalog);
+    }
+
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {

@@ -21,10 +21,10 @@
 
 ## 统一语义（四个节点共有的约定）
 
-- **ROI**：`image.threshold` 与 `region.fromRange` 都支持 canvas ROI。ROI 外清零；
-  `image.threshold` 的 Otsu/自适应统计与前景占比分母**都按 ROI 计**，不是整图。
+- **ROI**：`image.threshold` 与 `region.fromRange` 都支持画布 ROI，输出在 ROI 外清零。
+  Otsu 直方图只计入 ROI 实际覆盖的像素。自适应模式保留每个像素在整图中的局部邻域，因此窗口可跨过 ROI 边界。
 - **前景占比**：`foregroundRatio` = 非零像素 ÷ 统计域像素数。ROI 越小不再被稀释；
-  手动阈值选中比例 ≤0.05% 或 ≥99.95% 时会带 `warningCount=1` 与 `suggestedThreshold`（Otsu 对照值）。
+  手动阈值选中比例 ≤0.05% 或 ≥99.95% 时会带 `warningCount=1`，并在概要中给出按同一 ROI 计算的 `suggestedThreshold`（Otsu 对照值）。
 - **闭区间**：`fromRange` 的 min/max 两端都包含（`minGray=100, maxGray=200` 会选中 100 和 200）。
 - **反选**：`fromRange` 的 `invert` 取补集，底依次是 ROI → region/domain → 整幅画布，不会越界。
 - **count vs blobCount**：阈值区域把所有 run 放在**一个**区域对象里，所以 `count` 恒为 1；
@@ -58,18 +58,18 @@
 | `emptyPolicy` | empty | 无像素通过时：输出空区域 / 直接失败 |
 | `roi` | 空 | canvas ROI |
 
-## 踩坑记录（2026-11-11 修复）
+## 踩坑记录
 
 | 症状 | 根因 | 现状 |
 |---|---|---|
 | 手动阈值前景占比永远是 0 | `long / long` 整除（10000/20000 = 0） | 改双精度并显式转 double |
-| ROI 框住目标，Otsu 阈值仍被 ROI 外高亮拉偏 | 阈值在整图直方图上求，ROI 只用于输出清零 | Otsu/自适应在 ROI 包围盒内统计（自适应外扩半窗口保邻域） |
+| 圆形、多边形等 ROI 的 Otsu 阈值被选区外高亮拉偏 | 外接矩形包含选区外的像素 | Otsu 直方图与手动模式的 Otsu 建议值都按 ROI 掩膜计算 |
 | ROI 内全前景，占比却只有 0.25 | 分母是整图面积 | 分母改为 ROI 像素数 |
 | 12 位相机阈值几乎不可用 | 16U 一律 ÷257，4095 只剩 15 级 | `inputBitDepth` 按真实位深映射 |
 | `count` 明明是 1，画面里却有两个目标 | 阈值区域不自动拆分连通域 | 新增 `blobCount`，并在描述与本文档说明 |
 
 ## 验证
 
-`backend/tests/VisionStudio.Engine.Tests` 下 4 个文件共 18 项，覆盖：ROI 统计口径、占比分母、
+`backend/tests/VisionStudio.Engine.Tests` 下的阈值用例覆盖精确 ROI 统计、占比分母、
 16 位位深映射、`maxValue`、端口覆盖参数、反选补集边界、ROI 限制、`blobCount` 与 `count` 的差异、
 极端占比告警。目录快照 `CatalogExporter --check` 与 i18n 完整性用例同时锁定参数与文案。

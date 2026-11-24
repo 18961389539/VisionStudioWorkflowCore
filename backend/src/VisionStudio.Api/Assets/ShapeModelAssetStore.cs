@@ -108,6 +108,8 @@ public sealed class ShapeModelAssetStore(AssetStore assets)
     /// <summary>同步读取（引擎侧 <c>IModelAssetSource</c>）；version&lt;=0 表示 latest。</summary>
     public byte[]? ReadBytesSync(string id, int version) => assets.ReadBytesSync(id, version);
 
+    internal byte[]? ReadTemplateBytesSync(string id, int version) => assets.ReadBytesSync(id, version, "template");
+
     public async Task<bool> DeleteAsync(string id, CancellationToken ct)
         => await GetAsync(id, ct) is not null && await assets.DeleteAsync(id, ct);
 

@@ -19,7 +19,7 @@ internal sealed class OnnxModelSession : IDisposable
     public void Dispose() { Input = null; _lease.Dispose(); }
 }
 internal sealed record OnnxPreparedInput(DenseTensor<float> Tensor) : IDisposable { public void Dispose() { } }
-internal sealed record OnnxOutputTensor(float[] Values, int[] Dimensions) : IDisposable { public void Dispose() { } }
+internal sealed record OnnxOutputTensor(float[] Values, int[] Dimensions, string Name) : IDisposable { public void Dispose() { } }
 
 /// <summary>ONNX Runtime inference. Image normalization preserves BGR/RGB, means and NCHW node contracts.</summary>
 internal static class OnnxInferenceHelpers
@@ -58,11 +58,13 @@ internal static class OnnxInferenceHelpers
         catch (Exception ex) { throw new InvalidOperationException($"Could not load ONNX model '{resolved}': {ex.Message}", ex); }
     }
 
-    public static (OnnxPreparedInput Blob, string OutputName, int Width, int Height) PrepareInput(OnnxModelSession net, Mat source, NodeDefinition node)
+    public static (OnnxPreparedInput Blob, string OutputName, int Width, int Height) PrepareInput(
+        OnnxModelSession net, Mat source, NodeDefinition node, (int Width, int Height)? inputSize = null,
+        bool? letterbox = null, bool? swapRB = null)
     {
-        var (width, height) = ResolveInputSize(node);
+        var (width, height) = ResolveInputSize(node, inputSize);
         var values = new float[checked(3 * width * height)];
-        NormalizeInto(values, 0, source, width, height, node);
+        NormalizeInto(values, 0, source, width, height, node, letterbox, swapRB);
         var tensor = new DenseTensor<float>(values, new[] { 1, 3, height, width });
         RequireSingleInput(net);
         net.Input = tensor;
@@ -98,19 +100,22 @@ internal static class OnnxInferenceHelpers
         return new(tensor);
     }
 
-    private static (int Width, int Height) ResolveInputSize(NodeDefinition node)
+    private static (int Width, int Height) ResolveInputSize(NodeDefinition node, (int Width, int Height)? inputSize = null)
     {
-        var width = node.GetInt("inputWidth", 224); var height = node.GetInt("inputHeight", 224);
+        var (width, height) = inputSize ?? (node.GetInt("inputWidth", 224), node.GetInt("inputHeight", 224));
         if (width is < 1 or > 4096 || height is < 1 or > 4096) throw new InvalidOperationException("ONNX inputWidth and inputHeight must be between 1 and 4096.");
         return (width, height);
     }
 
-    private static void RequireSingleInput(OnnxModelSession net)
+    public static KeyValuePair<string, NodeMetadata> RequireSingleInput(OnnxModelSession net)
     {
-        if (net.Session.InputMetadata.Count != 1) throw new InvalidOperationException("Image inference requires a model with exactly one input tensor.");
+        var inputs = net.Session.InputMetadata;
+        if (inputs.Count != 1) throw new InvalidOperationException("Image inference requires a model with exactly one input tensor.");
+        return inputs.Single();
     }
 
-    internal static void NormalizeInto(float[] values, int offset, Mat source, int width, int height, NodeDefinition node)
+    internal static void NormalizeInto(float[] values, int offset, Mat source, int width, int height, NodeDefinition node,
+        bool? letterbox = null, bool? swapRB = null)
     {
         if (source.Empty()) throw new InvalidOperationException("ONNX inference requires a non-empty image.");
         if (source.Depth() != MatType.CV_8U) throw new InvalidOperationException("ONNX preprocessing requires byte pixels.");
@@ -121,9 +126,10 @@ internal static class OnnxInferenceHelpers
         if (source.Channels() == 3) source.CopyTo(bgr);
         else JLVisionOperators.CvtColor(source, bgr, source.Channels() switch { 1 => ColorConversionCodes.GRAY2BGR, 4 => ColorConversionCodes.BGRA2BGR, _ => throw new InvalidOperationException("ONNX inference supports 1, 3, or 4 channel images.") });
         using var resized = new Mat();
+        var useLetterbox = letterbox ?? node.GetBool("letterbox", false);
         if (node.GetBool("crop", false))
         {
-            if (node.GetBool("letterbox", false))
+            if (useLetterbox)
                 throw new InvalidOperationException("ONNX preprocessing cannot enable crop and letterbox together.");
             var factor = Math.Max((double)width / bgr.Width, (double)height / bgr.Height);
             using var scaled = new Mat();
@@ -131,7 +137,7 @@ internal static class OnnxInferenceHelpers
             using var cropped = new Mat(scaled, new Rect((scaled.Width - width) / 2, (scaled.Height - height) / 2, width, height));
             cropped.CopyTo(resized);
         }
-        else if (node.GetBool("letterbox", false))
+        else if (useLetterbox)
         {
             // Ultralytics-style letterbox: preserve aspect, pad with 114 gray, centered.
             var factor = Math.Min((double)width / bgr.Width, (double)height / bgr.Height);
@@ -148,7 +154,7 @@ internal static class OnnxInferenceHelpers
         }
         else JLVisionOperators.Resize(bgr, resized, new Size(width, height));
         var pixels = checked(width * height);
-        var swap = node.GetBool("swapRB", false);
+        var swap = swapRB ?? node.GetBool("swapRB", false);
         // Split once and normalize each plane natively; per-pixel At<Vec3b> costs one managed/native
         // transition per pixel (~1.2M at 640x640) for the same arithmetic.
         Cv2.Split(resized, out var planes);
@@ -211,7 +217,7 @@ internal static class OnnxInferenceHelpers
             for (var i = 0; i < requested.Length; i++)
             {
                 var tensor = result[i].AsTensor<float>();
-                list[i] = new(tensor.ToArray(), tensor.Dimensions.ToArray());
+                list[i] = new(tensor.ToArray(), tensor.Dimensions.ToArray(), result[i].Name);
             }
             cancellationToken.ThrowIfCancellationRequested();
             return list;

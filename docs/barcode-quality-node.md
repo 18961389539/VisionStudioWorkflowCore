@@ -11,12 +11,13 @@
 
 | 参数 | 本节点做法 | ISO 15415 阈值 |
 |---|---|---|
-| 符号对比度 SC | ROI 内 `Rmax − Rmin`（灰度极值） | A≥70 B≥55 C≥40 D≥20 |
+| 符号对比度 SC | ROI 内灰度第 95 与第 5 百分位之差 | A≥70 B≥55 C≥40 D≥20 |
 | 调制比 MOD（近似） | 各模块单元灰度偏离全局中值的程度，取最差单元 | A≥0.50 B≥0.40 C≥0.30 D≥0.20 |
 | 轴向非均匀性 AN | 左右半区、上下半区均值差比的较大者 | A≤0.06 B≤0.08 C≤0.10 D≤0.12 |
 
-总等级 = 三项中最差的一档；`decodeOk` 接了 `recognition.barcode` 的解码结果且为 false 时**直接判 F**
-（ISO 里解不出来就是不合格，不看其他参数）。
+指标等级取各项的最低等级。将 `recognition.barcode.found` 接到 `decodeOk` 可提供解码结果。解码失败时等级为 F。
+
+新建节点使用「要求解码结果」。未提供解码状态时，节点仍输出指标和指示等级，`pass` 端口无值。缺少策略字段的旧配方继续使用兼容模式，未提供解码结果时保留原判定行为并在诊断中提示。
 
 **不做的事**：固定图形损伤、未使用纠错、网格非均匀性、校准光源、1D 码的 15416 全套。
 诊断里固定写入 `"standard": "ISO/IEC 15415 partial (SC/MOD/AN) - indicator grade, not a certified report"`。
@@ -38,24 +39,26 @@ ROI 必须收紧到符号上：镜面反光会把 `Rmax` 抬高、SC 虚高；�
 
 | 端口 | 说明 |
 |---|---|
-| `symbolContrast` | Rmax − Rmin（灰度级） |
+| `symbolContrast` | 灰度第 95 与第 5 百分位之差 |
 | `modulation` | 可选；`whole` 模式不输出 |
 | `axialNonUniformity` | 可选；`whole` 模式不输出 |
 | `darkFraction` | 深色单元占比；用于发现网格配错（接近 0 或 1 说明划分偏了） |
-| `grade` / `numericGrade` / `pass` | `enableGrade` 打开时输出；`minGrade` 默认 C |
+| `decodeStatus` | `decoded`、`failed` 或 `unverified` |
+| `grade` / `numericGrade` | `enableGrade` 打开时输出 |
+| `pass` | 开启等级且具备判定条件时输出。最低等级默认 C |
 | `diagnostics` | 含覆盖参数、标准声明、网格参数 |
 
 ## 典型接线
 
 ```
 image.acquire / image.load ─┬─ image ─────────→ recognition.barcode ─ found ─┐
-                            └─ image ─────────→ recognition.barcodeQuality ─┼─ pass → flow.if
+                            └─ image ─────────→ recognition.barcodeQuality ─┼─ pass → flow.ifBoolean
                                                      ↑ roi（收窄到符号）      └ decodeOk
 ```
 
 ## 验证
 
-`BarcodeQualityNodeTests` 9 项：
+`BarcodeQualityNodeTests` 覆盖以下场景。
 
 | 用例 | 覆盖点 |
 |---|---|
@@ -67,6 +70,8 @@ image.acquire / image.load ─┬─ image ─────────→ recogn
 | `CellSizeModeDerivesGridFromPitch` | 由间距推导网格 |
 | `RoiRestrictsTheGridToTheSymbol` | 无 ROI 等级变差，接 ROI 回 A |
 | `FlatImageFailsWithExplicitMessage` | 无对比度失败并说明原因 |
+| `RequireDecodeDistinguishesAllThreeStates` | 要求解码结果时区分未验证、成功和失败 |
+| `RequireDecodeReportsFlatUndecodableImageAsNg` | 均匀图像带解码失败结果时输出 NG |
 | `RejectsInvalidGridConfiguration` | 未知网格模式、行列越界、非法最低等级 |
 
 Engine 全量 1908 项通过；前端 i18n 全量中文（A/B/C/D 译成「A 级」等，避免 CJK 断言失败）。

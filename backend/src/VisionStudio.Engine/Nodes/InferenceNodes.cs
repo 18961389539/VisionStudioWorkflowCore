@@ -275,29 +275,23 @@ var source = context.RequireImage("image").Mat;
         var inputWidth = node.GetInt("inputWidth", 224);
         var inputHeight = node.GetInt("inputHeight", 224);
         if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("Detection inputWidth/inputHeight must be positive.");
-        double MapX(double inputX)
-        {
-            if (!letterbox) return inputX * sourceWidth / inputWidth;
-            var scale = Math.Min((double)inputWidth / sourceWidth, (double)inputHeight / sourceHeight);
-            return (inputX - (inputWidth - sourceWidth * scale) / 2) / scale;
-        }
-        double MapY(double inputY)
-        {
-            if (!letterbox) return inputY * sourceHeight / inputHeight;
-            var scale = Math.Min((double)inputWidth / sourceWidth, (double)inputHeight / sourceHeight);
-            return (inputY - (inputHeight - sourceHeight * scale) / 2) / scale;
-        }
+        var mapping = new LetterboxMapping(sourceWidth, sourceHeight, inputWidth, inputHeight, letterbox);
         void AddCandidate(double x1, double y1, double x2, double y2, double score, int classId, int rowIndex)
         {
             if (score is < 0 or > 1 || classId < 0)
                 throw new InvalidOperationException($"Detection row {rowIndex} has an invalid score or classId; score must be within [0,1] and classId must be a non-negative integer.");
             if (coordinates == "normalized") { x1 *= inputWidth; x2 *= inputWidth; y1 *= inputHeight; y2 *= inputHeight; }
-            var left = Math.Clamp(Math.Min(MapX(x1), MapX(x2)), 0, sourceWidth);
-            var top = Math.Clamp(Math.Min(MapY(y1), MapY(y2)), 0, sourceHeight);
-            var right = Math.Clamp(Math.Max(MapX(x1), MapX(x2)), 0, sourceWidth);
-            var bottom = Math.Clamp(Math.Max(MapY(y1), MapY(y2)), 0, sourceHeight);
+            var inputLeft = Math.Min(x1, x2);
+            var inputTop = Math.Min(y1, y2);
+            var inputRight = Math.Max(x1, x2);
+            var inputBottom = Math.Max(y1, y2);
+            var left = Math.Clamp(mapping.ToSourceX(inputLeft), 0, sourceWidth);
+            var top = Math.Clamp(mapping.ToSourceY(inputTop), 0, sourceHeight);
+            var right = Math.Clamp(mapping.ToSourceX(inputRight), 0, sourceWidth);
+            var bottom = Math.Clamp(mapping.ToSourceY(inputBottom), 0, sourceHeight);
             if (score < threshold || right <= left || bottom <= top) return;
-            candidates.Add(new DetectionCandidate(left, top, right, bottom, score, classId));
+            // NMS runs on input-space boxes; the clamped source box is only for output.
+            candidates.Add(new DetectionCandidate(left, top, right, bottom, score, classId, inputLeft, inputTop, inputRight, inputBottom));
         }
 
         if (isYoloLayout)
@@ -354,11 +348,11 @@ var source = context.RequireImage("image").Mat;
 
     private static double IoU(DetectionCandidate a, DetectionCandidate b)
     {
-        var iw = Math.Max(0, Math.Min(a.Right, b.Right) - Math.Max(a.Left, b.Left));
-        var ih = Math.Max(0, Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Top, b.Top));
+        var iw = Math.Max(0, Math.Min(a.InputRight, b.InputRight) - Math.Max(a.InputLeft, b.InputLeft));
+        var ih = Math.Max(0, Math.Min(a.InputBottom, b.InputBottom) - Math.Max(a.InputTop, b.InputTop));
         var intersection = iw * ih;
-        var areaA = (a.Right - a.Left) * (a.Bottom - a.Top);
-        var areaB = (b.Right - b.Left) * (b.Bottom - b.Top);
+        var areaA = (a.InputRight - a.InputLeft) * (a.InputBottom - a.InputTop);
+        var areaB = (b.InputRight - b.InputLeft) * (b.InputBottom - b.InputTop);
         return intersection / (areaA + areaB - intersection);
     }
 
@@ -373,7 +367,8 @@ var source = context.RequireImage("image").Mat;
             new VisionRectangle2D(x.Left, x.Top, width, height), x.Score, x.ClassId);
     }
 
-    private sealed record DetectionCandidate(double Left, double Top, double Right, double Bottom, double Score, int ClassId);
+    private sealed record DetectionCandidate(double Left, double Top, double Right, double Bottom, double Score, int ClassId,
+        double InputLeft, double InputTop, double InputRight, double InputBottom);
 }
 
 /// <summary>YOLOv8/YOLO26 ONNX oriented-box inference with exact rotated IoU suppression.</summary>
@@ -428,17 +423,9 @@ var source = context.RequireImage("image").Mat;
 
         // A rotated rectangle remains a rotated rectangle through letterbox (uniform scale).
         // A stretch with different X/Y scales turns it into a parallelogram, which Rectangle2D cannot represent.
-        var stretchScaleX = (double)inputWidth / source.Width;
-        var stretchScaleY = (double)inputHeight / source.Height;
-        if (!letterbox && Math.Abs(stretchScaleX - stretchScaleY) > 1e-6 * Math.Max(stretchScaleX, stretchScaleY))
+        var mapping = new LetterboxMapping(source.Width, source.Height, inputWidth, inputHeight, letterbox);
+        if (!letterbox && Math.Abs(mapping.ScaleX - mapping.ScaleY) > 1e-6 * Math.Max(mapping.ScaleX, mapping.ScaleY))
             throw new InvalidOperationException("OBB letterbox=false requires source and model input to have the same aspect ratio; enable letterbox to preserve rotated-box geometry.");
-        var letterboxScale = Math.Min(stretchScaleX, stretchScaleY);
-        var padX = letterbox ? (inputWidth - source.Width * letterboxScale) / 2 : 0;
-        var padY = letterbox ? (inputHeight - source.Height * letterboxScale) / 2 : 0;
-        var scaleX = letterbox ? letterboxScale : stretchScaleX;
-        var scaleY = letterbox ? letterboxScale : stretchScaleY;
-        double MapX(double x) => (x - padX) / scaleX;
-        double MapY(double y) => (y - padY) / scaleY;
 
         var decoded = layout == "yolo"
             ? InferenceStats.DecodeYoloObb(values, shape, tensorOrder)
@@ -461,8 +448,8 @@ var source = context.RequireImage("image").Mat;
             {
                 cx *= inputWidth; cy *= inputHeight; width *= inputWidth; height *= inputHeight;
             }
-            cx = MapX(cx); cy = MapY(cy);
-            width /= scaleX; height /= scaleY;
+            cx = mapping.ToSourceX(cx); cy = mapping.ToSourceY(cy);
+            width /= mapping.ScaleX; height /= mapping.ScaleY;
             var corners = InferenceStats.OrientedBoxCorners(cx, cy, width, height, item.AngleRad);
             candidates.Add(new ObbCandidate(cx, cy, width, height, item.AngleRad, item.Score, item.ClassId, corners));
         }

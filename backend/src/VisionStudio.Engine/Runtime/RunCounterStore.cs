@@ -2,6 +2,24 @@ using System.Collections.Concurrent;
 
 namespace VisionStudio.Engine.Runtime;
 
+public interface IDurableRunCounterStore
+{
+    Task<(RunCounterReading Reading, bool Reused)> ApplyAsync(
+        DurableCounterEvent input, bool preview, CancellationToken cancellationToken = default);
+}
+
+public sealed record DurableCounterEvent(string WorkflowId, string CounterId, string EventId, long Step, bool? Pass, bool Reset);
+
+public readonly record struct RunCounterReading(long Count, long Total, long Pass, long Fail)
+{
+    public RunCounterReading Apply(long step, bool? pass, bool reset)
+    {
+        var current = reset ? default : this;
+        return checked(new RunCounterReading(current.Count + step, current.Total + (pass.HasValue ? 1 : 0),
+            current.Pass + (pass == true ? 1 : 0), current.Fail + (pass == false ? 1 : 0)));
+    }
+}
+
 /// <summary>
 /// 跨轮计数存储（value.counter 的宿主侧状态）。
 ///

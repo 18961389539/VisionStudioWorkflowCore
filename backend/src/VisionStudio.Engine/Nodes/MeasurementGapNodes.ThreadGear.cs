@@ -6,6 +6,8 @@ namespace VisionStudio.Engine.Nodes;
 
 public sealed class ThreadMeasurementNode : IVisionNodeExecutor
 {
+    private const string PitchDiameterMethod = "arithmeticMeanOfMajorAndMinor";
+
     public string Type => "measure.thread";
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
@@ -96,6 +98,7 @@ public sealed class ThreadMeasurementNode : IVisionNodeExecutor
         var within = pitchTolerance <= 0 || pitches.All(p => Math.Abs(p - pitch) <= pitchTolerance);
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("crestCount", crests.Count),
             ("sampleCount", samples.Length), ("pitch", pitch), ("majorDiameter", major), ("minorDiameter", minor),
+            ("pitchDiameter", pitchDiameter), ("pitchDiameterMethod", PitchDiameterMethod),
             ("threadAngleDeg", threadAngle), ("axisLength", axisLength), ("withinTolerance", within));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
@@ -103,14 +106,16 @@ public sealed class ThreadMeasurementNode : IVisionNodeExecutor
                 ["found"] = VisionValue.Boolean(true), ["crestCount"] = VisionValue.Integer(crests.Count),
                 ["sampleCount"] = VisionValue.Integer(samples.Length), ["pitch"] = VisionValue.Double(pitch),
                 ["majorDiameter"] = VisionValue.Double(major), ["minorDiameter"] = VisionValue.Double(minor),
-                ["pitchDiameter"] = VisionValue.Double(pitchDiameter), ["threadAngleDeg"] = VisionValue.Double(threadAngle),
+                ["pitchDiameter"] = VisionValue.Double(pitchDiameter), ["pitchDiameterMethod"] = VisionValue.String(PitchDiameterMethod),
+                ["threadAngleDeg"] = VisionValue.Double(threadAngle),
                 ["threadDepth"] = VisionValue.Double((major - minor) / 2), ["withinTolerance"] = VisionValue.Boolean(within),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["found"] = true, ["crestCount"] = crests.Count, ["pitch"] = pitch, ["majorDiameter"] = major,
-                ["minorDiameter"] = minor, ["pitchDiameter"] = pitchDiameter, ["threadAngleDeg"] = threadAngle,
+                ["minorDiameter"] = minor, ["pitchDiameter"] = pitchDiameter, ["pitchDiameterMethod"] = PitchDiameterMethod,
+                ["threadAngleDeg"] = threadAngle,
                 ["sampleCount"] = samples.Length, ["withinTolerance"] = within, ["unit"] = "px",
                 ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             },
@@ -211,6 +216,11 @@ public sealed class ToleranceStackupNode : IVisionNodeExecutor
 
         var method = node.GetString("method", "worstCase").ToLowerInvariant();
         if (method is not ("worstcase" or "rss")) throw new InvalidOperationException($"tolerance.stackup method '{method}' is not supported (worstCase | rss).");
+        var gateMode = node.GetString("gateMode", "nominal").Trim().ToLowerInvariant();
+        if (gateMode is not ("nominal" or "interval"))
+            throw new InvalidOperationException("tolerance.stackup gateMode must be nominal or interval.");
+        var unit = node.GetString("unit", "mm").Trim();
+        if (unit.Length > 16) throw new InvalidOperationException("tolerance.stackup unit must be at most 16 characters.");
         var target = node.GetDouble("targetNominal", 0);
         var tolerance = node.GetDouble("tolerance", 0);
         if (!double.IsFinite(target) || !double.IsFinite(tolerance) || tolerance < 0)
@@ -226,6 +236,7 @@ public sealed class ToleranceStackupNode : IVisionNodeExecutor
         catch (JsonException ex) { throw new InvalidOperationException("tolerance.stackup contributionsJson must be an array of {name, nominal, plus, minus, sign}.", ex); }
         if (contributions.Count == 0) throw new InvalidOperationException("tolerance.stackup needs at least one contribution.");
         if (contributions.Count > 64) throw new InvalidOperationException("tolerance.stackup supports at most 64 contributions.");
+        if (contributions.Any(item => item is null)) throw new InvalidOperationException("tolerance.stackup contributions must be objects.");
 
         // a..f 覆盖前六个贡献的名义值：把上游实测值接进尺寸链，而不必改 JSON
         var ports = new[] { "a", "b", "c", "d", "e", "f" };
@@ -241,46 +252,46 @@ public sealed class ToleranceStackupNode : IVisionNodeExecutor
         }
 
         var nominal = contributions.Sum(c => c.Sign * c.Nominal);
-        var upper = 0.0; var lower = 0.0; var variance = 0.0;
-        var shares = new List<object>();
+        var upper = 0.0; var lower = 0.0; var sigmaTotal = 0.0;
         foreach (var c in contributions)
         {
             var plus = c.Sign > 0 ? c.Plus : c.Minus;
             var minus = c.Sign > 0 ? c.Minus : c.Plus;
             upper += c.Sign * c.Nominal + plus;
             lower += c.Sign * c.Nominal - minus;
-            var sigma = (c.Plus + c.Minus) / 6;
-            variance += sigma * sigma;
-            shares.Add(new { name = c.Name, sign = c.Sign, nominal = Math.Round(c.Sign * c.Nominal, 6), upper = Math.Round(plus, 6), lower = Math.Round(minus, 6) });
+            sigmaTotal = double.Hypot(sigmaTotal, c.Plus / 6 + c.Minus / 6);
         }
-        var sigmaTotal = Math.Sqrt(variance);
         var rssTolerance = 6 * sigmaTotal;
         var useRss = method == "rss";
+        var limitModel = useRss ? "independentSymmetricThreeSigma" : "worstCase";
         var reportedUpper = useRss ? nominal + 3 * sigmaTotal : upper;
         var reportedLower = useRss ? nominal - 3 * sigmaTotal : lower;
-        var gap = Math.Abs(nominal - target);
-        var margin = tolerance > 0 ? tolerance - gap : 0;
-        var within = tolerance <= 0 || gap <= tolerance;
-        var utilization = tolerance > 0 ? gap / tolerance : 0;
+        var gap = gateMode == "interval"
+            ? Math.Max(Math.Abs(reportedLower - target), Math.Abs(reportedUpper - target))
+            : Math.Abs(nominal - target);
+        var gateEnabled = tolerance > 0;
+        var margin = gateEnabled ? tolerance - gap : 0;
+        var within = !gateEnabled || gap <= tolerance;
+        var utilization = gateEnabled ? gap / tolerance : 0;
+        if (!new[] { nominal, upper, lower, rssTolerance, reportedUpper, reportedLower, gap, margin, utilization }.All(double.IsFinite))
+            throw new InvalidOperationException("tolerance.stackup calculation exceeded the supported numeric range.");
 
-        if (useRss)
+        var shares = contributions.Select(c =>
         {
-            // RSS 的贡献占比按方差分配，最坏情况的占比按半带宽分配
-            shares = contributions.Select(c =>
+            var share = new
             {
-                var sigma = (c.Plus + c.Minus) / 6;
-                return (object)new
-                {
-                    name = c.Name, sign = c.Sign, nominal = Math.Round(c.Sign * c.Nominal, 6),
-                    upper = Math.Round(c.Sign > 0 ? c.Plus : c.Minus, 6), lower = Math.Round(c.Sign > 0 ? c.Minus : c.Plus, 6),
-                    varianceShare = sigmaTotal > 0 ? Math.Round(sigma * sigma / (variance is 0 ? 1 : variance), 6) : 0
-                };
-            }).ToList();
-        }
+                name = c.Name, sign = c.Sign, nominal = Math.Round(c.Sign * c.Nominal, 6),
+                upper = Math.Round(c.Sign > 0 ? c.Plus : c.Minus, 6), lower = Math.Round(c.Sign > 0 ? c.Minus : c.Plus, 6)
+            };
+            if (!useRss) return (object)share;
+            var ratio = sigmaTotal > 0 ? (c.Plus / 6 + c.Minus / 6) / sigmaTotal : 0;
+            return new { share.name, share.sign, share.nominal, share.upper, share.lower, varianceShare = Math.Round(ratio * ratio, 6) };
+        }).ToArray();
 
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("method", method),
             ("contributorCount", contributions.Count), ("nominal", nominal), ("upper", reportedUpper),
-            ("lower", reportedLower), ("rssTolerance", rssTolerance), ("margin", margin), ("withinTolerance", within));
+            ("lower", reportedLower), ("rssTolerance", rssTolerance), ("margin", margin), ("withinTolerance", within),
+            ("limitModel", limitModel), ("gateMode", gateMode), ("gateEnabled", gateEnabled), ("evaluatedDeviation", gap), ("unit", unit));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -289,6 +300,9 @@ public sealed class ToleranceStackupNode : IVisionNodeExecutor
                 ["worstCaseMin"] = VisionValue.Double(lower), ["rssTolerance"] = VisionValue.Double(rssTolerance),
                 ["upperLimit"] = VisionValue.Double(reportedUpper), ["lowerLimit"] = VisionValue.Double(reportedLower),
                 ["margin"] = VisionValue.Double(margin), ["utilization"] = VisionValue.Double(utilization),
+                ["limitModel"] = VisionValue.String(limitModel), ["gateMode"] = VisionValue.String(gateMode),
+                ["gateEnabled"] = VisionValue.Boolean(gateEnabled), ["evaluatedDeviation"] = VisionValue.Double(gap),
+                ["unit"] = VisionValue.String(unit),
                 ["contributionsJson"] = VisionValue.String(JsonSerializer.Serialize(shares)),
                 ["withinTolerance"] = VisionValue.Boolean(within), ["diagnostics"] = VisionValue.String(diagnostics)
             },
@@ -296,6 +310,9 @@ public sealed class ToleranceStackupNode : IVisionNodeExecutor
             {
                 ["found"] = true, ["method"] = method, ["nominal"] = nominal, ["worstCaseMax"] = upper,
                 ["worstCaseMin"] = lower, ["rssTolerance"] = rssTolerance, ["margin"] = margin,
+                ["lowerLimit"] = reportedLower, ["upperLimit"] = reportedUpper,
+                ["limitModel"] = limitModel, ["gateMode"] = gateMode, ["gateEnabled"] = gateEnabled,
+                ["evaluatedDeviation"] = gap, ["unit"] = unit,
                 ["utilization"] = utilization, ["contributorCount"] = contributions.Count,
                 ["withinTolerance"] = within, ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             }));

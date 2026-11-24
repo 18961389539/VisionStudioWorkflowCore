@@ -74,6 +74,8 @@ public sealed record VisionPluginNode(
     VisionExecutorConcurrency Concurrency = VisionExecutorConcurrency.Serialized)
 {
     public VisionPluginToolIdentity? ToolIdentity { get; init; }
+    /// <summary>Optional stateless validator, independent of the executor lifetime.</summary>
+    public IVisionNodeDefinitionValidator? DefinitionValidator { get; init; }
 
     public static VisionPluginNode Singleton<TTool>(
         NodeCatalogItem catalog,

@@ -13,8 +13,8 @@ public sealed class ProductionSecurityGuardTests
     [Fact]
     public void ProductionEnvironment_WithAutoLoginAdmin_RefusesToStart()
     {
-        using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
+        using var host = new IsolatedApiFactory();
+        using var factory = host.WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Production");
                 builder.UseSetting("Security:Enabled", "true");
@@ -30,8 +30,8 @@ public sealed class ProductionSecurityGuardTests
     [Fact]
     public async Task AutoLoginEndpoint_IsNotFound_WhenDisabled()
     {
-        using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
+        using var host = new IsolatedApiFactory();
+        using var factory = host.WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Testing");
                 builder.UseSetting("Security:Enabled", "true");

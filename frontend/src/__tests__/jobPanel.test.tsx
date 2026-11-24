@@ -21,7 +21,8 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 function mount(initialJobs = [recipe('b-main', 'B 检测')], delayedRecipe?: Promise<unknown>,
-  prepare: PrepareWorkflowChange = () => ({ apply: vi.fn(async () => true), cancel: vi.fn(), isCurrent: () => true, isSameDocument: () => true })) {
+  prepare: PrepareWorkflowChange = () => ({ apply: vi.fn(async () => true), cancel: vi.fn(), isCurrent: () => true, isSameDocument: () => true }),
+  onOpenValidation?: () => void) {
   let jobs = [...initialJobs];
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     let data: unknown = {};
@@ -44,7 +45,7 @@ function mount(initialJobs = [recipe('b-main', 'B 检测')], delayedRecipe?: Pro
     return { ok: true, json: async () => data } as Response;
   });
   vi.stubGlobal('fetch', fetchMock);
-  render(<ConfigProvider theme={{ token: { motion: false } }}><JobPanel open onClose={vi.fn()} workflow={workflow} prepareWorkflowChange={prepare} onRunResult={vi.fn()} /></ConfigProvider>);
+  render(<ConfigProvider theme={{ token: { motion: false } }}><JobPanel open onClose={vi.fn()} workflow={workflow} prepareWorkflowChange={prepare} onRunResult={vi.fn()} onOpenValidation={onOpenValidation} /></ConfigProvider>);
   return fetchMock;
 }
 
@@ -82,6 +83,18 @@ describe('recipe workbench', () => {
     expect(JSON.parse(String(request[1]!.body))).not.toHaveProperty('id');
     expect(JSON.parse(String(request[1]!.body))).not.toHaveProperty('recipeCode');
     await waitFor(() => expect(screen.getByRole('button', { name: '去验证' })).toBeInTheDocument());
+  });
+
+  it('没有匹配的验证记录时，空态给出「打开数据集验证」入口', async () => {
+    const onOpenValidation = vi.fn();
+    const fetchMock = mount(undefined, undefined, undefined, onOpenValidation);
+    await screen.findByRole('button', { name: '去验证' });
+    fireEvent.click(screen.getByRole('tab', { name: '验证' }));
+    fireEvent.click(screen.getByRole('button', { name: '查询可用验证记录' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/validation-candidates'))).toBe(true));
+    // 空表不能只写“没有记录”：告诉用户下一步去哪跑出记录
+    fireEvent.click(await screen.findByRole('button', { name: '打开数据集验证' }));
+    expect(onOpenValidation).toHaveBeenCalledOnce();
   });
 
   it('filters navigation without changing the selected recipe', async () => {

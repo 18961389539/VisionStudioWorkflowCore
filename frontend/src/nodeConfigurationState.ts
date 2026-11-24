@@ -52,6 +52,8 @@ export function configurationParameters(parameters: NodeParameters, catalog: Nod
   if (catalog.type === 'measure.metrology') delete merged.debugImagePreviewOnly;
   if (catalog.type === 'measure.regionIntensity') migrateRegionIntensityParameters(parameters, merged);
   if (catalog.type === 'output.saveImage') migrateSaveImageParameters(parameters, merged);
+  if (catalog.type === 'recognition.barcodeQuality' && parameters.decodePolicy === undefined) merged.decodePolicy = 'legacy';
+  if (catalog.type === 'image.fuse' && parameters.alignmentPolicy === undefined) merged.alignmentPolicy = 'legacy';
   if (catalog.type === 'output.exportResult' && parameters.overwrite !== undefined) {
     merged.conflictPolicy = parameters.overwrite ? 'overwrite' : 'fail'; delete merged.overwrite;
   }
@@ -81,6 +83,8 @@ export function hydrateNodeParameters(parameters: NodeParameters, catalog: NodeC
   if (catalog.type === 'measure.metrology') delete merged.debugImagePreviewOnly;
   if (catalog.type === 'measure.regionIntensity') migrateRegionIntensityParameters(parameters, merged);
   if (catalog.type === 'output.saveImage') migrateSaveImageParameters(parameters, merged);
+  if (catalog.type === 'recognition.barcodeQuality' && parameters.decodePolicy === undefined) merged.decodePolicy = 'legacy';
+  if (catalog.type === 'image.fuse' && parameters.alignmentPolicy === undefined) merged.alignmentPolicy = 'legacy';
   if (catalog.type === 'output.exportResult' && parameters.overwrite !== undefined) {
     merged.conflictPolicy = parameters.overwrite ? 'overwrite' : 'fail'; delete merged.overwrite;
   }
@@ -336,8 +340,9 @@ export function validateNodeConfiguration(
   }
   if (catalog.type === 'jlvision.matrixOp')
     ['matrixA', 'matrixB'].filter(port => hasConnectedInput(port, 'String')).forEach(port => overriddenParameters.add(port));
-  if (catalog.type === 'jlvision.restoration' && ['psfMotion', 'psfDefocus'].includes(String(parameters.operator)) && hasConnectedInput('image', 'Image'))
-    ['width', 'height'].forEach(port => overriddenParameters.add(port));
+  for (const parameter of catalog.parameters) {
+    if (parameter.overriddenByPorts?.some((port) => connectedPorts.has(port.toLowerCase()))) overriddenParameters.add(parameter.name);
+  }
   if (hasConnectedInput('searchLine', 'Line2D'))
     ['startX', 'startY', 'endX', 'endY'].forEach((name) => overriddenParameters.add(name));
   if (hasConnectedInput('circle', 'Circle'))
@@ -345,10 +350,11 @@ export function validateNodeConfiguration(
   const parameterIssues = validateParameterValues(catalog.parameters.filter((parameter) => !overriddenParameters.has(parameter.name)), parameters)
     .map((issue) => ({ parameter: issue.name, message: `${catalog.parameters.find((p) => p.name === issue.name)?.label ?? issue.name}：${issue.message}` }));
   const issues: string[] = [];
-  if (catalog.type === 'measure.fitLine' || catalog.type === 'measure.fitCircle') {
-    const minimum = catalog.type === 'measure.fitCircle' ? 3 : 2;
-    const count = catalog.inputs.filter(port => hasConnectedInput(port.name, 'Point2D')).length;
-    if (count < minimum) issues.push(`至少需要连接 ${minimum} 个点输入，当前已连接 ${count} 个。`);
+  for (const { dataType, count: minimumCount } of catalog.minimumConnectedInputs ?? []) {
+    const minimum = Number(minimumCount);
+    const count = catalog.inputs.filter(port => hasConnectedInput(port.name, dataType)).length;
+    const inputLabel = dataType === 'Point2D' ? '点' : `${dataType} 类型的`;
+    if (count < minimum) issues.push(`至少需要连接 ${minimum} 个${inputLabel}输入，当前已连接 ${count} 个。`);
   }
   if (catalog.type === 'flow.switch') {
     const raw = parameters.casesJson === undefined ? catalog.parameters.find(parameter => parameter.name === 'casesJson')?.defaultValue : parameters.casesJson;

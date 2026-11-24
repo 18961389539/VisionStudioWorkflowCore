@@ -181,17 +181,21 @@ internal static class P0CompletionCatalog
 
         new("value.counter", "Run Counter", "Value",
             [Exec, new("pass", VisionDataType.Boolean, Required: false),
-             new("reset", VisionDataType.Boolean, Required: false)],
+             new("reset", VisionDataType.Boolean, Required: false),
+             new("eventId", VisionDataType.String, Required: false) { RequiredWhen = new("durability", ["durable"]) }],
             [
                 new("count", VisionDataType.Integer), new("total", VisionDataType.Integer),
                 new("passCount", VisionDataType.Integer), new("failCount", VisionDataType.Integer),
-                new("rate", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next
+                new("rate", VisionDataType.Double), new("reused", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("counterId", "Counter Id", "text", "counter", Group: "Counter",
                     Description: "Name of this counter inside its scope. Two nodes sharing the id share state, which is exactly how 'consecutive NG' and 'shift total' are wired on the same branch."),
                 new("step", "Step", "number", 1, -1000000, 1000000, 1, Group: "Counter",
                     Description: "Added to count on every execution; use -1 for a remaining-parts countdown."),
+                new("durability", "Persistence", "select", "snapshot", Group: "Counter",
+                    Options: [new("Periodic Snapshot", "snapshot"), new("Durable per Event", "durable")],
+                    Description: "Durable mode uses workflow scope and a non-empty eventId. Reuse it for retries of the same operation. Debug runs preview the change."),
                 new("scope", "Scope", "select", "workflow", Group: "Counter", Options:
                 [
                     new("Workflow (survives across runs)", "workflow"),
@@ -202,7 +206,7 @@ internal static class P0CompletionCatalog
                 new("resetOnFail", "Reset On Fail", "boolean", false, Group: "Reset",
                     Description: "Clear the counter when the pass input is false, then count this execution. Use it for a consecutive-OK or no-fault streak."),
             ],
-            "Cross-run counter with yield statistics. Wire: optional pass + reset -> count/total/passCount/failCount/rate. Reset is evaluated before incrementing, so the part that triggers the reset counts as the first item, not the zeroth. State lives in the host counter store keyed by workflow (default) or run, is thread-safe for parallel branches, and is snapshotted to data/runtime/counters.json every 5s so shift totals survive a restart; the node itself requires the store to be registered and fails fast when it is missing. Deterministic=false because the result depends on execution history.",
+            "Cross-run counter with yield statistics. Reset runs before incrementing. Snapshot mode uses the host's periodic snapshots. Durable mode commits each new event ID within a workflow and counter ID before reporting success. A retry returns the original result with reused=true.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: false),
             Actions: [])
     ];

@@ -668,8 +668,9 @@ export default function ImageViewer({
   const measurementUndoAvailable = Boolean(measurementUndoEntry && measurementGeometry
     && measurementUndoEntry.afterFingerprint === parameterFingerprint(measurementGeometry));
 
+  const showDrawingHint = Boolean(geometryDrawMode && (measurementGeometry?.type === 'line' || measurementGeometry?.type === 'circle'));
   return (
-    <div className={'vision-viewer' + (geometryDrawMode && measurementGeometry?.type === 'circle' ? ' is-drawing-circle' : '')}>
+    <div className={'vision-viewer' + (showDrawingHint ? ' is-drawing' : '')}>
       <ImageViewerToolbar
         showRoiTools={showRoiTools}
         roiEnabled={roiEnabled}
@@ -718,8 +719,7 @@ export default function ImageViewer({
         onOverlayFilterChange={setOverlayFilter}
         nodeLabels={nodeLabels}
       />
-      {geometryDrawMode && (measurementGeometry?.type === 'line' || measurementGeometry?.type === 'circle')
-        && <ImageViewerDrawingHint
+      {showDrawingHint && measurementGeometry && <ImageViewerDrawingHint
           kind={measurementGeometry.type}
           threePoint={isThreePointDrawing}
           circleDrawMode={circleDrawMode}

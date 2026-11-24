@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { configurationParameters, hydrateNodeParameters, roiConfigurationIssue } from '../nodeConfigurationState';
+import { fallbackCatalog, makeDefaultParameters } from '../catalog';
 import type { NodeCatalogItem } from '../types';
 
 /**
@@ -12,6 +13,28 @@ const catalog = (type: string, parameters: NodeCatalogItem['parameters'] = []): 
 });
 
 describe('configurationParameters legacy migrations', () => {
+  it('checks image frame metadata for new fusion nodes and preserves saved legacy nodes', () => {
+    const item = fallbackCatalog.find(entry => entry.type === 'image.fuse')!;
+    const defaults = makeDefaultParameters(item);
+    const old = { sourceMode: 'frameSet' };
+    const prealigned = { ...old, alignmentPolicy: 'prealigned' };
+    expect(defaults.alignmentPolicy).toBe('sameFrame');
+    expect(configurationParameters(old, item).alignmentPolicy).toBe('legacy');
+    expect(hydrateNodeParameters(old, item, defaults).alignmentPolicy).toBe('legacy');
+    expect(configurationParameters(prealigned, item).alignmentPolicy).toBe('prealigned');
+    expect(hydrateNodeParameters(defaults, item, defaults).alignmentPolicy).toBe('sameFrame');
+  });
+
+  it('requires a decode result for new barcode-quality nodes and preserves legacy recipes', () => {
+    const item = fallbackCatalog.find(entry => entry.type === 'recognition.barcodeQuality')!;
+    const defaults = makeDefaultParameters(item);
+    expect(defaults.decodePolicy).toBe('requireDecode');
+    expect(configurationParameters({}, item).decodePolicy).toBe('legacy');
+    expect(hydrateNodeParameters({}, item, defaults).decodePolicy).toBe('legacy');
+    expect(configurationParameters(defaults, item).decodePolicy).toBe('requireDecode');
+    expect(hydrateNodeParameters(defaults, item, defaults).decodePolicy).toBe('requireDecode');
+  });
+
   it('exposes legacy crop scalars as a rectangle ROI without dropping the original fields', () => {
     const merged = configurationParameters({ x: 5, y: 6, width: 7, height: 8 }, catalog('image.crop'));
     expect(merged.roi).toEqual({ type: 'Rectangle', x: 5, y: 6, width: 7, height: 8 });

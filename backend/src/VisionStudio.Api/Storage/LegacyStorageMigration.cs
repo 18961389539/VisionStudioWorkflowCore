@@ -14,7 +14,6 @@ public sealed class LegacyStorageMigrationService
 {
     private const string MigrationKey = "v20-file-metadata-to-sqlite";
     private readonly SqliteMetadataDatabase _db;
-    private readonly IWebHostEnvironment _env;
     private readonly ILogger<LegacyStorageMigrationService> _logger;
     private int _migrationErrors;
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
@@ -25,7 +24,6 @@ public sealed class LegacyStorageMigrationService
     public LegacyStorageMigrationService(SqliteMetadataDatabase db, IWebHostEnvironment env, ILogger<LegacyStorageMigrationService> logger)
     {
         _db = db;
-        _env = env;
         _logger = logger;
     }
 
@@ -64,7 +62,7 @@ public sealed class LegacyStorageMigrationService
 
     private async Task<int> MigrateJobsAsync(SqliteConnection connection, CancellationToken ct)
     {
-        var root = Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath), "jobs");
+        var root = Path.Combine(_db.DataRoot, "jobs");
         if (!Directory.Exists(root)) return 0;
         var count = 0;
         foreach (var dir in Directory.EnumerateDirectories(root))
@@ -109,7 +107,7 @@ public sealed class LegacyStorageMigrationService
 
     private async Task<int> MigrateCalibrationsAsync(SqliteConnection connection, CancellationToken ct)
     {
-        var root = Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath), "calibrations");
+        var root = Path.Combine(_db.DataRoot, "calibrations");
         if (!Directory.Exists(root)) return 0;
         var count = 0;
         foreach (var dir in Directory.EnumerateDirectories(root))
@@ -155,9 +153,9 @@ public sealed class LegacyStorageMigrationService
 
     private async Task<int> MigrateTracesAsync(SqliteConnection connection, CancellationToken ct)
     {
-        var root = Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath), "traces");
+        var root = Path.Combine(_db.DataRoot, "traces");
         if (!Directory.Exists(root)) return 0;
-        var artifactRoot = Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath), "artifacts");
+        var artifactRoot = Path.Combine(_db.DataRoot, "artifacts");
         var count = 0;
         foreach (var metadataPath in Directory.EnumerateFiles(root, "metadata.json", SearchOption.AllDirectories))
         {

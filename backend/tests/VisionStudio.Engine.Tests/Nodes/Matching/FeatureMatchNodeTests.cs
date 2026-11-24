@@ -147,6 +147,53 @@ public sealed class FeatureMatchNodeTests
         Assert.Contains("8-bit or 16-bit", depth.Message);
     }
 
+    [Fact]
+    public async Task FeatureMatchUsesPinnedAssetAndReportsActualVersion()
+    {
+        using var pattern = TexturedPattern();
+        using var scene = WarpedScene(pattern, 15, 1.1, 300, 260);
+        Assert.True(Cv2.ImEncode(".png", pattern, out var bytes));
+        var source = new TemplateSource(bytes);
+        var result = await Run(new FeatureMatchNode(), new() { ["image"] = Image(scene) },
+            """{"templateAssetId":"pattern","templateAssetVersion":2,"templatePath":"unused.png","minInliers":6}""", source);
+        using var output = result.Outputs["image"].Require<VisionImage>("image");
+        Assert.True(result.Outputs["found"].Require<bool>("found"), Diagnostics(result));
+        Assert.Equal("asset", result.Summary["templateSource"]);
+        Assert.Equal(2, result.Summary["templateAssetVersion"]);
+        Assert.Equal(1, source.Reads);
+    }
+
+    [Fact]
+    public async Task TemplatePortTakesPrecedenceAndAssetErrorsDoNotFallBack()
+    {
+        using var pattern = TexturedPattern();
+        using var scene = WarpedScene(pattern, 15, 1.1, 300, 260);
+        var source = new TemplateSource(null);
+        var result = await Run(new FeatureMatchNode(), new() { ["image"] = Image(scene), ["template"] = Image(pattern) },
+            """{"templateAssetId":"missing","templateAssetVersion":2}""", source);
+        using var output = result.Outputs["image"].Require<VisionImage>("image");
+        Assert.Equal("input-port", result.Summary["templateSource"]);
+        Assert.Equal(0, source.Reads);
+
+        var missing = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new FeatureMatchNode(),
+            new() { ["image"] = Image(scene) }, """{"templateAssetId":"missing","templateAssetVersion":2,"templatePath":"unused.png"}""", source));
+        Assert.Contains("asset 'missing' v2", missing.Message);
+        var unpinned = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new FeatureMatchNode(),
+            new() { ["image"] = Image(scene) }, """{"templateAssetId":"pattern"}""", source));
+        Assert.Contains("positive templateAssetVersion", unpinned.Message);
+    }
+
+    private sealed class TemplateSource(byte[]? bytes) : IModelAssetSource
+    {
+        public int Reads { get; private set; }
+        public byte[]? TryRead(string id, int version) => throw new NotSupportedException();
+        public byte[]? TryReadTemplate(string id, int version)
+        {
+            Reads++;
+            return (id, version) == ("pattern", 2) ? bytes : null;
+        }
+    }
+
     // ---------------------------------------------------------------- 辅助
 
     private static string Diagnostics(NodeExecutorResult result)
@@ -161,13 +208,14 @@ public sealed class FeatureMatchNodeTests
         }, json);
 
     private static async Task<NodeExecutorResult> Run(
-        IVisionNodeExecutor executor, Dictionary<string, VisionValue> inputs, string json)
+        IVisionNodeExecutor executor, Dictionary<string, VisionValue> inputs, string json, IModelAssetSource? source = null)
     {
         try
         {
             var node = new NodeDefinition("n1", executor.Type, null, null,
                 JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json));
-            return await executor.ExecuteAsync(new NodeExecutionContext(inputs), node, CancellationToken.None);
+            return await executor.ExecuteAsync(new NodeExecutionContext(inputs, workflowScope: null, runId: null, modelAssets: source),
+                node, CancellationToken.None);
         }
         finally
         {

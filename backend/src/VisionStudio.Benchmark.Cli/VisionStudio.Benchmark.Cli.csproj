@@ -5,4 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- P2 engine microbenchmark executes engine nodes directly on golden fixtures. -->
+    <ProjectReference Include="..\VisionStudio.Engine\VisionStudio.Engine.csproj" />
+  </ItemGroup>
 </Project>

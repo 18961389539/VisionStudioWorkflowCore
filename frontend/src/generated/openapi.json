@@ -329,6 +329,113 @@
         }
       }
     },
+    "/api/security/service-tokens": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServiceTokenDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServiceTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTokenCreated"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/security/service-tokens/{id}/rotate": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTokenCreated"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/security/service-tokens/{id}/revoke": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTokenDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/audit": {
       "get": {
         "tags": [
@@ -384,6 +491,25 @@
                   "items": {
                     "$ref": "#/components/schemas/AuditEventDto"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/security/audit/verify": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditChainVerification"
                 }
               }
             }
@@ -7318,6 +7444,15 @@
         "tags": [
           "VisionStudio.Api"
         ],
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7335,6 +7470,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProductionRuntimeConfig"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -7502,6 +7657,13 @@
             }
           },
           {
+            "name": "pendingOnly",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "skip",
             "in": "query",
             "schema": {
@@ -7543,6 +7705,25 @@
         }
       }
     },
+    "/api/alarms/summary": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlarmSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/alarms/{id}/ack": {
       "post": {
         "tags": [
@@ -7565,6 +7746,343 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AlarmRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/operator-layout/{jobId}": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorLayout"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorLayout"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorLayout"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/stations": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductionStationOverview"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/stations/local": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionStationStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/production/operator-preview": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "ngOnly",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionOperatorPreview"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/production/recipe-rollouts": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecipeRolloutBatch"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeRolloutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeRolloutBatch"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/recipe-rollouts/latest-by-station": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StationRecipeRollout"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/recipe-deliveries": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecipeDeliveryReceipt"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StationRecipeDelivery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeDeliveryReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/recipe-deliveries/{id}/publish": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRecipeDeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDescriptor"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcknowledgementRequired"
                 }
               }
             }
@@ -8674,6 +9192,149 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InvestigationVerificationEvidence"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spc/datasets": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpcDatasetSummary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spc/series": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "dataset",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chartType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subgroupSize",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "grouping",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "lsl",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "double"
+            }
+          },
+          {
+            "name": "usl",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpcAnalysis"
                 }
               }
             }
@@ -9812,7 +10473,8 @@
           "message",
           "active",
           "acknowledged",
-          "raisedAt"
+          "raisedAt",
+          "occurrenceCount"
         ],
         "type": "object",
         "properties": {
@@ -9860,6 +10522,22 @@
               "null",
               "string"
             ]
+          },
+          "lastRaisedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "occurrenceCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 1
           }
         }
       },
@@ -9870,6 +10548,47 @@
           "Error",
           "Critical"
         ]
+      },
+      "AlarmSummary": {
+        "required": [
+          "activeCount",
+          "criticalCount",
+          "latestActiveMessage",
+          "pendingCount"
+        ],
+        "type": "object",
+        "properties": {
+          "activeCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "criticalCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "latestActiveMessage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pendingCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
       },
       "AppendShapeModelVersionRequest": {
         "required": [
@@ -10106,6 +10825,65 @@
           "Device",
           "Robot"
         ]
+      },
+      "AuditChainVerification": {
+        "required": [
+          "valid",
+          "checked",
+          "firstInvalidSeq",
+          "firstInvalidReason",
+          "lastSeq",
+          "lastHash",
+          "verifiedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "checked": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "firstInvalidSeq": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "firstInvalidReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastSeq": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "lastHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "AuditEventDto": {
         "required": [
@@ -15054,6 +15832,37 @@
           },
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "CreateServiceTokenRequest": {
+        "required": [
+          "name",
+          "scopes",
+          "expiresInDays"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresInDays": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -20509,6 +21318,15 @@
           "maturity": {
             "$ref": "#/components/schemas/NodeMaturity"
           },
+          "minimumConnectedInputs": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/NodeInputMinimum"
+            }
+          },
           "declaresActions": {
             "type": "boolean"
           },
@@ -20731,6 +21549,26 @@
           "TransformTarget",
           "InputFrame"
         ]
+      },
+      "NodeInputMinimum": {
+        "required": [
+          "dataType",
+          "count"
+        ],
+        "type": "object",
+        "properties": {
+          "dataType": {
+            "$ref": "#/components/schemas/VisionDataType"
+          },
+          "count": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
       },
       "NodeMaturity": {
         "enum": [
@@ -21513,6 +22351,36 @@
             "type": "string"
           }
         }
+      },
+      "OperatorLayout": {
+        "required": [
+          "title",
+          "widgets"
+        ],
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "widgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorWidget"
+            }
+          }
+        }
+      },
+      "OperatorWidget": {
+        "enum": [
+          "Result",
+          "Counts",
+          "Timing",
+          "Alarms",
+          "Preview"
+        ]
       },
       "ParameterDescriptor": {
         "required": [
@@ -23534,6 +24402,73 @@
           }
         }
       },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instance": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ProductionOperatorPreview": {
+        "required": [
+          "runId",
+          "startedAt",
+          "disposition",
+          "jobVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "jobVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "ProductionPtpGuardGroupStatus": {
         "required": [
           "groupId",
@@ -24007,7 +24942,8 @@
           "pendingTraceCount",
           "traceQueueCapacity",
           "recoveryAttempts",
-          "hasDeviceSideEffects"
+          "hasDeviceSideEffects",
+          "statusVersion"
         ],
         "type": "object",
         "properties": {
@@ -24182,6 +25118,21 @@
           "hasDeviceSideEffects": {
             "type": "boolean",
             "default": false
+          },
+          "statusEpoch": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "statusVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
           }
         }
       },
@@ -24193,6 +25144,195 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "ProductionStationOverview": {
+        "required": [
+          "id",
+          "name",
+          "operatorUrl",
+          "connection",
+          "lastCheckedAt",
+          "lastSeenAt",
+          "status",
+          "target",
+          "versionCheck",
+          "recipeDeliveryEnabled"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "operatorUrl": {
+            "type": "string"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/StationConnection"
+          },
+          "lastCheckedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastSeenAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProductionStationStatus"
+              }
+            ]
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StationVersionTarget"
+              }
+            ]
+          },
+          "versionCheck": {
+            "$ref": "#/components/schemas/StationVersionCheck"
+          },
+          "recipeDeliveryEnabled": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "ProductionStationStatus": {
+        "required": [
+          "stationId",
+          "state",
+          "jobId",
+          "job",
+          "lockedVersion",
+          "lockedWorkflowHash",
+          "cycleCount",
+          "okCount",
+          "ngCount",
+          "lastDisposition",
+          "lastCycleAt",
+          "activeAlarms",
+          "criticalAlarms",
+          "pendingAlarms"
+        ],
+        "type": "object",
+        "properties": {
+          "stationId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProductionRuntimeState"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "job": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StationJob"
+              }
+            ]
+          },
+          "lockedVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "lockedWorkflowHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "cycleCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "okCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "ngCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "lastDisposition": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastCycleAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "activeAlarms": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "criticalAlarms": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "pendingAlarms": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -24593,6 +25733,208 @@
             "format": "date-time"
           },
           "dependencyManifestHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "PublishRecipeDeliveryRequest": {
+        "required": [
+          "expectedUpdatedAt",
+          "acknowledgeMaturityNodes"
+        ],
+        "type": "object",
+        "properties": {
+          "expectedUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "acknowledgeMaturityNodes": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "RecipeDeliveryOutcome": {
+        "enum": [
+          "Unconfirmed",
+          "Received",
+          "Rejected"
+        ]
+      },
+      "RecipeDeliveryReceipt": {
+        "required": [
+          "id",
+          "stationId",
+          "jobId",
+          "jobName",
+          "sourceVersion",
+          "workflowHash",
+          "localVersion",
+          "requiresValidation",
+          "publishedVersion",
+          "jobUpdatedAt",
+          "receivedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "stationId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "jobName": {
+            "type": "string"
+          },
+          "sourceVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "workflowHash": {
+            "type": "string"
+          },
+          "localVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "requiresValidation": {
+            "type": "boolean"
+          },
+          "publishedVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "jobUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "receivedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RecipeRolloutBatch": {
+        "required": [
+          "id",
+          "jobId",
+          "jobName",
+          "sourceVersion",
+          "workflowHash",
+          "createdAt",
+          "stations"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "jobName": {
+            "type": "string"
+          },
+          "sourceVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "workflowHash": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecipeRolloutStation"
+            }
+          }
+        }
+      },
+      "RecipeRolloutRequest": {
+        "required": [
+          "jobId",
+          "sourceVersion",
+          "workflowHash",
+          "stationIds"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "sourceVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "workflowHash": {
+            "type": "string"
+          },
+          "stationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RecipeRolloutStation": {
+        "required": [
+          "stationId",
+          "stationName",
+          "outcome"
+        ],
+        "type": "object",
+        "properties": {
+          "stationId": {
+            "type": "string"
+          },
+          "stationName": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RecipeDeliveryOutcome"
+          },
+          "localVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "detail": {
             "type": [
               "null",
               "string"
@@ -26326,6 +27668,83 @@
           }
         }
       },
+      "ServiceTokenCreated": {
+        "required": [
+          "token",
+          "details"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/ServiceTokenDto"
+          }
+        }
+      },
+      "ServiceTokenDto": {
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scopes",
+          "createdAt",
+          "createdBy",
+          "expiresAt",
+          "lastUsedAt",
+          "revokedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expiresAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "SessionUserResponse": {
         "required": [
           "expiresAt",
@@ -26612,6 +28031,447 @@
           }
         }
       },
+      "SpcAnalysis": {
+        "required": [
+          "dataset",
+          "chartType",
+          "subgroupSize",
+          "grouping",
+          "recordsRead",
+          "recordsUsed",
+          "recordsIgnored",
+          "samplesUsed",
+          "samplesDropped",
+          "nonFiniteSamples",
+          "subgroupCount",
+          "mean",
+          "lowerSpecificationLimit",
+          "upperSpecificationLimit",
+          "capability",
+          "primaryChart",
+          "secondaryChart",
+          "warnings",
+          "truncated",
+          "firstSampleAt",
+          "lastSampleAt"
+        ],
+        "type": "object",
+        "properties": {
+          "dataset": {
+            "type": "string"
+          },
+          "chartType": {
+            "type": "string"
+          },
+          "subgroupSize": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "grouping": {
+            "type": "string"
+          },
+          "recordsRead": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "recordsUsed": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "recordsIgnored": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "samplesUsed": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "samplesDropped": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "nonFiniteSamples": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "subgroupCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "mean": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "lowerSpecificationLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "upperSpecificationLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "capability": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SpcCapability"
+              }
+            ]
+          },
+          "primaryChart": {
+            "$ref": "#/components/schemas/SpcChart"
+          },
+          "secondaryChart": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SpcChart"
+              }
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "firstSampleAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastSampleAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "SpcCapability": {
+        "required": [
+          "cp",
+          "cpk",
+          "pp",
+          "ppk",
+          "lowerSpecificationLimit",
+          "upperSpecificationLimit",
+          "withinSigma",
+          "overallSigma",
+          "outOfSpecificationCount"
+        ],
+        "type": "object",
+        "properties": {
+          "cp": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "cpk": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "pp": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "ppk": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "lowerSpecificationLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "upperSpecificationLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "withinSigma": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "overallSigma": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "outOfSpecificationCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "SpcChart": {
+        "required": [
+          "kind",
+          "label",
+          "centerLine",
+          "upperControlLimit",
+          "lowerControlLimit",
+          "points",
+          "violations"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "centerLine": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "upperControlLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "lowerControlLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpcChartPoint"
+            }
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpcViolation"
+            }
+          }
+        }
+      },
+      "SpcChartPoint": {
+        "required": [
+          "index",
+          "value",
+          "timestamp",
+          "beyondLimits"
+        ],
+        "type": "object",
+        "properties": {
+          "index": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "value": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "beyondLimits": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SpcDatasetSummary": {
+        "required": [
+          "dataset",
+          "recordCount",
+          "payloadBytes",
+          "firstRecordAt",
+          "lastRecordAt"
+        ],
+        "type": "object",
+        "properties": {
+          "dataset": {
+            "type": "string"
+          },
+          "recordCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "payloadBytes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "firstRecordAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastRecordAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "SpcViolation": {
+        "required": [
+          "rule",
+          "startIndex",
+          "endIndex",
+          "description"
+        ],
+        "type": "object",
+        "properties": {
+          "rule": {
+            "type": "string"
+          },
+          "startIndex": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "endIndex": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
       "StartPluginBenchmarkRequest": {
         "required": [
           "datasetId",
@@ -26694,6 +28554,162 @@
               {
                 "$ref": "#/components/schemas/PluginBenchmarkBaselineSnapshot"
               }
+            ]
+          }
+        }
+      },
+      "StationConnection": {
+        "enum": [
+          "Waiting",
+          "Online",
+          "Offline",
+          "Timeout",
+          "Unauthorized",
+          "InvalidResponse",
+          "IdentityMismatch"
+        ]
+      },
+      "StationJob": {
+        "required": [
+          "name",
+          "publishedVersion",
+          "publishedWorkflowHash"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "publishedVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "publishedWorkflowHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "StationRecipeDelivery": {
+        "required": [
+          "stationId",
+          "jobId",
+          "jobName",
+          "sourceVersion",
+          "workflowHash",
+          "requiresValidation",
+          "workflow"
+        ],
+        "type": "object",
+        "properties": {
+          "stationId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "jobName": {
+            "type": "string"
+          },
+          "sourceVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "workflowHash": {
+            "type": "string"
+          },
+          "requiresValidation": {
+            "type": "boolean"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowDefinition"
+          }
+        }
+      },
+      "StationRecipeRollout": {
+        "required": [
+          "batchId",
+          "jobId",
+          "jobName",
+          "sourceVersion",
+          "workflowHash",
+          "createdAt",
+          "delivery"
+        ],
+        "type": "object",
+        "properties": {
+          "batchId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "jobName": {
+            "type": "string"
+          },
+          "sourceVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "workflowHash": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/RecipeRolloutStation"
+          }
+        }
+      },
+      "StationVersionCheck": {
+        "enum": [
+          "NotConfigured",
+          "Unverified",
+          "Matches",
+          "PublishedOnly",
+          "Mismatch"
+        ]
+      },
+      "StationVersionTarget": {
+        "required": [
+          "jobId",
+          "version",
+          "workflowHash"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "workflowHash": {
+            "type": [
+              "null",
+              "string"
             ]
           }
         }

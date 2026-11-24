@@ -3,7 +3,11 @@ import { responseErrorMessage } from './apiErrors';
 import { apiFetch } from './apiClient';
 
 type Messages = { success: (text: string) => unknown; error: (text: string) => unknown };
-type Action = { url: string; action: string; method?: string; body?: unknown; successMessage: string; onSuccess?: (data: unknown) => void };
+type Action = {
+  url: string; action: string; method?: string; body?: unknown; headers?: Record<string, string>;
+  timeoutMs?: number; successMessage: string;
+  onSuccess?: (data: unknown, response: Response) => { error: string } | void;
+};
 type Result = { ok: true } | { ok: false; error: string; cancelled?: boolean };
 
 /** 重复动作同步互斥；停止可在其它动作等待期间发出。所有写请求有期限且不自动重放。 */
@@ -24,7 +28,7 @@ export function useProductionActions(open: boolean, messages: Messages, refresh:
     };
   }, [open]);
 
-  const call = async ({ url, method = 'POST', body, successMessage, action, onSuccess }: Action): Promise<Result> => {
+  const call = async ({ url, method = 'POST', body, headers, timeoutMs = 20_000, successMessage, action, onSuccess }: Action): Promise<Result> => {
     if (!active.current || requests.current.has(action)
       || (action === 'start' && requests.current.has('save')) || (action === 'save' && requests.current.has('start'))) {
       return { ok: false, cancelled: true, error: '操作正在进行，请等待结果。' };
@@ -37,11 +41,11 @@ export function useProductionActions(open: boolean, messages: Messages, refresh:
     setError(undefined);
     const owns = () => active.current && requests.current.get(action) === controller;
     const superseded = () => runtimeAction && generation !== runtimeGeneration.current;
-    const timeout = setTimeout(() => controller.abort(), 20_000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await apiFetch(url, {
         method, signal: controller.signal,
-        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+        headers: body === undefined ? headers : { 'Content-Type': 'application/json', ...headers },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       if (!owns() || superseded()) return { ok: false, cancelled: true, error: '操作已失效。' };
@@ -57,7 +61,13 @@ export function useProductionActions(open: boolean, messages: Messages, refresh:
       const data: unknown = response.status === 204 ? undefined : await response.json();
       if (!owns() || superseded()) return { ok: false, cancelled: true, error: '操作已失效。' };
       if (controller.signal.aborted) throw new Error('请求超时');
-      onSuccess?.(data);
+      const outcome = onSuccess?.(data, response);
+      if (outcome) {
+        setError(outcome.error);
+        messages.error(outcome.error);
+        refresh();
+        return { ok: false, error: outcome.error };
+      }
       messages.success(successMessage);
       refresh();
       return { ok: true };

@@ -4,7 +4,7 @@
  * 纯展示：状态与派生值来自 ./useNodeConfigurationDialogModel，交互动作由弹窗外壳
  * （NodeConfigurationDialog）注入。文案、data-testid 与 ARIA 名称与拆分前保持一致。
  */
-import type { CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import type { Node } from '@xyflow/react';
 import { Alert, Button, Collapse, InputNumber, Segmented, Select, Space, Tag, Tooltip } from 'antd';
 import type { VisionRoi, PortDescriptor } from '../types';
@@ -21,7 +21,7 @@ import SplitHandle from './SplitHandle';
 import SwitchCaseEditor from './SwitchCaseEditor';
 import { runImagePortLabel } from '../useRunImages';
 import { cloneParameters } from '../nodeConfigurationState';
-import { withSwitchPorts } from '../switchPorts';
+import { switchBranchConnections, SWITCH_CASE_PORTS, withSwitchPorts } from '../switchPorts';
 import { canonicalParameterGroup, portDisplayName } from '../i18n/catalog';
 import { parameterMeta } from './nodeConfigurationGeometry';
 import { parameterVisibility } from './nodeConfigurationDialogModel';
@@ -42,12 +42,14 @@ export type NodeConfigurationActions = {
 
 export type NodeConfigurationView = ReturnType<typeof useNodeConfigurationDialogModel> & NodeConfigurationActions;
 
-function PortTable({ ports, input }: { ports: PortDescriptor[]; input?: boolean }) {
+function PortTable({ ports, input, switchOutputs }: { ports: PortDescriptor[]; input?: boolean; switchOutputs?: boolean }) {
   if (!ports.length) return <p className="node-info-muted">无{input ? '输入' : '输出'}端口</p>;
   return <div className="node-info-table-wrap"><table className="node-info-table">
     <thead><tr><th>端口</th><th>数据类型</th>{input && <th>连接要求</th>}</tr></thead>
     <tbody>{ports.map((port) => <tr key={port.name}>
-      <td title={port.label && port.label !== port.name ? port.name : undefined}>{portDisplayName(port.name, port.label)}</td>
+      <td title={port.label && port.label !== port.name ? port.name : undefined}>
+        {switchOutputs && SWITCH_CASE_PORTS.includes(port.name) && port.label ? port.label : portDisplayName(port.name, port.label)}
+      </td>
       <td>{port.dataType}</td>
       {input && <td>{port.required ? '必需' : port.requiredWhen ? '所选操作需要时必需' : '可选'}</td>}
     </tr>)}</tbody>
@@ -59,7 +61,7 @@ export function NodeConfigurationDetails({ model }: { model: NodeConfigurationVi
   return <div className="node-info">
     <NodeDescription text={catalogItem.description ?? undefined} />
     <h3>输入端口</h3><PortTable ports={catalogItem.inputs} input />
-    <h3>输出端口</h3><PortTable ports={withSwitchPorts(catalogItem, draft).outputs} />
+    <h3>输出端口</h3><PortTable ports={withSwitchPorts(catalogItem, draft).outputs} switchOutputs={catalogItem.type === 'flow.switch'} />
     {catalogItem.parameters.some((parameter) => !parameter.internal) && <>
       <h3>参数说明</h3>
       <dl className="node-info-parameters">{catalogItem.parameters.filter((parameter) => !parameter.internal).map((parameter) => {
@@ -90,7 +92,7 @@ export function NodeConfigurationDetails({ model }: { model: NodeConfigurationVi
 
 export function NodeConfigurationWorkspace({ model, shapeMode }: { model: NodeConfigurationView; shapeMode?: 'training' | 'search' }) {
   const {
-    node, catalogItem, nodes, previewBlockedReason, circleSamplingNotice,
+    node, catalogItem, nodes, edges, previewBlockedReason, circleSamplingNotice,
     circleFitConditionNotice, caliperCircleBoundsNotice, caliperLineBoundsNotice, caliperSearchLineBoundsNotice, baseline, imageSource,
     setImageSource, selectedOutputAvailable, selectedInputAvailable, imageCatalogLoading, imageCatalogError, retryImageCatalog,
     imageOutputPorts, imageOutputPortName, setImageOutputPortName, changeShapeWorkspaceTab, trainingSamples, setTrainingSamples,
@@ -121,6 +123,10 @@ export function NodeConfigurationWorkspace({ model, shapeMode }: { model: NodeCo
     canLocateRoiInImage, changeParameter, changeCropRoi, changePerspectiveQuad, runPreview, loadMetrologyImage,
     captureRoiReference, saveAsAsset, clearCropSelection, undoCropSelectionClear, locateRoi,
   } = model;
+  const switchConnections = useMemo(() => catalogItem.type === 'flow.switch' ? switchBranchConnections(node.id, nodes, edges) : undefined,
+    [catalogItem.type, node.id, nodes, edges]);
+  const fuseFrameSet = catalogItem.type === 'image.fuse' && String(draft.sourceMode).trim().toLowerCase() === 'frameset';
+  const legacyFuseAlignment = String(draft.alignmentPolicy).trim().toLowerCase() === 'legacy';
   const draftNode: Node = { ...node, data: { ...node.data, parameters: draft } };
   const perspectiveRoi = (() => {
     const defaults = [0, 0, 100, 0, 100, 100, 0, 100];
@@ -483,7 +489,11 @@ export function NodeConfigurationWorkspace({ model, shapeMode }: { model: NodeCo
         disabled={locked || referenceMismatch}
         onApply={(values) => { for (const [key, value] of Object.entries(values)) changeParameter(key, value); }} />}
       {catalogItem.type === 'flow.switch' && <SwitchCaseEditor value={draft.casesJson} disabled={locked}
+        connections={switchConnections}
         onChange={(value) => changeParameter('casesJson', value)} />}
+      {fuseFrameSet && <Alert showIcon type={legacyFuseAlignment ? 'warning' : 'info'}
+        title={legacyFuseAlignment ? '当前配方跳过对齐校验' : '同步帧组需要空间配准'}
+        description="同步采集用于对齐拍摄时间。用「帧组图像」分别取图，再用「图像配准」和「仿射变换图像」统一到同一参考图，接入图像端口。仅在已验证像素对齐时选择「使用已配准输入」。" />}
       {['coordinate.point', 'coordinate.point3D', 'coordinate.pose'].includes(catalogItem.type)
         && connectedInputPorts.some(port => ['x', 'y', 'z', 'thetaDeg'].includes(port))
         && <Alert type="info" showIcon title="已接线的坐标分量使用上游输入，未接线分量使用本地参数。" style={{ marginBottom: 10 }} />}

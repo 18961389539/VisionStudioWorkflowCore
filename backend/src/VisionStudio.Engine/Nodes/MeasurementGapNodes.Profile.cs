@@ -75,8 +75,10 @@ internal static class ProfileMath
         if (!double.IsFinite(step) || step <= 0) throw new InvalidOperationException("Profile sample step must be a positive finite value.");
         var length = sortedU[^1] - sortedU[0];
         if (length < 1e-9) throw new InvalidOperationException("Profile axial length is degenerate; a nonzero polyline is required.");
-        var count = (int)Math.Max(2, Math.Ceiling(length / step) + 1);
-        if (count > budget) throw new InvalidOperationException($"Profile sample budget exceeded ({budget}); increase sampleStep.");
+        var requestedCount = Math.Max(2, Math.Ceiling(length / step) + 1);
+        if (!double.IsFinite(requestedCount) || requestedCount > budget)
+            throw new InvalidOperationException($"Profile sample budget exceeded ({budget}); increase sampleStep.");
+        var count = (int)requestedCount;
         var resultU = new double[count]; var resultZ = new double[count];
         var segment = 1;
         for (var i = 0; i < count; i++)
@@ -91,26 +93,50 @@ internal static class ProfileMath
         return (resultU, resultZ);
     }
 
-    /// <summary>最小二乘主轴 + 轴向等距重采样，供滤波/粗糙度直接使用。</summary>
-    public static (double[] U, double[] Z, VisionPoint2D Origin, double Ux, double Uy) AxialProfile(
-        VisionPoint2D[] points, double step, int budget)
+    /// <summary>Measure the largest projected input gap before interpolation.</summary>
+    public static (double[] U, double[] Z, VisionPoint2D Origin, double Ux, double Uy, double InputGap) ProjectWithGap(
+        VisionPoint2D[] points)
     {
         var (u, z, origin, ux, uy) = Project(points);
-        var (uniformU, uniformZ) = Uniformize(u, z, step, budget);
-        return (uniformU, uniformZ, origin, ux, uy);
+        var inputGap = 0d;
+        for (var i = 1; i < u.Length; i++) inputGap = Math.Max(inputGap, u[i] - u[i - 1]);
+        return (u, z, origin, ux, uy, inputGap);
+    }
+
+    public static int GaussianRadius(double cutoff, double step)
+        => (int)Math.Min(int.MaxValue, Math.Ceiling(GaussianSigmaPerCutoff / step * cutoff * 3));
+
+    private static readonly double GaussianSigmaPerCutoff = Math.Sqrt(Math.Log(2) / Math.PI) / Math.Sqrt(2 * Math.PI);
+
+    public static NodeExecutorResult? CheckInputGap(NodeDefinition node, double inputGap, int pointCount)
+    {
+        var maximum = node.GetDouble("maxInputGap", 0);
+        if (!double.IsFinite(maximum) || maximum < 0)
+            throw new InvalidOperationException($"{node.Type} maxInputGap must be finite and >= 0.");
+        if (maximum == 0 || inputGap <= maximum) return null;
+        var diagnostics = CoordinateValidation.Diagnostics(node.Type, ("found", false), ("sampleCount", pointCount),
+            ("reason", "profile-input-gap-exceeded"), ("maxObservedInputGap", inputGap), ("maxInputGap", maximum));
+        return new NodeExecutorResult(new Dictionary<string, VisionValue>
+        {
+            ["found"] = VisionValue.Boolean(false), ["sampleCount"] = VisionValue.Integer(pointCount),
+            ["maxObservedInputGap"] = VisionValue.Double(inputGap), ["diagnostics"] = VisionValue.String(diagnostics)
+        }, new Dictionary<string, object?>
+        {
+            ["found"] = false, ["sampleCount"] = pointCount, ["reason"] = "profile-input-gap-exceeded",
+            ["maxObservedInputGap"] = inputGap, ["maxInputGap"] = maximum, ["unit"] = "px", ["diagnostics"] = diagnostics
+        });
     }
 
     /// <summary>
     /// ISO 16610-21 高斯权函数：s(x)=1/(αλc)·exp(-π(x/(αλc))²)，α=√(ln2/π)。
     /// 与标准正态对照可得 σ = αλc/√(2π) ≈ 0.1874λc，这里直接用该 σ 生成核。
     /// </summary>
-    public static double[] Gaussian(double[] values, double cutoff, double step, bool reflect, out int edge)
+    public static double[] Gaussian(double[] values, double cutoff, double step, bool reflect, CancellationToken ct, out int edge)
     {
         if (cutoff <= 0) throw new InvalidOperationException("Cutoff wavelength must be positive for Gaussian filtering.");
-        var sigma = Math.Sqrt(Math.Log(2) / Math.PI) * cutoff / Math.Sqrt(2 * Math.PI);
-        var samplesPerSigma = sigma / step;
-        edge = (int)Math.Ceiling(3 * samplesPerSigma);
-        if (edge < 1 || edge > values.Length / 2) edge = Math.Clamp(values.Length / 4, 0, edge);
+        var samplesPerSigma = GaussianSigmaPerCutoff / step * cutoff;
+        edge = GaussianRadius(cutoff, step);
+        if (edge > values.Length / 2) edge = values.Length / 4;
         var kernel = new double[2 * edge + 1];
         var total = 0.0;
         for (var i = -edge; i <= edge; i++)
@@ -122,6 +148,7 @@ internal static class ProfileMath
         var result = new double[values.Length];
         for (var i = 0; i < values.Length; i++)
         {
+            ct.ThrowIfCancellationRequested();
             var sum = 0.0;
             for (var k = -edge; k <= edge; k++)
             {
@@ -540,14 +567,23 @@ public sealed class ProfileFilterNode : IVisionNodeExecutor
         var points = ProfileMath.SelectContour(context, node, closed);
         if (points.Length < 3) return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", nodeType: Type));
 
-        var (u, z, origin, ux, uy) = ProfileMath.AxialProfile(points, step, 20000);
+        var (inputU, inputZ, origin, ux, uy, inputGap) = ProfileMath.ProjectWithGap(points);
+        if (ProfileMath.CheckInputGap(node, inputGap, points.Length) is { } gapFailure) return ValueTask.FromResult(gapFailure);
+        var (u, z) = ProfileMath.Uniformize(inputU, inputZ, step, ToleranceGeometry.MaxPoints);
         var length = u[^1] - u[0];
+        var actualStep = length / (u.Length - 1);
         var cutoff = cutoffParam > 0 ? cutoffParam : length / 5;
-        if (cutoff <= step * 2) throw new InvalidOperationException("measure.profileFilter cutoffWavelength must exceed two sample steps; lower sampleStep or raise the cutoff.");
-        var mean = ProfileMath.Gaussian(z, cutoff, step, endEffect == "reflect", out var edge);
-        var start = 0; var end = u.Length;
-        if (endEffect == "discard") { start = Math.Min(edge, u.Length / 4); end = Math.Max(start + 2, u.Length - start); }
+        if (cutoff <= actualStep * 2) throw new InvalidOperationException("measure.profileFilter cutoffWavelength must exceed two sample steps. Lower sampleStep or raise the cutoff.");
+        var reflect = endEffect == "reflect";
+        var requestedRadius = ProfileMath.GaussianRadius(cutoff, actualStep);
+        if (!reflect && requestedRadius > (u.Length - 2) / 2)
+            return ValueTask.FromResult(ToleranceGeometry.Missing(u.Length, "insufficient-gaussian-support", nodeType: Type));
+        var mean = ProfileMath.Gaussian(z, cutoff, actualStep, reflect, cancellationToken, out var edge);
+        var start = reflect ? 0 : edge;
+        var end = reflect ? u.Length : u.Length - edge;
         var removed = u.Length - (end - start);
+        var usableLength = u[end - 1] - u[start];
+        var kernelTruncated = edge < requestedRadius;
 
         var waviness = new VisionPoint2D[end - start];
         var residual = new VisionPoint2D[end - start];
@@ -565,6 +601,8 @@ public sealed class ProfileFilterNode : IVisionNodeExecutor
         var residualRms = end > start ? Math.Sqrt(sumSquares / (end - start)) : 0;
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", residual.Length),
             ("cutoff", cutoff), ("length", length), ("removedPointCount", removed), ("endEffect", endEffect),
+            ("actualSampleStep", actualStep), ("maxObservedInputGap", inputGap),
+            ("usableLength", usableLength), ("kernelTruncated", kernelTruncated), ("unit", "px"),
             ("residualPeak", residualPeak), ("wavinessPeak", wavinessPeak));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
@@ -574,12 +612,16 @@ public sealed class ProfileFilterNode : IVisionNodeExecutor
                 ["residual"] = VisionValue.PointList(residual), ["length"] = VisionValue.Double(length),
                 ["residualPeak"] = VisionValue.Double(residualPeak), ["wavinessPeak"] = VisionValue.Double(wavinessPeak),
                 ["residualRms"] = VisionValue.Double(residualRms),
+                ["actualSampleStep"] = VisionValue.Double(actualStep), ["maxObservedInputGap"] = VisionValue.Double(inputGap),
+                ["usableLength"] = VisionValue.Double(usableLength), ["kernelTruncated"] = VisionValue.Boolean(kernelTruncated),
                 ["removedPointCount"] = VisionValue.Integer(removed), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["found"] = true, ["cutoff"] = cutoff, ["length"] = length, ["sampleCount"] = residual.Length,
                 ["removedPointCount"] = removed, ["endEffect"] = endEffect, ["residualPeak"] = residualPeak,
+                ["actualSampleStep"] = actualStep, ["maxObservedInputGap"] = inputGap,
+                ["usableLength"] = usableLength, ["kernelTruncated"] = kernelTruncated,
                 ["wavinessPeak"] = wavinessPeak, ["residualRms"] = residualRms, ["unit"] = "px",
                 ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             }));
@@ -604,6 +646,9 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
         if (!double.IsFinite(evaluationParam) || evaluationParam < 0) throw new InvalidOperationException("measure.roughness evaluationLength must be finite and >= 0 (0 uses the whole profile).");
         var maxRa = node.GetDouble("maxRa", 0);
         if (!double.IsFinite(maxRa) || maxRa < 0) throw new InvalidOperationException("measure.roughness maxRa must be finite and >= 0 (0 disables the gate).");
+        var endEffect = node.GetString("endEffect", "reflect").Trim().ToLowerInvariant();
+        if (endEffect is not ("reflect" or "discard"))
+            throw new InvalidOperationException("measure.roughness endEffect must be reflect or discard.");
 
         VisionPoint2D[] points;
         if (context.TryGetValue("pointList", out var wired))
@@ -618,17 +663,34 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
         }
         if (points.Length < 4) return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", nodeType: Type));
 
-        var (u, z, _, _, _) = ProfileMath.AxialProfile(points, step, 20000);
+        var (inputU, inputZ, _, _, _, inputGap) = ProfileMath.ProjectWithGap(points);
+        if (ProfileMath.CheckInputGap(node, inputGap, points.Length) is { } gapFailure) return ValueTask.FromResult(gapFailure);
+        var (u, z) = ProfileMath.Uniformize(inputU, inputZ, step, ToleranceGeometry.MaxPoints);
         var length = u[^1] - u[0];
+        var actualStep = length / (u.Length - 1);
         var cutoff = cutoffParam > 0 ? cutoffParam : length / 5;
-        if (cutoff <= step * 2) throw new InvalidOperationException("measure.roughness cutoffWavelength must exceed two sample steps; lower sampleStep or raise the cutoff.");
-        var mean = ProfileMath.Gaussian(z, cutoff, step, true, out _);
-        var residual = z.Select((value, i) => value - mean[i]).ToArray();
+        if (cutoff <= actualStep * 2) throw new InvalidOperationException("measure.roughness cutoffWavelength must exceed two sample steps. Lower sampleStep or raise the cutoff.");
+        var reflect = endEffect == "reflect";
+        var requestedRadius = ProfileMath.GaussianRadius(cutoff, actualStep);
+        if (!reflect && requestedRadius > (u.Length - 3) / 2)
+            return ValueTask.FromResult(ToleranceGeometry.Missing(u.Length, "insufficient-gaussian-support", nodeType: Type));
+        var start = reflect ? 0 : requestedRadius;
+        var end = reflect ? u.Length : u.Length - requestedRadius;
+        var available = u[end - 1] - u[start];
+        var requestedLength = evaluationParam > 0 ? Math.Min(evaluationParam, available) : available;
+        var keep = Math.Min(end - start, (int)Math.Floor(requestedLength / actualStep + 1e-9) + 1);
+        if (keep < 3)
+            return ValueTask.FromResult(ToleranceGeometry.Missing(keep, "insufficient-evaluation-samples", nodeType: Type));
 
-        var evaluated = evaluationParam > 0 ? Math.Min(evaluationParam, length) : length;
-        var keep = Math.Max(3, (int)Math.Round(evaluated / step));
-        if (keep >= residual.Length) keep = residual.Length;
-        var window = residual[(residual.Length - keep)..];
+        var mean = ProfileMath.Gaussian(z, cutoff, actualStep, reflect, cancellationToken, out var edge);
+        var kernelTruncated = edge < requestedRadius;
+        var evaluated = u[end - 1] - u[end - keep];
+        var window = new double[keep];
+        for (var i = 0; i < keep; i++)
+        {
+            var sample = end - keep + i;
+            window[i] = z[sample] - mean[sample];
+        }
         var ra = window.Average(Math.Abs);
         var rq = Math.Sqrt(window.Average(v => v * v));
         var rp = window.Max();
@@ -650,7 +712,9 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
         var within = maxRa <= 0 || ra <= maxRa;
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", window.Length),
             ("cutoff", cutoff), ("evaluationLength", evaluated), ("ra", ra), ("rq", rq), ("rz", rz), ("rmax", rmax),
-            ("samplingLengths", rzValues.Count), ("withinTolerance", within));
+            ("samplingLengths", rzValues.Count), ("withinTolerance", within), ("gateEnabled", maxRa > 0),
+            ("actualSampleStep", actualStep), ("maxObservedInputGap", inputGap), ("endEffect", endEffect),
+            ("kernelTruncated", kernelTruncated), ("unit", "px"), ("measurementKind", "imageTrend"));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -659,12 +723,18 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
                 ["ra"] = VisionValue.Double(ra), ["rq"] = VisionValue.Double(rq), ["rz"] = VisionValue.Double(rz),
                 ["rp"] = VisionValue.Double(rp), ["rv"] = VisionValue.Double(rv), ["rmax"] = VisionValue.Double(rmax),
                 ["zeroCrossings"] = VisionValue.Integer(crossings), ["withinTolerance"] = VisionValue.Boolean(within),
+                ["actualSampleStep"] = VisionValue.Double(actualStep), ["maxObservedInputGap"] = VisionValue.Double(inputGap),
+                ["rzSamplingLengths"] = VisionValue.Integer(rzValues.Count), ["kernelTruncated"] = VisionValue.Boolean(kernelTruncated),
+                ["gateEnabled"] = VisionValue.Boolean(maxRa > 0), ["unit"] = VisionValue.String("px"),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["found"] = true, ["ra"] = ra, ["rq"] = rq, ["rz"] = rz, ["rp"] = rp, ["rv"] = rv, ["rmax"] = rmax,
                 ["cutoff"] = cutoff, ["evaluationLength"] = evaluated, ["sampleCount"] = window.Length,
+                ["actualSampleStep"] = actualStep, ["maxObservedInputGap"] = inputGap, ["endEffect"] = endEffect,
+                ["rzSamplingLengths"] = rzValues.Count, ["kernelTruncated"] = kernelTruncated,
+                ["gateEnabled"] = maxRa > 0, ["measurementKind"] = "imageTrend",
                 ["zeroCrossings"] = crossings, ["withinTolerance"] = within, ["maxRa"] = maxRa,
                 ["unit"] = "px", ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             }));

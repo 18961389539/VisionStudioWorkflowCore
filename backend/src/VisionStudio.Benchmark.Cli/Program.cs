@@ -4,12 +4,18 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using VisionStudio.Benchmark.Cli;
 
 const int ExitSuccess = 0;
 const int ExitRegressionGateFailed = 10;
 const int ExitBenchmarkFailed = 11;
 const int ExitInfrastructureError = 12;
 const int ExitTimedOut = 13;
+
+// P2 引擎微基准（2026-11-23）：--engine-bench 在 CliOptions.Parse 之前分发，
+// 因为插件门禁的参数解析会拒绝未知开关。
+if (args.Contains("--engine-bench", StringComparer.Ordinal))
+    return EngineBenchmark.Run(args, Console.Out, Console.Error);
 
 try
 {
@@ -327,6 +333,9 @@ sealed record CliOptions(
         Console.WriteLine("  --summary FILE               Optional Markdown summary; GITHUB_STEP_SUMMARY is auto-detected");
         Console.WriteLine("  --poll-ms N                  Poll interval (default 1000)");
         Console.WriteLine("  --timeout-seconds N          Overall benchmark timeout (default 3600)");
+        Console.WriteLine();
+        Console.WriteLine("Engine microbenchmark (golden fixtures, nightly gate):");
+        Console.WriteLine("  dotnet run --project backend/src/VisionStudio.Benchmark.Cli -- --engine-bench [--update-baseline] [--samples N]");
         Console.WriteLine();
         Console.WriteLine("Exit codes: 0=pass, 10=regression gate fail, 11=benchmark failed/cancelled, 12=infrastructure/config error, 13=timeout.");
     }

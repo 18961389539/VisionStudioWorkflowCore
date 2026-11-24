@@ -8,6 +8,9 @@ public static class SecurityRoles
     public const string Engineer = "Engineer";
     public const string Administrator = "Administrator";
 
+    /// <summary>服务令牌主体角色（P3-6）。只经作用域策略授权，刻意不在 <see cref="All"/> 里：不能分配给登录用户。</summary>
+    public const string Service = "Service";
+
     public static readonly string[] All = [Operator, Engineer, Administrator];
 
     public static bool IsValid(string role) => All.Contains(role, StringComparer.OrdinalIgnoreCase);
@@ -18,6 +21,33 @@ public static class SecurityPolicies
     public const string Operator = "OperatorOrAbove";
     public const string Engineer = "EngineerOrAbove";
     public const string Administrator = "AdministratorOnly";
+
+    /// <summary>追溯结果读取：人类 Operator 及以上，或持有 results:read 的服务令牌。</summary>
+    public const string ResultsRead = "ResultsReadOrScope";
+
+    /// <summary>触发流程运行：人类 Engineer 及以上，或持有 runs:run 的服务令牌。</summary>
+    public const string RunTrigger = "RunTriggerOrScope";
+    public const string StationRead = "StationReadOrScope";
+    public const string StationDelivery = "StationRecipeDeliveryScope";
+}
+
+public static class SecurityClaims
+{
+    public const string Scope = "scope";
+    public const string ServiceTokenId = "service_token_id";
+}
+
+public static class ServiceScopes
+{
+    public const string ResultsRead = "results:read";
+    public const string RunsRun = "runs:run";
+
+    public const string StationRead = "stations:read";
+
+    public const string StationDelivery = "stations:deliver";
+    public static readonly string[] All = [ResultsRead, RunsRun, StationRead, StationDelivery];
+
+    public static bool IsValid(string scope) => All.Contains(scope, StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class SecurityOptions
@@ -93,6 +123,35 @@ public sealed record AuditEventDto(
     string? CorrelationId,
     string? ClientIp);
 
+public sealed record CreateServiceTokenRequest(string Name, string[]? Scopes, int? ExpiresInDays);
+
+/// <summary>令牌元数据。明文 token 只在创建/轮换响应里出现一次，之后任何读接口都不返回。</summary>
+public sealed record ServiceTokenDto(
+    string Id,
+    string Name,
+    string Prefix,
+    IReadOnlyList<string> Scopes,
+    DateTimeOffset CreatedAt,
+    string? CreatedBy,
+    DateTimeOffset? ExpiresAt,
+    DateTimeOffset? LastUsedAt,
+    DateTimeOffset? RevokedAt);
+
+public sealed record ServiceTokenCreated(string Token, ServiceTokenDto Details);
+
+/// <summary>
+/// 审计链校验结果：<see cref="FirstInvalidSeq"/> 是第一个不可信行，<see cref="FirstInvalidReason"/>
+/// 取值 missing-hash / link-mismatch / hash-mismatch。
+/// </summary>
+public sealed record AuditChainVerification(
+    bool Valid,
+    long Checked,
+    long? FirstInvalidSeq,
+    string? FirstInvalidReason,
+    long? LastSeq,
+    string? LastHash,
+    DateTimeOffset VerifiedAt);
+
 public static class SecurityEndpointExtensions
 {
     public static TBuilder RequireOperator<TBuilder>(this TBuilder builder, string action, string resource) where TBuilder : IEndpointConventionBuilder
@@ -103,4 +162,12 @@ public static class SecurityEndpointExtensions
 
     public static TBuilder RequireAdministrator<TBuilder>(this TBuilder builder, string action, string resource) where TBuilder : IEndpointConventionBuilder
     { builder.RequireAuthorization(SecurityPolicies.Administrator); builder.WithAudit(action, resource); return builder; }
+
+    /// <summary>人类 Operator 及以上或服务令牌 results:read；服务令牌的每次读取单独留审计。</summary>
+    public static TBuilder RequireResultsRead<TBuilder>(this TBuilder builder, string action, string resource) where TBuilder : IEndpointConventionBuilder
+    { builder.RequireAuthorization(SecurityPolicies.ResultsRead); builder.WithServiceUsageAudit(action, resource); return builder; }
+
+    /// <summary>人类 Engineer 及以上或服务令牌 runs:run；触发运行始终留审计。</summary>
+    public static TBuilder RequireRunTrigger<TBuilder>(this TBuilder builder, string action, string resource) where TBuilder : IEndpointConventionBuilder
+    { builder.RequireAuthorization(SecurityPolicies.RunTrigger); builder.WithAudit(action, resource); return builder; }
 }

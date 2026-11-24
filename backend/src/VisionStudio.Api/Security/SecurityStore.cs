@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using VisionStudio.Api.Infrastructure;
@@ -372,7 +371,7 @@ VALUES($id,$username,$normalized,$display,$role,1,$salt,$hash,$iter,$at,$at,NULL
         var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, 32); return (salt, hash, iterations);
     }
     private static bool VerifyPassword(string password, byte[] salt, byte[] expected, int iterations) => CryptographicOperations.FixedTimeEquals(Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, expected.Length), expected);
-    private static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+    private static string HashToken(string token) => SecurityHashing.HashToken(token);
     private static string NormalizeUsername(string username) => username.Trim().ToUpperInvariant();
     private static string NormalizeRole(string role) => SecurityRoles.All.First(x => string.Equals(x, role, StringComparison.OrdinalIgnoreCase));
     private static void ValidateRole(string role) { if (!SecurityRoles.IsValid(role)) throw new ApiValidationException($"Role must be one of: {string.Join(", ", SecurityRoles.All)}."); }

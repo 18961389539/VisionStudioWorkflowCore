@@ -1,0 +1,42 @@
+.workstation-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.workstation-heading h2 { margin: 0; font-size: 20px; color: var(--vs-text-1); }
+.workstation-heading p { margin: 4px 0 0; color: var(--vs-text-3); }
+.operator-dashboard, .station-overview { display: grid; gap: 16px; }
+.operator-widgets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
+.operator-widget { display: flex; min-height: 145px; flex-direction: column; justify-content: center; gap: 8px; padding: 18px; border: 1px solid var(--vs-border-frame); border-radius: 10px; background: var(--vs-bg-card); }
+.operator-widget h3 { margin: 0; color: var(--vs-text-3); font-size: 14px; }
+/* 主数字的字号由形态提供：弹窗 42px 封顶，运行时全屏页与 kiosk 各自用变量放大。
+   三种形态共用一个 token，避免"全屏页看起来只是弹窗放大版"。 */
+.operator-widget strong { font-size: var(--operator-number-size, clamp(26px, 3vw, 42px)); line-height: 1.12; font-variant-numeric: tabular-nums; }
+.operator-widget strong[data-result="NG"] { color: var(--vs-text-danger); }
+.operator-widget small, .operator-widget span { color: var(--vs-text-3); font-size: 13px; }
+/* 告警卡：只染边框与标题色，数字保持主色——整卡变红会盖过其它指标 */
+.operator-widget[data-severity='critical'] { border-color: var(--vs-danger); }
+.operator-widget[data-severity='critical'] h3 { color: var(--vs-text-danger); }
+.operator-widget[data-severity='warning'] { border-color: var(--vs-warn-text); }
+.operator-widget[data-severity='warning'] h3 { color: var(--vs-warn-text); }
+.operator-widget .operator-alarm-latest { display: -webkit-box; overflow: hidden; color: var(--vs-text-2); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.is-kiosk .operator-widget .operator-alarm-latest { -webkit-line-clamp: 3; }
+.operator-layout-form { width: 100%; }
+.operator-layout-form .ant-select { width: 100%; }
+.operator-layout-widgets { min-width: 0; margin: 0; padding: 0; border: 0; }
+.operator-layout-widgets legend { margin-bottom: 8px; }
+.operator-layout-order { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.operator-layout-order li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid var(--vs-border-panel); border-radius: 6px; }
+.station-secondary { margin: 3px 0; color: var(--vs-text-3); font-size: 12px; }
+.operator-preview-widget { grid-column: 1 / -1; }
+.operator-inspection-image { display: block; max-width: 100%; max-height: 360px; object-fit: contain; }
+.recipe-rollout-form { display: grid; gap: 10px; margin-bottom: 18px; }
+.recipe-rollout-form p { margin: 0; color: var(--vs-text-3); }
+.recipe-rollout-form > .ant-btn { justify-self: start; }
+.recipe-rollout-stations { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.rollout-receipt { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 3px 0; }
+.rollout-fingerprint { overflow-wrap: anywhere; }
+.operator-workspace-content { display: grid; gap: 14px; }
+.operator-alarm-queue { display: grid; gap: 8px; border: 1px solid var(--vs-border-frame); border-radius: 10px; padding: 12px 16px; background: var(--vs-bg-card); }
+.operator-alarm-queue h3 { margin: 0; font-size: 15px; }
+.operator-alarm-queue ul { list-style: none; display: grid; gap: 8px; margin: 0; padding: 0; }
+.operator-alarm-queue li { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; border-top: 1px solid var(--vs-border-panel); padding-top: 8px; }
+.operator-alarm-message { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; overflow-wrap: anywhere; }
+.station-rollout-progress { margin-top: 5px; padding-top: 4px; border-top: 1px solid var(--vs-border-panel); }
+.station-rollout-filter { min-width: 132px; }

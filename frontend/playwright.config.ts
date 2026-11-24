@@ -2,8 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 /**
  * 端到端测试：补 jsdom 覆盖不到的层次——真实布局引擎、Canvas、React Flow 的
- * 命中判定与事件链。后端行为由 VisionStudio.Api.Tests 覆盖，这里的 API 全部走桩，
- * 因此 e2e 不依赖 .NET 进程，可在任意机器与 CI 上稳定运行。
+ * 命中判定与事件链。真实后端冒烟还验证生产告警的 SignalR 推送、确认和刷新。
  */
 export default defineConfig({
   testDir: './e2e',
@@ -40,7 +39,7 @@ export default defineConfig({
     // 免去每次跑 e2e 都要先 build（沙箱下 build 需先清理 dist）。
     command: 'npx vite --port 4173 --strictPort',
     url: 'http://localhost:4173',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !process.env.CI && !process.env.VISIONSTUDIO_E2E_API,
     timeout: 120_000
   }
 });

@@ -200,7 +200,8 @@ public sealed partial class CalibrationWizardService
         IWebHostEnvironment environment,
         HandEyeCalibrationAssetStore? handEyeAssets = null,
         HandEye3DCalibrationAssetStore? handEye3DAssets = null,
-        ILogger<CalibrationWizardService>? logger = null)
+        ILogger<CalibrationWizardService>? logger = null,
+        IConfiguration? configuration = null)
     {
         _detectBoard = detectBoard;
         _intrinsics = intrinsics;
@@ -211,7 +212,7 @@ public sealed partial class CalibrationWizardService
         _intrinsicAssets = intrinsicAssets;
         _handEyeAssets = handEyeAssets;
         _handEye3DAssets = handEye3DAssets;
-        _persistRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "calibration-wizard");
+        _persistRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "calibration-wizard");
         Directory.CreateDirectory(_persistRoot);
         TryHydrateFromDisk();
         _handEyeSessions = new WizardSessionStore<HandEyeWizardSessionDocument>(

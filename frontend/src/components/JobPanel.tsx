@@ -9,7 +9,9 @@ import type { PrepareWorkflowChange } from '../useWorkflowChanges';
 import { apiFetch } from '../apiClient';
 import { jobs as jobEndpoints, apiUrl } from '../endpoints';
 
-type Props = { open: boolean; onClose: () => void; workflow: WorkflowPayload; prepareWorkflowChange: PrepareWorkflowChange; onRunResult: (result: RunResult) => void; };
+type Props = { open: boolean; onClose: () => void; workflow: WorkflowPayload; prepareWorkflowChange: PrepareWorkflowChange; onRunResult: (result: RunResult) => void;
+  /** 没有可关联记录时，直接打开数据集验证工作区（否则用户卡在空表不知道该去哪跑验证） */
+  onOpenValidation?: () => void; };
 
 type DraftEntry = { key: string; value: unknown };
 
@@ -88,7 +90,7 @@ function ParameterDraft({ title, text, onChange, disabled }: { title: string; te
   );
 }
 
-export default function JobPanel({ open, onClose, workflow, prepareWorkflowChange, onRunResult }: Props) {
+export default function JobPanel({ open, onClose, workflow, prepareWorkflowChange, onRunResult, onOpenValidation }: Props) {
   const [jobs, setJobs] = useState<JobDescriptor[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [name, setName] = useState('');
@@ -342,7 +344,8 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
             setSelectedId(job.id); setTab('versions');
           }} />
         {!loading && navItems.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={filtered ? '没有匹配的配方' : '还没有配方'}>
-          <Button onClick={filtered ? () => { setQuery(''); setStatusFilter('all'); } : openRecipeCreate}>{filtered ? '清空筛选' : '创建第一个配方'}</Button>
+          {/* 未筛选时不重复给创建按钮：右侧空态与顶部各有一个入口，三处同名不同字更容易让人犹豫 */}
+          {filtered && <Button onClick={() => { setQuery(''); setStatusFilter('all'); }}>清空筛选</Button>}
         </Empty>}
         <div className="job-nav-guide"><strong>创建到生产</strong><span>从当前工作流创建配方 → 数据集验证 → 发布 → 生产配置中选用</span></div>
       </section>
@@ -361,7 +364,10 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
             </div>
             <Space wrap>
               <Button onClick={saveVersion} loading={busy} disabled={!canSaveSelectedVersion || !workflow.nodes.length} title={workflowMatchesSelectedRecipe ? '使用当前配方工作流创建新的不可变版本' : '先载入所选配方的基础版本，再编辑并保存'}>保存草稿版本</Button>
-              <Button onClick={runPublished} disabled={!selected.publishedVersion||!selected.publishedDependencyManifestHash}>运行当前版本</Button>
+              <Button onClick={runPublished} disabled={!selected.publishedVersion||!selected.publishedDependencyManifestHash}
+                title={!selected.publishedVersion ? '还没有已发布版本：先完成数据集验证并发布'
+                  : !selected.publishedDependencyManifestHash ? '已发布版本缺少依赖清单（旧版本），重新发布后才能运行'
+                    : '用当前已发布版本启动生产运行'}>运行当前版本</Button>
               <Dropdown menu={{ items: headingMenu }} trigger={['click']}><Button>更多 ▾</Button></Dropdown>
             </Space>
           </div>
@@ -424,7 +430,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
                   <Table size="small" scroll={{ x: 980 }} pagination={false} rowKey="version" dataSource={versions} locale={{ emptyText: '暂无版本' }} columns={[
                     {title:'版本',width:110,render:(_,r)=>r.published?<Tag color="green">V{r.version} 生效</Tag>:r.version===selected.latestVersion?<Tag color="gold">V{r.version} 草稿</Tag>:<Tag>V{r.version}</Tag>},
                     {title:'生命周期',width:110,render:(_,r)=>r.published?<Tag color="green">已发布</Tag>:r.validation?.accepted?<Tag color="blue">已验证</Tag>:r.validation?<Tag color="red">未通过</Tag>:<Tag>草稿</Tag>},
-                    {title:'验证',width:190,render:(_,r)=>r.validation?<span>{r.validation.accepted?'通过':'失败'}{r.validation.summary?` · ${(r.validation.summary.accuracy*100).toFixed(2)}%`:''}</span>:'未关联'},
+                    {title:'验证',width:190,render:(_,r)=>r.validation?<span>{r.validation.accepted?'通过':'失败'}{r.validation.summary?` · ${(r.validation.summary.accuracy*100).toFixed(2)}%`:''}</span>:'未关联验证'},
                     {title:'创建时间',dataIndex:'createdAt',width:165,render:(v:string)=>new Date(v).toLocaleString('zh-CN')},
                     {title:'绑定数',width:80,render:(_,r)=>r.bindingCount?<Tag color="purple">{r.bindingCount}</Tag>:'—'},
                     {title:'变更说明',dataIndex:'note'},
@@ -458,7 +464,12 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
                       rowKey="validationRunId"
                       pagination={false}
                       dataSource={candidates}
-                      locale={{ emptyText: candidatesVersion ? '没有与该版本哈希匹配的已完成验证记录' : '点击“查询可用验证记录”列出候选' }}
+                      locale={{ emptyText: candidatesVersion
+                        ? <div style={{ display: 'grid', gap: 6, justifyItems: 'center' }}>
+                          <span>没有与该版本哈希匹配的已完成验证记录。</span>
+                          {onOpenValidation && <Button size="small" type="primary" ghost onClick={onOpenValidation}>打开数据集验证</Button>}
+                        </div>
+                        : '点击“查询可用验证记录”列出候选' }}
                       columns={[
                         { title: '验证运行', dataIndex: 'validationRunId', render: (v: string) => <Typography.Text code>{v.slice(0, 16)}…</Typography.Text> },
                         { title: '数据集', dataIndex: 'datasetId', width: 180 },

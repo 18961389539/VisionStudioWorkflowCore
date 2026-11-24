@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Modal, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { apiFetch } from '../apiClient';
 import { responseErrorMessage } from '../apiErrors';
 import { templateAssets } from '../endpoints';
@@ -17,7 +17,7 @@ type Props = {
   assetId: string;
   version: number;
   disabled?: boolean;
-  /** 选定资产：version 传该资产的 latest；清除时传 ('', 0)。 */
+  /** 选定版本，清除时传 ('', 0)。 */
   onChange: (assetId: string, version: number) => void;
 };
 
@@ -26,14 +26,15 @@ const formatBytes = (value: number) => value >= 1024 * 1024
   : value >= 1024 ? `${(value / 1024).toFixed(1)} KB` : `${value} B`;
 
 /**
- * match.template 的模板来源选择器（P2）。
+ * 匹配节点的模板来源选择器。
  *
  * 只负责"选哪个资产"，不改变节点执行优先级（端口 > 资产 > 模板文件）。
- * 选择困难点在于用户拿不到资产 id，所以这里把列表、尺寸与最新版本一起显示出来。
+ * 展示可用版本及其对应尺寸。
  */
 export default function TemplateAssetPicker({ assetId, version, disabled, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [assets, setAssets] = useState<TemplateAsset[]>([]);
+  const [versions, setVersions] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [messageApi, holder] = message.useMessage();
@@ -54,6 +55,8 @@ export default function TemplateAssetPicker({ assetId, version, disabled, onChan
   };
 
   useEffect(() => { if (open) void load(); }, [open]);
+  const versionFor = (asset: TemplateAsset) => versions[asset.id]
+    ?? (asset.id === assetId && asset.versions.some(item => item.version === version) ? version : asset.latestVersion);
 
   return (
     <div className="template-asset-picker">
@@ -63,7 +66,7 @@ export default function TemplateAssetPicker({ assetId, version, disabled, onChan
         {assetId
           ? <Tag color="blue">{assetId} · {version > 0 ? `v${version}` : '最新版'}</Tag>
           : <Typography.Text type="secondary">未绑定资产（使用模板端口或模板文件）</Typography.Text>}
-        <Button size="small" disabled={disabled} onClick={() => setOpen(true)}>从资产选择</Button>
+        <Button size="small" disabled={disabled} onClick={() => { setVersions({}); setOpen(true); }}>从资产选择</Button>
         {assetId && <Button size="small" disabled={disabled} onClick={() => { onChange('', 0); messageApi.success('已清除模板资产，节点将按端口或模板文件取图'); }}>清除</Button>}
       </Space>
       <Modal open={open} onCancel={() => setOpen(false)} footer={null} width={900} title="选择模板图资产">
@@ -83,20 +86,25 @@ export default function TemplateAssetPicker({ assetId, version, disabled, onChan
                   <Typography.Text type="secondary" code>{asset.id}</Typography.Text>
                 </Space>
               ) },
-              { title: '最新版本', dataIndex: 'latestVersion', width: 100, render: (value: number) => <Tag>v{value}</Tag> },
+              { title: '版本', width: 125, render: (_: unknown, asset) => <Select
+                aria-label={`选择 ${asset.name} 的版本`} size="small" value={versionFor(asset)} style={{ width: '100%' }}
+                options={asset.versions.map(item => ({ value: item.version,
+                  label: `v${item.version}${item.version === asset.latestVersion ? '（最新）' : ''}` }))}
+                onChange={selected => setVersions(previous => ({ ...previous, [asset.id]: selected }))} /> },
               { title: '尺寸', width: 130, render: (_: unknown, asset) => {
-                const latest = asset.versions.find((item) => item.version === asset.latestVersion);
-                return latest ? `${latest.width} × ${latest.height}` : '—';
+                const selected = asset.versions.find(item => item.version === versionFor(asset));
+                return selected ? `${selected.width} × ${selected.height}` : '—';
               } },
               { title: '大小', width: 100, render: (_: unknown, asset) => {
-                const latest = asset.versions.find((item) => item.version === asset.latestVersion);
-                return latest ? formatBytes(latest.sizeBytes) : '—';
+                const selected = asset.versions.find(item => item.version === versionFor(asset));
+                return selected ? formatBytes(selected.sizeBytes) : '—';
               } },
               { title: '操作', width: 90, render: (_: unknown, asset) => (
                 <Button size="small" type="primary" onClick={() => {
-                  onChange(asset.id, asset.latestVersion);
+                  const selected = versionFor(asset);
+                  onChange(asset.id, selected);
                   setOpen(false);
-                  messageApi.success(`已选择模板资产 ${asset.id} v${asset.latestVersion}`);
+                  messageApi.success(`已选择模板资产 ${asset.id} v${selected}`);
                 }}>选用</Button>
               ) }
             ]}

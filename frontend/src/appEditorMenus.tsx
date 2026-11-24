@@ -23,6 +23,7 @@ export type PanelOpeners = {
   setRobotsOpen: (value: boolean) => void;
   setDevicesOpen: (value: boolean) => void;
   setProductionOpen: (value: boolean) => void;
+  setSpcOpen: (value: boolean) => void;
   setDiagnosticsOpen: (value: boolean) => void;
   setPluginsOpen: (value: boolean) => void;
   setModelPackagesOpen: (value: boolean) => void;
@@ -54,6 +55,8 @@ export function buildPaletteTargets(focusMode: boolean): PaletteCommand[] {
     { key: 'focus', title: focusMode ? '退出专注画布' : '专注画布', group: '命令', keywords: 'focus fullscreen 专注' },
     { key: 'theme', title: '切换深浅主题', group: '命令', keywords: 'theme dark light 主题' },
     { key: 'lang', title: '切换界面语言 / Switch language', group: '命令', keywords: 'language lang 语言 english' },
+    { key: 'shortcuts', title: '键盘快捷键', group: '命令', keywords: 'shortcut keyboard 快捷键 help' },
+    { key: 'about', title: '关于 VisionStudio', group: '命令', keywords: 'about version 版本 关于' },
     { key: 'panel:calibration', title: '标定', group: '面板', keywords: 'calibration' },
     { key: 'panel:traces', title: '运行追溯', group: '面板', keywords: 'trace' },
     { key: 'panel:jobs', title: '配方管理', group: '面板', keywords: 'job recipe' },
@@ -64,6 +67,7 @@ export function buildPaletteTargets(focusMode: boolean): PaletteCommand[] {
     { key: 'panel:robots', title: '机器人', group: '面板', keywords: 'robot' },
     { key: 'panel:devices', title: '设备运行时', group: '面板', keywords: 'device plc' },
     { key: 'panel:production', title: '生产运行', group: '面板', keywords: 'production' },
+    { key: 'panel:spc', title: 'SPC 看板', group: '面板', keywords: 'spc control chart 控制图 过程能力' },
     { key: 'panel:diagnostics', title: '诊断中心', group: '面板', keywords: 'diagnostics' },
     { key: 'panel:plugins', title: '插件包管理', group: '面板', keywords: 'plugin' },
     { key: 'panel:models', title: '外部训练包', group: '面板', keywords: 'model package' },
@@ -82,6 +86,8 @@ export function runPaletteCommand(key: string, context: PaletteContext): void {
     case 'focus': context.toggleFocusMode(); return;
     case 'theme': context.toggleTheme(); return;
     case 'lang': context.toggleLang(); return;
+    case 'shortcuts': context.setShortcutsOpen(true); return;
+    case 'about': context.setAboutOpen(true); return;
     case 'panel:calibration': context.setCalibrationOpen(true); return;
     case 'panel:traces': context.setTracesOpen(true); return;
     case 'panel:jobs': context.setJobsOpen(true); return;
@@ -92,6 +98,7 @@ export function runPaletteCommand(key: string, context: PaletteContext): void {
     case 'panel:robots': context.setRobotsOpen(true); return;
     case 'panel:devices': context.setDevicesOpen(true); return;
     case 'panel:production': context.setProductionOpen(true); return;
+    case 'panel:spc': context.setSpcOpen(true); return;
     case 'panel:diagnostics': context.setDiagnosticsOpen(true); return;
     case 'panel:plugins': context.setPluginsOpen(true); return;
     case 'panel:models': context.setModelPackagesOpen(true); return;
@@ -198,7 +205,8 @@ export function buildProductionMenuItems(openers: PanelOpeners): NonNullable<Men
   return [
     { key: 'jobs', label: '配方管理', onClick: () => openers.setJobsOpen(true) },
     { key: 'traces', label: '运行追溯', onClick: () => openers.setTracesOpen(true) },
-    { key: 'production', label: '生产运行', onClick: () => openers.setProductionOpen(true) }
+    { key: 'production', label: '生产运行', onClick: () => openers.setProductionOpen(true) },
+    { key: 'spc', label: 'SPC 看板', onClick: () => openers.setSpcOpen(true) }
   ];
 }
 
@@ -213,6 +221,7 @@ export type ToolMenuContext = {
   redo: () => void;
   toggleTheme: () => void;
   openWorkflowPicker: () => void;
+  reopenOnboarding: () => void;
 };
 
 export function buildToolMenuItems(context: ToolMenuContext, openers: PanelOpeners): NonNullable<MenuProps['items']> {
@@ -224,6 +233,7 @@ export function buildToolMenuItems(context: ToolMenuContext, openers: PanelOpene
     { key: 'undo', label: `撤销${context.history.undoLabel ? ` · ${context.history.undoLabel}` : ''}（Ctrl+Z）`, disabled: !context.history.canUndo, onClick: context.undo },
     { key: 'redo', label: `重做${context.history.redoLabel ? ` · ${context.history.redoLabel}` : ''}（Ctrl+Shift+Z）`, disabled: !context.history.canRedo, onClick: context.redo },
     { key: 'shortcuts', label: '键盘快捷键…', onClick: () => openers.setShortcutsOpen(true) },
+    { key: 'onboarding', label: '重新打开上手引导', onClick: context.reopenOnboarding },
     { type: 'divider' },
     { key: 'plugins', label: '插件', onClick: () => openers.setPluginsOpen(true) },
     { key: 'modules', label: '可复用模块', onClick: () => openers.setModulesOpen(true) },

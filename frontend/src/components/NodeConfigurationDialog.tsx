@@ -146,6 +146,23 @@ export default function NodeConfigurationDialog(props: Props) {
     } catch (error) { setPreviewError(error instanceof Error ? error.message : '无法获取输入图像。'); }
     finally { setPreviewBusy(false); }
   };
+  const captureReplayManifest = async () => {
+    if (locked || externalChange || previewBlockedReason) return;
+    setPreviewBusy(true); setPreviewError(undefined);
+    try {
+      const next = await onPreview({
+        ...cloneParameters(draft), pathMode: 'directory', captureManifest: true, indexPolicy: 'wrap', pageIndex: 0
+      });
+      const report = next.nodeReports.filter(item => item.nodeId === node.id).slice(-1)[0];
+      const manifest = report?.outputs?.manifestJson?.value;
+      if (!next.success || !report?.success || typeof manifest !== 'string' || !manifest)
+        throw new Error(report?.error || next.error || '未生成回放清单。');
+      setDraft(current => ({ ...current, pathMode: 'manifest', manifestJson: manifest }));
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : '未生成回放清单。');
+      setResultExpanded(true);
+    } finally { setPreviewBusy(false); }
+  };
   const captureRoiReference = async () => {
     if (locked || externalChange || previewBlockedReason || !debugImageConnected) return;
     setPreviewBusy(true); setPreviewError(undefined);
@@ -284,7 +301,10 @@ export default function NodeConfigurationDialog(props: Props) {
         </div>
       </div>}>
       {externalChange && <Alert type="warning" showIcon title="流程中的节点参数已更新，请关闭后重新打开，避免覆盖其他修改。" />}
-      {catalogItem.type === 'match.template' && <TemplateAssetPicker
+      {catalogItem.type === 'image.load' && draft.pathMode !== 'file' && <Button
+        size="small" disabled={locked || externalChange || Boolean(previewBlockedReason)}
+        onClick={() => void captureReplayManifest()}>{draft.pathMode === 'manifest' ? '重新生成回放清单' : '生成回放清单'}</Button>}
+      {['match.template', 'match.feature'].includes(catalogItem.type) && <TemplateAssetPicker
         assetId={typeof draft.templateAssetId === 'string' ? draft.templateAssetId.trim() : ''}
         version={Number(draft.templateAssetVersion ?? 0)}
         disabled={locked}

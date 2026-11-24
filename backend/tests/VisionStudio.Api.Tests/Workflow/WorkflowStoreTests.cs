@@ -108,12 +108,9 @@ public sealed class WorkflowStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Save_WhenRevisionLagsContent_RejectsEvenMatchingStaleBaseline()
+    public async Task Save_WhenContentChangedExternally_RejectsStaleBaseline()
     {
-        // A02（2026-10-12 第三轮）：内容已替换、修订写入失败会留下"旧修订 + 新内容"的漂移——
-        // 旧修订绝不能通过检查去覆盖新代内容。
         var baseline = (await _store.SaveAsync("lag", new WorkflowDefinition("lag", "V1", [], []), CancellationToken.None)).Revision;
-        // 模拟"内容已更新、修订未更新"的保存中断中间态（注入必须指向真实存储根）。
         await File.WriteAllTextAsync(Path.Combine(_storeRoot, "lag.json"),
             "{\"id\":\"lag\",\"name\":\"V2-content\",\"nodes\":[],\"edges\":[]}");
 
@@ -129,7 +126,7 @@ public sealed class WorkflowStoreTests : IDisposable
     {
         // A02：内容存在但修订缺失（不一致态）时，expected=''（"期望新建"）必须拒绝而不是覆盖。
         await _store.SaveAsync("orphan", new WorkflowDefinition("orphan", "V1", [], []), CancellationToken.None);
-        File.Delete(Path.Combine(_storeRoot, "orphan.revision.json"));
+        Assert.False(File.Exists(Path.Combine(_storeRoot, "orphan.revision.json")));
 
         await Assert.ThrowsAsync<ApiConflictException>(() =>
             _store.SaveAsync("orphan", new WorkflowDefinition("orphan", "V2", [], []), CancellationToken.None, expectedRevision: ""));
@@ -224,10 +221,8 @@ public sealed class WorkflowStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadWithRevision_SelfHealsDriftedRevisionRecord()
+    public async Task LoadWithRevision_UsesContentAndIgnoresLegacyRevisionFile()
     {
-        // F04：保存中断/外部改动让旁路修订漂移——GET 必须返回**内容对应**的修订（内容为权威自愈），
-        // 且以该修订保存不再误报 409。
         await _store.SaveAsync("drift", new WorkflowDefinition("drift", "V1", [], []), CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(_storeRoot, "drift.revision.json"),
             "{\"revision\":\"deadbeef\",\"savedAt\":\"2026-01-01T00:00:00Z\"}");
@@ -236,16 +231,15 @@ public sealed class WorkflowStoreTests : IDisposable
         Assert.NotNull(loaded);
         var healed = loaded!.Value.Revision;
         Assert.NotEqual("deadbeef", healed);
-        Assert.Equal(healed, await _store.GetRevisionAsync("drift", CancellationToken.None)); // 已自愈落盘
+        Assert.Equal(healed, await _store.GetRevisionAsync("drift", CancellationToken.None));
 
         await _store.SaveAsync("drift", new WorkflowDefinition("drift", "V2", [], []), CancellationToken.None, expectedRevision: healed);
         Assert.Equal("V2", (await _store.LoadAsync("drift", CancellationToken.None))!.Name);
     }
 
     [Fact]
-    public async Task Save_WithUnreadableRevisionRecord_IsRejected()
+    public async Task Save_WithUnreadableLegacyRevisionRecord_StillChecksTheActualContent()
     {
-        // F04：损坏的修订不能当作"安全的无基线"——显式基线一律 409，要求先核对/修复。
         await _store.SaveAsync("broken", new WorkflowDefinition("broken", "V1", [], []), CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(_storeRoot, "broken.revision.json"), "not-json");
 
@@ -256,27 +250,19 @@ public sealed class WorkflowStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Save_WhenRevisionFinalizeFails_CommitsContentAndReportsDeferred()
+    public async Task Save_WithLockedLegacyRevisionFile_AcceptsNextWriteWithoutReload()
     {
-        // Q06（2026-10-13 审查）：修订落定失败（文件被占用）时内容已提交——旧实现返回 500，
-        // 前端据此提示"未写入后端"，实际文档已被覆盖。现在如实报告"延迟落定"，
-        // 且读取路径按"内容为权威"自愈，修订与内容始终可核对。
         var baseline = (await _store.SaveAsync("defer", new WorkflowDefinition("defer", "V1", [], []), CancellationToken.None)).Revision;
         var revisionPath = Path.Combine(_storeRoot, "defer.revision.json");
-        // 允许读取、阻止写入/替换——精确命中"修订落定失败"（与审查探针的锁模式一致）。
+        await File.WriteAllTextAsync(revisionPath, "legacy");
         using var lockHandle = new FileStream(revisionPath, FileMode.Open, FileAccess.Read, FileShare.Read);
 
         var outcome = await _store.SaveAsync("defer", new WorkflowDefinition("defer", "V2", [], []), CancellationToken.None, expectedRevision: baseline);
 
-        Assert.True(outcome.RevisionRecordDeferred);
-        // 内容已提交：文档确实是 V2，而不是"未写入"。
-        Assert.Equal("V2", (await _store.LoadAsync("defer", CancellationToken.None))!.Name);
-
-        lockHandle.Dispose();
-        // 自愈后：读取返回的修订与保存返回的修订一致（内容为权威）。
+        var next = await _store.SaveAsync("defer", new WorkflowDefinition("defer", "V3", [], []), CancellationToken.None, expectedRevision: outcome.Revision);
         var loaded = await _store.LoadWithRevisionAsync("defer", CancellationToken.None);
-        Assert.Equal(outcome.Revision, loaded!.Value.Revision);
-        Assert.Equal(outcome.Revision, await _store.GetRevisionAsync("defer", CancellationToken.None));
+        Assert.Equal("V3", loaded!.Value.Workflow.Name);
+        Assert.Equal(next.Revision, loaded.Value.Revision);
     }
 
     [Fact]

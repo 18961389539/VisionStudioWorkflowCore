@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   ReactFlowProvider, useEdgesState, useNodesState, useNodesInitialized, useReactFlow, type Edge, type Node
 } from '@xyflow/react';
@@ -25,6 +25,7 @@ import { SecurityAccountBadge } from './security';
 import { demos, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, type WorkflowDraft } from './draft';
+import { readStored, removeStored, writeStored, STORAGE_KEYS } from './storage';
 import type { WorkflowIssue } from './validation';
 import type { DocumentBaseline } from './documentSync';
 import { useWorkflowChanges } from './useWorkflowChanges';
@@ -41,7 +42,7 @@ import { onConfigureNode, onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
 import { cloneParameters, type NodeParameters } from './nodeConfigurationState';
 import { applyReferenceParameters } from './roiReference';
-import { withSwitchPorts } from './switchPorts';
+import { removeSwitchBranchEdges, withSwitchPorts } from './switchPorts';
 import type { PluginLoadInfo, WorkflowPayload } from './types';
 import { apiFetch } from './apiClient';
 import { apiUrl } from './endpoints';
@@ -53,6 +54,9 @@ import {
   buildDebugMenuItems, buildDeviceMenuItems, buildMoreMenu, buildNodeContextMenuItems, buildPaletteTargets,
   buildProductionMenuItems, buildToolMenuItems, runPaletteCommand, type PanelOpeners
 } from './appEditorMenus';
+
+// `?view=spc` 独立页面（生产现场大屏/侧屏可用），与面板共用同一实现但单独分包。
+const SpcDashboard = lazy(() => import('./components/SpcDashboard'));
 
 function Editor() {
   // 语言（2026-10-25 接线）：catalog 保存后端英文原文，显示用的本地化目录按语言派生——
@@ -101,6 +105,10 @@ function Editor() {
   // 专注画布（P1）：一键收起全部面板，画布独占窗口；退出时还原进入前的布局
   const [focusMode, setFocusMode] = useState(false);
   const focusSnapshotRef = useRef<LayoutState | null>(null);
+  // 首次上手：只在没关过时出现；关掉写本地偏好，「工具」菜单可重新打开
+  const [onboardingOpen, setOnboardingOpen] = useState(() => readStored(STORAGE_KEYS.onboardingDone) !== '1');
+  const closeOnboarding = () => { writeStored(STORAGE_KEYS.onboardingDone, '1'); setOnboardingOpen(false); };
+  const reopenOnboarding = () => { removeStored(STORAGE_KEYS.onboardingDone); setOnboardingOpen(true); };
   // R07（2026-10-12 复审）/F05（2026-10-12 复核）：并发基线修订**必须绑定它所属的文档**——
   // 单一字符串在切换文档（模板/Job/模块/草稿）后会携带错误修订产生误报 409。
   // undefined = 未知基线（保存前先探测后端）；revision='' = 后端尚无修订记录。
@@ -119,7 +127,7 @@ function Editor() {
     jobsOpen, setJobsOpen, tracesOpen, setTracesOpen, traceRunId, setTraceRunId, commandOpen, setCommandOpen,
     validationOpen, setValidationOpen, modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
     tuningOpen, setTuningOpen, modulesOpen, setModulesOpen, calibrationOpen, setCalibrationOpen, framesOpen, setFramesOpen,
-    productionOpen, setProductionOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
+    productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
     aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen
   } = useEditorPanels();
   const { mode: themeMode, toggle: toggleTheme } = useThemeMode();
@@ -416,15 +424,22 @@ function Editor() {
 
 
   const applyNodeParameters = (parameters: NodeParameters) => {
-    if (!nodeConfigurationId || anyBusy || !nodesRef.current.some((node) => node.id === nodeConfigurationId)) return false;
+    const target = nodesRef.current.find((node) => node.id === nodeConfigurationId);
+    if (!target || anyBusy) return false;
     pushHistory('应用节点参数');
     const committed = cloneParameters(parameters);
-    const targetId = nodeConfigurationId;
-    setNodes((current) => applyReferenceParameters(current, edges, targetId, committed).map((node) => {
-      if (node.id !== targetId) return node;
-      const catalogItem = catalog.find((item) => item.type === node.data.typeKey);
-      return catalogItem ? { ...node, data: { ...node.data, outputs: withSwitchPorts(catalogItem, committed).outputs } } : node;
-    }));
+    const catalogItem = catalog.find((item) => item.type === target.data.typeKey);
+    const nextCatalogItem = catalogItem && withSwitchPorts(catalogItem, committed);
+    const currentEdges = edgesRef.current;
+    const nextEdges = catalogItem?.type === 'flow.switch' && nextCatalogItem
+      ? removeSwitchBranchEdges(target.id, nodesRef.current, currentEdges,
+        withSwitchPorts(catalogItem, target.data.parameters as NodeParameters | undefined).outputs, nextCatalogItem.outputs)
+      : currentEdges;
+    if (nextEdges !== currentEdges) setEdges(nextEdges);
+    setNodes((current) => applyReferenceParameters(current, nextEdges, target.id, committed).map((node) =>
+      node.id === target.id && nextCatalogItem
+        ? { ...node, data: { ...node.data, outputs: nextCatalogItem.outputs } }
+        : node));
     return true;
   };
 
@@ -511,7 +526,7 @@ function Editor() {
   // 面板/弹窗开关集中成一份，供命令面板、顶栏菜单与收尾的挂载点复用。
   const openers: PanelOpeners = {
     setCalibrationOpen, setTracesOpen, setJobsOpen, setValidationOpen, setTuningOpen, setModulesOpen,
-    setCamerasOpen, setRobotsOpen, setDevicesOpen, setProductionOpen, setDiagnosticsOpen, setPluginsOpen,
+    setCamerasOpen, setRobotsOpen, setDevicesOpen, setProductionOpen, setSpcOpen, setDiagnosticsOpen, setPluginsOpen,
     setModelPackagesOpen, setModelAssetsOpen, setFramesOpen, setHardwareProvenanceOpen, setShortcutsOpen, setAboutOpen
   };
   // 命令面板（Ctrl/Cmd+K，2026-10-25）：把散在顶栏菜单、工具箱和按钮上的入口收成一个键盘入口。
@@ -544,7 +559,7 @@ function Editor() {
   const productionMenuItems = buildProductionMenuItems(openers);
   const toolMenuItems = buildToolMenuItems({
     catalogSource, catalogCount: catalog.length, catalogSchemaVersion, loadedPluginCount: plugins.filter((p) => p?.loaded).length,
-    history, themeMode, undo, redo, toggleTheme, openWorkflowPicker
+    history, themeMode, undo, redo, toggleTheme, openWorkflowPicker, reopenOnboarding
   }, openers);
   const moreMenu = buildMoreMenu(
     { showTemplates, openWorkflowPicker, applyLayoutPreset, layoutPreset: layout.preset },
@@ -585,7 +600,7 @@ function Editor() {
   const overlayOpen = Boolean(
     pendingGuard || templateOpen || imagePreviewOpen || workflowPickerOpen || pluginsOpen || camerasOpen
     || robotsOpen || devicesOpen || jobsOpen || tracesOpen || validationOpen || modelPackagesOpen || modelAssetsOpen
-    || tuningOpen || modulesOpen || calibrationOpen || framesOpen || productionOpen || diagnosticsOpen
+    || tuningOpen || modulesOpen || calibrationOpen || framesOpen || productionOpen || spcOpen || diagnosticsOpen
     || hardwareProvenanceOpen || aboutOpen || shortcutsOpen
   );
   useEditorShortcuts({
@@ -625,16 +640,28 @@ function Editor() {
 
 
 
-  if (runtimeOnly) return <>
+  const searchParams = new URLSearchParams(window.location.search);
+  const productionView = searchParams.get('view');
+  // 车间大屏形态：`?view=operator&kiosk=1` 只留操作员工作台，隐藏诊断入口、账号徽标与标签栏，
+  // 字号按视口短边放大。只对操作员视图生效——工位总览是管理视角，不应进 kiosk。
+  const kiosk = productionView === 'operator' && ['1', 'true'].includes(searchParams.get('kiosk') ?? '');
+  // `?view=spc`：独立 SPC 页面。优先于运行时/操作员视图判断，生产宿主也能开。
+  if (productionView === 'spc') return <ErrorBoundary variant="panel" scope="SPC 看板">
+    <Suspense fallback={<div className="panel-loading" role="status" aria-live="polite"><span className="panel-loading-label">正在加载 SPC 看板…</span></div>}>
+      <SpcDashboard open onClose={() => undefined} embedded />
+    </Suspense>
+  </ErrorBoundary>;
+  if (runtimeOnly || productionView === 'operator' || productionView === 'stations') return <>
     <ErrorBoundary variant="panel" scope="生产运行">
-      <ProductionPanel open={true} onClose={() => undefined} embedded />
+      <ProductionPanel open={true} onClose={() => undefined} embedded runtimeOnly={runtimeOnly} kiosk={kiosk}
+        initialView={productionView === 'stations' ? 'stations' : 'operator'} />
     </ErrorBoundary>
-    <Button className="runtime-diagnostics-button" type="primary" ghost onClick={() => setDiagnosticsOpen(true)}>诊断</Button>
+    {!kiosk && <Button className="runtime-diagnostics-button" type="primary" ghost onClick={() => setDiagnosticsOpen(true)}>诊断</Button>}
     {/* 操作员页无顶栏：账号入口固定在「诊断」按钮下方 */}
-    <div className="runtime-account-slot"><SecurityAccountBadge /></div>
-    <ErrorBoundary variant="panel" scope="诊断" onDismiss={() => setDiagnosticsOpen(false)}>
+    {!kiosk && <div className="runtime-account-slot"><SecurityAccountBadge /></div>}
+    {!kiosk && <ErrorBoundary variant="panel" scope="诊断" onDismiss={() => setDiagnosticsOpen(false)}>
       <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
-    </ErrorBoundary>
+    </ErrorBoundary>}
   </>;
 
   const canvas: EditorCanvasAreaProps = {
@@ -649,7 +676,16 @@ function Editor() {
     onDrop: graph.onDrop, cancelLongPress, longPressRef, openNodeMenuAt, draftNotice, locale, restoreDraft,
     discardDraft, showTemplates, openWorkflowPicker, connectionPicker, connectionPickerRef, catalog,
     recentNodeTypes, addNode: graph.addNode, nodeContextMenu, setNodeContextMenu, nodeContextMenuItems,
-    designerWorkflowId, nodeLabels, result, resultStale, running, debugBusy
+    designerWorkflowId, nodeLabels, result, resultStale, running, debugBusy,
+    onboarding: {
+      open: onboardingOpen,
+      onClose: closeOnboarding,
+      onOpenTemplates: showTemplates,
+      onOpenCameras: () => setCamerasOpen(true),
+      onOpenCommand: () => setCommandOpen(true),
+      onOpenValidation: () => setValidationOpen(true),
+      onOpenJobs: () => setJobsOpen(true),
+    }
   };
 
   const overlays: EditorOverlaysProps = {
@@ -667,7 +703,7 @@ function Editor() {
     tracesOpen, setTracesOpen, traceRunId, setTraceRunId, modelPackagesOpen, setModelPackagesOpen,
     modelAssetsOpen, setModelAssetsOpen, validationOpen, setValidationOpen, tuningOpen, setTuningOpen,
     catalog, selectedId, messageApi, modulesOpen, setModulesOpen, insertModule, upgradeSelectedModule,
-    productionOpen, setProductionOpen, diagnosticsOpen, setDiagnosticsOpen, aboutOpen, setAboutOpen,
+    productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, aboutOpen, setAboutOpen,
     hardwareProvenanceOpen, setHardwareProvenanceOpen, pluginsOpen, setPluginsOpen, refreshCatalog
   };
 

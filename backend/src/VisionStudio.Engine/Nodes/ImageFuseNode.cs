@@ -6,21 +6,8 @@ using VisionStudio.Engine.Runtime;
 namespace VisionStudio.Engine.Nodes;
 
 /// <summary>
-/// 多帧融合（image.fuse，2026-10-27 · 缺口分析 P1-13）。
-///
-/// 现场缺口：`camera.syncCapture` 能出 FrameSet，但只有一个 `frameset.image` 能拆一帧，
-/// 没有任何节点能把多帧叠起来。于是"多帧平均降噪（把随机噪声压到 1/√N）"
-/// "多曝光融合（暗部用长曝、亮部用短曝）"在图上完全做不到。
-///
-/// 2026-11-02：补 `sourceMode=frameSet`，直接吃 `camera.syncCapture` 的 FrameSet（按相机 id 排序），
-/// 多相机叠加从 8 根线变成 1 根。`image1..image8` 保留原样（已保存流程的端口不变），两条来源互斥。
-/// 仍保留 8 个图像端口的原因：库里没有 ImageList 端口类型，单帧多曝光场景本来就要逐根接线。
-///
-/// 口径：
-/// - 所有输入必须同尺寸、同通道数、同位深，否则直接失败（尺寸不一致的"平均"是没意义的）；
-/// - 平均与 min/max 走 OpenCV 累加器，任意帧数都很快；中值按像素排序，帧数 ≤8 时用插入排序，
-///   代价是 O(N·W·H)，大图上比平均慢一个数量级——目录描述里写清楚。
-/// - 输出位深跟随输入，浮点累加后饱和回写，不产生绕回。
+/// 逐像素融合图像端口或同步帧组。使用共同的像素网格，并要求尺寸、通道数和位深一致。
+/// 帧组的采集时序和图像的坐标系分别记录在诊断里。
 /// </summary>
 public sealed class ImageFuseNode : IVisionNodeExecutor
 {
@@ -43,7 +30,17 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
         if (sourceMode is not ("images" or "frameset"))
             throw new InvalidOperationException("image.fuse sourceMode must be images or frameSet.");
 
+        var (alignmentPolicy, alignmentStatus) = node.GetString("alignmentPolicy", "legacy").Trim().ToLowerInvariant() switch
+        {
+            "sameframe" => ("sameFrame", "frameVerified"),
+            "prealigned" => ("prealigned", "operatorConfirmed"),
+            "legacy" => ("legacy", "unchecked"),
+            _ => throw new InvalidOperationException("image.fuse alignmentPolicy must be sameFrame, prealigned or legacy.")
+        };
+
         var images = new List<VisionImage>(MaxInputs);
+        var inputSources = new List<string>(MaxInputs);
+        IVisionFrameSet? frameSet = null;
         if (sourceMode == "frameset")
         {
             for (var index = 1; index <= MaxInputs; index++)
@@ -52,14 +49,16 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
                     throw new InvalidOperationException(
                         $"image.fuse sourceMode=frameSet ignores image1..image{MaxInputs}; disconnect them or switch sourceMode=images.");
             }
-            var frameSet = context.TryGetValue("frameSet", out var frameSetValue)
+            frameSet = context.TryGetValue("frameSet", out var frameSetValue)
                 ? frameSetValue.Require<IVisionFrameSet>("frameSet")
                 : throw new InvalidOperationException("image.fuse sourceMode=frameSet requires a frameSet input.");
             // 按相机 id 排序：mean/median/min/max 与顺序无关，但跨运行顺序必须稳定，诊断也要可复现。
-            foreach (var pair in frameSet.Images.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            foreach (var pair in frameSet.Images.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(pair => pair.Key, StringComparer.Ordinal))
             {
                 if (pair.Value is not VisionImage frame)
                     throw new InvalidOperationException($"image.fuse frameSet image '{pair.Key}' is not a VisionImage.");
+                inputSources.Add(pair.Key);
                 images.Add(frame);
             }
         }
@@ -69,6 +68,7 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
             {
                 var port = $"image{index}";
                 if (!context.TryGetValue(port, out _)) continue;
+                inputSources.Add(port);
                 images.Add(context.RequireImage(port));
             }
         }
@@ -83,32 +83,56 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
             throw new InvalidOperationException("image.fuse maxPixels must be within 1000..200000000.");
 
         var reference = images[0].Mat;
+        var referenceSource = inputSources[0];
         if (reference.Empty())
-            throw new InvalidOperationException("image.fuse received an empty image.");
+            throw new InvalidOperationException($"image.fuse input '{referenceSource}' is empty.");
         var pixels = (long)reference.Rows * reference.Cols;
         if (pixels > maxPixels)
             throw new InvalidOperationException(
-                $"image.fuse input is {reference.Cols}x{reference.Rows} ({pixels} px) above maxPixels={maxPixels}.");
+                $"image.fuse input '{referenceSource}' is {reference.Cols}x{reference.Rows} ({pixels} px) above maxPixels={maxPixels}.");
 
         for (var index = 1; index < images.Count; index++)
         {
             var candidate = images[index].Mat;
+            var candidateSource = inputSources[index];
             if (candidate.Empty())
-                throw new InvalidOperationException($"image.fuse input image{index + 1} is empty.");
+                throw new InvalidOperationException($"image.fuse input '{candidateSource}' is empty.");
             if (candidate.Rows != reference.Rows || candidate.Cols != reference.Cols)
                 throw new InvalidOperationException(
-                    $"image.fuse inputs must share the same size: image1 is {reference.Cols}x{reference.Rows}, " +
-                    $"image{index + 1} is {candidate.Cols}x{candidate.Rows}.");
+                    $"image.fuse inputs must share the same size: '{referenceSource}' is {reference.Cols}x{reference.Rows}, " +
+                    $"'{candidateSource}' is {candidate.Cols}x{candidate.Rows}.");
             if (candidate.Channels() != reference.Channels())
                 throw new InvalidOperationException(
-                    $"image.fuse inputs must share the same channel count: image1 has {reference.Channels()}, " +
-                    $"image{index + 1} has {candidate.Channels()}.");
+                    $"image.fuse inputs must share the same channel count: '{referenceSource}' has {reference.Channels()}, " +
+                    $"'{candidateSource}' has {candidate.Channels()}.");
             if (candidate.Depth() != reference.Depth())
                 throw new InvalidOperationException(
-                    $"image.fuse inputs must share the same depth: image1 is {reference.Depth()}, " +
-                    $"image{index + 1} is {candidate.Depth()}.");
+                    $"image.fuse inputs must share the same depth: '{referenceSource}' is {reference.Depth()}, " +
+                    $"'{candidateSource}' is {candidate.Depth()}.");
         }
 
+        var coordinateFrames = images.Select(image => image.CoordinateFrame).ToArray();
+        if (alignmentPolicy == "sameFrame" && (!IsKnownFrame(coordinateFrames[0]) ||
+            coordinateFrames.Any(frame => !string.Equals(frame, coordinateFrames[0], StringComparison.OrdinalIgnoreCase))))
+        {
+            var details = string.Join(", ", inputSources.Zip(coordinateFrames, (source, frame) => $"'{source}'={frame}"));
+            throw new InvalidOperationException(
+                $"image.fuse alignmentPolicy=sameFrame requires a shared known coordinate frame. Inputs: {details}. " +
+                "Register and warp the inputs onto one reference image, or select prealigned after verifying their alignment.");
+        }
+
+        var sourceNames = inputSources.ToArray();
+        var cameraIds = frameSet is null ? Array.Empty<string>() : sourceNames;
+        var diagnostics = CoordinateValidation.Diagnostics(
+            Type, ("mode", mode), ("sourceMode", sourceMode), ("inputCount", images.Count),
+            ("width", reference.Cols), ("height", reference.Rows), ("channels", reference.Channels()),
+            ("alignmentPolicy", alignmentPolicy), ("alignmentStatus", alignmentStatus),
+            ("inputSources", sourceNames), ("inputCoordinateFrames", coordinateFrames),
+            ("cameraIds", cameraIds), ("frameSetGroupId", frameSet?.GroupId),
+            ("timestampBasis", frameSet?.TimestampBasis), ("triggerSkewUs", frameSet?.TriggerSkewUs),
+            ("withinTolerance", frameSet?.WithinTolerance));
+
+        cancellationToken.ThrowIfCancellationRequested();
         using var fused = mode switch
         {
             "min" => Fold(images, (left, right, output) => Cv2.Min(left, right, output)),
@@ -117,13 +141,8 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
             _ => Mean(images)
         };
 
-        var result = new Mat();
-        fused.ConvertTo(result, reference.Type());
-        var image = VisionImage.Own(result);
-
-        var diagnostics = CoordinateValidation.Diagnostics(
-            Type, ("mode", mode), ("sourceMode", sourceMode), ("inputCount", images.Count),
-            ("width", reference.Cols), ("height", reference.Rows), ("channels", reference.Channels()));
+        cancellationToken.ThrowIfCancellationRequested();
+        var image = VisionImage.Own(ImageTransformOutput.Create(result => fused.ConvertTo(result, reference.Type())));
 
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -139,8 +158,17 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
             {
                 ["mode"] = mode, ["inputCount"] = images.Count,
                 ["width"] = reference.Cols, ["height"] = reference.Rows,
+                ["sourceMode"] = sourceMode, ["alignmentPolicy"] = alignmentPolicy, ["alignmentStatus"] = alignmentStatus,
+                ["inputSources"] = sourceNames, ["inputCoordinateFrames"] = coordinateFrames, ["cameraIds"] = cameraIds,
                 ["algorithmBackend"] = "opencv", ["diagnostics"] = diagnostics
             }));
+    }
+
+    private static bool IsKnownFrame(string frame)
+    {
+        var name = frame.Trim();
+        return name.Length > 0 && !name.Equals("CurrentImage", StringComparison.OrdinalIgnoreCase)
+            && !name.Equals("ReferenceImage", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>均值：先在 float32 里累加再除，避免 8 位累加溢出。</summary>
@@ -207,7 +235,7 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
                         var median = images.Count % 2 == 1
                             ? buffer[images.Count / 2]
                             : (buffer[images.Count / 2 - 1] + buffer[images.Count / 2]) / 2;
-                        outputPlanes[channel].Set(y, x, median);
+                        outputPlanes[channel].Set(y, x, (byte)median);
                     }
                 }
             }

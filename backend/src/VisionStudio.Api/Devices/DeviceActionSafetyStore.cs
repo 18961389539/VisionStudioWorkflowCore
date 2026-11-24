@@ -31,7 +31,7 @@ public class DeviceActionSafetyStore
     {
         var configured = configuration.GetValue<string>("Production:DeviceActionSafetyFile");
         _path = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "production", "device-action-safety.json")
+            ? Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "production", "device-action-safety.json")
             : configured;
         _logger = logger;
     }

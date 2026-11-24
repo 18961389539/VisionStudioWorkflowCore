@@ -1,5 +1,6 @@
 using OpenCvSharp;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Runtime;
 
@@ -26,10 +27,8 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
 
         var source = context.RequireImage("image");
-        using var gray = RecognitionImageHelpers.ToGray8(source.Mat);
-        var threshold = ReadThreshold(node);
-        var invert = node.GetBool("invert", false);
-        using var binary = Binarize(gray, threshold, invert);
+        var mask = MaskThreshold.Read(node);
+        using var binary = mask.Apply(source.Mat);
 
         var (components, pixelCount) = BuildComponents(binary, cancellationToken);
         var region = new VisionRegion(binary.Width, binary.Height, components);
@@ -38,8 +37,9 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
         {
             var diagnostics = CoordinateValidation.Diagnostics(
                 Type,
-                ("threshold", threshold),
-                ("invert", invert),
+                ("maskMode", mask.Mode),
+                ("threshold", mask.Value),
+                ("invert", mask.Invert),
                 ("width", binary.Width),
                 ("height", binary.Height),
                 ("componentCount", components.Count),
@@ -58,28 +58,12 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
                 {
                     ["componentCount"] = components.Count,
                     ["pixelCount"] = pixelCount,
-                    ["threshold"] = threshold,
-                    ["invert"] = invert,
+                    ["maskMode"] = mask.Mode,
+                    ["threshold"] = mask.Value,
+                    ["invert"] = mask.Invert,
                     ["diagnostics"] = diagnostics
                 });
         }, cancellationToken));
-    }
-
-    internal static int ReadThreshold(NodeDefinition node)
-    {
-        var threshold = node.GetInt("threshold", 1);
-        if (threshold is < 1 or > 255)
-            throw new InvalidOperationException("mask threshold must be within 1..255 (pixels at or above it belong to the region).");
-        return threshold;
-    }
-
-    /// <summary>≥threshold 记为前景；invert 再取反。输出恒为 8 位单通道 0/255。</summary>
-    internal static Mat Binarize(Mat gray, int threshold, bool invert)
-    {
-        var binary = new Mat();
-        Cv2.Threshold(gray, binary, threshold - 1, 255, ThresholdTypes.Binary);
-        if (invert) Cv2.BitwiseNot(binary, binary);
-        return binary;
     }
 
     /// <summary>
@@ -156,10 +140,8 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
 
         var source = context.RequireImage("image");
-        using var gray = RecognitionImageHelpers.ToGray8(source.Mat);
-        var threshold = RegionFromMaskNode.ReadThreshold(node);
-        var invert = node.GetBool("invert", false);
-        using var binary = RegionFromMaskNode.Binarize(gray, threshold, invert);
+        var mask = MaskThreshold.Read(node);
+        using var binary = mask.Apply(source.Mat);
 
         var retrieval = node.GetString("retrieval", "external").Trim().ToLowerInvariant() switch
         {
@@ -210,8 +192,9 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type,
-            ("threshold", threshold),
-            ("invert", invert),
+            ("maskMode", mask.Mode),
+            ("threshold", mask.Value),
+            ("invert", mask.Invert),
             ("retrieval", retrieval == RetrievalModes.External ? "external" : "all"),
             ("approximation", approximation == ContourApproximationModes.ApproxSimple ? "simple" : "none"),
             ("contourCount", results.Count),
@@ -227,10 +210,60 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
             new Dictionary<string, object?>
             {
                 ["contourCount"] = results.Count,
-                ["threshold"] = threshold,
-                ["invert"] = invert,
+                ["maskMode"] = mask.Mode,
+                ["threshold"] = mask.Value,
+                ["invert"] = mask.Invert,
                 ["minArea"] = minArea,
                 ["diagnostics"] = diagnostics
             }));
+    }
+}
+
+/// <summary>Shared inclusive threshold and optional inversion. Output is always a byte mask with values 0 and 255.</summary>
+internal sealed record class MaskThreshold(string Mode, double Value, bool Invert)
+{
+    public static MaskThreshold Read(NodeDefinition node)
+    {
+        var mode = node.GetString("maskMode", "byte").Trim().ToLowerInvariant();
+        var threshold = mode switch
+        {
+            "byte" => node.GetInt("threshold", 1),
+            "probability" => node.GetDouble("probabilityThreshold", 0.5),
+            _ => throw new InvalidOperationException("maskMode must be byte or probability.")
+        };
+        if (mode == "byte" && threshold is < 1 or > 255)
+            throw new InvalidOperationException("mask threshold must be within 1..255 (pixels at or above it belong to the region).");
+        if (mode == "probability" && (!double.IsFinite(threshold) || threshold is < 0 or > 1))
+            throw new InvalidOperationException("probabilityThreshold must be finite and within 0..1.");
+        return new(mode, threshold, node.GetBool("invert", false));
+    }
+
+    public Mat Apply(Mat source)
+    {
+        var binary = new Mat();
+        try
+        {
+            if (Mode == "probability")
+            {
+                if (source.Empty() || (source.Type() != MatType.CV_32FC1 && source.Type() != MatType.CV_64FC1))
+                    throw new InvalidOperationException("Probability masks require a non-empty, single-channel float32 or float64 image.");
+                Cv2.InRange(source, Scalar.All(0), Scalar.All(1), binary);
+                if (JLVisionOperators.CountNonZero(binary) != source.Total())
+                    throw new InvalidOperationException("Probability mask pixels must be finite and within 0..1.");
+                Cv2.InRange(source, Scalar.All(Value), Scalar.All(1), binary);
+            }
+            else
+            {
+                using var gray = RecognitionImageHelpers.ToGray8(source);
+                Cv2.Threshold(gray, binary, Value - 1, 255, ThresholdTypes.Binary);
+            }
+            if (Invert) Cv2.BitwiseNot(binary, binary);
+            return binary;
+        }
+        catch
+        {
+            binary.Dispose();
+            throw;
+        }
     }
 }

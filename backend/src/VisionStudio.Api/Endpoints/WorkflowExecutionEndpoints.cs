@@ -108,7 +108,7 @@ public static class WorkflowExecutionEndpoints
                     actionIntent.MarkUnknown("the run returned success but an accepted device action still awaits completion confirmation");
             }
             return EndpointResults.StoreAndMapRunResult(result, store);
-        }).RequireEngineer("workflow.run.adhoc", "workflow").Produces<WorkflowRunResult>();
+        }).RequireRunTrigger("workflow.run.adhoc", "workflow").Produces<WorkflowRunResult>();
 
         app.MapPost("/api/debug/run", async (
             DebugRunRequest request,

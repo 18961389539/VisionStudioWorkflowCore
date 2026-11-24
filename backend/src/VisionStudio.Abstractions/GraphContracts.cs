@@ -60,6 +60,8 @@ public sealed record PortDescriptor(string Name, VisionDataType DataType, bool R
 
 public sealed record ParameterOption(string Label, string Value);
 
+public sealed record NodeInputMinimum(VisionDataType DataType, int Count);
+
 public sealed record ParameterVisibility(string Parameter, IReadOnlyList<string> Values);
 
 public sealed record ParameterPresentation(string? Label = null, string? Description = null,
@@ -283,6 +285,10 @@ public sealed record NodeCatalogItem(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     NodeMaturity Maturity = NodeMaturity.Stable)
 {
+    /// <summary>Minimum number of connected inputs of each specified type, in any port order.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<NodeInputMinimum>? MinimumConnectedInputs { get; init; }
+
     /// <summary>该目录是否给出了显式动作声明（与"未声明、走兼容回退"区分）。</summary>
     public bool DeclaresActions => Actions is not null;
 

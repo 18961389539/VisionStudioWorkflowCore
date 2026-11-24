@@ -9,6 +9,7 @@ import NodeCategoryIcon from './NodeCategoryIcon';
 import ExecutionStatus, { executionStatusLabel } from './ExecutionStatus';
 import { summarizeScalars } from '../summaryText';
 import { localizePortName, portDisplayName } from '../i18n/catalog';
+import { SWITCH_CASE_PORTS } from '../switchPorts';
 import { useI18n } from '../i18n/provider';
 import { configureNode, showNodeDetails } from '../uiBridge';
 import type { CSSProperties } from 'react';
@@ -109,7 +110,9 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
     return graphConnectionVerdict(candidate, getNode, candidateEdges);
   };
 
-  const labelOf = (port: PortLike) => portDisplayName(port.name, port.label, lang);
+  const labelOf = (port: PortLike) => typeKey === 'flow.switch' && SWITCH_CASE_PORTS.includes(port.name) && port.label
+    ? port.label
+    : portDisplayName(port.name, port.label, lang);
   const requiredInputReason = (name: string) => connectedHandles.input.has(name) ? '连线无效' : '未连接';
   const portTitle = (port: PortLike, side: 'input' | 'output', verdict?: { allowed: boolean; reason?: string }) => {
     const bits = [labelOf(port), port.dataType];

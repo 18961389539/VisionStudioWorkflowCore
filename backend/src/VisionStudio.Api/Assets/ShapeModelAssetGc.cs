@@ -1,5 +1,6 @@
 using System.Text.Json;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Api;
 
@@ -150,14 +151,14 @@ public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore w
         foreach (var node in workflow.Nodes)
         {
             if (node.Parameters is null) continue;
-            if (node.Type.Equals("match.template", StringComparison.OrdinalIgnoreCase))
+            if (MatchingTemplateAsset.SupportsNode(node.Type))
             {
                 // 模板图资产：与模型资产共用同一份回收保护集合。
                 if (node.Parameters.TryGetValue("templateAssetId", out var templateId)
                     && templateId.ValueKind == JsonValueKind.String
                     && !string.IsNullOrWhiteSpace(templateId.GetString()))
                 {
-                    var templateVersion = node.Parameters.TryGetValue("templateAssetVersion", out var tv) && tv.TryGetInt32(out var pinnedTemplateVersion) ? pinnedTemplateVersion : 0;
+                    var templateVersion = node.GetInt("templateAssetVersion", 0);
                     if (templateVersion > 0) references.Add((templateId.GetString()!.Trim(), templateVersion));
                 }
                 continue;

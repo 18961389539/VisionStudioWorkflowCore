@@ -243,6 +243,61 @@ public sealed class MeasurementGapNodeTests
         Assert.True(result.Outputs["zeroCrossings"].Require<long>("zeroCrossings") > 10);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProfileNodesRejectLargeGapBetweenOriginalSamples(bool roughness)
+    {
+        IVisionNodeExecutor executor = roughness ? new ProfileRoughnessNode() : new ProfileFilterNode();
+        var points = new VisionPoint2D[] { new(0, 0), new(1, 0), new(5, 0), new(6, 0) };
+        var result = await executor.ExecuteAsync(Ctx(new() { ["contours"] = VisionValue.Contours([Contour(points)]) }),
+            Def(executor.Type, """{"sampleStep":0.5,"maxInputGap":2}"""), CancellationToken.None);
+
+        Assert.False(result.Outputs["found"].Require<bool>("found"));
+        Assert.Equal(4d, result.Outputs["maxObservedInputGap"].Require<double>("maxObservedInputGap"), 8);
+        Assert.Equal("profile-input-gap-exceeded", result.Summary["reason"]);
+    }
+
+    [Fact]
+    public async Task ProfileFilterReportsActualSpacingAndRequiresFullKernelForDiscard()
+    {
+        var points = Enumerable.Range(0, 11).Select(x => new VisionPoint2D(x, 0)).ToArray();
+        var context = Ctx(new() { ["contours"] = VisionValue.Contours([Contour(points)]) });
+        var executor = new ProfileFilterNode();
+        var reflect = await executor.ExecuteAsync(context,
+            Def(executor.Type, """{"sampleStep":3,"cutoffWavelength":100}"""), CancellationToken.None);
+        Assert.Equal(2.5, reflect.Outputs["actualSampleStep"].Require<double>("actualSampleStep"), 8);
+        Assert.Equal(10d, reflect.Outputs["usableLength"].Require<double>("usableLength"), 8);
+        Assert.True(reflect.Outputs["kernelTruncated"].Require<bool>("kernelTruncated"));
+
+        var discard = await executor.ExecuteAsync(context,
+            Def(executor.Type, """{"sampleStep":1,"cutoffWavelength":100,"endEffect":"discard"}"""), CancellationToken.None);
+        Assert.False(discard.Outputs["found"].Require<bool>("found"));
+        Assert.Equal("insufficient-gaussian-support", discard.Summary["reason"]);
+        Assert.DoesNotContain("residual", discard.Outputs.Keys);
+    }
+
+    [Fact]
+    public async Task RoughnessReportsActualEvaluationSpanAndRzFallback()
+    {
+        var points = Enumerable.Range(0, 11).Select(x => new VisionPoint2D(x, 0)).ToArray();
+        var context = Ctx(new() { ["pointList"] = VisionValue.PointList(points) });
+        var executor = new ProfileRoughnessNode();
+        var result = await executor.ExecuteAsync(context,
+            Def(executor.Type, """{"sampleStep":1,"cutoffWavelength":4,"evaluationLength":2.4,"endEffect":"discard"}"""), CancellationToken.None);
+        Assert.True(result.Outputs["found"].Require<bool>("found"));
+        Assert.Equal(3L, result.Outputs["sampleCount"].Require<long>("sampleCount"));
+        Assert.Equal(2d, result.Outputs["evaluationLength"].Require<double>("evaluationLength"), 8);
+        Assert.Equal(0L, result.Outputs["rzSamplingLengths"].Require<long>("rzSamplingLengths"));
+        Assert.Equal("px", result.Outputs["unit"].Require<string>("unit"));
+        Assert.False(result.Outputs["gateEnabled"].Require<bool>("gateEnabled"));
+
+        var tooShort = await executor.ExecuteAsync(context,
+            Def(executor.Type, """{"sampleStep":1,"cutoffWavelength":4,"evaluationLength":1.5,"endEffect":"discard"}"""), CancellationToken.None);
+        Assert.Equal("insufficient-evaluation-samples", tooShort.Summary["reason"]);
+        Assert.False(tooShort.Outputs["found"].Require<bool>("found"));
+    }
+
     // ── 轮廓间距 ────────────────────────────────────────────────────
     [Fact]
     public async Task ContourDistance_ParallelLines_ReportGap()
@@ -284,8 +339,12 @@ public sealed class MeasurementGapNodeTests
         Assert.True(result.Outputs["found"].Require<bool>("found"));
         Assert.InRange(result.Outputs["pitch"].Require<double>("pitch"), 9.5, 10.5);
         Assert.True(result.Outputs["crestCount"].Require<long>("crestCount") >= 5);
-        Assert.Equal(10d, result.Outputs["majorDiameter"].Require<double>("majorDiameter"), .2);
-        Assert.Equal(7d, result.Outputs["minorDiameter"].Require<double>("minorDiameter"), .4);
+        var major = result.Outputs["majorDiameter"].Require<double>("majorDiameter");
+        var minor = result.Outputs["minorDiameter"].Require<double>("minorDiameter");
+        Assert.Equal(10d, major, .2);
+        Assert.Equal(7d, minor, .4);
+        Assert.Equal((major + minor) / 2, result.Outputs["pitchDiameter"].Require<double>("pitchDiameter"), 8);
+        Assert.Equal("arithmeticMeanOfMajorAndMinor", result.Outputs["pitchDiameterMethod"].Require<string>("pitchDiameterMethod"));
         Assert.InRange(result.Outputs["threadAngleDeg"].Require<double>("threadAngleDeg"), 20, 45);
     }
 
@@ -346,6 +405,24 @@ public sealed class MeasurementGapNodeTests
         var result = await new ToleranceStackupNode().ExecuteAsync(
             Ctx(new() { ["a"] = VisionValue.Double(11) }), Def("tolerance.stackup", json), CancellationToken.None);
         Assert.Equal(11d, result.Outputs["nominal"].Require<double>("nominal"), 6);
+    }
+
+    [Theory]
+    [InlineData("nominal", "worstCase", true, 0, "worstCase")]
+    [InlineData("interval", "worstCase", false, 0.05, "worstCase")]
+    [InlineData("interval", "rss", true, 0.025, "independentSymmetricThreeSigma")]
+    public async Task Stackup_UsesSelectedAcceptanceBasis(string gateMode, string method, bool expected, double deviation, string model)
+    {
+        var json = JsonSerializer.Serialize(new { contributionsJson = Chain, gateMode, method, targetNominal = -0.05, tolerance = 0.03, unit = "mm" });
+        var result = await new ToleranceStackupNode().ExecuteAsync(Ctx(new()),
+            Def("tolerance.stackup", json), CancellationToken.None);
+
+        Assert.Equal(expected, result.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.True(result.Outputs["gateEnabled"].Require<bool>("gateEnabled"));
+        Assert.Equal(deviation, result.Outputs["evaluatedDeviation"].Require<double>("evaluatedDeviation"), 8);
+        Assert.Equal(.03 - deviation, result.Outputs["margin"].Require<double>("margin"), 8);
+        Assert.Equal(model, result.Outputs["limitModel"].Require<string>("limitModel"));
+        Assert.Equal("mm", result.Outputs["unit"].Require<string>("unit"));
     }
 
     [Fact]

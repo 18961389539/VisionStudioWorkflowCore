@@ -23,6 +23,7 @@ export const STORAGE_KEYS = {
   toolboxCollapsed: 'toolbox-collapsed',
   toolboxFavorites: 'toolbox-favorites',
   autoLoginSkipped: 'auto-login-skipped',
+  onboardingDone: 'onboarding-done',
   draftWorkflow: 'draft.workflow'
 } as const;
 

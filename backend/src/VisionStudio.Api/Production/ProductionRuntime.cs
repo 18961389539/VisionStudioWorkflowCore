@@ -27,6 +27,8 @@ public sealed partial class ProductionRuntimeService
     private readonly WorkflowModuleExpander? _moduleExpander;
     /// <summary>扩展安全契约：显式动作声明的目录解析入口（可选；缺省走内置兼容分类）。</summary>
     private readonly VisionNodeRegistry? _nodes;
+    private readonly RuntimeWorkloadGate _workloads;
+    private IDisposable? _workloadLease;
     private ProductionTraceWriter? _traceWriter;
     /// <summary>
     /// R05（2026-10-12 复审）：上一次循环退出时仍有在途追溯提交（存储挂起被预算截断）的 writer。
@@ -35,8 +37,11 @@ public sealed partial class ProductionRuntimeService
     private ProductionTraceWriter? _drainingTraceWriter;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
+    private readonly string _statusEpoch = Guid.NewGuid().ToString("N");
+    private long _statusVersion;
     private CancellationTokenSource? _runtimeCts;
     private Task? _loopTask;
+    private TaskCompletionSource<ProductionRuntimeStatus>? _stopCompletion;
     private ProductionRuntimeConfig _config = new();
     private PublishedJobSnapshot? _lockedSnapshot;
     private DeviceLease? _lease;
@@ -98,7 +103,8 @@ public sealed partial class ProductionRuntimeService
         DeviceActionSafetyStore? safetyStore = null,
         WorkflowModuleExpander? moduleExpander = null,
         DeviceActionAuthorizationService? authorization = null,
-        VisionNodeRegistry? nodes = null)
+        VisionNodeRegistry? nodes = null,
+        RuntimeWorkloadGate? workloads = null)
     {
         _jobs = jobs;
         _runner = runner;
@@ -117,6 +123,7 @@ public sealed partial class ProductionRuntimeService
         _authorization = authorization;
         _moduleExpander = moduleExpander;
         _nodes = nodes;
+        _workloads = workloads ?? new RuntimeWorkloadGate();
 
         // F01：加载持久化的"设备动作不确定"状态——重启后标记与锁定清单必须复现，
         // 否则自动/人工启动都会跳过设备核对。文件损坏时按"不可核对"处理（保守拒绝启动）。
@@ -168,7 +175,9 @@ public sealed partial class ProductionRuntimeService
                     _traceWriter?.PendingCount ?? 0,
                     _traceOptions.QueueCapacity,
                     _recoveryAttempts,
-                    _hasDeviceSideEffects);
+                    _hasDeviceSideEffects,
+                    _statusEpoch,
+                    ++_statusVersion);
             }
         }
     }
@@ -198,7 +207,7 @@ public sealed partial class ProductionRuntimeService
         }
     }
 
-    public async Task<ProductionRuntimeConfig> UpdateConfigAsync(ProductionRuntimeConfig config, CancellationToken ct)
+    public async Task<ProductionRuntimeConfig> UpdateConfigAsync(ProductionRuntimeConfig config, CancellationToken ct, string? expectedRevision = null)
     {
         // 检查与写入必须在同一生命周期锁（_gate）内：否则并发 StartAsync 可以在检查通过之后、
         // 保存完成之前拿到锁并完成启动，随后这里把新配置写进正在运行的 _config；
@@ -207,7 +216,7 @@ public sealed partial class ProductionRuntimeService
         try
         {
             if (Status.ProductionLocked) throw new InvalidOperationException("Stop Production Runtime before changing production configuration.");
-            var saved = await _configStore.SaveAsync(config, ct);
+            var saved = await _configStore.SaveAsync(config, ct, expectedRevision);
             lock (_stateSync) _config = saved;
             return saved;
         }
@@ -216,17 +225,19 @@ public sealed partial class ProductionRuntimeService
 
     public async Task<ProductionRuntimeStatus> StartAsync(string? jobId, CancellationToken ct)
     {
+        IDisposable? startupLease = null;
+        var starting = false;
         await _gate.WaitAsync(ct);
         try
         {
             var current = Status.State;
-            // Stopping 同样拒绝：两段式停止的收尾（等待循环退出）可能持续到 StopTimeoutMs，
-            // 期间启动会与旧 Stop 的收尾交错——旧收尾即使做了循环身份核对，也不该给它创造窗口
             if (current is ProductionRuntimeState.Starting or ProductionRuntimeState.Running or ProductionRuntimeState.Recovering or ProductionRuntimeState.Stopping)
                 return Status;
-            if (_loopTask is { IsCompleted: false })
-                throw new InvalidOperationException("A previous Production Runtime loop is still alive. Stop must complete before starting another loop.");
+            if (_stopCompletion is not null || _loopTask is { IsCompleted: false })
+                throw new InvalidOperationException("Previous Production Runtime work is still active or stopping. Stop must complete before starting another loop.");
 
+            if (_workloadLease is null) startupLease = _workloads.AcquireProduction();
+            starting = true;
             var config = await _configStore.GetAsync(ct);
             var selectedJob = string.IsNullOrWhiteSpace(jobId) ? config.JobId : jobId;
             if (string.IsNullOrWhiteSpace(selectedJob)) throw new InvalidOperationException("Production JobId is not configured.");
@@ -282,17 +293,23 @@ public sealed partial class ProductionRuntimeService
                 throw new ApiConflictException($"Production synchronization health guard blocked start: {synchronizationGuard.Summary}");
             }
             await RecoverSynchronizationGuardAlarmsAsync(ct);
+
+            await _alarms.RecoverAsync("PROD-START", "ProductionRuntime", ct);
+            await _alarms.RecoverAsync("PROD-STOP-TIMEOUT", "ProductionRuntime", ct);
             _runtimeCts?.Dispose();
             _runtimeCts = new CancellationTokenSource();
             lock (_stateSync)
             {
                 // Lease acquisition is atomic with the locked snapshot: a conflicting holder (debug
                 // session, run or manual operation) blocks the start instead of silently sharing hardware.
-                // The previous lease (if any) is kept until the single release point in StopAsync.
-                _lease = _leases.AcquireOrThrow(
+                var lease = _leases.AcquireOrThrow(
                     DeviceLeaseOwner.Production(snapshot.JobId),
                     LeaseResources(snapshot),
                     $"Cannot start Production Runtime for job '{snapshot.JobId}'");
+                _lease?.Dispose();
+                _lease = lease;
+                _workloadLease ??= startupLease;
+                startupLease = null;
                 _lockedSnapshot = snapshot;
                 _startedAt = DateTimeOffset.UtcNow;
                 _lastCycleAt = null;
@@ -310,12 +327,11 @@ public sealed partial class ProductionRuntimeService
                 _state = ProductionRuntimeState.Running;
             }
 
-            await _alarms.RecoverAsync("PROD-START", "ProductionRuntime", ct);
-            await _alarms.RecoverAsync("PROD-STOP-TIMEOUT", "ProductionRuntime", ct);
-            _loopTask = Task.Run(() => LoopGuardedAsync(snapshot, _runtimeCts.Token));
+            var token = _runtimeCts.Token;
+            _loopTask = Task.Run(() => LoopGuardedAsync(snapshot, token));
             return Status;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (starting)
         {
             lock (_stateSync)
             {
@@ -327,85 +343,10 @@ public sealed partial class ProductionRuntimeService
             await _alarms.RaiseAsync("PROD-START", AlarmSeverity.Critical, "ProductionRuntime", ex.Message, null, CancellationToken.None);
             throw;
         }
-        finally { _gate.Release(); }
+        finally
+        {
+            startupLease?.Dispose();
+            _gate.Release();
+        }
     }
-
-    public async Task<ProductionRuntimeStatus> StopAsync(CancellationToken ct)
-    {
-        Task? loop;
-        await _gate.WaitAsync(ct);
-        try
-        {
-            if (Status.State == ProductionRuntimeState.Stopped) return Status;
-            lock (_stateSync) _state = ProductionRuntimeState.Stopping;
-            _runtimeCts?.Cancel();
-            loop = _loopTask;
-        }
-        finally { _gate.Release(); }
-
-        var stopTimedOut = false;
-        if (loop is not null)
-        {
-            ProductionRuntimeConfig config;
-            lock (_stateSync) config = _config;
-            try { await loop.WaitAsync(TimeSpan.FromMilliseconds(config.StopTimeoutMs), ct); }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
-            catch (TimeoutException)
-            {
-                stopTimedOut = true;
-                _logger.LogError("Production runtime loop did not stop within configured timeout; the host will not claim Stopped while work may still be executing.");
-            }
-            // R05/F02（2026-10-12 复核）：循环已结束但 Task 失败（例如 writer 释放时重抛追溯持久化
-            // 错误）——错误证据已在其边界记录；这里吸收后继续完成停止收尾，绝不以异常中断使状态
-            // 永久卡在 Stopping。设备所有权的释放仍由下方统一收尾点执行（未结束的循环不会走到这里）。
-            catch (Exception ex) when (loop.IsCompleted)
-            {
-                _logger.LogWarning(ex, "Production runtime loop task ended with an error during stop; completing the resource cleanup and releasing the lease.");
-            }
-        }
-
-        if (stopTimedOut && loop is { IsCompleted: false })
-        {
-            const string error = "Production Runtime stop timed out; an execution loop may still be active. Restart is blocked until that loop exits.";
-            lock (_stateSync)
-            {
-                _state = ProductionRuntimeState.Faulted;
-                _lastError = error;
-            }
-            await _alarms.RaiseAsync("PROD-STOP-TIMEOUT", AlarmSeverity.Critical, "ProductionRuntime", error, _currentRunId, CancellationToken.None);
-            return Status;
-        }
-
-        await _gate.WaitAsync(ct);
-        try
-        {
-            // 循环身份校验：等待“自己捕获的那个循环”退出期间，可能有另一个 Stop 完成了收尾、
-            // 随后新的 Start 建立了新循环。本次收尾只能清理自己捕获的那一代（循环引用仍是当前
-            // _loopTask 时才执行）；否则会把新循环的状态、CTS 和硬件租约一并清掉——对外显示
-            // Stopped / 未锁定，但新执行器仍在运行。
-            if (!ReferenceEquals(_loopTask, loop))
-                return Status;
-            lock (_stateSync)
-            {
-                _state = ProductionRuntimeState.Stopped;
-                _lockedSnapshot = null;
-                // Single release point for the production lease: reached by a completed stop and by
-                // recovery after a faulted loop. Faulted states with live work keep the lease.
-                _lease?.Dispose();
-                _lease = null;
-                _currentRunId = null;
-            }
-            _runtimeCts?.Dispose();
-            _runtimeCts = null;
-            _loopTask = null;
-            return Status;
-        }
-        finally { _gate.Release(); }
-    }
-
-    /// <summary>
-    /// R05：把"在途追溯提交"作为启动闸门——上一循环退出时若有提交未收尾（存储挂起被预算截断），
-    /// 新周期开始前必须先等它排空。永久挂起时宿主重启是恢复路径（设备动作意图持久保留，
-    /// 重启后由安全闸门要求核对）——绝不允许与同一个挂起存储并发跑新周期。
-    /// </summary>
 }

@@ -61,6 +61,7 @@ type Params = {
   nodes: Node[];
   edges: Edge[];
   nodeLabels: Record<string, string>;
+  preferredOutputPortName?: string;
 };
 
 /**
@@ -69,7 +70,7 @@ type Params = {
  * - 目录只在 runId 和请求批次均一致且响应有效时生效；
  * - 切换、重试、超时和卸载均使旧请求作废，失败保留最终预览而不伪造空目录。
  */
-export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: Params) {
+export function useRunImages({ result, selectedId, nodes, edges, nodeLabels, preferredOutputPortName }: Params) {
   const [imageSource, setImageSource] = useState<'preview' | 'output' | 'input'>('preview');
   const [requestedOutputPortName, setRequestedOutputPortName] = useState<string>();
   const [catalogRequest, setCatalogRequest] = useState<CatalogRequest>();
@@ -139,7 +140,9 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
   const selectedOutputPorts = useMemo(
     () => Object.values(catalog?.images[selectedId] ?? {}),
     [catalog, selectedId]);
-  const outputEntry = runImageEntryForPort(catalog, selectedId, requestedOutputPortName);
+  const outputPortName = requestedOutputPortName ?? (preferredOutputPortName &&
+    runImageEntryForPort(catalog, selectedId, preferredOutputPortName)?.portName);
+  const outputEntry = runImageEntryForPort(catalog, selectedId, outputPortName);
   const imageOutputPortName = outputEntry?.portName;
   const selectedOutputAvailable = selectedOutputPorts.length > 0;
   const selectedInputAvailable = Boolean(runImageEntryForPort(catalog, imageInputConnection?.nodeId, imageInputConnection?.portName));
@@ -154,7 +157,7 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
         : undefined;
     };
     if (imageSource === 'output' && selectedId) {
-      const resolved = nodeImage(selectedId, requestedOutputPortName);
+      const resolved = nodeImage(selectedId, outputPortName);
       if (resolved) return { ...resolved, label: `输出 · ${label(selectedId)}${resolved.portName === 'image' ? '' : ` · ${runImagePortLabel(nodes, selectedId, resolved.portName)}`}`, nodeId: selectedId as string | undefined };
       if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: `最终预览（${imageCatalogLoading ? '节点图像加载中' : imageCatalogError ? '节点图像暂不可用' : `${label(selectedId)} 无输出图像`}）`, nodeId: undefined as string | undefined };
     }
@@ -164,7 +167,7 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
       if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: selectedId ? `最终预览（${imageCatalogLoading ? '节点图像加载中' : imageCatalogError ? '节点图像暂不可用' : `${label(selectedId)} 无输入图像`}）` : '最终预览', nodeId: undefined as string | undefined };
     }
     return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: '最终预览', nodeId: undefined as string | undefined };
-  }, [catalog, imageInputConnection, imageSource, nodeLabels, nodes, previewUrl, result, selectedId, imageCatalogLoading, imageCatalogError, requestedOutputPortName]);
+  }, [catalog, imageInputConnection, imageSource, nodeLabels, nodes, previewUrl, result, selectedId, imageCatalogLoading, imageCatalogError, outputPortName]);
 
   // 查看节点图像时只显示该节点自己的覆盖层，避免与上游/下游标注混淆
   const viewerOverlays = useMemo(

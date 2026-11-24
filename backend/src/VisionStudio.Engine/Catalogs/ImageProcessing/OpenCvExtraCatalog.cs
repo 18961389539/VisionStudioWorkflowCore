@@ -176,8 +176,12 @@ internal static class OpenCvExtraCatalog
             ],
             [
                 new("templatePath", "Template File", "text", string.Empty, Group: "Template",
-                    Description: "Used when the template input port is not connected (absolute path, or relative to the host working directory). A connected template port overrides it.")
+                    Description: "Fallback when the image port is disconnected and the node has no template asset.")
                     { OverriddenByPorts = ["template"] },
+                new("templateAssetId", "Template Image Asset", "text", "", Group: "Template",
+                    Description: "Use this template image asset when the template port is disconnected.") { OverriddenByPorts = ["template"] },
+                new("templateAssetVersion", "Template Image Version", "number", 0, 0, 1000000, 1, Group: "Template",
+                    Description: "Select a positive immutable version when using a template image asset.") { Integer = true, OverriddenByPorts = ["template"] },
                 new("detector", "Detector", "select", "sift", Group: "Detector", Options:
                 [
                     new("SIFT (rotation + scale, float descriptors)", "sift"),

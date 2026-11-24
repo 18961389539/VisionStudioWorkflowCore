@@ -7,6 +7,7 @@ using VisionStudio.Api.Security;
 using VisionStudio.Api.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseWindowsService();
 
 // 首屏与目录接口的传输体积（2026-11-13）：/api/catalog 冷启动约 1.65 MB JSON，
 // 前端 index/vendor chunk 合计约 2.9 MB；这里统一开 Brotli/Gzip（默认 MIME 已含
@@ -21,7 +22,9 @@ builder.Services.AddResponseCompression(options =>
 
 // F06：站点配置源（数据根 site-config/appsettings.site.json）——现场策略覆盖内容根 appsettings、
 // 被环境变量/命令行覆盖；该文件随系统备份往返，恢复数据根即恢复"实际生效的配置"。
+var dataRoot = VisionStudioDataRoot.Resolve(builder.Environment.ContentRootPath, builder.Configuration);
 VisionStudioSiteConfig.AddSource(builder.Configuration, builder.Environment.ContentRootPath);
+builder.Configuration[VisionStudioDataRoot.ConfigurationKey] = dataRoot;
 
 builder.Services.AddVisionStudioHost(builder.Configuration, builder.Environment);
 
@@ -33,7 +36,7 @@ app.Logger.LogInformation(
     "VisionStudio starting: env={Environment} contentRoot={ContentRoot} dataDir={DataDir} version={Version}",
     app.Environment.EnvironmentName,
     app.Environment.ContentRootPath,
-    VisionStudioDataRoot.Resolve(app.Environment.ContentRootPath),
+    VisionStudioDataRoot.Resolve(app.Environment.ContentRootPath, app.Configuration),
     typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown");
 
 // 反向代理策略进启动横幅：部署在代理后面却没开 X-Forwarded-*，表现是"全厂共享登录配额"
@@ -44,11 +47,12 @@ app.Logger.LogInformation("Reverse proxy forwarded headers: {ForwardedHeaders}",
 // 必须是管线里第一个中间件：限流分区、Secure Cookie 判定、审计来源 IP 都依赖它改写后的
 // RemoteIpAddress / Scheme。放在后面等于没配。
 app.UseForwardedHeaders();
+// 安全响应头（CSP/HSTS/XFO 等）必须覆盖静态文件、API 与错误响应：放在压缩与静态文件之前。
+app.UseMiddleware<SecurityHeadersMiddleware>();
 
 // 压缩必须早于静态文件与端点：越晚包住响应，能压到的正文越少。
 app.UseResponseCompression();
-app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseDefaultFiles(); app.UseStaticFiles();
 app.UseRouting();
 app.UseCors();
 app.UseMiddleware<AuditMiddleware>();
@@ -73,5 +77,4 @@ app.MapHub<MonitorHub>("/hubs/monitor").RequireAuthorization();
 app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
-
 public partial class Program { }

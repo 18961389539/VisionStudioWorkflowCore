@@ -21,6 +21,8 @@ public sealed class ThresholdRoiStatisticsTests
     private static double Number(NodeExecutorResult result, string port) => Convert.ToDouble(result.Outputs[port].Value);
 
     private const string LeftHalfRoi = """{"type":"Rectangle","x":0,"y":0,"width":100,"height":100}""";
+    private const string CircularRoi = """{"type":"Circle","x":40,"y":40,"radius":20}""";
+    private const string PolygonalRoi = """{"type":"Polygon","points":[{"x":20,"y":20},{"x":60,"y":20},{"x":20,"y":60}]}""";
 
     [Fact]
     public async Task ManualRatio_DividesByRoiPixelsWithoutIntegerTruncation()
@@ -66,6 +68,57 @@ public sealed class ThresholdRoiStatisticsTests
         Assert.True(roiThreshold < fullThreshold - 30, $"ROI 阈值 {roiThreshold} 应明显低于整图阈值 {fullThreshold}。");
     }
 
+    [Theory]
+    [InlineData(CircularRoi, "auto")]
+    [InlineData(PolygonalRoi, "12")]
+    public async Task OtsuThreshold_IgnoresBrightPixelsOutsideNonRectangularRoi(string roi, string inputBitDepth)
+    {
+        var definition = Def("image.threshold", $$"""{"mode":"otsu","inputBitDepth":"{{inputBitDepth}}","roi":{{roi}}}""");
+        // 12 位输入的 640/1280 经既有灰度映射后也为 40/80。
+        var isUInt16 = inputBitDepth == "12";
+        var scale = isUInt16 ? 16 : 1;
+        using var image = new Mat(80, 80, isUInt16 ? MatType.CV_16UC1 : MatType.CV_8UC1, Scalar.All(40 * scale));
+        Cv2.Rectangle(image, new Rect(40, 0, 40, 80), Scalar.All(80 * scale), -1);
+        using var mask = definition.GetRoi()!.BuildMask(image.Size());
+        using var brightBackground = new Mat(image.Size(), image.Type(), Scalar.All(240 * scale));
+        image.CopyTo(brightBackground, mask);
+
+        var original = await RunThreshold(image, definition);
+        using var originalBinary = original.Outputs["image"].Require<VisionImage>("image");
+        var changed = await RunThreshold(brightBackground, definition);
+        using var changedBinary = changed.Outputs["image"].Require<VisionImage>("image");
+        using var difference = new Mat();
+        Cv2.Absdiff(originalBinary.Mat, changedBinary.Mat, difference);
+
+        Assert.Equal(40d, Number(original, "threshold"));
+        Assert.Equal(40d, Number(changed, "threshold"));
+        Assert.Equal(0, Cv2.CountNonZero(difference));
+        using var outsideMask = new Mat();
+        Cv2.Compare(mask, Scalar.All(0), outsideMask, CmpTypes.EQ);
+        using var outsideForeground = new Mat();
+        Cv2.BitwiseAnd(changedBinary.Mat, outsideMask, outsideForeground);
+        Assert.Equal(0, Cv2.CountNonZero(outsideForeground));
+        Assert.InRange(Number(changed, "foregroundRatio"), 0.1, 0.9);
+    }
+
+    [Fact]
+    public async Task ManualThreshold_OtsuSuggestionUsesTheActualRoiMask()
+    {
+        var definition = Def("image.threshold", $$"""{"mode":"manual","threshold":200,"roi":{{CircularRoi}}}""");
+        using var image = new Mat(80, 80, MatType.CV_8UC1, Scalar.All(240));
+        using var dark = new Mat(80, 80, MatType.CV_8UC1, Scalar.All(40));
+        Cv2.Rectangle(dark, new Rect(40, 0, 40, 80), Scalar.All(80), -1);
+        using var mask = definition.GetRoi()!.BuildMask(image.Size());
+        dark.CopyTo(image, mask);
+
+        var result = await RunThreshold(image, definition);
+        using var output = result.Outputs["image"].Require<VisionImage>("image");
+        Assert.Equal(0, Cv2.CountNonZero(output.Mat));
+        Assert.Equal(200d, Number(result, "threshold"));
+        Assert.Equal(1d, Number(result, "warningCount"));
+        Assert.Equal(40d, Assert.IsType<double>(result.Summary["suggestedThreshold"]));
+    }
+
     [Fact]
     public async Task AdaptiveThreshold_KeepsPixelValuesInsideRoi()
     {
@@ -105,5 +158,11 @@ public sealed class ThresholdRoiStatisticsTests
                 Def("image.threshold", """{"mode":"otsu","roi":{"type":"Rectangle","x":500,"y":500,"width":10,"height":10}}"""),
                 CancellationToken.None));
         Assert.Contains("covers no pixels", error.Message);
+    }
+
+    private static async Task<NodeExecutorResult> RunThreshold(Mat image, NodeDefinition definition)
+    {
+        using var input = VisionImage.Borrow(image);
+        return await new ThresholdNode().ExecuteAsync(Ctx(new() { ["image"] = VisionValue.Image(input) }), definition, CancellationToken.None);
     }
 }

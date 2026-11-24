@@ -8,11 +8,16 @@ namespace VisionStudio.Api.Infrastructure;
 public static class VisionStudioDataRoot
 {
     public const string EnvironmentVariable = "VISIONSTUDIO_DATA_ROOT";
+    public const string ConfigurationKey = "VisionStudio:DataRoot";
 
-    public static string Resolve(string contentRoot)
-        => Environment.GetEnvironmentVariable(EnvironmentVariable) is { Length: > 0 } custom
+    public static string Resolve(string contentRoot, IConfiguration? configuration = null)
+    {
+        if (configuration?[ConfigurationKey] is { Length: > 0 } configured)
+            return Path.GetFullPath(configured, contentRoot);
+        return Environment.GetEnvironmentVariable(EnvironmentVariable) is { Length: > 0 } custom
             ? Path.GetFullPath(custom)
             : Path.Combine(contentRoot, "data");
+    }
 
     /// <summary>
     /// 媒体库根解析的单一来源（R05）：默认数据根/media；配置了 `MediaLibrary:RootPath` 时，
@@ -21,12 +26,12 @@ public static class VisionStudioDataRoot
     /// 兼容历史配置：相对路径若以 `data/` 开头（旧约定 = 内容根下 data 子目录），
     /// 该前缀会被剥离——数据根本身即 `data`，避免解析成 `&lt;dataRoot&gt;/data/...`。
     /// </summary>
-    public static string ResolveMediaRoot(string contentRoot, string? configured)
+    public static string ResolveMediaRoot(string contentRoot, string? configured, IConfiguration? configuration = null)
     {
-        if (string.IsNullOrWhiteSpace(configured)) return Path.Combine(Resolve(contentRoot), "media");
+        if (string.IsNullOrWhiteSpace(configured)) return Path.Combine(Resolve(contentRoot, configuration), "media");
         if (Path.IsPathRooted(configured)) return Path.GetFullPath(configured);
         var relative = configured.Replace('\\', '/');
         if (relative.StartsWith("data/", StringComparison.OrdinalIgnoreCase)) relative = relative["data/".Length..];
-        return Path.Combine(Resolve(contentRoot), relative.Replace('/', Path.DirectorySeparatorChar));
+        return Path.Combine(Resolve(contentRoot, configuration), relative.Replace('/', Path.DirectorySeparatorChar));
     }
 }

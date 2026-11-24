@@ -183,7 +183,7 @@ public sealed partial class ProductionRuntimeService
             }
             else
             {
-                var watchdog = result.Error?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true;
+                var watchdog = result.ErrorCode == VisionRunErrorCodes.Timeout;
                 int failures;
                 bool hasDeviceSideEffects;
                 lock (_stateSync)

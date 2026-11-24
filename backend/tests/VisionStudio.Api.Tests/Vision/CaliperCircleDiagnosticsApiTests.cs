@@ -264,8 +264,10 @@ public sealed class CaliperCircleDiagnosticsApiTests(CaliperDiagnosticsApiFactor
     }
 }
 
-public sealed class CaliperDiagnosticsApiFactory : WebApplicationFactory<Program>
+public sealed class CaliperDiagnosticsApiFactory : IsolatedApiFactory
 {
+    protected override string DataRoot => Path.Combine(_root, "data");
+
     private readonly string _root = Path.Combine(Path.GetTempPath(), "visionstudio-caliper-diagnostics", Guid.NewGuid().ToString("N"));
     private int _cleanupStarted;
     public CaliperDiagnosticsApiFactory() => Directory.CreateDirectory(_root);

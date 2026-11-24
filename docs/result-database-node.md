@@ -39,8 +39,24 @@ output.database  ──IResultRecordStore──▶  宿主实现（本仓库 = S
 |---|---|---|
 | `dataset` | 最长 96 字符，非空 | 逻辑分组：`caliper-width`、`ng-parts` |
 | `key`（或 `key` 端口） | 最长 256 字符，空白归一为 null | 按件追溯（序列号/批次号） |
+| `idempotencyKey`（或同名端口） | 最长 256 字符，空白表示每次追加 | 同一数据集内标识一次业务操作 |
+| `idempotencyConflictPolicy` | `reuse`（默认）、`warn`、`fail` | 同一幂等键对应不同写入内容时的处理 |
 
 端口优先于参数，与全仓既有约定一致。
+
+同一次业务操作重试时复用幂等键，新操作使用新键。SQLite 对数据集和幂等键的组合做唯一约束，在单个事务内尝试写入并读取冲突记录。同一组合以首次提交为准，重试返回原记录的 `recordId`、`payloadBytes` 和 `reused=true`。业务键可以重复，可用于查询同一产品的多次检测。
+
+### 幂等冲突策略
+
+| 策略 | 同键时的行为 |
+|---|---|
+| `reuse` 复用首条记录 | 直接复用，沿用已有配方的默认行为 |
+| `warn` 告警后复用 | 相同内容直接复用。内容有变化时返回首条记录，并输出 `idempotencyConflict=true` 和 `warningCount=1` |
+| `fail` 冲突时报错 | 相同内容直接复用。内容有变化时节点报错，错误包含首条记录 ID |
+
+`warn` 和 `fail` 比较规范化后的业务键与完整的 `{type,value}` 序列化文本。业务键去掉首尾空白，空白键按 null 比较。结果类型或 JSON 文本有变化都算冲突，运行 ID、节点 ID、工作流标识和写入时间不参与比较。图像以落库的尺寸摘要为比较依据。
+
+幂等键为空时始终追加。成功输出 `reused` 表示返回首条记录，`idempotencyConflict=true` 表示 `warn` 策略明确检出冲突。每条冲突处理路径都保留首条记录。
 
 ## 存储层（宿主）
 
@@ -56,9 +72,9 @@ CREATE INDEX ix_result_records_dataset_created ON result_records(dataset, create
 CREATE INDEX ix_result_records_key ON result_records(record_key);
 ```
 
-索引只建在 `dataset/created_at` 与 `record_key` 上，**不建在 payload 上** —— payload 可能很大，
-报表按数据集与业务键查即可。主键是节点生成的 GUID：同一条记录重复写入会撞主键失败，
-从而保证"重试不会变成两行"。
+迁移 34 增加可空的 `idempotency_key` 和 `(dataset, idempotency_key)` 唯一索引，已有记录保留。节点每次执行生成一个候选 GUID，业务重试由显式幂等键去重。报表仍可按数据集和业务键查询。
+
+冲突检查使用同一个唯一索引，在同一写入事务内比较首条记录。自定义宿主需要实现 `AppendCheckedIdempotentAsync` 才能启用 `warn` 或 `fail`。
 
 配套只读 API（报表/对账用，节点不调用）：`ReadAsync(dataset, limit)`、`ReadByKeyAsync(key, limit)`。
 

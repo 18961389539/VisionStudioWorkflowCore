@@ -127,7 +127,7 @@ public sealed class RunCounterPersistence : BackgroundService
         AlarmStore alarms)
         : this(
             store,
-            ResolveSnapshotPath(environment),
+            ResolveSnapshotPath(environment, configuration),
             logger,
             alarms,
             RunCounterPersistenceOptions.FromConfiguration(configuration))
@@ -160,8 +160,8 @@ public sealed class RunCounterPersistence : BackgroundService
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
     }
 
-    private static string ResolveSnapshotPath(IWebHostEnvironment environment)
-        => Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "runtime", "counters.json");
+    private static string ResolveSnapshotPath(IWebHostEnvironment environment, IConfiguration configuration)
+        => Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "runtime", "counters.json");
 
     /// <summary>当前落盘状态；供诊断端点读取，不参与写盘路径。</summary>
     public RunCounterPersistenceStatus Status()

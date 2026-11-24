@@ -36,10 +36,6 @@ public static class WorkflowStoreEndpoints
                 // 响应头返回写入后的新修订，供客户端作为下一次保存的并发基线。
                 var outcome = await store.SaveAsync(id, workflow, ct, expectedRevision);
                 http.Response.Headers["X-Workflow-Revision"] = outcome.Revision;
-                // Q06：修订记录延迟落定时如实通告（内容已提交、读取路径自愈对齐），
-                // 前端据此给出"已保存、版本基线将自动对齐"的一致反馈。
-                if (outcome.RevisionRecordDeferred)
-                    http.Response.Headers["X-Workflow-Revision-Deferred"] = "true";
                 return Results.NoContent();
             }
             catch (ArgumentException ex)
@@ -65,8 +61,6 @@ public static class WorkflowStoreEndpoints
             {
                 var outcome = await store.SaveAsync(id, request.Workflow, ct, expectedRevision: null);
                 http.Response.Headers["X-Workflow-Revision"] = outcome.Revision;
-                if (outcome.RevisionRecordDeferred)
-                    http.Response.Headers["X-Workflow-Revision-Deferred"] = "true";
                 return Results.NoContent();
             }
             catch (ArgumentException ex)

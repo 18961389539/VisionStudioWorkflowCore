@@ -25,8 +25,8 @@ public static class VisionStudioSiteConfig
     public const string FolderName = "site-config";
     public const string FileName = "appsettings.site.json";
 
-    public static string ResolvePath(string contentRoot)
-        => Path.Combine(VisionStudioDataRoot.Resolve(contentRoot), FolderName, FileName);
+    public static string ResolvePath(string contentRoot, IConfiguration? configuration = null)
+        => Path.Combine(VisionStudioDataRoot.Resolve(contentRoot, configuration), FolderName, FileName);
 
     /// <summary>
     /// 把站点文件源插入到"环境变量源之前"（覆盖 appsettings* 文件源、被环境变量/命令行覆盖）。
@@ -34,7 +34,7 @@ public static class VisionStudioSiteConfig
     /// </summary>
     public static void AddSource(IConfigurationBuilder configuration, string contentRoot)
     {
-        var path = ResolvePath(contentRoot);
+        var path = ResolvePath(contentRoot, configuration as IConfiguration);
         // PhysicalFileProvider 要求其根目录存在（"可选文件"不等于"可选目录"）；预建空目录对运维
         // 也是放置位置提示，且对不存在文件的行为与未配置时完全一致。
         var directory = Path.GetDirectoryName(path)!;

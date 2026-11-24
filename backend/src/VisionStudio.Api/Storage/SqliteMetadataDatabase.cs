@@ -17,14 +17,15 @@ public sealed class SqliteMetadataDatabase
     private readonly SqliteSchemaMigrationRunner _migrations = new();
     private volatile bool _initialized;
 
-    public SqliteMetadataDatabase(IWebHostEnvironment env)
+    public SqliteMetadataDatabase(IWebHostEnvironment env, IConfiguration? configuration = null)
     {
-        var dataRoot = VisionStudioDataRoot.Resolve(env.ContentRootPath);
-        Directory.CreateDirectory(dataRoot);
-        _databasePath = Path.Combine(dataRoot, "visionstudio.db");
+        DataRoot = VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration);
+        Directory.CreateDirectory(DataRoot);
+        _databasePath = Path.Combine(DataRoot, "visionstudio.db");
         _connectionString = BuildConnectionString(_databasePath, SqliteOpenMode.ReadWriteCreate, pooling: true);
     }
 
+    public string DataRoot { get; }
     public string DatabasePath => _databasePath;
     public int CurrentSchemaVersion => SqliteSchemaMigrationRunner.CurrentVersion;
 

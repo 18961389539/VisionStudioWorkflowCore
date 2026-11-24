@@ -49,6 +49,51 @@ public sealed class Batch2ControlRuntimeTests
     }
 
     [Theory]
+    [InlineData("""[{"label":"A"}]""")]
+    [InlineData("""[{"port":"case1","label":"A"},{"port":"case1","label":"B"}]""")]
+    [InlineData("""[{"port":"case17","label":"A"}]""")]
+    [InlineData("""[{"port":"Case2","label":"A"}]""")]
+    [InlineData("""["A",{"port":"case2","label":"B"}]""")]
+    public void Switch_CompilerRejectsInvalidStablePorts(string casesJson)
+    {
+        var workflow = SwitchWorkflow("A", false);
+        var parameters = Params(JsonSerializer.Serialize(new { casesJson }));
+        var nodes = workflow.Nodes.Select(node => node.Id == "switch" ? node with { Parameters = parameters } : node).ToArray();
+
+        var error = Assert.Throws<InvalidOperationException>(() => new VisionWorkflowCompiler(Registry()).Compile(workflow with { Nodes = nodes }));
+
+        Assert.Contains("casesJson", error.Message);
+    }
+
+    [Theory]
+    [InlineData("A", "case1", "a-tail")]
+    [InlineData("B", "case12", "b-tail")]
+    [InlineData("unmatched", "default", "fallback-tail")]
+    public async Task Switch_RoutesReorderedCasesThroughTheirExistingSparsePorts(string value, string port, string expectedNode)
+    {
+        await using var provider = Provider();
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(SparseSwitchWorkflow(value));
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(port, Assert.Single(result.ControlFlowDecisions!, decision => decision.NodeId == "switch").SelectedBranch);
+        var executed = result.NodeReports.Select(report => report.NodeId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(expectedNode, Assert.Single(executed.Intersect(["a-tail", "b-tail", "fallback-tail"])));
+        Assert.Contains("merge", executed);
+        Assert.Contains("after", executed);
+    }
+
+    [Fact]
+    public void Switch_RequiresMatchingSparseMergePort()
+    {
+        var workflow = SparseSwitchWorkflow("B");
+        var edges = workflow.Edges.Select(edge => edge.Id == "b-merge" ? edge with { TargetPort = "case2" } : edge).ToArray();
+
+        var error = Assert.Throws<InvalidOperationException>(() => new VisionWorkflowCompiler(Registry()).Compile(workflow with { Edges = edges }));
+
+        Assert.Contains("case12", error.Message);
+    }
+
+    [Theory]
     [InlineData("A", "inner-false", "a-tail")]
     [InlineData("B", "b-tail", "b-tail")]
     [InlineData("unmatched", "fallback-tail", "fallback-tail")]
@@ -131,6 +176,20 @@ public sealed class Batch2ControlRuntimeTests
         };
         var configuredNodes = nodes.Select(node => node.Id == "source" ? node with { Parameters = Params(JsonSerializer.Serialize(new { value })) } : node).ToArray();
         return new WorkflowDefinition("switch-runtime-" + value, "Switch Runtime", configuredNodes, edges);
+    }
+
+    private static WorkflowDefinition SparseSwitchWorkflow(string value)
+    {
+        var workflow = SwitchWorkflow(value, false);
+        var parameters = Params(JsonSerializer.Serialize(new { casesJson = """[{"port":"case12","label":"B"},{"port":"case1","label":"A"}]""" }));
+        var nodes = workflow.Nodes.Select(node => node.Id == "switch" ? node with { Parameters = parameters } : node).ToArray();
+        var edges = workflow.Edges.Select(edge => edge.Id switch
+        {
+            "case-b" => edge with { SourcePort = "case12" },
+            "b-merge" => edge with { TargetPort = "case12" },
+            _ => edge
+        }).ToArray();
+        return workflow with { Nodes = nodes, Edges = edges };
     }
 
     private static ServiceProvider Provider()

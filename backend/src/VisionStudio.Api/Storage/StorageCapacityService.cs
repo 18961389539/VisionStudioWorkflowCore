@@ -22,7 +22,7 @@ public sealed class StorageCapacityService
     {
         // R05：容量核算必须跟随实际数据根（VISIONSTUDIO_DATA_ROOT），否则发布后数据目录在包外时
         // 会量错卷、量错占用（甚至把整个打包目录算进来）。与 StorageBackupService/媒体服务同源。
-        _dataRoot = VisionStudioDataRoot.Resolve(env.ContentRootPath);
+        _dataRoot = database.DataRoot;
         _contentRoot = _dataRoot;
         _artifactRoot = Path.Combine(_dataRoot, "artifacts");
         _backupRoot = Path.Combine(_dataRoot, "backups");

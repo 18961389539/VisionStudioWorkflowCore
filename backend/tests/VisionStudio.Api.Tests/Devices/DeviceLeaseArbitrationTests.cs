@@ -189,7 +189,7 @@ public sealed class DeviceLeaseArbitrationTests : IDisposable
 
     private async Task ConfigureProduction(string jobId)
     {
-        var config = await _client.PutAsJsonAsync("/api/production/config", new
+        var config = await _client.PutProductionConfigAsync(new
         {
             jobId,
             autoStart = false,

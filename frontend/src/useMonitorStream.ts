@@ -22,39 +22,65 @@ export type MonitorSnapshot = {
   robots: RobotDescriptor[];
   /** 生产状态随快照直达（2026-11-13）：生产面板不再为状态单独轮询。 */
   production: ProductionRuntimeStatus;
-  /** 报警文件版本戳；变化时生产面板只补拉一次报警列表。 */
+  /** 告警数据版本戳。生产面板据此刷新活动告警统计和当前历史页。 */
   alarmRevision: string;
 };
 
+const retryDelays = [1000, 3000, 10_000, 30_000];
 let shared: HubConnection | undefined;
-const listeners = new Set<(snapshot: MonitorSnapshot) => void>();
+let currentSnapshot: MonitorSnapshot | undefined;
+let retryTimer: ReturnType<typeof setTimeout> | undefined;
+let retryAttempt = 0;
+const listeners = new Set<(snapshot: MonitorSnapshot | undefined) => void>();
 
-async function ensureStarted(): Promise<void> {
-  if (shared) {
-    // 之前被最后一个订阅者停掉、或重连失败停在 Disconnected：重新拉起来。
-    if (shared.state === HubConnectionState.Disconnected) {
-      await shared.start().catch(() => undefined);
-    }
-    return;
-  }
-  const builder = new HubConnectionBuilder()
+function publish(snapshot: MonitorSnapshot | undefined) {
+  currentSnapshot = snapshot;
+  listeners.forEach((listener) => listener(snapshot));
+}
+
+function scheduleRetry() {
+  if (listeners.size === 0 || retryTimer !== undefined) return;
+  const delay = retryDelays[retryAttempt];
+  retryAttempt = Math.min(retryAttempt + 1, retryDelays.length - 1);
+  retryTimer = setTimeout(() => {
+    retryTimer = undefined;
+    ensureStarted();
+  }, delay);
+}
+
+function createConnection(): HubConnection {
+  const connection = new HubConnectionBuilder()
     .withUrl('/hubs/monitor')
-    .withAutomaticReconnect([0, 1000, 3000, 10000])
-    .configureLogging(LogLevel.Warning);
-  // build() 会立刻解析相对地址；宿主没给出可解析的 base（测试环境、被嵌进 about:blank 的窗口）
-  // 时它是**同步抛出**的，不走 start() 的 promise 链——那样就成了未捕获拒绝，会把面板一起带崩。
-  // 推送只是"更快看到变化"，拿不到就退回定时兜底，不影响任何功能。
-  let connection: HubConnection;
-  try {
-    connection = builder.build();
-  } catch {
-    return;
-  }
+    .configureLogging(LogLevel.Warning)
+    .build();
   connection.on('monitorSnapshot', (snapshot: MonitorSnapshot) => {
-    listeners.forEach((listener) => listener(snapshot));
+    if (shared !== connection) return;
+    const previous = currentSnapshot?.production;
+    const next = snapshot.production;
+    if (previous?.statusEpoch && previous.statusEpoch === next.statusEpoch
+      && (previous.statusVersion ?? 0) > (next.statusVersion ?? 0)) return;
+    publish(snapshot);
   });
-  shared = connection;
-  await connection.start().catch(() => undefined);
+  connection.onclose(() => {
+    if (shared !== connection) return;
+    publish(undefined);
+    scheduleRetry();
+  });
+  return connection;
+}
+
+function ensureStarted() {
+  if (listeners.size === 0 || retryTimer !== undefined) return;
+  try {
+    const connection = shared ??= createConnection();
+    if (connection.state !== HubConnectionState.Disconnected) return;
+    void connection.start().then(() => {
+      if (shared === connection && connection.state === HubConnectionState.Connected) retryAttempt = 0;
+    }, () => { if (shared === connection) scheduleRetry(); });
+  } catch {
+    // Resolving a relative endpoint can throw synchronously when the document has no usable base URL.
+    scheduleRetry();
+  }
 }
 
 /**
@@ -66,18 +92,21 @@ export function useMonitorSnapshot(enabled: boolean): MonitorSnapshot | undefine
 
   useEffect(() => {
     if (!enabled) return;
-    const listener = (next: MonitorSnapshot) => setSnapshot(next);
-    listeners.add(listener);
-    void ensureStarted().catch(() => undefined);
+    listeners.add(setSnapshot);
+    setSnapshot(currentSnapshot);
+    ensureStarted();
     return () => {
-      listeners.delete(listener);
-      if (listeners.size === 0 && shared) {
-        const connection = shared;
-        shared = undefined;
-        if (connection.state !== HubConnectionState.Disconnected) void connection.stop();
-      }
+      listeners.delete(setSnapshot);
+      if (listeners.size !== 0) return;
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+      retryAttempt = 0;
+      const connection = shared;
+      shared = undefined;
+      currentSnapshot = undefined;
+      if (connection && connection.state !== HubConnectionState.Disconnected) void connection.stop().catch(() => undefined);
     };
   }, [enabled]);
 
-  return snapshot;
+  return enabled ? snapshot : undefined;
 }

@@ -167,7 +167,7 @@ public static partial class BuiltInNodeCatalog
              new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("nonZeroCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next],
             [
                 new("mode", "Threshold Mode", "select", "manual", Group: "Mode", Options:
-                [new("Manual", "manual"), new("Adaptive", "adaptive"), new("Otsu", "otsu")], Description: "manual uses Threshold; adaptive uses local mean/Gaussian; otsu picks a global level."),
+                [new("Manual", "manual"), new("Adaptive", "adaptive"), new("Otsu", "otsu")], Description: "Manual uses the configured threshold. Adaptive uses a local mean or Gaussian window. Otsu picks one level from the ROI pixels, or from the full image when no ROI is set."),
                 new("inputBitDepth", "Input Bit Depth", "select", "auto", Group: "Input", Options:
                 [new("Auto (full 16-bit range)", "auto"), new("8-bit", "8"), new("10-bit", "10"), new("12-bit", "12"), new("14-bit", "14"), new("16-bit", "16")],
                     Description: "How 16-bit unsigned inputs are scaled to byte before thresholding. auto keeps the historical full-range mapping (divide by 257); a fixed depth maps 0..(2^bits-1) onto 0..255 so 10/12-bit cameras keep their contrast. Ignored for other pixel types."),
@@ -184,7 +184,7 @@ public static partial class BuiltInNodeCatalog
                 new("invert", "Invert", "boolean", false, Group: "Output",
                     Description: "Swap foreground/background polarity.", VisibleWhen: new("mode", ["manual", "adaptive", "otsu"]))
             ],
-            "Binary threshold with one cut level: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 (or by the declared inputBitDepth) to an 8-bit binary image; manual/Otsu also emit the threshold value. A ROI limits the Otsu and adaptive statistics to the ROI bounding box and makes the foreground ratio relative to the ROI area; pixels outside the ROI are cleared. Emits the foreground pixel ratio so binarization drift is visible, and raises a warning with an Otsu suggestion when a manual level selects almost nothing or almost everything. Need a 100..200 band instead of one cut? Use region.fromRange — it keeps the source bit depth and returns a Region; this node answers \"above/below one level\" and returns an Image. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
+            "Binary segmentation in manual, local adaptive, or Otsu mode. All modes convert color to gray and scale UInt16 by 1/257 (or by the declared inputBitDepth) to produce an 8-bit binary image. Manual and Otsu emit the threshold value. Otsu and the manual-mode suggestion use only the pixels covered by the ROI, or the full image when no ROI is set. Adaptive preserves each pixel's local window. The foreground ratio uses the ROI pixel count, and pixels outside the ROI are cleared. Manual mode warns and shows an Otsu suggestion when almost no pixels or almost all pixels are selected. For a range such as 100..200, use region.fromRange to preserve the input bit depth and return a Region.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
     ];
 }

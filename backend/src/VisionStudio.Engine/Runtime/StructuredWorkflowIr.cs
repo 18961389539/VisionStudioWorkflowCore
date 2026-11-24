@@ -314,7 +314,7 @@ internal sealed class StructuredWorkflowIrBuilder
             {
                 var cases = SwitchNode.ReadCases(node);
                 var outgoing = _graph.Outgoing(node.Id);
-                var expectedPorts = cases.Select((_, index) => $"case{index + 1}").Append("default").ToArray();
+                var expectedPorts = cases.Select(item => item.Port).Append("default").ToArray();
                 var unexpected = outgoing.Where(edge => !expectedPorts.Contains(edge.SourcePort, StringComparer.OrdinalIgnoreCase)).ToArray();
                 if (unexpected.Length > 0)
                     throw new InvalidOperationException($"Switch '{node.Id}' has control edges from undeclared ports: {string.Join(", ", unexpected.Select(x => x.SourcePort))}.");
@@ -327,7 +327,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 var mergePorts = expectedPorts.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 if (mergeEdges.Count != expectedPorts.Length || mergeEdges.Any(edge => !mergePorts.Contains(edge.TargetPort)) ||
                     expectedPorts.Any(port => mergeEdges.Count(edge => edge.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase)) != 1))
-                    throw new InvalidOperationException($"Switch '{node.Id}' casesJson must match exactly one incoming flow.merge control port per configured case and default (case1..caseN, default).");
+                    throw new InvalidOperationException($"Switch '{node.Id}' requires exactly one incoming flow.merge control edge at each configured port: {string.Join(", ", expectedPorts)}.");
                 var branches = new List<StructuredSwitchBranch>(branchEdges.Length);
                 for (var index = 0; index < branchEdges.Length; index++)
                 {
@@ -338,7 +338,7 @@ internal sealed class StructuredWorkflowIrBuilder
                     var matchingMergeEdge = mergeEdges.Single(x => x.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase));
                     if (!branch.NodeIds.Contains(matchingMergeEdge.SourceNodeId, StringComparer.OrdinalIgnoreCase))
                         throw new InvalidOperationException($"Switch '{node.Id}' branch '{port}' must converge through the matching flow.merge input '{port}'.");
-                    branches.Add(new StructuredSwitchBranch(port, index < cases.Length ? cases[index] : "default", branch));
+                    branches.Add(new StructuredSwitchBranch(port, index < cases.Length ? cases[index].Label : "default", branch));
                 }
                 for (var i = 0; i < branches.Count; i++)
                 for (var j = i + 1; j < branches.Count; j++)

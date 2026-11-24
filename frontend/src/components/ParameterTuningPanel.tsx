@@ -148,7 +148,11 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
         </Card>
         <Card size="small" title="2 · 调优节点" style={{ marginTop: 10 }}>
           <Select style={{ width: '100%' }} aria-label="调优节点" value={nodeId} onChange={setNodeId} options={tunableNodes.map((x) => ({ value: x.id, label: `${x.name ?? x.id} · ${x.type}` }))} />
-          {selectedCatalog && <><Typography.Title level={5} style={{ margin: '10px 0 2px' }}>{selectedCatalog.displayName}</Typography.Title><Typography.Text type="secondary">{selectedCatalog.description}</Typography.Text></>}
+          {/* 节点说明常有 200+ 字，全文铺开会把参数区挤到折叠线以下；默认三行、按需展开 */}
+          {selectedCatalog && <><Typography.Title level={5} style={{ margin: '10px 0 2px' }}>{selectedCatalog.displayName}</Typography.Title>
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
+              {selectedCatalog.description}
+            </Typography.Paragraph></>}
         </Card>
         <Card size="small" title="参数" style={{ marginTop: 10, maxHeight: 520, overflow: 'auto' }}>
           {!selectedCatalog?.parameters.length && !roiEnabled && <Typography.Text type="secondary">此节点没有可调参数。</Typography.Text>}
@@ -181,14 +185,19 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
             {preview?.replay.error && <Tag color="red">{preview.replay.error}</Tag>}
           </Space>
         </Card>
-        <Row gutter={10} style={{ marginTop: 10 }}>
-          <Col span={12}><Card size="small" title="节点输入"><pre style={{ maxHeight: 180, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(nodeReport?.inputs ?? {}, null, 2)}</pre></Card></Col>
-          <Col span={12}><Card size="small" title="节点输出"><pre style={{ maxHeight: 180, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(nodeReport?.outputs ?? {}, null, 2)}</pre></Card></Col>
-        </Row>
-        <Card size="small" title="节点摘要" style={{ marginTop: 10 }}>
-          <Space wrap>{nodeReport && <><Tag color={nodeReport.success ? 'green' : 'red'}>{nodeReport.success ? '成功' : '错误'}</Tag><Tag>{nodeReport.durationMs.toFixed(3)} 毫秒</Tag><Tag>{localizeStatus(nodeReport.phase)}</Tag></>}</Space>
-          <pre style={{ maxHeight: 150, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(nodeReport?.summary ?? {}, null, 2)}</pre>
-        </Card>
+        {/* 未运行时三块各画一个空 {}，白占 250px；有报告才铺开细节 */}
+        {nodeReport ? <>
+          <Row gutter={10} style={{ marginTop: 10 }}>
+            <Col span={12}><Card size="small" title="节点输入"><pre style={{ maxHeight: 180, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(nodeReport.inputs ?? {}, null, 2)}</pre></Card></Col>
+            <Col span={12}><Card size="small" title="节点输出"><pre style={{ maxHeight: 180, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(nodeReport.outputs ?? {}, null, 2)}</pre></Card></Col>
+          </Row>
+          <Card size="small" title="节点摘要" style={{ marginTop: 10 }}>
+            <Space wrap><Tag color={nodeReport.success ? 'green' : 'red'}>{nodeReport.success ? '成功' : '错误'}</Tag><Tag>{nodeReport.durationMs.toFixed(3)} 毫秒</Tag><Tag>{localizeStatus(nodeReport.phase)}</Tag></Space>
+            <pre style={{ maxHeight: 150, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(nodeReport.summary ?? {}, null, 2)}</pre>
+          </Card>
+        </> : <Card size="small" title="节点输入 / 输出 / 摘要" style={{ marginTop: 10 }}>
+          <Typography.Text type="secondary">运行当前节点或完整工作流后显示。</Typography.Text>
+        </Card>}
       </Col>
 
       <Col span={7}>

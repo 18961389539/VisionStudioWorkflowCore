@@ -11,6 +11,25 @@ import { fallbackCatalog } from '../catalog';
 import { catalog, node, report, mount } from './nodeConfigurationDialogHarness';
 
 describe('node configuration draft', () => {
+  it('captures a replay manifest and only saves it when applied', async () => {
+    const item = fallbackCatalog.find(entry => entry.type === 'image.load')!;
+    const imageNode: Node = { id: 'load', position: { x: 0, y: 0 }, data: { typeKey: item.type, parameters: { path: 'samples' } } };
+    const manifest = JSON.stringify({ version: 1, files: [{ path: 'image.png', sha256: 'a'.repeat(64) }] });
+    const onPreview = vi.fn(async (): Promise<RunResult> => ({
+      ...report, success: true, nodeReports: [{ nodeId: imageNode.id, nodeType: item.type, success: true, durationMs: 1,
+        summary: {}, outputs: { manifestJson: { type: 'String', display: manifest, value: manifest } } }]
+    }));
+    const onApply = vi.fn();
+    const { dialog } = mount({ node: imageNode, nodes: [imageNode], catalogItem: item, onPreview, onApply });
+    fireEvent.click(dialog.getByRole('button', { name: '生成回放清单' }));
+    await waitFor(() => expect(dialog.getByRole('button', { name: '重新生成回放清单' })).toBeTruthy());
+    expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({ pathMode: 'directory', captureManifest: true }));
+    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ pathMode: 'manifest', manifestJson: manifest }));
+    expect(onApply.mock.calls[0][0].captureManifest).toBeUndefined();
+  });
+
   it('keeps trained models in the staged workflow until Apply, and excludes runtime thresholds from training status', async () => {
     const shapeCatalog: NodeCatalogItem = {
       type: 'match.shape', displayName: '形状匹配', category: '匹配', pluginId: 'builtin', description: '显式训练模型',

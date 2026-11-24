@@ -10,6 +10,21 @@ import type { NodeCatalogItem, RunResult, VisionOverlay, VisionRoi } from '../ty
 import { fallbackCatalog } from '../catalog';
 import { catalog, node, report, mount } from './nodeConfigurationDialogHarness';
 
+describe('image fusion alignment guidance', () => {
+  it.each([
+    ['sameFrame', '同步帧组需要空间配准'],
+    [undefined, '当前配方跳过对齐校验'],
+  ])('explains registration for a FrameSet with policy %s', (alignmentPolicy, title) => {
+    const fuse = fallbackCatalog.find(item => item.type === 'image.fuse')!;
+    const target: Node = { id: 'fuse', position: { x: 0, y: 0 }, data: {
+      typeKey: fuse.type, label: fuse.displayName, inputs: fuse.inputs, parameters: { sourceMode: 'frameSet', alignmentPolicy }
+    } };
+    const { dialog } = mount({ node: target, nodes: [target], catalogItem: fuse });
+    expect(dialog.getByText(title)).toBeTruthy();
+    expect(dialog.getByText(/图像配准.*仿射变换图像.*同一参考图/)).toBeTruthy();
+  });
+});
+
 describe('numeric conditional parameters', () => {
   it('hides the HTTP retry delay until retries are enabled', () => {
     const httpCatalog = fallbackCatalog.find(item => item.type === 'output.httpRequest')!;

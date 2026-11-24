@@ -311,13 +311,24 @@ public sealed class PluginPerformanceBenchmarkService(
     OfflineReplayService replay,
     PluginWorkerSupervisor workers,
     PluginManager plugins,
-    IHostApplicationLifetime lifetime)
+    IHostApplicationLifetime lifetime,
+    RuntimeWorkloadGate workloads,
+    ILogger<PluginPerformanceBenchmarkService> logger)
 {
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool HasActiveRuns => !_active.IsEmpty;
-
     public async Task<PluginBenchmarkRun> StartAsync(StartPluginBenchmarkRequest request, CancellationToken ct)
+    {
+        var admission = workloads.AcquireBenchmark();
+        try { return await StartCoreAsync(request, admission, ct); }
+        catch
+        {
+            admission.Dispose();
+            throw;
+        }
+    }
+
+    private async Task<PluginBenchmarkRun> StartCoreAsync(StartPluginBenchmarkRequest request, IDisposable admission, CancellationToken ct)
     {
         var dataset = await datasets.GetDatasetAsync(request.DatasetId, ct);
         if (dataset.Items.Count == 0) throw new ApiConflictException("Benchmark Dataset has no items.");
@@ -362,15 +373,41 @@ public sealed class PluginPerformanceBenchmarkService(
 
         var run = await store.CreateAsync(request, plugin.Version, plugin.AssemblySha256, validation.WorkflowHash, pools, count, warmup, concurrency, ct);
         var cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.ApplicationStopping);
-        if (!_active.TryAdd(run.RunId, cts)) throw new InvalidOperationException("Benchmark runner ID collision.");
-        _ = Task.Run(() => ExecuteAsync(run.RunId, dataset, workflow, pools, count, warmup, concurrency, portableBaseline, run.RegressionPolicy, cts.Token));
+        if (!_active.TryAdd(run.RunId, cts))
+        {
+            cts.Dispose();
+            throw new InvalidOperationException("Benchmark runner ID collision.");
+        }
+        _ = Task.Run(async () =>
+        {
+            using (admission)
+            {
+                try
+                {
+                    await ExecuteAsync(run.RunId, dataset, workflow, pools, count, warmup, concurrency,
+                        portableBaseline, run.RegressionPolicy, cts.Token);
+                }
+                catch (Exception exception)
+                {
+                    logger.LogError(exception, "Could not finalize plugin benchmark {RunId}.", run.RunId);
+                }
+                finally
+                {
+                    if (_active.TryRemove(run.RunId, out var completed)) completed.Dispose();
+                }
+            }
+        });
         return run;
     }
 
     public async Task CancelAsync(string runId, CancellationToken ct)
     {
         await store.RequestCancelAsync(runId, ct);
-        if (_active.TryGetValue(runId, out var cts)) cts.Cancel();
+        if (_active.TryGetValue(runId, out var cts))
+        {
+            try { await cts.CancelAsync(); }
+            catch (ObjectDisposedException) { /* The benchmark finished while cancellation was being requested. */ }
+        }
     }
 
     private async Task ExecuteAsync(string runId, ValidationDatasetDetail dataset, WorkflowDefinition workflow, IReadOnlyList<int> pools, int count, int warmup, int concurrency, PluginBenchmarkBaselineSnapshot? baseline, PluginBenchmarkRegressionPolicy policy, CancellationToken ct)
@@ -413,7 +450,6 @@ public sealed class PluginPerformanceBenchmarkService(
         finally
         {
             await store.CompleteAsync(runId, status, recommendation, regression, error, CancellationToken.None);
-            if (_active.TryRemove(runId, out var cts)) cts.Dispose();
         }
     }
 

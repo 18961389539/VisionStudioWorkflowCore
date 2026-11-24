@@ -53,8 +53,8 @@ public sealed class RobotCommandTraceStore : IRobotCommandObserver
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public RobotCommandTraceStore(IWebHostEnvironment env, IOptions<RobotTraceRetentionOptions> retention)
-        : this(Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "robot-traces"), retention)
+    public RobotCommandTraceStore(IWebHostEnvironment env, IOptions<RobotTraceRetentionOptions> retention, IConfiguration? configuration = null)
+        : this(Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "robot-traces"), retention)
     {
     }
 

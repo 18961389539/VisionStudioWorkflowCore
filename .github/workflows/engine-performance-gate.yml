@@ -1,0 +1,62 @@
+name: Engine Performance Gate
+
+# Nightly engine algorithm microbenchmark on golden fixtures. Absolute timings are
+# only comparable on the same machine, so this gate must run on a dedicated
+# self-hosted runner. The committed baseline stores the machine identity; on a
+# different machine the benchmark reports MACHINE_MISMATCH and skips gating.
+on:
+  schedule:
+    - cron: '45 18 * * *'
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: "Record the current run as the baseline on this runner, then commit ci/engine-benchmark-baseline.json"
+        type: boolean
+        default: false
+      samples:
+        description: "Timed samples per case (3..51)"
+        required: false
+        default: "9"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-performance-gate
+  cancel-in-progress: false
+
+jobs:
+  engine-benchmark:
+    # Fixed machine is the point: 25% median tolerance means nothing across
+    # differently provisioned runners.
+    runs-on: self-hosted
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Run engine algorithm microbenchmark
+        shell: pwsh
+        run: |
+          $arguments = @{
+            Samples = "${{ inputs.samples || '9' }}"
+            Baseline = "ci/engine-benchmark-baseline.json"
+            Output = "artifacts/engine-benchmark-result.json"
+          }
+          if ("${{ inputs.update_baseline }}" -eq "true") { $arguments.UpdateBaseline = $true }
+          ./scripts/engine-benchmark-gate.ps1 @arguments
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-performance-gate
+          path: artifacts/engine-benchmark-result.json
+          if-no-files-found: warn
+      - name: Upload refreshed baseline
+        if: ${{ inputs.update_baseline == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-benchmark-baseline
+          path: ci/engine-benchmark-baseline.json
+          if-no-files-found: error

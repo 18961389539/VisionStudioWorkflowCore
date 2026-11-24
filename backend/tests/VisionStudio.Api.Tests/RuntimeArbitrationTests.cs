@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace VisionStudio.Api.Tests;
 
@@ -11,8 +12,28 @@ namespace VisionStudio.Api.Tests;
 public sealed class RuntimeArbitrationTests : IClassFixture<VisionStudioApiFactory>
 {
     private readonly HttpClient _client;
+    private readonly RuntimeWorkloadGate _workloads;
 
-    public RuntimeArbitrationTests(VisionStudioApiFactory factory) => _client = factory.CreateClient();
+    public RuntimeArbitrationTests(VisionStudioApiFactory factory)
+    {
+        _client = factory.CreateClient();
+        _workloads = factory.Services.GetRequiredService<RuntimeWorkloadGate>();
+    }
+
+    [Fact]
+    public async Task BenchmarkClaimsAdmissionBeforeReadingTheDataset_AndReleasesItOnFailure()
+    {
+        var request = new StartPluginBenchmarkRequest("missing", "missing", "missing");
+        using (_workloads.AcquireProduction())
+        {
+            using var conflict = await _client.PostAsJsonAsync("/api/plugin-benchmarks", request);
+            Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        }
+
+        using var missing = await _client.PostAsJsonAsync("/api/plugin-benchmarks", request);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        using var production = _workloads.AcquireProduction();
+    }
 
     [Fact]
     public async Task ProductionRuntime_BlocksReferencedAssetsAndRuns_ButAllowsUnrelatedWorkflows()
@@ -32,7 +53,7 @@ public sealed class RuntimeArbitrationTests : IClassFixture<VisionStudioApiFacto
         var publish = await _client.PostAsync($"/api/jobs/{jobId}/versions/1/publish", null);
         Assert.True(publish.StatusCode == HttpStatusCode.OK, $"publish -> {(int)publish.StatusCode}: {await publish.Content.ReadAsStringAsync()}");
 
-        var config = await _client.PutAsJsonAsync("/api/production/config", new
+        var config = await _client.PutProductionConfigAsync(new
         {
             jobId,
             autoStart = false,

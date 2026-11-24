@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Data.Sqlite;
 
 namespace VisionStudio.Api;
@@ -25,7 +23,7 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed partial class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 29;
+    public const int CurrentVersion = 37;
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
     {
@@ -93,7 +91,7 @@ CREATE TABLE IF NOT EXISTS schema_migration_history (
             var existing = await check.ExecuteScalarAsync(ct) as string;
             if (existing is not null)
             {
-                if (!string.Equals(existing, migration.Checksum, StringComparison.OrdinalIgnoreCase))
+                if (!migration.MatchesChecksum(existing))
                     throw new InvalidOperationException($"Schema migration checksum drift detected for v{migration.Version} ({migration.Name}).");
                 continue;
             }
@@ -170,7 +168,7 @@ VALUES($version,$name,$checksum,$at,$duration,0);
             command.Parameters.AddWithValue("$version", migration.Version);
             var value = await command.ExecuteScalarAsync(ct) as string;
             if (value is null) continue;
-            if (!string.Equals(value, migration.Checksum, StringComparison.OrdinalIgnoreCase))
+            if (!migration.MatchesChecksum(value))
                 throw new InvalidOperationException($"Schema migration checksum drift detected for v{migration.Version} ({migration.Name}).");
         }
     }
@@ -292,23 +290,4 @@ SET base_workflow_hash = COALESCE(base_workflow_hash, workflow_hash),
         alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {declaration};";
         await alter.ExecuteNonQueryAsync(ct);
     }
-
-    private sealed class Migration
-    {
-        public Migration(int version, string name, string sql, Func<SqliteConnection, SqliteTransaction, CancellationToken, Task>? customApply = null, string? checksumSeed = null)
-        {
-            Version = version;
-            Name = name;
-            Sql = sql;
-            CustomApply = customApply;
-            var normalized = $"{version}\n{name}\n{sql.Trim()}\n{checksumSeed ?? string.Empty}";
-            Checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
-        }
-        public int Version { get; }
-        public string Name { get; }
-        public string Sql { get; }
-        public Func<SqliteConnection, SqliteTransaction, CancellationToken, Task>? CustomApply { get; }
-        public string Checksum { get; }
-    }
-
 }

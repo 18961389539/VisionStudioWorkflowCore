@@ -1,5 +1,4 @@
 using VisionStudio.Api.Security;
-using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api.Endpoints;
 
@@ -13,13 +12,8 @@ public static class PluginBenchmarkEndpoints
         app.MapPost("/api/plugin-benchmarks", async (
             StartPluginBenchmarkRequest request,
             PluginPerformanceBenchmarkService service,
-            ProductionRuntimeService production,
-            CancellationToken ct) =>
-        {
-            if (production.Status.ProductionLocked)
-                throw new ApiConflictException("Stop Production Runtime before starting a plugin performance benchmark.");
-            return Results.Ok(await service.StartAsync(request, ct));
-        }).Produces<PluginBenchmarkRun>().RequireEngineer("plugin-benchmark.start", "plugin-benchmark");
+            CancellationToken ct) => Results.Ok(await service.StartAsync(request, ct)))
+            .Produces<PluginBenchmarkRun>().RequireEngineer("plugin-benchmark.start", "plugin-benchmark");
 
         app.MapGet("/api/plugin-benchmarks/{runId}", async (string runId, PluginBenchmarkStore store, CancellationToken ct) =>
             Results.Ok(await store.GetAsync(runId, true, ct))).Produces<PluginBenchmarkRun>().RequireAuthorization(SecurityPolicies.Engineer);

@@ -13,6 +13,8 @@ public enum AlarmSeverity { Info, Warning, Error, Critical }
 /// <summary>报警分页结果；Total 是裁剪到 take 之前的条数。</summary>
 public sealed record AlarmPage(IReadOnlyList<AlarmRecord> Items, int Total);
 
+public sealed record AlarmSummary(int ActiveCount, int CriticalCount, string? LatestActiveMessage, int PendingCount);
+
 public sealed record AlarmRecord(
     string Id,
     string Code,
@@ -24,7 +26,9 @@ public sealed record AlarmRecord(
     DateTimeOffset RaisedAt,
     DateTimeOffset? RecoveredAt = null,
     DateTimeOffset? AcknowledgedAt = null,
-    string? RunId = null);
+    string? RunId = null,
+    DateTimeOffset? LastRaisedAt = null,
+    int OccurrenceCount = 1);
 
 public sealed class AlarmStore
 {
@@ -40,7 +44,7 @@ public sealed class AlarmStore
     /// <summary>列表接口允许的最大 take，避免调用方一次拉全量。</summary>
     public const int MaxPageSize = 1000;
 
-    private const string Columns = "id, code, severity, source, message, active, acknowledged, raised_at, recovered_at, acknowledged_at, run_id";
+    private const string Columns = "id, code, severity, source, message, active, acknowledged, raised_at, recovered_at, acknowledged_at, run_id, COALESCE(last_raised_at, raised_at), occurrence_count";
 
     private static readonly JsonSerializerOptions LegacyJson = new(JsonSerializerDefaults.Web)
     {
@@ -51,7 +55,7 @@ public sealed class AlarmStore
     private readonly ILogger<AlarmStore> _logger;
     private readonly string _legacyPath;
     private readonly SemaphoreSlim _legacyGate = new(1, 1);
-    private volatile bool _legacyImported;
+    private readonly Action<string, string> _archiveLegacyFile;
 
     /// <summary>测试与非 DI 场景的便捷构造：独立打开内容根下的元数据库。</summary>
     public AlarmStore(IWebHostEnvironment env)
@@ -60,10 +64,17 @@ public sealed class AlarmStore
     }
 
     public AlarmStore(SqliteMetadataDatabase database, IWebHostEnvironment env, ILogger<AlarmStore> logger)
+        : this(database, env, logger, File.Move)
+    {
+    }
+
+    internal AlarmStore(SqliteMetadataDatabase database, IWebHostEnvironment env, ILogger<AlarmStore> logger,
+        Action<string, string> archiveLegacyFile)
     {
         _database = database;
         _logger = logger;
-        var dir = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "production");
+        _archiveLegacyFile = archiveLegacyFile;
+        var dir = Path.Combine(database.DataRoot, "production");
         Directory.CreateDirectory(dir);
         _legacyPath = Path.Combine(dir, "alarms.json");
     }
@@ -80,11 +91,12 @@ public sealed class AlarmStore
             using var command = connection.CreateCommand();
             command.CommandText = """
 SELECT COUNT(*),
-       COALESCE(MAX(raised_at), ''),
+       COALESCE(MAX(COALESCE(last_raised_at, raised_at)), ''),
        COALESCE(MAX(recovered_at), ''),
        COALESCE(MAX(acknowledged_at), ''),
        COALESCE(SUM(active), 0),
-       COALESCE(SUM(acknowledged), 0)
+       COALESCE(SUM(acknowledged), 0),
+       COALESCE(SUM(occurrence_count), 0)
 FROM alarms;
 """;
             using var reader = command.ExecuteReader();
@@ -95,7 +107,8 @@ FROM alarms;
                 reader.GetString(2),
                 reader.GetString(3),
                 reader.GetInt32(4).ToString(CultureInfo.InvariantCulture),
-                reader.GetInt32(5).ToString(CultureInfo.InvariantCulture));
+                reader.GetInt32(5).ToString(CultureInfo.InvariantCulture),
+                reader.GetInt64(6).ToString(CultureInfo.InvariantCulture));
         }
         catch
         {
@@ -105,33 +118,63 @@ FROM alarms;
     }
 
     /// <summary>
-    /// 分页读取报警。返回分页结果与**裁剪前**的总数（供 X-Total-Count），
+    /// 分页读取报警。总数为筛选后、分页前的条数（供 X-Total-Count）。
+    /// 待确认筛选只包含仍在活动且尚未确认的报警。
     /// take 会被夹在 [1, MaxPageSize]，skip 负数按 0 处理。
     /// </summary>
-    public async Task<AlarmPage> ListAsync(bool activeOnly, int skip, int take, CancellationToken ct)
+    public async Task<AlarmPage> ListAsync(bool activeOnly, int skip, int take, CancellationToken ct, bool pendingOnly = false)
     {
         await EnsureLegacyImportedAsync(ct);
         var effectiveSkip = Math.Max(0, skip);
         var effectiveTake = take <= 0 ? DefaultPageSize : Math.Min(take, MaxPageSize);
-        var filter = activeOnly ? " WHERE active = 1" : string.Empty;
+        var filter = (pendingOnly, activeOnly) switch
+        {
+            (true, _) => " WHERE active = 1 AND acknowledged = 0",
+            (_, true) => " WHERE active = 1",
+            _ => string.Empty
+        };
 
         await using var connection = await _database.OpenConnectionAsync(ct);
-        var total = await ScalarIntAsync(connection, null, $"SELECT COUNT(*) FROM alarms{filter};", ct);
+        await using var tx = connection.BeginTransaction(deferred: true);
+        var total = await ScalarIntAsync(connection, tx, $"SELECT COUNT(*) FROM alarms{filter};", ct);
 
         await using var command = connection.CreateCommand();
+        command.Transaction = tx;
         command.CommandText = $"""
 SELECT {Columns}
 FROM alarms{filter}
-ORDER BY raised_at DESC
+ORDER BY raised_at DESC, id DESC
 LIMIT $take OFFSET $skip;
 """;
         command.Parameters.AddWithValue("$take", effectiveTake);
         command.Parameters.AddWithValue("$skip", effectiveSkip);
 
         var items = new List<AlarmRecord>(Math.Min(effectiveTake, 128));
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) items.Add(ReadRecord(reader));
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct)) items.Add(ReadRecord(reader));
+        }
+        await tx.CommitAsync(ct);
         return new AlarmPage(items, total);
+    }
+
+    public async Task<AlarmSummary> GetSummaryAsync(CancellationToken ct)
+    {
+        await EnsureLegacyImportedAsync(ct);
+        await using var connection = await _database.OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+SELECT COUNT(*),
+       COUNT(CASE WHEN severity = $critical THEN 1 END),
+       (SELECT message FROM alarms WHERE active = 1 ORDER BY COALESCE(last_raised_at, raised_at) DESC, id DESC LIMIT 1),
+       COUNT(CASE WHEN acknowledged = 0 THEN 1 END)
+FROM alarms
+WHERE active = 1;
+""";
+        command.Parameters.AddWithValue("$critical", nameof(AlarmSeverity.Critical));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+        return new AlarmSummary(reader.GetInt32(0), reader.GetInt32(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt32(3));
     }
 
     /// <summary>
@@ -151,27 +194,34 @@ LIMIT $take OFFSET $skip;
     public async Task<AlarmRecord> RaiseAsync(string code, AlarmSeverity severity, string source, string message, string? runId, CancellationToken ct)
     {
         await EnsureLegacyImportedAsync(ct);
-        var alarm = new AlarmRecord(Guid.NewGuid().ToString("N"), code, severity, source, message, true, false, DateTimeOffset.UtcNow, null, null, runId);
-
         await using var connection = await _database.OpenConnectionAsync(ct);
         await using var tx = connection.BeginTransaction(deferred: false);
         try
         {
-            // 旧 JSON 实现用"找到活动同类就替换"维持 (code, source) 唯一；这里先删后插，
-            // 部分唯一索引 ux_alarms_active_code_source 负责兜底并发写入。
-            await ExecuteAsync(connection, tx, "DELETE FROM alarms WHERE active = 1 AND code = $code AND source = $source;", ct,
-                ("$code", code), ("$source", source));
-            await ExecuteAsync(connection, tx, """
-INSERT INTO alarms(id, code, severity, source, message, active, acknowledged, raised_at, recovered_at, acknowledged_at, run_id)
-VALUES($id, $code, $severity, $source, $message, 1, 0, $raisedAt, NULL, NULL, $runId);
-""", ct,
-                ("$id", alarm.Id),
-                ("$code", alarm.Code),
-                ("$severity", alarm.Severity.ToString()),
-                ("$source", alarm.Source),
-                ("$message", alarm.Message),
-                ("$raisedAt", FormatTimestamp(alarm.RaisedAt)),
-                ("$runId", alarm.RunId));
+            await using var command = connection.CreateCommand();
+            command.Transaction = tx;
+            command.CommandText = $"""
+INSERT INTO alarms(id, code, severity, source, message, active, acknowledged, raised_at, last_raised_at, run_id)
+VALUES($id, $code, $severity, $source, $message, 1, 0, $now, $now, $runId)
+ON CONFLICT(code, source) WHERE active = 1 DO UPDATE SET
+    severity = excluded.severity, message = excluded.message, run_id = excluded.run_id,
+    last_raised_at = MAX(COALESCE(alarms.last_raised_at, alarms.raised_at), excluded.last_raised_at),
+    occurrence_count = alarms.occurrence_count + 1
+RETURNING {Columns};
+""";
+            command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N"));
+            command.Parameters.AddWithValue("$code", code);
+            command.Parameters.AddWithValue("$severity", severity.ToString());
+            command.Parameters.AddWithValue("$source", source);
+            command.Parameters.AddWithValue("$message", message);
+            command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
+            command.Parameters.AddWithValue("$runId", (object?)runId ?? DBNull.Value);
+            AlarmRecord alarm;
+            await using (var reader = await command.ExecuteReaderAsync(ct))
+            {
+                if (!await reader.ReadAsync(ct)) throw new InvalidOperationException("Alarm write returned no record.");
+                alarm = ReadRecord(reader);
+            }
             await TrimAsync(connection, tx, ct);
             await tx.CommitAsync(ct);
             return alarm;
@@ -205,7 +255,7 @@ WHERE active = 1 AND code = $code AND source = $source;
         try
         {
             var affected = await ExecuteAsync(connection, tx,
-                "UPDATE alarms SET acknowledged = 1, acknowledged_at = $now WHERE id = $id;", ct,
+                "UPDATE alarms SET acknowledged = 1, acknowledged_at = COALESCE(acknowledged_at, $now) WHERE id = $id;", ct,
                 ("$now", FormatTimestamp(DateTimeOffset.UtcNow)), ("$id", id));
             if (affected == 0) throw new ApiNotFoundException($"Alarm '{id}' does not exist.");
 
@@ -238,69 +288,78 @@ WHERE active = 1 AND code = $code AND source = $source;
         await ExecuteAsync(connection, tx, """
 DELETE FROM alarms
 WHERE active = 0
-  AND id NOT IN (SELECT id FROM alarms WHERE active = 0 ORDER BY raised_at DESC LIMIT $keep);
+  AND id NOT IN (SELECT id FROM alarms WHERE active = 0 ORDER BY raised_at DESC, id DESC LIMIT $keep);
 """, ct, ("$keep", keep));
     }
 
     /// <summary>
-    /// 旧 alarms.json 一次性导入（2026-11-13）。导入成功后把文件改名为
-    /// <c>alarms.json.migrated-时间戳</c>，避免下次启动重复覆盖新数据；导入失败只告警，
-    /// 保留原文件供人工恢复，报警功能继续用空表运行。
+    /// 导入和完成标记一起提交。提交后归档失败时，后续请求只重试归档。
     /// </summary>
     private async Task EnsureLegacyImportedAsync(CancellationToken ct)
     {
-        if (_legacyImported) return;
+        if (!File.Exists(_legacyPath)) return;
         await _legacyGate.WaitAsync(ct);
         try
         {
-            if (_legacyImported) return;
-            if (File.Exists(_legacyPath))
-            {
-                try
-                {
-                    List<AlarmRecord> items;
-                    await using (var stream = new FileStream(_legacyPath, FileMode.Open, FileAccess.Read,
-                        FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan))
-                    {
-                        items = await JsonSerializer.DeserializeAsync<List<AlarmRecord>>(stream, LegacyJson, ct) ?? [];
-                    }
+            if (!File.Exists(_legacyPath)) return;
+            await ImportLegacyFileAsync(ct);
+            ct.ThrowIfCancellationRequested();
 
-                    await using var connection = await _database.OpenConnectionAsync(ct);
-                    await using var tx = connection.BeginTransaction(deferred: false);
-                    foreach (var item in items.OrderBy(x => x.RaisedAt))
-                    {
-                        // OR REPLACE：同一 (code, source) 的活动报警保留最新一条，与 RaiseAsync 语义一致。
-                        await ExecuteAsync(connection, tx, """
-INSERT OR REPLACE INTO alarms(id, code, severity, source, message, active, acknowledged, raised_at, recovered_at, acknowledged_at, run_id)
-VALUES($id, $code, $severity, $source, $message, $active, $acknowledged, $raisedAt, $recoveredAt, $acknowledgedAt, $runId);
-""", ct,
-                            ("$id", item.Id),
-                            ("$code", item.Code),
-                            ("$severity", item.Severity.ToString()),
-                            ("$source", item.Source),
-                            ("$message", item.Message),
-                            ("$active", item.Active ? 1 : 0),
-                            ("$acknowledged", item.Acknowledged ? 1 : 0),
-                            ("$raisedAt", FormatTimestamp(item.RaisedAt)),
-                            ("$recoveredAt", item.RecoveredAt is { } recovered ? FormatTimestamp(recovered) : null),
-                            ("$acknowledgedAt", item.AcknowledgedAt is { } acknowledged ? FormatTimestamp(acknowledged) : null),
-                            ("$runId", item.RunId));
-                    }
-                    await TrimAsync(connection, tx, ct);
-                    await tx.CommitAsync(ct);
-
-                    var archived = $"{_legacyPath}.migrated-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
-                    File.Move(_legacyPath, archived, overwrite: true);
-                    _logger.LogInformation("Migrated {Count} alarms from {Path} to SQLite (archived as {Archived}).", items.Count, _legacyPath, archived);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to import legacy alarms from {Path}; the file is left in place for manual recovery.", _legacyPath);
-                }
-            }
-            _legacyImported = true;
+            var archived = $"{_legacyPath}.migrated-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfffffff}";
+            _archiveLegacyFile(_legacyPath, archived);
+            _logger.LogInformation("Archived imported legacy alarms from {Path} to {Archived}.", _legacyPath, archived);
+        }
+        catch (FileNotFoundException) when (!File.Exists(_legacyPath))
+        {
+            // 另一宿主已将文件归档。
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not import or archive legacy alarms from {Path}.", _legacyPath);
         }
         finally { _legacyGate.Release(); }
+    }
+
+    private async Task ImportLegacyFileAsync(CancellationToken ct)
+    {
+        await using var connection = await _database.OpenConnectionAsync(ct, strongDurability: true);
+        await using var tx = connection.BeginTransaction(deferred: false);
+        if (await ScalarIntAsync(connection, tx, "SELECT COUNT(*) FROM legacy_alarm_import WHERE id = 1;", ct) != 0)
+            return;
+
+        List<AlarmRecord> items;
+        await using (var stream = new FileStream(_legacyPath, FileMode.Open, FileAccess.Read,
+            FileShare.Read | FileShare.Delete, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            items = await JsonSerializer.DeserializeAsync<List<AlarmRecord>>(stream, LegacyJson, ct) ?? [];
+        }
+
+        // 保留数据库中已有的状态。旧文件内同一活动报警取最新一条。
+        foreach (var item in items.OrderByDescending(x => x.RaisedAt))
+        {
+            ct.ThrowIfCancellationRequested();
+            await ExecuteAsync(connection, tx, """
+INSERT INTO alarms(id, code, severity, source, message, active, acknowledged, raised_at, recovered_at, acknowledged_at, run_id)
+VALUES($id, $code, $severity, $source, $message, $active, $acknowledged, $raisedAt, $recoveredAt, $acknowledgedAt, $runId)
+ON CONFLICT DO NOTHING;
+""", ct,
+                ("$id", item.Id),
+                ("$code", item.Code),
+                ("$severity", item.Severity.ToString()),
+                ("$source", item.Source),
+                ("$message", item.Message),
+                ("$active", item.Active ? 1 : 0),
+                ("$acknowledged", item.Acknowledged ? 1 : 0),
+                ("$raisedAt", FormatTimestamp(item.RaisedAt)),
+                ("$recoveredAt", item.RecoveredAt is { } recovered ? FormatTimestamp(recovered) : null),
+                ("$acknowledgedAt", item.AcknowledgedAt is { } acknowledged ? FormatTimestamp(acknowledged) : null),
+                ("$runId", item.RunId));
+        }
+        await TrimAsync(connection, tx, ct);
+        await ExecuteAsync(connection, tx, "INSERT INTO legacy_alarm_import(id) VALUES(1);", ct);
+        ct.ThrowIfCancellationRequested();
+        await tx.CommitAsync(ct);
+        _logger.LogInformation("Imported legacy alarms from {Path} into SQLite.", _legacyPath);
     }
 
     private static AlarmRecord ReadRecord(SqliteDataReader reader) => new(
@@ -314,7 +373,9 @@ VALUES($id, $code, $severity, $source, $message, $active, $acknowledged, $raised
         RaisedAt: ParseTimestamp(reader.GetString(7)),
         RecoveredAt: reader.IsDBNull(8) ? null : ParseTimestamp(reader.GetString(8)),
         AcknowledgedAt: reader.IsDBNull(9) ? null : ParseTimestamp(reader.GetString(9)),
-        RunId: reader.IsDBNull(10) ? null : reader.GetString(10));
+        RunId: reader.IsDBNull(10) ? null : reader.GetString(10),
+        LastRaisedAt: ParseTimestamp(reader.GetString(11)),
+        OccurrenceCount: reader.GetInt32(12));
 
     private static AlarmSeverity ParseSeverity(string value)
         => Enum.TryParse<AlarmSeverity>(value, ignoreCase: true, out var severity) ? severity : AlarmSeverity.Warning;

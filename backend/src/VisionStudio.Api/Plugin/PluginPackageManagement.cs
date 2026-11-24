@@ -125,10 +125,10 @@ public sealed class PluginPackageService
     private readonly ILogger<PluginPackageService> _logger;
     private string? _pluginsRoot;
 
-    public PluginPackageService(IWebHostEnvironment environment, IOptions<PluginPackageOptions> options, ILogger<PluginPackageService> logger)
+    public PluginPackageService(IWebHostEnvironment environment, IOptions<PluginPackageOptions> options, ILogger<PluginPackageService> logger, IConfiguration? configuration = null)
     {
-        _repositoryRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "plugin-packages");
-        _trustRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "plugin-trust");
+        _repositoryRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "plugin-packages");
+        _trustRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "plugin-trust");
         _trustFile = Path.Combine(_trustRoot, "trusted-publishers.json");
         _pointerFile = Path.Combine(_repositoryRoot, "active-pointers.json");
         _options = options.Value;

@@ -66,6 +66,9 @@ public static class RuntimeOnlyPolicy
         if (value.Equals("/api/production/start", StringComparison.OrdinalIgnoreCase)) return true;
         if (value.Equals("/api/production/stop", StringComparison.OrdinalIgnoreCase)) return true;
         if (value.Equals("/api/production/recover", StringComparison.OrdinalIgnoreCase)) return true;
+        if (value.Equals("/api/production/recipe-deliveries", StringComparison.OrdinalIgnoreCase)) return true;
+        if (value.StartsWith("/api/production/recipe-deliveries/", StringComparison.OrdinalIgnoreCase) &&
+            value.EndsWith("/publish", StringComparison.OrdinalIgnoreCase)) return true;
         // C04：受管理员认证 + 审计的设备动作核对在正式运行模式下必须可达——否则 Unknown 只能先
         // resolve、而 resolve 被 RuntimeOnly 拒绝，故障恢复形成死路。
         if (value.Equals("/api/production/device-actions/resolve", StringComparison.OrdinalIgnoreCase)) return true;

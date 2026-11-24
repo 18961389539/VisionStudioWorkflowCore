@@ -44,6 +44,9 @@
 | `check-warning-baseline.ps1` | 编译器/分析器告警不新增（`scripts/warning-baseline.txt`） | 修掉告警；确属误报则显式加入基线，让下一次 review 看得到 |
 | `check-coverage.py` | 合并行/分支覆盖率下限 | 行 84 / 分支 62 是棘轮：只升不降（2026-11-13 实测 85.0% / 62.5%，各留约 1 点余量），提升后同步上调脚本默认值与 workflow 的 `MIN_LINE_COVERAGE`/`MIN_BRANCH_COVERAGE` |
 | `static-audit.py` 的空 catch 规则（2026-11-12，2026-11-13 清零） | 未写忽略原因的空 `catch` 不得新增（`scripts/empty-catch-baseline.json` 存量已清零） | 写 `catch { } // 原因`（或 `/* */`），或补上真正的错误处理。新增即失败，不再有按文件锁定的存量额度 |
+| `static-audit.py` 自动备份断言（2026-11-23） | 自动调度服务/宿主注册/`/api/health` 新鲜度字段/`Storage:AutoBackup` 配置/恢复演练测试/文档声明必须同时存在；文档必须写明 `stale` 不参与 `degradedReasons` | 补齐服务、注册或健康字段；不要为了让 `stale=false` 而删掉披露字段——陈旧备份是告警，不是就绪条件 |
+| `static-audit.py` 安全响应头断言（2026-11-23） | `SecurityHeadersMiddleware` 必须位于转发头之后、静态文件/异常处理器之前；CSP/HSTS/XFO 等 token、配置项、错误路径测试与文档的放宽理由必须同时存在 | 按 `docs/security-headers.md` 核对管线顺序；收紧 CSP 前先删除对应的前端用法（antd 内联样式、blob 预览、SignalR WebSocket） |
+| `static-audit.py` Windows 服务断言（2026-11-23） | `WindowsServices` 包/`UseWindowsService`/安装脚本（数据根隔离、恢复动作、延迟启动）/卸载脚本（优雅停止后才删除）/WER 转储脚本/运维文档必须同时存在 | 按 `docs/windows-service.md` 补齐；不要为绕过检查删除"停止超时拒绝删除"与"数据根不得在包内"两条安全断言 |
 | `dotnet list package --vulnerable`（2026-11-12） | NuGet 已知漏洞只拦 high/critical；离线时打印跳过而不是失败 | 在 `backend/Directory.Packages.props` 升版本。版本只在这一处改——24 个包原先散落在 15 个 csproj 里 |
 
 覆盖率棘轮的由来：原阈值 60 只能防"腰斩"，挡不住每次合并掉零点几个点的慢性退化。分支覆盖率单独
@@ -104,23 +107,22 @@ Playwright + Chromium，覆盖 jsdom 无法验证的部分：布局引擎、Canv
 失败时上传 `artifacts/test-results/playwright-report`。单列一段的原因：它和单测的稳定性与耗时不是一个量级，
 混在一起会把"断言挂了"和"浏览器没起来"混成同一个红叉。
 
-spec 用 `page.route('**/api/**')` 把后端全量桩化，**不依赖 .NET 进程**：真实浏览器 + 固定响应，
-既跑得了"点发布 → 收 409 → 确认 → 重发"这种跨请求链路，又不会因为宿主没起来而变红。
-目前两条：
+编辑器、配方发布和生产面板的界面回归通过 `page.route('**/api/**')` 提供固定响应，可独立于 .NET 宿主运行。
 
 | spec | 覆盖 |
 |---|---|
 | `editor.spec.ts` | 编辑器基本链路 |
 | `recipe-publication.spec.ts` | 发布遇成熟度门禁 → 面板列 findings → 确认按钮禁用 → 勾选 → 成功；并断言第二次请求带 `acknowledgeMaturityNodes=true` |
+| `production-panel.spec.ts` | 活动告警统计、历史服务端分页、确认操作及状态接口失败时的降级 |
+| `imageViewer-measurement.spec.ts` | 在真实 Konva 画布上拖拽重绘搜索线：绘制提示读数 → 参数写回 → 重新打开配置后数值仍在（不比对像素）；同时守住“绘制提示条不得把画布行挤成 0 高”的布局回归 |
+| `handeye-wizard.spec.ts` | 手眼向导：默认样本预检 → 求解残差/最差/离群标记 → 导出把手眼参数写回节点，重开配置后位姿对仍在 |
 
 `recipe-publication` 断言的是**请求本身**而不只是 toast：门禁参数没真发出去时，后端仍会拒绝，
 而界面看起来"成功了"。
 
-此外 `real-backend-smoke.spec.ts` 走 `request` fixture 直连真宿主，不经过浏览器：门禁先在
-`127.0.0.1:5199` 以独立数据根拉起 Debug 版 API，等 `/healthz` 返回 200 后再跑
-health → 登录 → `/api/catalog` → `/api/run` → `/api/traces/{runId}` → `/api/diagnostics/node-spans`
-整条链路；宿主不可达时该用例 skip 并打印原因，桩化用例照旧。真后端链路证明的是"契约端到端
-跑得通"，桩化用例证明的是"前端遇到某种 JSON 怎么表现"，两者不互相替代。
+`real-backend-smoke.spec.ts` 连接真实宿主。门禁在 `127.0.0.1:5199` 以每轮独立的数据根启动 Debug 版 API，
+覆盖登录、流程运行、追溯、节点 span，以及浏览器内的「生产故障 → SignalR 推送 → 操作员确认 → 刷新后仍已确认」。
+手工运行告警用例时，设置 `VISIONSTUDIO_E2E_API` 指向使用隔离数据根的 Development 宿主。
 
 下面几个环境相关的坑已固化在 `quality-gate.ps1` 里，别再删掉：
 
@@ -144,6 +146,17 @@ health → 登录 → `/api/catalog` → `/api/run` → `/api/traces/{runId}` �
   与 `package-lock.json` 不一致的版本，随后 `npm run test:e2e` 找不到命令。本地已有依赖时跳过。
   环境去重只在 Windows PowerShell 5.1 执行，pwsh（CI 的 shell）直接跳过——已用 pwsh 7 +
   `CI=true` 本地复跑 9 个用例确认这条路径。
+
+## 夜间引擎性能门禁（不是每 PR 跑）
+
+`engine-performance-gate.yml` 每天在**固定 self-hosted runner** 上跑
+`scripts/engine-benchmark-gate.ps1`：用与金样回归相同的固定 PNG 夹具，测高斯平滑、手动阈值
+（640×480 / 1280×960）与 managed chamfer 匹配的执行中位耗时。基线存在
+`ci/engine-benchmark-baseline.json`，只有当前中位数比基线慢 **超过 25%** 才失败（退出码 10），
+避免把机器抖动带进 PR；用例结果自检失败（算法输出不对）是退出码 11，不当成"变快"。
+基线记录机器名，跨机器时输出 `MACHINE_MISMATCH` 并跳过比较——绝对耗时没有跨机可比性，
+换 runner 后用 `workflow_dispatch` 的 `update_baseline` 重新钉基线。口径与处置见
+[`engine-benchmark.md`](engine-benchmark.md)。
 
 ## 前端的棘轮（在 `npm run test:coverage` 里）
 

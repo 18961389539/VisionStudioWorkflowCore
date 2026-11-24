@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   API_BASE, apiUrl, jobs, validation, cameras, debug, runs,
   cameraSync, calibration, calibrations, cameraIntrinsics,
-  devices, robots, investigations, media, storage, alarms,
+  devices, robots, investigations, media, storage, alarms, spc,
   modelPackages, modules, diagnostics, hardwareProvenance
 } from '../endpoints';
 
@@ -49,7 +49,12 @@ describe('endpoints', () => {
     expect(investigations.forTrace('run-1')).toBe('/api/investigations/for-trace/run-1');
     expect(hardwareProvenance.byKindAndId('camera', 'c1')).toBe('/api/hardware-provenance/camera/c1');
     // 2026-10-26：服务端改为分页（默认 200 条），客户端显式声明 take
-    expect(alarms.active).toBe('/api/alarms?activeOnly=false&take=200');
+    expect(alarms.page(8, 8)).toBe('/api/alarms?skip=8&take=8');
+    expect(alarms.page(0, 8, 'active')).toBe('/api/alarms?skip=0&take=8&activeOnly=true');
+    expect(alarms.page(0, 8, 'pending')).toBe('/api/alarms?skip=0&take=8&pendingOnly=true');
+    expect(alarms.summary).toBe('/api/alarms/summary');
     expect(diagnostics.events).toBe('/api/diagnostics/events?take=250');
+    expect(spc.datasets).toBe('/api/spc/datasets');
+    expect(spc.series('dataset=a&subgroupSize=5')).toBe('/api/spc/series?dataset=a&subgroupSize=5');
   });
 });

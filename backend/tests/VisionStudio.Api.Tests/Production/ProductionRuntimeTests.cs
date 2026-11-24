@@ -45,8 +45,11 @@ public sealed class ProductionRuntimeTests
         Assert.False(service.Status.ProductionLocked);
     }
 
-    [Fact]
-    public async Task ConsecutiveWatchdogFailures_FaultRuntimeAndRaiseAlarm_WhenAutoRecoverDisabled()
+    [Theory]
+    [InlineData(VisionRunErrorCodes.Timeout, "Cycle budget expired", 2)]
+    [InlineData(VisionRunErrorCodes.NodeTimeout, "A node timed out", 0)]
+    [InlineData(VisionRunErrorCodes.NodeFailure, "Device communication timed out", 0)]
+    public async Task ConsecutiveFailures_ClassifyWatchdogFromErrorCode(string errorCode, string message, int watchdogTrips)
     {
         using var env = new TempWebHostEnvironment();
         var jobs = new JobStore(env);
@@ -55,17 +58,17 @@ public sealed class ProductionRuntimeTests
         var dependencies = Dependencies(env);
         await PublishAsync(jobs, dependencies, "prod-fail", 1, workflow);
 
-        var runner = new RecordingRunner(alwaysFail: true);
+        var runner = new RecordingRunner(alwaysFail: true, failureCode: errorCode, failureMessage: message);
         var alarms = new AlarmStore(env);
         var service = Service(env, jobs, runner, dependencies, alarms);
         await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-fail", false, 1, 100, 2, false, 1), default);
         await service.StartAsync(null, default);
         await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Faulted, TimeSpan.FromSeconds(2));
 
-        Assert.True(service.Status.WatchdogTrips >= 2);
+        Assert.Equal(watchdogTrips, service.Status.WatchdogTrips);
         Assert.True(service.Status.ErrorCount >= 2);
         var active = (await alarms.ListAsync(true, 0, AlarmStore.DefaultPageSize, default)).Items;
-        Assert.Contains(active, x => x.Code == "PROD-WATCHDOG");
+        Assert.Equal(watchdogTrips > 0, active.Any(x => x.Code == "PROD-WATCHDOG"));
         Assert.Contains(active, x => x.Code == "PROD-FAULTED");
 
         await service.StopAsync(default);
@@ -139,23 +142,65 @@ public sealed class ProductionRuntimeTests
         var dependencies = Dependencies(env);
         await PublishAsync(jobs, dependencies, "prod-block", 1, workflow);
 
-        var runner = new BlockingRunner(TimeSpan.FromMilliseconds(450));
+        var runner = new BlockingRunner();
         var alarms = new AlarmStore(env);
-        var service = Service(env, jobs, runner, dependencies, alarms);
+        var workloads = new RuntimeWorkloadGate();
+        var service = Service(env, jobs, runner, dependencies, alarms, workloads: workloads);
         await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-block", false, 1, 1000, 3, true, 1, 100), default);
         await service.StartAsync(null, default);
         await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
 
-        var status = await service.StopAsync(default);
-        Assert.Equal(ProductionRuntimeState.Faulted, status.State);
-        Assert.True(status.ProductionLocked);
-        Assert.Contains("stop timed out", status.LastError ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains((await alarms.ListAsync(true, 0, AlarmStore.DefaultPageSize, default)).Items, x => x.Code == "PROD-STOP-TIMEOUT");
+        try
+        {
+            var status = await service.StopAsync(default);
+            Assert.Equal(ProductionRuntimeState.Faulted, status.State);
+            Assert.True(status.ProductionLocked);
+            Assert.Throws<ApiConflictException>(() => workloads.AcquireBenchmark());
+            Assert.Contains("stop timed out", status.LastError ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains((await alarms.ListAsync(true, 0, AlarmStore.DefaultPageSize, default)).Items, x => x.Code == "PROD-STOP-TIMEOUT");
+        }
+        finally { runner.Release.TrySetResult(); }
 
-        await Task.Delay(500);
-        status = await service.StopAsync(default);
-        Assert.Equal(ProductionRuntimeState.Stopped, status.State);
-        Assert.False(status.ProductionLocked);
+        await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Stopped, TimeSpan.FromSeconds(3));
+        Assert.False(service.Status.ProductionLocked);
+    }
+
+    [Fact]
+    public async Task CancelledStopRequest_DoesNotCancelHostCleanup()
+    {
+        using var env = new TempWebHostEnvironment();
+        var jobs = new JobStore(env);
+        var workflow = Workflow("V1", 1);
+        await jobs.CreateAsync(new CreateJobRequest("prod-stop", "Prod Stop", null, workflow, "initial"), default);
+        var dependencies = Dependencies(env);
+        await PublishAsync(jobs, dependencies, "prod-stop", 1, workflow);
+        var runner = new BlockingRunner();
+        var workloads = new RuntimeWorkloadGate();
+        var service = Service(env, jobs, runner, dependencies, workloads: workloads);
+        await service.UpdateConfigAsync(new ProductionRuntimeConfig(JobId: "prod-stop"), default);
+
+        using (workloads.AcquireBenchmark())
+        {
+            await Assert.ThrowsAsync<ApiConflictException>(() => service.StartAsync(null, default));
+            Assert.Equal(ProductionRuntimeState.Stopped, service.Status.State);
+        }
+
+        await service.StartAsync(null, default);
+        try
+        {
+            await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            using var request = new CancellationTokenSource();
+            var stopping = service.StopAsync(request.Token);
+            request.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stopping);
+            Assert.Equal(ProductionRuntimeState.Stopping, service.Status.State);
+            Assert.Throws<ApiConflictException>(() => workloads.AcquireBenchmark());
+        }
+        finally { runner.Release.TrySetResult(); }
+
+        await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Stopped, TimeSpan.FromSeconds(3));
+        Assert.False(service.Status.ProductionLocked);
+        using var benchmark = workloads.AcquireBenchmark();
     }
 
     private static ProductionRuntimeService Service(
@@ -164,7 +209,8 @@ public sealed class ProductionRuntimeTests
         IVisionWorkflowRunner runner,
         RuntimeDependencyManifestService dependencies,
         AlarmStore? alarms = null,
-        DeviceActionSafetyStore? safetyStore = null)
+        DeviceActionSafetyStore? safetyStore = null,
+        RuntimeWorkloadGate? workloads = null)
     {
         var db = new SqliteMetadataDatabase(env);
         var sync = new CameraSynchronizationService(
@@ -186,7 +232,8 @@ public sealed class ProductionRuntimeTests
             new DeviceLeaseRegistry(),
             NullLogger<ProductionRuntimeService>.Instance,
             traceOptions: null,
-            safetyStore: safetyStore);
+            safetyStore: safetyStore,
+            workloads: workloads);
     }
 
     private static DeviceActionSafetyStore SafetyStore(TempWebHostEnvironment env)
@@ -821,7 +868,9 @@ public sealed class ProductionRuntimeTests
         }
     }
 
-    private sealed class RecordingRunner(bool alwaysFail = false) : IVisionWorkflowRunner
+    private sealed class RecordingRunner(
+        bool alwaysFail = false, string failureCode = VisionRunErrorCodes.Timeout, string failureMessage = "Cycle budget expired")
+        : IVisionWorkflowRunner
     {
         public ConcurrentQueue<string> WorkflowNames { get; } = new();
 
@@ -830,19 +879,24 @@ public sealed class ProductionRuntimeTests
             WorkflowNames.Enqueue(workflow.Name);
             var effectiveRunId = runId ?? Guid.NewGuid().ToString("N");
             if (alwaysFail)
-                return Task.FromResult(new WorkflowRunResult(effectiveRunId, false, 101, false, 0, 0, [], [], null, $"Workflow Core execution timed out after {options?.TimeoutMs ?? 10000} ms.", "Error"));
+                return Task.FromResult(new WorkflowRunResult(effectiveRunId, false, 101, false, 0, 0, [], [], null,
+                    failureMessage, "Error")
+                {
+                    ErrorCode = failureCode,
+                });
             return Task.FromResult(new WorkflowRunResult(effectiveRunId, true, 1.2, false, 0, 0, [], [], null, QualityDisposition: "OK"));
         }
     }
-    private sealed class BlockingRunner(TimeSpan delay) : IVisionWorkflowRunner
+    private sealed class BlockingRunner : IVisionWorkflowRunner
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public async Task<WorkflowRunResult> RunAsync(WorkflowDefinition workflow, VisionRunOptions? options = null, string? runId = null, CancellationToken cancellationToken = default)
         {
             Started.TrySetResult();
-            await Task.Delay(delay); // deliberately ignores cancellation to simulate a blocked vendor/native call.
-            return new WorkflowRunResult(runId ?? Guid.NewGuid().ToString("N"), true, delay.TotalMilliseconds, false, 0, 0, [], [], null, QualityDisposition: "OK");
+            await Release.Task; // Simulates a native call that does not observe cancellation.
+            return new WorkflowRunResult(runId ?? Guid.NewGuid().ToString("N"), true, 1, false, 0, 0, [], [], null, QualityDisposition: "OK");
         }
     }
 

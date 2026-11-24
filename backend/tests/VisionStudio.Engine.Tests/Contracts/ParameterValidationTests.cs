@@ -1,4 +1,6 @@
 using System.Text.Json;
+using VisionStudio.Engine.Device;
+using VisionStudio.Engine.Nodes;
 using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Tests;
@@ -9,6 +11,21 @@ namespace VisionStudio.Engine.Tests;
 /// </summary>
 public sealed class ParameterValidationTests
 {
+    [Fact]
+    public void CompilerUsesTheValidatorRegisteredWithATransientPluginNode()
+    {
+        const string type = "test.customValidation";
+        var catalog = new NodeCatalogItem(type, "Custom validation", "Test", [], [], []);
+        using var registry = new VisionNodeRegistry();
+        registry.Register(catalog, VisionPluginNode.FromFactory(catalog, () => new NoopExecutor(type),
+            VisionExecutorLifetime.Transient) with { DefinitionValidator = new TestDefinitionValidator() }, "test");
+        var workflow = new WorkflowDefinition("validation", "Validation",
+            [new NodeDefinition("n1", type, null, null, null)], []);
+
+        var error = Assert.Throws<InvalidOperationException>(() => new VisionWorkflowCompiler(registry).Compile(workflow));
+        Assert.Equal("Custom validation rejected n1.", error.Message);
+    }
+
     [Theory]
     [InlineData("collection.detections.at", "index", 0.4)]
     [InlineData("collection.detections.sort", "topN", 0.4)]
@@ -1308,8 +1325,16 @@ public sealed class ParameterValidationTests
     private static VisionWorkflowCompiler CreateCompiler(params NodeCatalogItem[] additionalCatalog)
     {
         var registry = new VisionNodeRegistry();
+        IVisionNodeExecutor[] validatedNodes =
+        [
+            new SaveImageNode(), new FlatFieldCorrectNode(), new RegionIntensityNode(),
+            new CaliperNode(), new EdgeSubpixelNode(), new CaliperLineNode(), new CaliperCircleNode(),
+            new CaliperWidthNode(), new CaliperArrayNode(), new ContourThicknessNode(),
+            new DeviceWaitTagNode(new DeviceManager()), new IfConditionNode()
+        ];
+        var executors = validatedNodes.ToDictionary(node => node.Type, StringComparer.OrdinalIgnoreCase);
         foreach (var catalog in BuiltInNodeCatalog.Items.Concat(additionalCatalog))
-            registry.Register(catalog, new NoopExecutor(catalog.Type), "test-catalog");
+            registry.Register(catalog, executors.GetValueOrDefault(catalog.Type) ?? new NoopExecutor(catalog.Type), "test-catalog");
         return new VisionWorkflowCompiler(registry);
     }
 
@@ -1319,5 +1344,11 @@ public sealed class ParameterValidationTests
 
         public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
             => throw new NotSupportedException("Compilation-only executor.");
+    }
+
+    private sealed class TestDefinitionValidator : IVisionNodeDefinitionValidator
+    {
+        public void ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs) =>
+            throw new InvalidOperationException($"Custom validation rejected {node.Id}.");
     }
 }

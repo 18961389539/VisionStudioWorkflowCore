@@ -5,8 +5,6 @@ namespace VisionStudio.Engine.Nodes;
 /// <summary>
 /// 结果落库（output.database，2026-10-26 · 缺口分析 P1-12）。
 ///
-/// 现状：结果只能写文件（output.exportResult）或 HTTP 推走；要入库必须在上位机再写一套接收端。
-///
 /// 分层取舍：节点不认识任何数据库。它把结果序列化成一条 <see cref="ResultRecord"/>，交给宿主注册的
 /// <see cref="IResultRecordStore"/>。好处是换存储不用改配方，引擎也不用背数据库驱动依赖。
 ///
@@ -38,6 +36,13 @@ public sealed class DatabaseWriteNode(IResultRecordStore? store = null) : IVisio
         recordKey = string.IsNullOrWhiteSpace(recordKey) ? null : recordKey.Trim();
         if (recordKey is { Length: > 256 })
             throw new InvalidOperationException("output.database key must be at most 256 characters.");
+        var idempotencyKey = context.TryGetValue("idempotencyKey", out var connectedIdempotencyKey)
+            ? connectedIdempotencyKey.Require<string>("idempotencyKey")
+            : node.GetString("idempotencyKey", string.Empty);
+        idempotencyKey = idempotencyKey.Trim();
+        if (idempotencyKey.Length > 256)
+            throw new InvalidOperationException("output.database idempotencyKey must be at most 256 characters.");
+        var conflictPolicy = ResultFileWriter.Choice(node, "idempotencyConflictPolicy", "reuse", "reuse", "warn", "fail");
 
         var serializable = value.Value switch
         {
@@ -65,9 +70,17 @@ public sealed class DatabaseWriteNode(IResultRecordStore? store = null) : IVisio
             NodeId: node.Id,
             CreatedAt: DateTimeOffset.UtcNow);
 
+        var recordId = record.Id;
+        var reused = false;
+        var conflict = false;
         try
         {
-            await target.AppendAsync(record, cancellationToken).ConfigureAwait(false);
+            if (idempotencyKey.Length == 0)
+                await target.AppendAsync(record, cancellationToken).ConfigureAwait(false);
+            else if (conflictPolicy == "reuse")
+                (recordId, payloadBytes, reused) = await target.AppendIdempotentAsync(record, idempotencyKey, cancellationToken).ConfigureAwait(false);
+            else
+                (recordId, payloadBytes, reused, conflict) = await target.AppendCheckedIdempotentAsync(record, idempotencyKey, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -79,28 +92,47 @@ public sealed class DatabaseWriteNode(IResultRecordStore? store = null) : IVisio
             throw new InvalidOperationException($"output.database failed to append record {record.Id} to dataset '{dataset}': {ex.Message}", ex);
         }
 
+        var conflictMessage = conflict
+            ? $"output.database idempotency conflict in dataset '{dataset}': the business key or payload differs from existing record '{recordId}'."
+            : null;
+        if (conflictMessage is not null && conflictPolicy == "fail")
+            throw new InvalidOperationException(conflictMessage);
+
         var diagnostics = CoordinateValidation.Diagnostics(
             Type,
             ("dataset", dataset),
-            ("recordId", record.Id),
-            ("recordKey", recordKey),
+            ("recordId", recordId),
+            ("reused", reused),
+            (reused ? "requestedRecordKey" : "recordKey", recordKey),
             ("payloadBytes", payloadBytes),
-            ("valueType", value.Type.ToString()));
-        return new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["recordId"] = VisionValue.String(record.Id),
-                ["dataset"] = VisionValue.String(dataset),
-                ["payloadBytes"] = VisionValue.Integer(payloadBytes),
-                ["diagnostics"] = VisionValue.String(diagnostics)
-            },
-            new Dictionary<string, object?>
-            {
-                ["dataset"] = dataset,
-                ["recordId"] = record.Id,
-                ["recordKey"] = recordKey,
-                ["payloadBytes"] = payloadBytes,
-                ["diagnostics"] = diagnostics
-            });
+            (reused ? "requestedValueType" : "valueType", value.Type.ToString()),
+            ("idempotencyConflictPolicy", conflictPolicy),
+            ("idempotencyConflict", conflict));
+        var outputs = new Dictionary<string, VisionValue>
+        {
+            ["recordId"] = VisionValue.String(recordId),
+            ["reused"] = VisionValue.Boolean(reused),
+            ["dataset"] = VisionValue.String(dataset),
+            ["payloadBytes"] = VisionValue.Integer(payloadBytes),
+            ["idempotencyConflict"] = VisionValue.Boolean(conflict),
+            ["diagnostics"] = VisionValue.String(diagnostics)
+        };
+        var summary = new Dictionary<string, object?>
+        {
+            ["dataset"] = dataset,
+            ["recordId"] = recordId,
+            ["reused"] = reused,
+            [reused ? "requestedRecordKey" : "recordKey"] = recordKey,
+            ["payloadBytes"] = payloadBytes,
+            ["diagnostics"] = diagnostics
+        };
+        if (conflictMessage is not null)
+        {
+            outputs["warningCount"] = VisionValue.Integer(1);
+            summary["warningCount"] = 1;
+            summary["idempotencyConflict"] = true;
+            summary["idempotencyWarning"] = conflictMessage;
+        }
+        return new NodeExecutorResult(outputs, summary);
     }
 }

@@ -68,4 +68,11 @@ describe('toolbox shortcuts and discovery', () => {
     // 徽标必须带悬停说明，讲清"为什么降级"。
     expect(within(preview).getByText('预览').getAttribute('title')).toContain('适用范围');
   });
+
+  it('悬停提示先给完整节点名，其次才是描述', () => {
+    render(<Toolbox catalog={catalog} recentTypes={[]} onAddNode={vi.fn()} />);
+    const button = screen.getAllByRole('button', { name: '图像阈值分割' })[0];
+    // 长名在 220px 栏里可能被折成两行，但 title 必须能读到全名
+    expect(button.getAttribute('title')).toBe('图像阈值分割\n按阈值提取明亮区域。支持反向分割。');
+  });
 });

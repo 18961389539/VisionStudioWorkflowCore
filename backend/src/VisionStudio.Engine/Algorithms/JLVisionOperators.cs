@@ -98,20 +98,34 @@ internal static partial class JLVisionOperators
     {
         using var image = JLVisionImages.FromMat(source);
         var inverted = (type & ThresholdTypes.BinaryInv) != 0;
-        JlRegion region;
-        if ((type & ThresholdTypes.Otsu) != 0)
-        {
-            using var automatic = image.BinaryThreshold("max_separability", inverted ? "dark" : "light", out int used);
-            using var domain = image.GetDomain();
-            image.MinMaxGray(domain, 0d, out double minimum, out double maximum, out double _);
-            threshold = minimum == maximum ? 0 : used;
-            region = image.Threshold(inverted ? 0d : Math.Floor(threshold) + 1, inverted ? Math.Floor(threshold) : 255d);
-        }
-        else region = image.Threshold(inverted ? 0d : Math.Floor(threshold) + 1, inverted ? Math.Floor(threshold) : 255d);
-        using (region)
-        using (var binary = region.RegionToBin((int)maxValue, 0, source.Width, source.Height)) JLVisionImages.Store(binary, target);
+        if ((type & ThresholdTypes.Otsu) != 0) threshold = OtsuLevel(image, inverted);
+        using var region = image.Threshold(inverted ? 0d : Math.Floor(threshold) + 1, inverted ? Math.Floor(threshold) : 255d);
+        using var binary = region.RegionToBin((int)maxValue, 0, source.Width, source.Height);
+        JLVisionImages.Store(binary, target);
         return threshold;
     }
+
+    public static double OtsuLevel(Mat source, Mat? mask, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var image = JLVisionImages.FromMat(source);
+        using var maskImage = mask is null ? null : JLVisionImages.FromMat(mask);
+        using var domain = maskImage?.Threshold(1d, 255d);
+        using var reduced = domain is null ? null : image.ReduceDomain(domain);
+        cancellationToken.ThrowIfCancellationRequested();
+        var threshold = OtsuLevel(reduced ?? image, inverted: false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return threshold;
+    }
+
+    private static double OtsuLevel(JlImage image, bool inverted)
+    {
+        using var automatic = image.BinaryThreshold("max_separability", inverted ? "dark" : "light", out int used);
+        using var domain = image.GetDomain();
+        image.MinMaxGray(domain, 0d, out double minimum, out double maximum, out double _);
+        return minimum == maximum ? 0 : used;
+    }
+
     public static void AdaptiveThreshold(Mat source, Mat target, double maxValue, AdaptiveThresholdTypes method, ThresholdTypes type, int blockSize, double c)
     {
         using var image = JLVisionImages.FromMat(source);

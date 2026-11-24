@@ -18,7 +18,7 @@ namespace VisionStudio.Engine;
 /// 每条必须给理由、分级集合是棘轮（升降级必须改测试里的期望表）。
 ///
 /// 分级口径见 <see cref="NodeMaturity"/>：Stable = 有行为基线且文档无保留；
-/// Preview = 有行为基线但文档写明适用范围；Experimental = 没有算法级行为基线。
+/// Preview = 有行为基线但文档写明适用范围。Experimental = 部署场景缺少所需的行为基线。
 ///
 /// 2026-10-29 更正：首轮审计用"测试源码里是否出现节点类型字符串"统计覆盖，
 /// 把大量用执行器类名构造的用例误判为"零测试"（match.feature / contour.fromMask /
@@ -35,23 +35,22 @@ public static class NodeMaturityCatalog
         new Dictionary<string, Declaration>(StringComparer.OrdinalIgnoreCase)
         {
             // ---------------------------------------------------------- Experimental
-            // 判据：算法路径没有行为基线。下面三个推理节点只有"拒绝裁剪 / 缺模型报错"的契约测试，
-            // 仓库里没有可用的模型包，推理精度与后处理（NMS/掩码解码/关键点配对）从未被断言。
+            // 合成 ONNX 夹具覆盖节点级后处理。真实训练模型包的兼容性和现场精度仍待验证。
 
             ["inference.instanceSegmentation"] = new(NodeMaturity.Experimental,
-                "无模型包可跑端到端：YOLO-Seg 解码与掩码合成已有纯函数测试，但节点级实例后处理（NMS + proto 掩码合成）未串联验证。"),
+                "合成 ONNX 已串联验证 NMS、原型掩码合成和坐标回映射。真实训练模型包的兼容性和精度仍待验证。"),
 
             ["inference.obb"] = new(NodeMaturity.Experimental,
-                "无模型包可跑端到端：OBB 解码、旋转 IoU 与 NMS 已有纯函数测试，但节点级角度后处理未串联验证。"),
+                "合成 ONNX 已串联验证旋转角度回映射和分类去重。真实训练模型包的兼容性和精度仍待验证。"),
 
             ["inference.pose"] = new(NodeMaturity.Experimental,
-                "无模型包可跑端到端：关键点解码已有纯函数测试，但节点级关键点配对与骨架输出未串联验证。"),
+                "合成 ONNX 已串联验证关键点配对和可见骨架。真实训练模型包的兼容性和精度仍待验证。"),
 
             // ---------------------------------------------------------- Preview
             // 判据：有行为基线，但文档（docs/*.md 或目录长描述）写明了适用范围/近似口径。
 
             ["contour.fromMask"] = new(NodeMaturity.Preview,
-                "与 region.fromMask 共用阈值语义：掩码统一转 8 位，0–1 浮点软掩码会被截成 0/255（docs/mask-to-region-contour.md）。"),
+                "支持 8 位掩码和浮点概率图。轮廓数及单轮廓点数有硬预算（docs/mask-to-region-contour.md）。"),
 
             ["device.serialPort"] = new(NodeMaturity.Preview,
                 "CI 无串口硬件：只有配置校验与协议帧测试，真实波特率/流控需现场验证（docs/custom-protocol-nodes.md）。"),
@@ -63,7 +62,7 @@ public static class NodeMaturityCatalog
                 "无重传与分片重组，丢包由业务侧承担（docs/custom-protocol-nodes.md）。"),
 
             ["image.load"] = new(NodeMaturity.Preview,
-                "不支持多页 TIFF 页选择、RAW/DNG、视频帧；目录枚举每次重新列目录（docs/image-load-node.md）。"),
+                "支持回放清单和 TIFF 页选择。RAW/DNG 与视频仍不在支持范围内（docs/image-load-node.md）。"),
 
             ["match.feature"] = new(NodeMaturity.Preview,
                 "目录长描述自述 single-target：只取首个一致变换，不做旋转训练的多目标搜索（多目标用 match.shape）。"),
@@ -87,7 +86,7 @@ public static class NodeMaturityCatalog
                 "MOD 是模块均值偏离中值的近似，只有 SC/MOD/AN，缺固定图形损伤，不能用于出具合规报告（docs/barcode-quality-node.md）。"),
 
             ["region.fromMask"] = new(NodeMaturity.Preview,
-                "掩码统一转 8 位：0–1 浮点软掩码会被截成 0/255；组件数沿用 VisionRegion 的 10000 上限（docs/mask-to-region-contour.md）。"),
+                "支持 8 位掩码和浮点概率图。连通域数和行程量仍受 VisionRegion 预算约束（docs/mask-to-region-contour.md）。"),
 
             ["script.csharp"] = new(NodeMaturity.Preview,
                 "进程内 trusted-code 运行时：语法树 denylist 是纵深防御，不是 OS 沙箱；脚本可调用未列入禁用表的 BCL/OpenCV API。发布含脚本的流程必须显式确认，导入的第三方流程按代码审批（目录长描述与 CSharpScriptRunner.cs 同步声明）。"),
@@ -96,7 +95,7 @@ public static class NodeMaturityCatalog
                 "RSS 按各环独立 ±3σ 假设，不处理相关环；增减环靠 sign 显式给出（docs/measurement-gap-nodes.md）。"),
 
             ["value.counter"] = new(NodeMaturity.Preview,
-                "跨轮计数有行为基线；状态由宿主 IRunCounterStore 承载并每 5s 快照到 data/runtime/counters.json，窗口内停机最多丢 5s 增量。")
+                "周期快照存在尚未写盘的窗口。按事件持久化可以去重，要求输入稳定的业务事件 ID。")
         };
 
     /// <summary>按类型取声明；未声明即 Stable。</summary>

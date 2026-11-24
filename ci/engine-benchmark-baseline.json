@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "machine": "DESKTOP-3KS9SDU",
+  "recordedAt": "2026-11-23T07:15:18.8243694+00:00",
+  "samples": 9,
+  "tolerancePercent": 25,
+  "cases": {
+    "preprocess.gaussian.640x480": {
+      "medianMs": 0.5069,
+      "minMs": 0.4103,
+      "p90Ms": 0.5678
+    },
+    "preprocess.threshold.640x480": {
+      "medianMs": 0.3276,
+      "minMs": 0.3148,
+      "p90Ms": 0.4426
+    },
+    "preprocess.gaussian.1280x960": {
+      "medianMs": 1.974,
+      "minMs": 1.8111,
+      "p90Ms": 2.5402
+    },
+    "match.shape.managedChamfer.640x480": {
+      "medianMs": 33.385,
+      "minMs": 31.8745,
+      "p90Ms": 65.6509
+    }
+  }
+}

@@ -301,6 +301,7 @@ public sealed class Batch3RecognitionNodeTests
         Assert.Contains("centroidX", result.Outputs["classes"].Require<string>("classes"));
         Assert.True(result.Outputs.ContainsKey("meanConfidence"));
         Assert.True(result.Outputs.ContainsKey("lowConfidenceFraction"));
+        Assert.Equal(0L, result.Outputs["maskClassOffset"].Require<long>("maskClassOffset"));
     }
 
     [Fact]

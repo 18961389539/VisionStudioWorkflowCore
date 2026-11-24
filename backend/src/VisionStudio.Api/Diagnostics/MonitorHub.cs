@@ -24,21 +24,18 @@ namespace VisionStudio.Api.Diagnostics;
 /// 不推送单个设备的细粒度遥测（帧率、轴坐标）：那些由各自面板按需拉取，塞进每秒广播会让
 /// 消息体膨胀到与轮询同样贵。
 /// </summary>
-public sealed class MonitorHub : Hub
+public sealed class MonitorHub(MonitorSubscriptions subscriptions, MonitorSnapshotReader snapshots) : Hub
 {
-    private readonly MonitorSubscriptions _subscriptions;
-
-    public MonitorHub(MonitorSubscriptions subscriptions) => _subscriptions = subscriptions;
-
-    public override Task OnConnectedAsync()
+    public override async Task OnConnectedAsync()
     {
-        _subscriptions.Join();
-        return base.OnConnectedAsync();
+        subscriptions.Join();
+        await Clients.Caller.SendAsync("monitorSnapshot", snapshots.Capture(), Context.ConnectionAborted);
+        await base.OnConnectedAsync();
     }
 
     public override Task OnDisconnectedAsync(Exception? exception)
     {
-        _subscriptions.Leave();
+        subscriptions.Leave();
         return base.OnDisconnectedAsync(exception);
     }
 }
@@ -73,6 +70,17 @@ public sealed record MonitorSnapshot(
     ProductionRuntimeStatus Production,
     string AlarmRevision);
 
+public sealed class MonitorSnapshotReader(
+    CameraManager cameras,
+    DeviceManager devices,
+    RobotManager robots,
+    ProductionRuntimeService production,
+    AlarmStore alarms)
+{
+    public MonitorSnapshot Capture()
+        => new(DateTimeOffset.UtcNow, cameras.List(), devices.List(), robots.List(), production.Status, alarms.RevisionStamp());
+}
+
 /// <summary>
 /// 每秒采集一次设备描述符，内容变化时广播 <c>monitorSnapshot</c>。
 /// 采集的是 <c>List()</c>（纯内存读），不发命令、不碰硬件。
@@ -80,11 +88,7 @@ public sealed record MonitorSnapshot(
 public sealed class MonitorBroadcastService(
     IHubContext<MonitorHub> hub,
     MonitorSubscriptions subscriptions,
-    CameraManager cameras,
-    DeviceManager devices,
-    RobotManager robots,
-    ProductionRuntimeService production,
-    AlarmStore alarms,
+    MonitorSnapshotReader snapshots,
     ILogger<MonitorBroadcastService> logger) : BackgroundService
 {
     /// <summary>采集周期。1 s 与人的操作节拍一致；再快只是把"变化"重复广播。</summary>
@@ -114,17 +118,15 @@ public sealed class MonitorBroadcastService(
 
                 // 比较用的快照不带 CapturedAt：它每 tick 都变，带上会让"内容变了才广播"
                 // 退化成"每秒必广播"（2026-11-13 修正）。只有真的变化时才写入发送时间。
-                var probe = new MonitorSnapshot(
-                    DateTimeOffset.MinValue,
-                    cameras.List(),
-                    devices.List(),
-                    robots.List(),
-                    production.Status,
-                    alarms.RevisionStamp());
-                var payload = JsonSerializer.Serialize(probe, Json);
+                var snapshot = snapshots.Capture();
+                var payload = JsonSerializer.Serialize(snapshot with
+                {
+                    CapturedAt = DateTimeOffset.MinValue,
+                    Production = snapshot.Production with { StatusVersion = 0 }
+                }, Json);
                 if (string.Equals(payload, lastPayload, StringComparison.Ordinal)) continue;
                 lastPayload = payload;
-                await hub.Clients.All.SendAsync("monitorSnapshot", probe with { CapturedAt = DateTimeOffset.UtcNow }, stoppingToken);
+                await hub.Clients.All.SendAsync("monitorSnapshot", snapshot, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

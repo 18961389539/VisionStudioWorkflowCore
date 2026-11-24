@@ -1,4 +1,7 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+
+// 这组用例共用隔离宿主；生产告警用例会短暂改变运行状态。
+test.describe.configure({ mode: 'default' });
 
 /**
  * 真后端冒烟（2026-11-12）。
@@ -16,7 +19,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
  *   - 门禁：`./scripts/quality-gate.ps1 -Scope E2E` 会先拉起宿主（127.0.0.1:5199）；
  *   - 手工：先起 API（Development + Security:AutoLoginAdmin=true），再
  *     `VISIONSTUDIO_E2E_API=http://127.0.0.1:5199 npx playwright test real-backend-smoke`。
- * 后端不可达时跳过而不是失败：桩化用例不依赖它，CI 之外单独跑 e2e 不该被环境卡住。
+ * 手工运行时请使用隔离数据根。显式配置的宿主不可达会使真实后端用例失败。
  */
 
 const API = process.env.VISIONSTUDIO_E2E_API ?? 'http://127.0.0.1:5199';
@@ -59,12 +62,13 @@ function linearWorkflow() {
   };
 }
 
-/** 后端可达 + Development 自动登录；不可达时 skip 并给出启动方式。 */
+/** 检查 Development 宿主并登录；未显式配置宿主时允许跳过。 */
 async function connect(request: APIRequestContext): Promise<void> {
   let health;
   try {
     health = await request.get(`${API}/healthz`, { timeout: 3000 });
-  } catch {
+  } catch (error) {
+    if (process.env.VISIONSTUDIO_E2E_API) throw error;
     test.skip(true, `真后端未启动（${API}）。用 ./scripts/quality-gate.ps1 -Scope E2E 或手工启动宿主后再跑。`);
     return;
   }
@@ -211,4 +215,74 @@ test('真后端：失败流程返回失败报告并落一条 Failed 追溯', asy
   expect(trace.executionStatus).toBe('Failed');
   expect(trace.disposition).toBe('ERROR');
   expect(trace.error ?? '').not.toBe('');
+});
+
+function observeAlarmRevisions(page: Page): Set<string> {
+  const revisions = new Set<string>();
+  page.on('websocket', (socket) => {
+    if (!new URL(socket.url()).pathname.endsWith('/hubs/monitor')) return;
+    socket.on('framereceived', ({ payload }) => {
+      for (const frame of payload.toString().split('\u001e').filter(Boolean)) {
+        const message = JSON.parse(frame);
+        const revision = message.arguments?.[0]?.alarmRevision;
+        if (message.target === 'monitorSnapshot' && typeof revision === 'string') revisions.add(revision);
+      }
+    });
+  });
+  return revisions;
+}
+
+async function openProductionPanel(page: Page) {
+  await page.getByRole('button', { name: /生产/ }).click();
+  await page.getByRole('menuitem', { name: '生产运行' }).click();
+  return page.getByRole('dialog', { name: '生产运行' });
+}
+
+test('真后端：生产故障推送告警，操作员确认后刷新仍显示已确认', async ({ page, request }) => {
+  test.skip(!process.env.VISIONSTUDIO_E2E_API, '请通过 E2E 门禁启动隔离宿主，或显式提供隔离宿主的 URL。');
+  await connect(request);
+
+  const revisions = observeAlarmRevisions(page);
+  await page.goto('/');
+  const panel = await openProductionPanel(page);
+  await expect(panel.locator('.production-hero')).toBeVisible();
+  await expect.poll(() => revisions.size).toBeGreaterThan(0);
+
+  const peer = await page.context().newPage();
+  try {
+    const peerRevisions = observeAlarmRevisions(peer);
+    await peer.goto('/');
+    await openProductionPanel(peer);
+    await expect.poll(() => peerRevisions.size).toBeGreaterThan(0);
+  } finally {
+    await peer.close();
+  }
+  await panel.getByRole('tab', { name: /告警/ }).click();
+
+  const initialRevisions = new Set(revisions);
+  const jobId = `e2e-missing-${crypto.randomUUID()}`;
+  const alarmRow = panel.getByRole('row').filter({ hasText: jobId });
+  await expect(alarmRow).toHaveCount(0);
+  try {
+    // 不存在的配方走常规启动失败路径，由后端生成真实告警，无需连接设备。
+    const start = await request.post(`${API}/api/production/start`, { data: { jobId } });
+    expect(start.status(), await start.text()).toBe(404);
+    await expect.poll(() => [...revisions].some((revision) => !initialRevisions.has(revision)), { timeout: 7000 })
+      .toBe(true);
+    await expect(alarmRow.getByRole('cell', { name: 'PROD-START' })).toBeVisible({ timeout: 7000 });
+
+    const acknowledged = page.waitForResponse((response) =>
+      response.request().method() === 'POST' && /\/api\/alarms\/[^/]+\/ack$/.test(new URL(response.url()).pathname));
+    await alarmRow.getByRole('button', { name: /^确\s*认$/ }).click();
+    expect((await acknowledged).ok()).toBeTruthy();
+    await expect(alarmRow.getByText('已确认', { exact: true })).toBeVisible();
+
+    await page.reload();
+    const reopened = await openProductionPanel(page);
+    await reopened.getByRole('tab', { name: /告警/ }).click();
+    await expect(reopened.getByRole('row').filter({ hasText: jobId }).getByText('已确认', { exact: true })).toBeVisible();
+  } finally {
+    const stop = await request.post(`${API}/api/production/stop`);
+    expect(stop.ok(), await stop.text()).toBeTruthy();
+  }
 });

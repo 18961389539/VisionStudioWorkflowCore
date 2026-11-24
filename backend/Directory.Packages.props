@@ -31,6 +31,9 @@
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <!-- Windows 服务宿主（P1）：10.0.13 是当前可离线还原的补丁版本；其余 Microsoft.Extensions.* 仍是
+         10.0.12，运行期由 Microsoft.AspNetCore.App 共享框架统一，不改变应用可见行为。 -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />

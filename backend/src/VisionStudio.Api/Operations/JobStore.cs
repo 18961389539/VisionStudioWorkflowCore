@@ -81,7 +81,7 @@ public sealed record SaveJobVersionRequest(
 /// Version snapshots are transactional rows and are never overwritten.
 /// Publish/Rollback only changes the published pointer and appends history.
 /// </summary>
-public sealed class JobStore
+public sealed partial class JobStore
 {
     private readonly SqliteMetadataDatabase _db;
     private readonly RecipeParameterStore _parameters;
@@ -120,6 +120,23 @@ public sealed class JobStore
         await using var connection = await _db.OpenConnectionAsync(ct);
         var row = await LoadJobRowAsync(connection, id, null, ct);
         return row is null ? null : await BuildDescriptorAsync(connection, row, ct);
+    }
+
+    internal async Task<StationJob?> GetStationJobAsync(string id, CancellationToken ct)
+    {
+        await using var connection = await _db.OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+SELECT j.name, j.published_version, v.workflow_hash
+FROM jobs j
+LEFT JOIN job_versions v ON v.job_id = j.id AND v.version = j.published_version
+WHERE j.id = $id;
+""";
+        command.Parameters.AddWithValue("$id", id);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+        return new StationJob(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetInt32(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2));
     }
 
     public async Task<JobDescriptor> CreateAsync(CreateJobRequest request, CancellationToken ct)
@@ -237,7 +254,7 @@ public sealed class JobStore
                 throw new ApiNotFoundException($"Version {version} does not exist for job '{id}'.");
         }
 
-        if (row.RequiresValidation || !string.IsNullOrWhiteSpace(row.ProductId) || !string.IsNullOrWhiteSpace(row.RecipeCode))
+        if (RequiresDatasetValidation(row) || await DeliveredVersionRequiresValidationAsync(connection, transaction, id, version, ct))
         {
             await using var validation = connection.CreateCommand();
             validation.Transaction = transaction;

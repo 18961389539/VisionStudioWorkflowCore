@@ -82,8 +82,10 @@ public sealed class IndependentRecipeApiTests
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/api/jobs/{copyId}/versions/1/publish", null)).StatusCode);
     }
 
-    private sealed class RecipeApiFactory : WebApplicationFactory<Program>
+    private sealed class RecipeApiFactory : IsolatedApiFactory
     {
+        protected override string DataRoot => Path.Combine(_environment.ContentRootPath, "data");
+
         private readonly TempWebHostEnvironment _environment = new();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

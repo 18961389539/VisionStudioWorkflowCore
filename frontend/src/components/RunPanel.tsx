@@ -176,7 +176,8 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
         </Typography.Text>
       </div>
 
-      {timeline && (
+      {/* 少于四个节点时甘特没有洞察价值（表格里已有耗时列），却要占掉 87px 把表格挤出视口 */}
+      {timeline && timeline.bars.length > 3 && (
         <div className="run-result-timeline">
           <div className="run-result-timeline-caption">
             执行时间线（刻度 0 – {timeline.total.toFixed(1)} 毫秒 · 金色描边为最慢节点 · 条带重叠表示并行执行；点击定位节点）

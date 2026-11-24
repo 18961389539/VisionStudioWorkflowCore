@@ -92,9 +92,38 @@ public static class SecurityEndpoints
         }).RequireAuthorization(SecurityPolicies.Administrator).WithAudit("security.user.unlock", "security-user")
             .Produces<SecurityUserDto>();
 
+        // 服务账号令牌（P3-6）：明文只出现在创建/轮换响应里；列表只给前缀与使用时间。
+        // 三个写入口都进审计，谁签发/轮换/吊销了哪枚令牌可查。
+        app.MapGet("/api/security/service-tokens", async (ServiceTokenStore tokens, CancellationToken ct) =>
+            Results.Ok(await tokens.ListAsync(ct)))
+            .RequireAuthorization(SecurityPolicies.Administrator).Produces<IReadOnlyList<ServiceTokenDto>>();
+
+        app.MapPost("/api/security/service-tokens", async (CreateServiceTokenRequest request, HttpContext http, ClaimsPrincipal user, ServiceTokenStore tokens, CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, request.Name);
+            return Results.Ok(await tokens.CreateAsync(request, user.Identity?.Name, ct));
+        }).RequireAdministrator("security.service-token.create", "service-token").Produces<ServiceTokenCreated>();
+
+        app.MapPost("/api/security/service-tokens/{id}/rotate", async (string id, HttpContext http, ServiceTokenStore tokens, CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, id);
+            return Results.Ok(await tokens.RotateAsync(id, ct));
+        }).RequireAdministrator("security.service-token.rotate", "service-token").Produces<ServiceTokenCreated>();
+
+        app.MapPost("/api/security/service-tokens/{id}/revoke", async (string id, HttpContext http, ServiceTokenStore tokens, CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, id);
+            return Results.Ok(await tokens.RevokeAsync(id, ct));
+        }).RequireAdministrator("security.service-token.revoke", "service-token").Produces<ServiceTokenDto>();
+
         app.MapGet("/api/audit", async (int? offset, int? limit, string? username, string? action, AuditEventStore audit, CancellationToken ct) =>
             Results.Ok(await audit.ListAsync(offset ?? 0, limit ?? 100, username, action, ct)))
             .RequireAuthorization(SecurityPolicies.Administrator).Produces<IReadOnlyList<AuditEventDto>>();
+
+        // 审计链校验（P3-7）：只读诊断，不修复；校验动作本身进审计（谁在什么时候核对过）。
+        app.MapGet("/api/security/audit/verify", async (AuditEventStore audit, CancellationToken ct) =>
+            Results.Ok(await audit.VerifyChainAsync(ct)))
+            .RequireAdministrator("security.audit.verify", "audit").Produces<AuditChainVerification>();
 
         return app;
     }

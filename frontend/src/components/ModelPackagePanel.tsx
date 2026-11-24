@@ -109,7 +109,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
         showIcon
         style={{ marginBottom: 12 }}
         title="仅支持外部训练产物导入"
-        description="OCR tessdata、ONNX 分类/异常包、缺陷金样参考包。不做本机 SGD/反向传播训练；相对 HALCON 训练闭环仍有能力差距。"
+        description="可导入 OCR tessdata、ONNX 分类、异常检测、实例分割和缺陷金样参考包。"
       />
       <Card size="small" title="导入" style={{ marginBottom: 12 }}>
         <Space direction="vertical" style={{ width: '100%' }}>
@@ -122,6 +122,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
                 { value: 'Ocr', label: 'OCR tessdata' },
                 { value: 'Classification', label: 'ONNX 分类' },
                 { value: 'Anomaly', label: 'ONNX 异常' },
+                { value: 'InstanceSegmentation', label: 'ONNX 实例分割' },
                 { value: 'ReferenceCompare', label: '金样参考' },
               ]}
             />

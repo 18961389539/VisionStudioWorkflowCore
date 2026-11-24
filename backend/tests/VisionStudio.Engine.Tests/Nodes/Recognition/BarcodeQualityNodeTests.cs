@@ -25,8 +25,42 @@ public sealed class BarcodeQualityNodeTests
         Assert.Equal("A", result.Outputs["grade"].Require<string>("grade"));
         Assert.Equal(4d, result.Outputs["numericGrade"].Require<double>("numericGrade"), 1e-9);
         Assert.True(result.Outputs["pass"].Require<bool>("pass"));
+        Assert.Equal("unverified", result.Outputs["decodeStatus"].Require<string>("decodeStatus"));
+        Assert.Contains("Legacy grading", result.Outputs["diagnostics"].Require<string>("diagnostics"));
         // 棋盘格深色单元约占一半。
         Assert.Equal(0.5d, result.Outputs["darkFraction"].Require<double>("darkFraction"), 0.02);
+    }
+
+    [Theory]
+    [InlineData(null, "unverified")]
+    [InlineData(true, "decoded")]
+    [InlineData(false, "failed")]
+    public async Task RequireDecodeDistinguishesAllThreeStates(bool? decodeOk, string status)
+    {
+        using var image = Checkerboard(cells: 10, cellPx: 8, dark: 20, light: 220);
+        var node = Node(("rows", "10"), ("cols", "10"), ("decodePolicy", "requireDecode"));
+        var result = decodeOk is { } decoded
+            ? await Run(image, node, ("decodeOk", VisionValue.Boolean(decoded)))
+            : await Run(image, node);
+
+        Assert.Equal(status, result.Outputs["decodeStatus"].Require<string>("decodeStatus"));
+        Assert.Equal(decodeOk == false ? "F" : "A", result.Outputs["grade"].Require<string>("grade"));
+        if (decodeOk is { } expected)
+            Assert.Equal(expected, result.Outputs["pass"].Require<bool>("pass"));
+        else
+            Assert.False(result.Outputs.ContainsKey("pass"));
+    }
+
+    [Fact]
+    public async Task RequireDecodeReportsFlatUndecodableImageAsNg()
+    {
+        using var image = new Mat(40, 40, MatType.CV_8UC1, Scalar.All(0));
+        var result = await Run(image, Node(("decodePolicy", "requireDecode")), ("decodeOk", VisionValue.Boolean(false)));
+
+        Assert.Equal(0d, result.Outputs["symbolContrast"].Require<double>("symbolContrast"));
+        Assert.Equal(0d, result.Outputs["modulation"].Require<double>("modulation"));
+        Assert.Equal("F", result.Outputs["grade"].Require<string>("grade"));
+        Assert.False(result.Outputs["pass"].Require<bool>("pass"));
     }
 
     [Fact]

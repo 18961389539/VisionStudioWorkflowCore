@@ -43,6 +43,8 @@ cd frontend; npm install; npm run dev
 ```powershell
 ./scripts/publish-runtime.ps1 -Output D:\VisionStudio\0.63 -DataRoot D:\VisionStudioData
 ./scripts/run-runtime.ps1      # 或手工 dotnet <publish>/VisionStudio.Api.dll --contentRoot <publish>
+# Windows 服务方式（长期运行）：安装/卸载/崩溃转储见 docs/windows-service.md
+./scripts/install-windows-service.ps1 -PublishDir D:\VisionStudio\0.63 -DataRoot D:\VisionStudioData
 ```
 
 发布链的硬约束（都有回归测试守着，不要绕过）：

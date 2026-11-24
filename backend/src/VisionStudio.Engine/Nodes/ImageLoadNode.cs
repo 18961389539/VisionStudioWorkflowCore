@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -25,7 +26,7 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
 
     private static readonly string[] Extensions = [".png", ".bmp", ".jpg", ".jpeg", ".tif", ".tiff"];
 
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
@@ -41,8 +42,12 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
         var maxMegabytes = ProtocolFraming.RequireRange(node.GetInt("maxMegabytes", 64), 1, 4096, "image.load maxMegabytes");
         var recursive = node.GetBool("recursive", false);
         var mode = node.GetString("pathMode", "auto").Trim().ToLowerInvariant();
-        if (mode is not ("auto" or "file" or "directory"))
-            throw new InvalidOperationException("image.load pathMode must be auto, file or directory.");
+        if (mode is not ("auto" or "file" or "directory" or "manifest"))
+            throw new InvalidOperationException("image.load pathMode must be auto, file, directory or manifest.");
+        var pageIndex = ProtocolFraming.RequireRange(node.GetInt("pageIndex", 0), 0, 1000000, "image.load pageIndex");
+        var captureManifest = node.GetBool("captureManifest", false);
+        if (captureManifest && mode == "manifest")
+            throw new InvalidOperationException("image.load captureManifest requires live directory mode.");
 
         var authorization = replayInput ?? throw new InvalidOperationException(
             "image.load requires host file-read authorization (IReplayInputResolver). " +
@@ -55,7 +60,7 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
 
         var treatAsDirectory = mode switch
         {
-            "directory" => true,
+            "directory" or "manifest" => true,
             "file" => false,
             _ => Directory.Exists(resolvedRoot)
         };
@@ -77,14 +82,23 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
         string fullPath;
         int frameCount;
         long effectiveIndex;
+        ReplayImageManifest? manifest = null;
+        ReplayImageEntry? manifestEntry = null;
         if (treatAsDirectory)
         {
             if (!Directory.Exists(resolvedRoot))
                 throw new DirectoryNotFoundException($"image.load pathMode=directory but the path is not a directory: '{requested}'.");
-            var files = EnumerateFrames(resolvedRoot, recursive);
-            if (files.Count == 0)
-                throw new InvalidOperationException($"image.load found no images ({string.Join(", ", Extensions)}) in '{resolvedRoot}'.");
-            frameCount = files.Count;
+            List<string>? files = null;
+            if (mode == "manifest") manifest = ReplayImageManifest.Parse(node.GetString("manifestJson", ""));
+            else
+            {
+                files = EnumerateFrames(resolvedRoot, recursive, skipLinks: captureManifest);
+                if (files.Count == 0)
+                    throw new InvalidOperationException($"image.load found no images ({string.Join(", ", Extensions)}) in '{resolvedRoot}'.");
+                if (captureManifest)
+                    manifest = await ReplayImageManifest.CaptureAsync(resolvedRoot, files, authorization, maxMegabytes, cancellationToken);
+            }
+            frameCount = manifest?.Files.Length ?? files!.Count;
             var policy = node.GetString("indexPolicy", "fail").Trim().ToLowerInvariant();
             effectiveIndex = policy switch
             {
@@ -94,13 +108,17 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
                 "wrap" => requestedIndex % frameCount,
                 _ => throw new InvalidOperationException("image.load indexPolicy must be fail or wrap.")
             };
-            fullPath = files[(int)effectiveIndex];
+            manifestEntry = manifest?.Files[(int)effectiveIndex];
+            fullPath = manifestEntry is null ? files![(int)effectiveIndex]
+                : ReplayImageManifest.ResolveFile(resolvedRoot, manifestEntry.Path, authorization);
         }
         else
         {
             if (!File.Exists(resolvedRoot))
                 throw new FileNotFoundException($"image.load file was not found: '{requested}'.", resolvedRoot);
-            if (!Extensions.Contains(Path.GetExtension(resolvedRoot).ToLowerInvariant()))
+            if (captureManifest)
+                throw new InvalidOperationException("image.load requires a directory to capture a replay manifest.");
+            if (!IsImageFile(resolvedRoot))
                 throw new InvalidOperationException($"image.load only reads {string.Join(", ", Extensions)}; got '{Path.GetFileName(resolvedRoot)}'.");
             if (requestedIndex != 0)
                 throw new InvalidOperationException($"image.load file mode reads a single image; sequence/index must be 0 but was {requestedIndex}.");
@@ -109,10 +127,9 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
             fullPath = resolvedRoot;
         }
 
-        var length = new FileInfo(fullPath).Length;
-        if (length > maxMegabytes * 1024L * 1024L)
-            throw new InvalidOperationException($"image.load file '{Path.GetFileName(fullPath)}' is {length / (1024d * 1024d):0.#} MB which exceeds maxMegabytes={maxMegabytes}.");
-
+        var extension = Path.GetExtension(fullPath).ToLowerInvariant();
+        if (pageIndex > 0 && extension is not (".tiff" or ".tif"))
+            throw new InvalidOperationException($"image.load pageIndex > 0 requires a TIFF file. Got '{Path.GetFileName(fullPath)}'.");
         var colorMode = node.GetString("colorMode", "preserve").Trim().ToLowerInvariant() switch
         {
             "preserve" => ImreadModes.Unchanged,
@@ -121,7 +138,27 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
             _ => throw new InvalidOperationException("image.load colorMode must be preserve, gray or color.")
         };
 
-        var mat = Cv2.ImRead(fullPath, colorMode);
+        Mat mat;
+        if (manifestEntry is not null || pageIndex > 0)
+        {
+            await using var input = OpenBounded(fullPath, maxMegabytes);
+            var length = input.Length;
+            if (length > Array.MaxLength)
+                throw new InvalidOperationException($"image.load file '{Path.GetFileName(fullPath)}' exceeds the memory buffer limit for verified or paged decoding.");
+            var bytes = new byte[(int)length];
+            await input.ReadExactlyAsync(bytes, cancellationToken);
+            if (input.ReadByte() >= 0)
+                throw new InvalidDataException($"image.load file '{Path.GetFileName(fullPath)}' changed while being read.");
+            if (manifestEntry is not null && !Convert.ToHexString(SHA256.HashData(bytes)).Equals(manifestEntry.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"image.load manifest image content changed: '{manifestEntry.Path}'.");
+            if (pageIndex > 0) TiffPageSelection.Select(bytes, pageIndex, Path.GetFileName(fullPath), cancellationToken);
+            mat = Cv2.ImDecode(bytes, colorMode);
+        }
+        else
+        {
+            CheckSize(fullPath, new FileInfo(fullPath).Length, maxMegabytes);
+            mat = Cv2.ImRead(fullPath, colorMode);
+        }
         if (mat.Empty())
         {
             mat.Dispose();
@@ -129,21 +166,22 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
         }
 
         var image = VisionImage.Own(mat);
-        return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
+        return NodeOutputContracts.CreateOwnedResult(image, () =>
         {
+            var sourceMode = mode == "manifest" ? "manifest" : treatAsDirectory ? "directory" : "file";
             var diagnostics = CoordinateValidation.Diagnostics(
                 Type,
                 ("source", Path.GetFileName(fullPath)),
-                ("mode", treatAsDirectory ? "directory" : "file"),
+                ("mode", sourceMode),
                 ("sequence", effectiveIndex),
                 ("frameCount", frameCount),
+                ("pageIndex", pageIndex),
                 ("width", image.Width),
                 ("height", image.Height),
                 ("channels", image.Mat.Channels()),
                 ("bitDepth", BitDepth(image.Mat.Depth())));
-            return new NodeExecutorResult(
-                new Dictionary<string, VisionValue>
-                {
+            var outputs = new Dictionary<string, VisionValue>
+            {
                     ["image"] = VisionValue.Image(image),
                     ["width"] = VisionValue.Integer(image.Width),
                     ["height"] = VisionValue.Integer(image.Height),
@@ -153,28 +191,49 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
                     ["resolvedPath"] = VisionValue.String(fullPath),
                     ["sequence"] = VisionValue.Integer(effectiveIndex),
                     ["frameCount"] = VisionValue.Integer(frameCount),
+                    ["pageIndex"] = VisionValue.Integer(pageIndex),
                     ["diagnostics"] = VisionValue.String(diagnostics)
-                },
+            };
+            if (captureManifest && manifest is not null) outputs["manifestJson"] = VisionValue.String(manifest.ToJson());
+            return new NodeExecutorResult(outputs,
                 new Dictionary<string, object?>
                 {
                     ["source"] = Path.GetFileName(fullPath),
-                    ["mode"] = treatAsDirectory ? "directory" : "file",
+                    ["mode"] = sourceMode,
                     ["sequence"] = effectiveIndex,
                     ["frameCount"] = frameCount,
+                    ["pageIndex"] = pageIndex,
                     ["size"] = $"{image.Width}x{image.Height}",
                     ["channels"] = image.Mat.Channels(),
                     ["diagnostics"] = diagnostics
                 });
-        }, cancellationToken));
+        }, cancellationToken);
+    }
+
+    internal static bool IsImageFile(string path) => Extensions.Contains(Path.GetExtension(path).ToLowerInvariant());
+
+    private static void CheckSize(string path, long length, int maxMegabytes)
+    {
+        if (length > maxMegabytes * 1024L * 1024L)
+            throw new InvalidOperationException($"image.load file '{Path.GetFileName(path)}' is {length / (1024d * 1024d):0.#} MB which exceeds maxMegabytes={maxMegabytes}.");
+    }
+
+    internal static FileStream OpenBounded(string path, int maxMegabytes)
+    {
+        var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        try { CheckSize(path, file.Length, maxMegabytes); return file; }
+        catch { file.Dispose(); throw; }
     }
 
     /// <summary>按自然排序枚举图像：img2 排在 img10 之前，保证跑批可复现。</summary>
-    internal static List<string> EnumerateFrames(string directory, bool recursive)
+    internal static List<string> EnumerateFrames(string directory, bool recursive, bool skipLinks = false)
     {
-        var files = Directory
-            .EnumerateFiles(directory, "*", recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly)
-            .Where(file => Extensions.Contains(Path.GetExtension(file).ToLowerInvariant()))
-            .ToList();
+        var candidates = skipLinks
+            ? Directory.EnumerateFiles(directory, "*", new EnumerationOptions
+                { RecurseSubdirectories = recursive, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = false })
+            : Directory.EnumerateFiles(directory, "*", recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
+        var files = candidates.Where(IsImageFile).ToList();
         files.Sort(NaturalComparer.Instance);
         return files;
     }
@@ -220,7 +279,8 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
                 if (comparison != 0) return comparison;
                 i++; j++;
             }
-            return (leftSpan.Length - i).CompareTo(rightSpan.Length - j);
+            var remaining = (leftSpan.Length - i).CompareTo(rightSpan.Length - j);
+            return remaining != 0 ? remaining : StringComparer.Ordinal.Compare(left, right);
         }
     }
 }

@@ -46,11 +46,12 @@ public sealed class Yolo26InferenceTests
     {
         float[] protos = [1f, 1f, 1f, 1f];
         float[] coeffs = [0f];
-        var mask = InferenceStats.ComposeYoloSegMask(protos, 1, 2, 2, coeffs, 0, 0, 2, 2, 2, 2, 2, 2, maskThreshold: 0.5f);
+        var stretch = new LetterboxMapping(2, 2, 2, 2, letterbox: false);
+        var mask = InferenceStats.ComposeYoloSegMask(protos, 1, 2, 2, coeffs, 0, 0, 2, 2, stretch, maskThreshold: 0.5f);
         Assert.Equal(4, mask.Length);
         Assert.All(mask, b => Assert.Equal(255, b));
 
-        var cropped = InferenceStats.ComposeYoloSegMask(protos, 1, 2, 2, coeffs, 0, 0, 1, 1, 2, 2, 2, 2, maskThreshold: 0.5f);
+        var cropped = InferenceStats.ComposeYoloSegMask(protos, 1, 2, 2, coeffs, 0, 0, 1, 1, stretch, maskThreshold: 0.5f);
         Assert.Equal(255, cropped[0]);
         Assert.Equal(0, cropped[1]);
     }
@@ -157,10 +158,22 @@ public sealed class Yolo26InferenceTests
         var mask = InferenceStats.ComposeYoloSegMask(
             protos, 1, 2, 2, coeffs,
             boxLeft: 0, boxTop: 0, boxRight: 4, boxBottom: 4,
-            inputWidth: 4, inputHeight: 4, outWidth: 2, outHeight: 2,
-            maskThreshold: 0.5f, letterbox: true);
+            mapping: new LetterboxMapping(2, 2, 4, 4, letterbox: true),
+            maskThreshold: 0.5f);
         Assert.Equal(4, mask.Length);
         Assert.All(mask, b => Assert.Equal(255, b));
+    }
+
+    [Fact]
+    public void ComposeYoloSegMaskSamplesStretchPerAxis()
+    {
+        // Proto left column passes the threshold, right column does not.
+        float[] protos = [2f, -2f, 2f, -2f];
+        float[] coeffs = [1f];
+        // Source 4x2 stretched into a 2x2 input: x=0..1 sample proto column 0, x=2..3 column 1.
+        var mask = InferenceStats.ComposeYoloSegMask(protos, 1, 2, 2, coeffs, 0, 0, 2, 2,
+            new LetterboxMapping(4, 2, 2, 2, letterbox: false), maskThreshold: 0.5f);
+        Assert.Equal(new byte[] { 255, 255, 0, 0, 255, 255, 0, 0 }, mask);
     }
 
     [Fact]

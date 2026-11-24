@@ -3,6 +3,7 @@ using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Nodes;
+using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Tests;
 
@@ -130,35 +131,105 @@ public sealed class P1CompletionNodeTests
         Assert.Equal(200, maxImage.Mat.At<byte>(0, 0));
     }
 
-    [Fact]
-    public async Task Fuse_AcceptsASynchronizedFrameSet()
+    [Theory]
+    [InlineData("""{"sourceMode":"frameSet","mode":"mean"}""", "legacy", "unchecked")]
+    [InlineData("""{"sourceMode":"frameSet","mode":"mean","alignmentPolicy":"prealigned"}""", "prealigned", "operatorConfirmed")]
+    public async Task Fuse_ReportsCamerasAndAlignmentForASynchronizedFrameSet(string parameters, string policy, string status)
     {
-        using var frameSet = new VisionFrameSet("sync-1", "host", 12, true,
-            new Dictionary<string, IVisionImage>
-            {
-                ["cam-b"] = VisionImage.Own(Constant(64, 200)),
-                ["cam-a"] = VisionImage.Own(Constant(64, 120))
-            },
-            new Dictionary<string, VisionFrameSetFrameInfo>());
+        using var frameSet = SynchronizedFrameSet();
 
         var mean = await Run(new ImageFuseNode(), "image.fuse",
-            new Dictionary<string, VisionValue> { ["frameSet"] = VisionValue.FrameSet(frameSet) },
-            """{"sourceMode":"frameSet","mode":"mean"}""");
+            new Dictionary<string, VisionValue> { ["frameSet"] = VisionValue.FrameSet(frameSet) }, parameters);
         using var meanImage = Result(mean);
         Assert.Equal(160, meanImage.Mat.At<byte>(0, 0));
         Assert.Equal(2L, mean.Outputs["inputCount"].Require<long>("inputCount"));
+        Assert.Equal(new[] { "cam-a", "CAM-Z" }, Assert.IsType<string[]>(mean.Summary["cameraIds"]));
+        Assert.Equal(policy, mean.Summary["alignmentPolicy"]);
+        Assert.Equal(status, mean.Summary["alignmentStatus"]);
+        using var diagnostics = JsonDocument.Parse(mean.Outputs["diagnostics"].Require<string>("diagnostics"));
+        Assert.Equal(new[] { "cam-a", "CAM-Z" }, DiagnosticStrings(diagnostics, "cameraIds"));
+        Assert.Equal(new[] { "cam-a", "CAM-Z" }, DiagnosticStrings(diagnostics, "inputSources"));
+        Assert.Equal(new[] { "CurrentImage", "CurrentImage" }, DiagnosticStrings(diagnostics, "inputCoordinateFrames"));
+        Assert.Equal(status, diagnostics.RootElement.GetProperty("alignmentStatus").GetString());
+    }
 
-        // 两条来源互斥：frameSet 模式再接 image1 必须明确失败，而不是悄悄只算一半。
-        using var extra = Constant(64, 120);
+    [Fact]
+    public async Task Fuse_RequiresSpatialAlignmentEvenWhenTheCamerasAreSynchronized()
+    {
+        using var frameSet = SynchronizedFrameSet();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new ImageFuseNode(), "image.fuse",
+                new Dictionary<string, VisionValue> { ["frameSet"] = VisionValue.FrameSet(frameSet) },
+                """{"sourceMode":"frameSet","alignmentPolicy":"sameFrame"}"""));
+
+        Assert.Contains("sameFrame", error.Message);
+        Assert.Contains("cam-a", error.Message);
+        Assert.Contains("CAM-Z", error.Message);
+        Assert.Contains("CurrentImage", error.Message);
+    }
+
+    [Fact]
+    public async Task Fuse_RejectsAnImagePortAlongsideAFrameSet()
+    {
+        using var frameSet = SynchronizedFrameSet();
+        using var extra = VisionImage.Own(Constant(64, 120));
         var both = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             Run(new ImageFuseNode(), "image.fuse",
                 new Dictionary<string, VisionValue>
                 {
                     ["frameSet"] = VisionValue.FrameSet(frameSet),
-                    ["image1"] = VisionValue.Image(VisionImage.Own(extra.Clone()))
+                    ["image1"] = VisionValue.Image(extra)
                 },
                 """{"sourceMode":"frameSet","mode":"mean"}"""));
         Assert.Contains("ignores image1", both.Message);
+    }
+
+    [Theory]
+    [InlineData("image:camera-a:source", "image:camera-b:source")]
+    [InlineData("CurrentImage", "CurrentImage")]
+    [InlineData("ReferenceImage", "ReferenceImage")]
+    public async Task Fuse_RequiresTheSameKnownFrameOnIndividualImagePorts(string firstFrame, string secondFrame)
+    {
+        using var first = FramedImage(120, firstFrame);
+        using var second = FramedImage(200, secondFrame);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new ImageFuseNode(), "image.fuse", ImagePorts(first, second), """{"alignmentPolicy":"sameFrame"}"""));
+
+        Assert.Contains("sameFrame", error.Message);
+        Assert.Contains("image1", error.Message);
+        Assert.Contains("image2", error.Message);
+        Assert.Contains(firstFrame, error.Message);
+        Assert.Contains(secondFrame, error.Message);
+    }
+
+    [Fact]
+    public async Task Fuse_AcceptsAnAffineWarpOntoTheReferenceFrameThroughTheDispatcher()
+    {
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require("image.warpAffine"), new ImageWarpAffineNode(), "builtin");
+        registry.Register(BuiltInNodeCatalog.Require("image.fuse"), new ImageFuseNode(), "builtin");
+        var dispatcher = new VisionNodeDispatcher(registry);
+        using var reference = FramedImage(120, "image:reference:source");
+        using var candidate = FramedImage(200, "image:camera-b:source");
+        var warp = await dispatcher.ExecuteAsync(new NodeDefinition("warp", "image.warpAffine", null, null, null),
+            new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(candidate),
+                ["transform"] = VisionValue.Transform(new VisionTransform2D(
+                    candidate.CoordinateFrame, reference.CoordinateFrame, "px", 1, 0, 2, 0, 1, 1, 0, 0, 1))
+            }, null, CancellationToken.None);
+        using var warped = Result(warp);
+        Assert.Equal(reference.CoordinateFrame, warped.CoordinateFrame);
+
+        var fuse = await dispatcher.ExecuteAsync(Definition("image.fuse", """{"alignmentPolicy":"sameFrame"}"""),
+            ImagePorts(reference, warped), null, CancellationToken.None);
+        using var fused = Result(fuse);
+        Assert.Equal(160, fused.Mat.At<byte>(10, 10));
+        Assert.Equal("sameFrame", fuse.Summary["alignmentPolicy"]);
+        Assert.Equal("frameVerified", fuse.Summary["alignmentStatus"]);
+        using var diagnostics = JsonDocument.Parse(fuse.Outputs["diagnostics"].Require<string>("diagnostics"));
+        Assert.Equal(new[] { "image1", "image2" }, DiagnosticStrings(diagnostics, "inputSources"));
+        Assert.Equal(new[] { reference.CoordinateFrame, reference.CoordinateFrame }, DiagnosticStrings(diagnostics, "inputCoordinateFrames"));
     }
 
     [Fact]
@@ -315,11 +386,32 @@ public sealed class P1CompletionNodeTests
 
     private static async Task<NodeExecutorResult> Run(
         IVisionNodeExecutor executor, string type, Dictionary<string, VisionValue> inputs, string json)
+        => await executor.ExecuteAsync(new NodeExecutionContext(inputs), Definition(type, json), CancellationToken.None);
+
+    private static NodeDefinition Definition(string type, string json)
+        => new("n1", type, null, null, JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json));
+
+    private static VisionFrameSet SynchronizedFrameSet()
+        => new("sync-1", "host", 12, true,
+            new Dictionary<string, IVisionImage>
+            {
+                ["CAM-Z"] = VisionImage.Own(Constant(64, 200)),
+                ["cam-a"] = VisionImage.Own(Constant(64, 120))
+            },
+            new Dictionary<string, VisionFrameSetFrameInfo>());
+
+    private static VisionImage FramedImage(byte value, string frame)
     {
-        var node = new NodeDefinition("n1", type, null, null,
-            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json));
-        return await executor.ExecuteAsync(new NodeExecutionContext(inputs), node, CancellationToken.None);
+        var image = VisionImage.Own(Constant(64, value));
+        image.SetCoordinateFrame(frame);
+        return image;
     }
+
+    private static Dictionary<string, VisionValue> ImagePorts(VisionImage first, VisionImage second)
+        => new() { ["image1"] = VisionValue.Image(first), ["image2"] = VisionValue.Image(second) };
+
+    private static string?[] DiagnosticStrings(JsonDocument diagnostics, string property)
+        => diagnostics.RootElement.GetProperty(property).EnumerateArray().Select(item => item.GetString()).ToArray();
 
     private static Dictionary<string, VisionValue> Inputs(params (string Port, Mat Image)[] images)
     {

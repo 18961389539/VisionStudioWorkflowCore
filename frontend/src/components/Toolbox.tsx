@@ -163,7 +163,8 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
         event.dataTransfer.effectAllowed = 'copy';
       }}>
       <button type="button" className="toolbox-item-main" aria-pressed={selectedType === item.type}
-        aria-label={item.displayName} title={item.description || item.displayName} onClick={() => select(item.type)} onDoubleClick={() => add(item)}
+        aria-label={item.displayName} title={item.description ? `${item.displayName}\n${item.description}` : item.displayName}
+        onClick={() => select(item.type)} onDoubleClick={() => add(item)}
         onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); add(item); } }}>
         <NodeCategoryIcon type={item.type} /><span className="toolbox-item-copy"><span className="toolbox-item-name"><Highlight text={item.displayName} query={query} /></span>
           {(keyword || connection) && <small className="toolbox-item-purpose">{purpose}</small>}

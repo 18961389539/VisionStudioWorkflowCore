@@ -22,6 +22,7 @@ export function useEditorPanels() {
   const [calibrationOpen, setCalibrationOpen] = useState(false);
   const [framesOpen, setFramesOpen] = useState(false);
   const [productionOpen, setProductionOpen] = useState(false);
+  const [spcOpen, setSpcOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [hardwareProvenanceOpen, setHardwareProvenanceOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -31,7 +32,7 @@ export function useEditorPanels() {
     jobsOpen, setJobsOpen, tracesOpen, setTracesOpen, traceRunId, setTraceRunId, commandOpen, setCommandOpen,
     validationOpen, setValidationOpen, modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
     tuningOpen, setTuningOpen, modulesOpen, setModulesOpen, calibrationOpen, setCalibrationOpen, framesOpen, setFramesOpen,
-    productionOpen, setProductionOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
+    productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
     aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen
   };
 }

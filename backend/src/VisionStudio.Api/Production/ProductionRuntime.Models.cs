@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VisionStudio.Engine;
@@ -75,7 +76,9 @@ public sealed record ProductionRuntimeStatus(
     /// <summary>当前故障事件内已消耗的自动恢复次数（成功后清零）。</summary>
     int RecoveryAttempts = 0,
     /// <summary>锁定快照的工作流是否引用设备（PLC）/机器人：含设备副作用的失败不允许自动重跑。</summary>
-    bool HasDeviceSideEffects = false);
+    bool HasDeviceSideEffects = false,
+    string? StatusEpoch = null,
+    long StatusVersion = 0);
 
 public sealed record ProductionStartRequest(string? JobId = null);
 public sealed record DeviceActionResolutionRequest(
@@ -120,9 +123,9 @@ public sealed class ProductionRuntimeConfigStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public ProductionRuntimeConfigStore(IWebHostEnvironment env)
+    public ProductionRuntimeConfigStore(IWebHostEnvironment env, IConfiguration? configuration = null)
     {
-        var dir = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "production");
+        var dir = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "production");
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, "runtime.json");
     }
@@ -130,72 +133,80 @@ public sealed class ProductionRuntimeConfigStore
     public async Task<ProductionRuntimeConfig> GetAsync(CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
-        try
-        {
-            if (!File.Exists(_path)) return new ProductionRuntimeConfig();
-            await using var stream = File.OpenRead(_path);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-            var config = JsonSerializer.Deserialize<ProductionRuntimeConfig>(document.RootElement.GetRawText(), _json) ?? new ProductionRuntimeConfig();
-            var defaults = new ProductionRuntimeConfig();
-            if (!HasProperty(document.RootElement, "ptpDriftGuardEnabled"))
-            {
-                config = config with
-                {
-                    PtpDriftGuardEnabled = defaults.PtpDriftGuardEnabled,
-                    PtpGuardWindowRuns = defaults.PtpGuardWindowRuns,
-                    PtpGuardMinimumEvidenceRuns = defaults.PtpGuardMinimumEvidenceRuns,
-                    PtpGuardMinimumReadyRate = defaults.PtpGuardMinimumReadyRate,
-                    PtpGuardCheckEveryCycles = defaults.PtpGuardCheckEveryCycles,
-                    PtpGuardFaultOnMasterClockChange = defaults.PtpGuardFaultOnMasterClockChange
-                };
-            }
-            if (!HasProperty(document.RootElement, "synchronizationHealthGuardEnabled"))
-            {
-                config = config with
-                {
-                    SynchronizationHealthGuardEnabled = defaults.SynchronizationHealthGuardEnabled,
-                    SynchronizationGuardWindowRuns = defaults.SynchronizationGuardWindowRuns,
-                    SynchronizationGuardMinimumEvidenceRuns = defaults.SynchronizationGuardMinimumEvidenceRuns,
-                    SynchronizationGuardMaximumFailureRate = defaults.SynchronizationGuardMaximumFailureRate,
-                    SynchronizationGuardMaximumFrameTimeoutRate = defaults.SynchronizationGuardMaximumFrameTimeoutRate,
-                    SynchronizationGuardMaxConsecutiveFailures = defaults.SynchronizationGuardMaxConsecutiveFailures,
-                    SynchronizationGuardMaxConsecutiveSkewViolations = defaults.SynchronizationGuardMaxConsecutiveSkewViolations,
-                    SynchronizationGuardMaximumNativeFrameLossRate = defaults.SynchronizationGuardMaximumNativeFrameLossRate,
-                    SynchronizationGuardMaximumBufferUnderruns = defaults.SynchronizationGuardMaximumBufferUnderruns,
-                    SynchronizationGuardMaximumResynchronizations = defaults.SynchronizationGuardMaximumResynchronizations,
-                    SynchronizationGuardMaximumSequenceGapRate = defaults.SynchronizationGuardMaximumSequenceGapRate,
-                    SynchronizationGuardCheckEveryCycles = defaults.SynchronizationGuardCheckEveryCycles,
-                    SynchronizationGuardUnhealthyChecksToFault = defaults.SynchronizationGuardUnhealthyChecksToFault,
-                    SynchronizationGuardHealthyChecksToRecover = defaults.SynchronizationGuardHealthyChecksToRecover,
-                    SynchronizationGuardRecoveryTimeoutMs = defaults.SynchronizationGuardRecoveryTimeoutMs
-                };
-            }
-            else if (!HasProperty(document.RootElement, "synchronizationGuardMaximumNativeFrameLossRate"))
-            {
-                // V0.44 already has the synchronization guard but predates vendor-native transport thresholds.
-                // Apply V0.45 defaults explicitly instead of depending on constructor missing-parameter behavior.
-                config = config with
-                {
-                    SynchronizationGuardMaximumNativeFrameLossRate = defaults.SynchronizationGuardMaximumNativeFrameLossRate,
-                    SynchronizationGuardMaximumBufferUnderruns = defaults.SynchronizationGuardMaximumBufferUnderruns,
-                    SynchronizationGuardMaximumResynchronizations = defaults.SynchronizationGuardMaximumResynchronizations
-                };
-            }
-            // R3-05：旧文件可能带着越界的恢复预算（负数立即耗尽预算 / 极大值让"有限重试"失效）——
-            // 读取时收敛到合法区间（保存路径严格校验并 400），让运行语义始终受约束。
-            if (config.MaxRecoveryAttempts < 0 || config.MaxRecoveryAttempts > MaxRecoveryAttemptsLimit)
-                config = config with { MaxRecoveryAttempts = Math.Clamp(config.MaxRecoveryAttempts, 0, MaxRecoveryAttemptsLimit) };
-            return config;
-        }
+        try { return await ReadAsync(ct); }
         finally { _gate.Release(); }
     }
 
-    public async Task<ProductionRuntimeConfig> SaveAsync(ProductionRuntimeConfig config, CancellationToken ct)
+    private async Task<ProductionRuntimeConfig> ReadAsync(CancellationToken ct)
+    {
+        if (!File.Exists(_path)) return new ProductionRuntimeConfig();
+        await using var stream = File.OpenRead(_path);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        var config = JsonSerializer.Deserialize<ProductionRuntimeConfig>(document.RootElement.GetRawText(), _json) ?? new ProductionRuntimeConfig();
+        var defaults = new ProductionRuntimeConfig();
+        if (!HasProperty(document.RootElement, "ptpDriftGuardEnabled"))
+        {
+            config = config with
+            {
+                PtpDriftGuardEnabled = defaults.PtpDriftGuardEnabled,
+                PtpGuardWindowRuns = defaults.PtpGuardWindowRuns,
+                PtpGuardMinimumEvidenceRuns = defaults.PtpGuardMinimumEvidenceRuns,
+                PtpGuardMinimumReadyRate = defaults.PtpGuardMinimumReadyRate,
+                PtpGuardCheckEveryCycles = defaults.PtpGuardCheckEveryCycles,
+                PtpGuardFaultOnMasterClockChange = defaults.PtpGuardFaultOnMasterClockChange
+            };
+        }
+        if (!HasProperty(document.RootElement, "synchronizationHealthGuardEnabled"))
+        {
+            config = config with
+            {
+                SynchronizationHealthGuardEnabled = defaults.SynchronizationHealthGuardEnabled,
+                SynchronizationGuardWindowRuns = defaults.SynchronizationGuardWindowRuns,
+                SynchronizationGuardMinimumEvidenceRuns = defaults.SynchronizationGuardMinimumEvidenceRuns,
+                SynchronizationGuardMaximumFailureRate = defaults.SynchronizationGuardMaximumFailureRate,
+                SynchronizationGuardMaximumFrameTimeoutRate = defaults.SynchronizationGuardMaximumFrameTimeoutRate,
+                SynchronizationGuardMaxConsecutiveFailures = defaults.SynchronizationGuardMaxConsecutiveFailures,
+                SynchronizationGuardMaxConsecutiveSkewViolations = defaults.SynchronizationGuardMaxConsecutiveSkewViolations,
+                SynchronizationGuardMaximumNativeFrameLossRate = defaults.SynchronizationGuardMaximumNativeFrameLossRate,
+                SynchronizationGuardMaximumBufferUnderruns = defaults.SynchronizationGuardMaximumBufferUnderruns,
+                SynchronizationGuardMaximumResynchronizations = defaults.SynchronizationGuardMaximumResynchronizations,
+                SynchronizationGuardMaximumSequenceGapRate = defaults.SynchronizationGuardMaximumSequenceGapRate,
+                SynchronizationGuardCheckEveryCycles = defaults.SynchronizationGuardCheckEveryCycles,
+                SynchronizationGuardUnhealthyChecksToFault = defaults.SynchronizationGuardUnhealthyChecksToFault,
+                SynchronizationGuardHealthyChecksToRecover = defaults.SynchronizationGuardHealthyChecksToRecover,
+                SynchronizationGuardRecoveryTimeoutMs = defaults.SynchronizationGuardRecoveryTimeoutMs
+            };
+        }
+        else if (!HasProperty(document.RootElement, "synchronizationGuardMaximumNativeFrameLossRate"))
+        {
+            // V0.44 already has the synchronization guard but predates vendor-native transport thresholds.
+            // Apply V0.45 defaults explicitly instead of depending on constructor missing-parameter behavior.
+            config = config with
+            {
+                SynchronizationGuardMaximumNativeFrameLossRate = defaults.SynchronizationGuardMaximumNativeFrameLossRate,
+                SynchronizationGuardMaximumBufferUnderruns = defaults.SynchronizationGuardMaximumBufferUnderruns,
+                SynchronizationGuardMaximumResynchronizations = defaults.SynchronizationGuardMaximumResynchronizations
+            };
+        }
+        // R3-05：旧文件可能带着越界的恢复预算（负数立即耗尽预算 / 极大值让"有限重试"失效）——
+        // 读取时收敛到合法区间（保存路径严格校验并 400），让运行语义始终受约束。
+        if (config.MaxRecoveryAttempts < 0 || config.MaxRecoveryAttempts > MaxRecoveryAttemptsLimit)
+            config = config with { MaxRecoveryAttempts = Math.Clamp(config.MaxRecoveryAttempts, 0, MaxRecoveryAttemptsLimit) };
+        return config;
+    }
+
+    internal static string RevisionOf(ProductionRuntimeConfig config)
+        => $"\"{Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(config)))}\"";
+
+    public async Task<ProductionRuntimeConfig> SaveAsync(ProductionRuntimeConfig config, CancellationToken ct, string? expectedRevision = null)
     {
         Validate(config);
         await _gate.WaitAsync(ct);
         try
         {
+            if (expectedRevision is not null && !string.Equals(expectedRevision, RevisionOf(await ReadAsync(ct)), StringComparison.Ordinal))
+                throw new ApiConflictException("Production configuration changed. Reload it and review the changes before saving.");
+
             var temp = _path + ".tmp";
             await using (var stream = File.Create(temp))
                 await JsonSerializer.SerializeAsync(stream, config, _json, ct);

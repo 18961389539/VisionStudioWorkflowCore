@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import catalog from '../generated/catalog.generated.json';
 import { localizeCatalog } from '../i18n/catalog';
 import { optionLabels, parameterLabels, variantLabels } from '../i18n/catalogLabels';
+import { searchTools } from '../toolboxModel';
 import type { NodeCatalogItem } from '../types';
 
 const cjk = /[\u4e00-\u9fff]/;
@@ -31,6 +32,36 @@ const previouslyChineseAuthored = [
 
 const source = catalog.items as unknown as NodeCatalogItem[];
 const localized = new Map(localizeCatalog(source, 'zh').map((item) => [item.type, item]));
+
+describe('toolbox names and search', () => {
+  it('loads a Chinese name for every built-in node', () => {
+    const missing = [...localized.values()].filter(item => !cjk.test(item.displayName));
+    expect(missing.map(item => item.type)).toEqual([]);
+  });
+
+  it.each([
+    ['轮廓匹配', 'contour.matchXld'], ['轮廓转点列', 'contour.toPoints'],
+    ['螺纹中径', 'measure.thread'], ['目标框转选区', 'roi.fromDetection'],
+    ['概率图转轮廓', 'contour.fromMask'], ['保边降噪', 'image.bilateral']
+  ])('finds %s in the toolbox', (query, type) => {
+    expect(searchTools([...localized.values()], query)[0]?.type).toBe(type);
+  });
+
+  it('marks only the thread pitch diameter as an estimate in both languages', () => {
+    expect(localized.get('measure.thread')?.outputs.find(port => port.name === 'pitchDiameter')?.label).toBe('估算中径（px）');
+    expect(localized.get('measure.gear')?.outputs.find(port => port.name === 'pitchDiameter')?.label).toBe('中径');
+    const thread = localizeCatalog(source, 'en').find(item => item.type === 'measure.thread');
+    expect(thread?.outputs.find(port => port.name === 'pitchDiameter')?.label).toBe('Estimated Pitch Diameter (px)');
+  });
+
+  it.each(['region.fromMask', 'contour.fromMask'])('shows localized probability controls for %s', (type) => {
+    const item = localized.get(type)!;
+    expect(item.parameters.find(parameter => parameter.name === 'maskMode')?.options)
+      .toContainEqual({ value: 'probability', label: '浮点概率' });
+    expect(item.parameters.find(parameter => parameter.name === 'probabilityThreshold'))
+      .toMatchObject({ label: '概率阈值', defaultValue: 0.5, visibleWhen: { parameter: 'maskMode', values: ['probability'] } });
+  });
+});
 
 describe('catalog localization for previously Chinese-authored nodes', () => {
   it('keeps every node name and description Chinese', () => {

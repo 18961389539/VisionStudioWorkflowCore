@@ -12,6 +12,7 @@ public sealed class VisionStudioAuthenticationHandler(
     ILoggerFactory logger,
     UrlEncoder encoder,
     SecurityStore store,
+    ServiceTokenStore serviceTokens,
     IOptions<SecurityOptions> securityOptions)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
@@ -23,12 +24,21 @@ public sealed class VisionStudioAuthenticationHandler(
         if (!_security.Enabled)
             return AuthenticateResult.Success(CreateTicket("system", "Security Disabled", SecurityRoles.Administrator));
 
-        var token = Request.Cookies[_security.CookieName];
-        if (string.IsNullOrWhiteSpace(token))
+        var header = Request.Headers.Authorization.ToString();
+        var bearer = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..].Trim() : null;
+
+        // 服务令牌只走 Authorization 头（cookie 只承载人类会话，避免与会话 token 混淆）。
+        // 认证成功后角色固定为 Service：任何人类角色策略都不会通过，只能走显式作用域策略。
+        if (!string.IsNullOrWhiteSpace(bearer) && bearer.StartsWith(ServiceTokenStore.TokenPrefix, StringComparison.Ordinal))
         {
-            var header = Request.Headers.Authorization.ToString();
-            if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) token = header[7..].Trim();
+            var principal = await serviceTokens.ResolveAsync(bearer, Context.RequestAborted);
+            return principal is null
+                ? AuthenticateResult.Fail("Invalid, expired or revoked service token.")
+                : AuthenticateResult.Success(CreateServiceTicket(principal));
         }
+
+        var token = Request.Cookies[_security.CookieName];
+        if (string.IsNullOrWhiteSpace(token)) token = bearer;
         if (string.IsNullOrWhiteSpace(token)) return AuthenticateResult.NoResult();
         var user = await store.ResolveSessionAsync(token, Context.RequestAborted);
         if (user is null) return AuthenticateResult.Fail("Invalid or expired session.");
@@ -44,6 +54,20 @@ public sealed class VisionStudioAuthenticationHandler(
     private AuthenticationTicket CreateTicket(string id, string username, string role, string? displayName = null)
     {
         var claims = new[] { new Claim(ClaimTypes.NameIdentifier, id), new Claim(ClaimTypes.Name, username), new Claim(ClaimTypes.Role, role), new Claim("display_name", displayName ?? username) };
+        return new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme)), Scheme);
+    }
+
+    private AuthenticationTicket CreateServiceTicket(ServiceTokenPrincipal token)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, token.Id),
+            new(ClaimTypes.Name, $"service:{token.Name}"),
+            new(ClaimTypes.Role, SecurityRoles.Service),
+            new("display_name", token.Name),
+            new(SecurityClaims.ServiceTokenId, token.Id)
+        };
+        claims.AddRange(token.Scopes.Select(scope => new Claim(SecurityClaims.Scope, scope)));
         return new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme)), Scheme);
     }
 

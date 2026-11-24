@@ -177,7 +177,7 @@ WHERE v.asset_id = $id AND v.version = $version;
     }
 
     /// <summary>同步读取（供引擎的 <c>IModelAssetSource</c> 使用）；version&lt;=0 表示 latest。</summary>
-    public byte[]? ReadBytesSync(string id, int version)
+    public byte[]? ReadBytesSync(string id, int version, string? kind = null)
     {
         using var connection = db.OpenConnection();
         var effective = version;
@@ -197,8 +197,9 @@ SELECT b.bytes
 FROM asset_versions v
 JOIN assets a ON a.id = v.asset_id AND a.deleted_at IS NULL
 JOIN asset_blobs b ON b.sha256 = v.sha256
-WHERE v.asset_id = $id AND v.version = $version;
+WHERE v.asset_id = $id AND v.version = $version AND ($kind IS NULL OR a.kind = $kind);
 """;
+        command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$version", effective);
         using var reader = command.ExecuteReader();

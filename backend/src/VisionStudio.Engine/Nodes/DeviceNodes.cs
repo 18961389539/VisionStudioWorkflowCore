@@ -185,9 +185,19 @@ public sealed class DeviceWriteTagNode(DeviceManager devices) : IVisionNodeExecu
         };
 }
 
-public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecutor
+public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "device.waitTag";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        var timeout = TimingMs(node, "timeoutMs", 5000, 50, 120000);
+        var poll = TimingMs(node, "pollMs", 25, 10, 5000);
+        var stable = TimingMs(node, "stableMs", 0, 0, 120000);
+        if (poll > timeout || stable > timeout)
+            throw new InvalidOperationException($"Node '{node.Id}' pollMs and stableMs must not exceed timeoutMs.");
+    }
+
 
     public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
@@ -431,41 +441,77 @@ public sealed class DeviceWriteVisionResultNode(DeviceManager devices) : IVision
         var readyTag = DeviceNodeValidation.RequireId(node.GetString("resultReadyTag", "resultReady"), "resultReadyTag");
         var okTag = DeviceNodeValidation.RequireId(node.GetString("resultOkTag", "resultOk"), "resultOkTag");
         var writes = new List<(string, object?)> { (readyTag, false), (okTag, pass) };
+        var validityWrites = new List<(string, object?)>();
         var writtenCoordinates = new Dictionary<string, double>(StringComparer.Ordinal);
+        var coordinateValidity = new Dictionary<string, bool>(StringComparer.Ordinal);
         var skipped = new List<string>();
         var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { readyTag };
         if (!tags.Add(okTag)) throw new InvalidOperationException("Ready 和 OK 标签不能相同。");
         foreach (var field in new[] { "x", "y", "r" })
         {
             var tag = node.GetString(field + "Tag", "result" + field.ToUpperInvariant()).Trim();
+            var validTag = node.GetString(field + "ValidTag", "").Trim();
+            var connected = context.TryGetValue(field, out _);
+            if (validTag.Length != 0)
+            {
+                validTag = DeviceNodeValidation.RequireId(validTag, field + "ValidTag");
+                if (!tags.Add(validTag)) throw new InvalidOperationException($"PLC 结果标签重复：{validTag}。请为各字段配置独立标签。");
+                // A skipped, disabled or substituted coordinate is invalid for this result.
+                var valid = tag.Length != 0 && connected;
+                coordinateValidity.Add(field, valid);
+                validityWrites.Add((validTag, valid));
+            }
             if (tag.Length == 0) { skipped.Add(field + ":disabled"); continue; }
             tag = DeviceNodeValidation.RequireId(tag, field + "Tag");
             if (!tags.Add(tag)) throw new InvalidOperationException($"PLC 结果标签重复：{tag}。请为各字段配置独立标签。");
-            var connected = context.TryGetValue(field, out _);
             if (!connected && missingPolicy == "fail") throw new InvalidOperationException($"{field} 标签已启用但坐标未接入；请连接坐标、清空标签或调整缺失坐标策略。");
             if (!connected && missingPolicy == "skip") { skipped.Add(field + ":missing"); continue; }
             var coordinate = connected ? context.RequireNumber(field) : 0d;
             if (!double.IsFinite(coordinate)) throw new InvalidOperationException($"PLC 坐标 {field} 必须是有限数值。");
             writes.Add((tag, coordinate)); writtenCoordinates[field] = coordinate;
         }
+        writes.AddRange(validityWrites);
         writes.Add((readyTag, true));
 
         // One mutually exclusive device command: lower Ready, write payload, raise Ready last.
+        var confirmedWrites = 0;
+        int? activeWrite = null;
         try
         {
             await devices.WriteSequenceAsync(
                 deviceId,
                 writes,
                 autoConnect,
-                cancellationToken);
+                cancellationToken,
+                (index, confirmed) =>
+                {
+                    activeWrite = confirmed ? null : index;
+                    if (confirmed) confirmedWrites = index + 1;
+                });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
-            throw new InvalidOperationException($"device.writeVisionResult failed for '{deviceId}': {ex.Message}", ex);
+            var next = activeWrite ?? confirmedWrites;
+            var stage = next switch
+            {
+                0 when activeWrite is null => "preflight",
+                0 => "ready-clear",
+                _ when next == writes.Count - 1 => "ready-publish",
+                _ => "payload"
+            };
+            var lastConfirmed = confirmedWrites == 0 ? "none" : writes[confirmedWrites - 1].Item1;
+            var uncertain = activeWrite is { } index ? writes[index].Item1 : "none";
+            var message = $"device.writeVisionResult failed for '{deviceId}' at {stage}; " +
+                $"confirmed writes: {confirmedWrites}/{writes.Count}, last confirmed tag: {lastConfirmed}, " +
+                $"write with unknown outcome: {uncertain}. {ex.Message}";
+            if (ex is OperationCanceledException canceled)
+                throw new OperationCanceledException(message, canceled, canceled.CancellationToken);
+            throw new InvalidOperationException(message, ex);
         }
 
         var diag = CoordinateValidation.Diagnostics(Type,
-            ("deviceId", deviceId), ("pass", pass), ("coordinatesWritten", writtenCoordinates), ("skippedCoordinates", skipped), ("missingCoordinatePolicy", missingPolicy),
+            ("deviceId", deviceId), ("pass", pass), ("coordinatesWritten", writtenCoordinates), ("coordinateValidity", coordinateValidity),
+            ("skippedCoordinates", skipped), ("missingCoordinatePolicy", missingPolicy),
             ("autoConnect", autoConnect), ("readyTag", readyTag), ("okTag", okTag), ("tagsWritten", writes.Count));
         var outputs = new Dictionary<string, VisionValue>
             {
@@ -485,9 +531,10 @@ public sealed class DeviceWriteVisionResultNode(DeviceManager devices) : IVision
                 ["resultReadyTag"] = readyTag,
                 ["pass"] = pass,
                 ["coordinatesWritten"] = writtenCoordinates,
+                ["coordinateValidity"] = coordinateValidity,
                 ["skippedCoordinates"] = skipped,
                 ["tagsWritten"] = writes.Count,
-                ["writeOrder"] = $"{readyTag}=0 -> payload -> {readyTag}=1",
+                ["writeOrder"] = $"{readyTag}=0 -> payload and configured validity flags -> {readyTag}=1",
                 ["diagnostics"] = diag
             });
     }

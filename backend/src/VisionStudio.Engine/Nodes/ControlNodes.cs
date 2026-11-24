@@ -1,8 +1,18 @@
 ﻿using VisionStudio.Engine.Runtime;
 namespace VisionStudio.Engine.Nodes;
-public sealed class IfConditionNode : IVisionNodeExecutor
+public sealed class IfConditionNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "flow.if";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        if (!node.GetString("mode", "threshold").Equals("range", StringComparison.OrdinalIgnoreCase)) return;
+        var minimum = node.GetDouble("rangeMin", 0);
+        var maximum = node.GetDouble("rangeMax", 100);
+        if (minimum > maximum)
+            throw new InvalidOperationException($"Node '{node.Id}' rangeMin {minimum} is greater than rangeMax {maximum}.");
+    }
+
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

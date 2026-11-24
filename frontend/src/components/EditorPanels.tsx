@@ -28,6 +28,7 @@ const FrameTreePanel = lazy(() => import('./FrameTreePanel'));
 const HardwareProvenancePanel = lazy(() => import('./HardwareProvenancePanel'));
 const PluginPackagePanel = lazy(() => import('./PluginPackagePanel'));
 const AboutPanel = lazy(() => import('./AboutPanel'));
+const SpcDashboard = lazy(() => import('./SpcDashboard'));
 
 export type EditorPanelsProps = {
   camerasOpen: boolean;
@@ -68,6 +69,8 @@ export type EditorPanelsProps = {
   upgradeSelectedModule: (version: WorkflowModuleVersion) => void;
   productionOpen: boolean;
   setProductionOpen: (value: boolean) => void;
+  spcOpen: boolean;
+  setSpcOpen: (value: boolean) => void;
   diagnosticsOpen: boolean;
   setDiagnosticsOpen: (value: boolean) => void;
   aboutOpen: boolean;
@@ -87,7 +90,7 @@ export default function EditorPanels({
   modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
   validationOpen, setValidationOpen, tuningOpen, setTuningOpen, catalog, selectedId, messageApi,
   modulesOpen, setModulesOpen, insertModule, upgradeSelectedModule,
-  productionOpen, setProductionOpen, diagnosticsOpen, setDiagnosticsOpen,
+  productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen,
   aboutOpen, setAboutOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
   pluginsOpen, setPluginsOpen, refreshCatalog
 }: EditorPanelsProps) {
@@ -110,7 +113,7 @@ export default function EditorPanels({
         selectedNodeType={selectedNode ? String(selectedNode.data.typeKey) : undefined}
         onApplyToSelectedNode={applyCalibrationParameters}
       /></LazyPanel>
-      <LazyPanel open={jobsOpen} label="作业" onClose={() => setJobsOpen(false)}><JobPanel open onClose={() => setJobsOpen(false)} workflow={workflowPayload} prepareWorkflowChange={workflowChanges.prepare} onRunResult={applyResult} /></LazyPanel>
+      <LazyPanel open={jobsOpen} label="作业" onClose={() => setJobsOpen(false)}><JobPanel open onClose={() => setJobsOpen(false)} workflow={workflowPayload} prepareWorkflowChange={workflowChanges.prepare} onRunResult={applyResult} onOpenValidation={() => setValidationOpen(true)} /></LazyPanel>
       <LazyPanel open={tracesOpen} label="追溯" onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }}>
         <TracePanel open initialRunId={traceRunId} onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }} />
       </LazyPanel>
@@ -122,6 +125,7 @@ export default function EditorPanels({
       <ErrorBoundary variant="panel" scope="生产运行" onDismiss={() => setProductionOpen(false)}>
         <ProductionPanel open={productionOpen} onClose={() => setProductionOpen(false)} />
       </ErrorBoundary>
+      <LazyPanel open={spcOpen} label="SPC 看板" onClose={() => setSpcOpen(false)}><SpcDashboard open onClose={() => setSpcOpen(false)} /></LazyPanel>
       <ErrorBoundary variant="panel" scope="诊断" onDismiss={() => setDiagnosticsOpen(false)}>
         <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
       </ErrorBoundary>

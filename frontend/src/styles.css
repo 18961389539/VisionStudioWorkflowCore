@@ -278,7 +278,8 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .toolbox-item.active { background: var(--vs-row-selected); border-color: var(--vs-border-input); }
 .toolbox-item-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; align-self: stretch; padding: 5px 3px; border: 0; background: transparent; color: var(--vs-text-2); font: inherit; font-size: 13px; text-align: left; cursor: grab; }
 .toolbox-connection .toolbox-item-main { cursor: pointer; }
-.toolbox-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 单行省略会把「传送带跟随标定」这类名字压成 4 个字；允许两行，单行条目高度不变 */
+.toolbox-item-name { display: -webkit-box; overflow: hidden; white-space: normal; line-height: 1.32; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .toolbox-item-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .toolbox-item-purpose { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--vs-text-5); font-size: 11px; line-height: 1.45; }
 .toolbox-category-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; padding: 0 10px 8px; color: var(--vs-text-5); font-size: 10px; }
@@ -436,7 +437,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .json-textarea-description { max-height: 96px; margin: 4px 0 0; overflow: auto; color: var(--vs-text-5); font-size: 11px; line-height: 1.5; white-space: pre-wrap; }
 .switch-case-editor { margin: 0 10px 10px; padding: 10px; border: 1px solid var(--vs-border-subtle); border-radius: 6px; background: var(--vs-bg-subtle); }
 .switch-case-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-.switch-case-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 24px; gap: 6px; align-items: center; margin-bottom: 4px; }
+.switch-case-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 6px; align-items: center; margin-bottom: 4px; }
 .switch-case-index { color: var(--vs-text-5); font-size: 11px; }
 .switch-case-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .switch-case-error { margin: 4px 0; color: var(--vs-text-danger); font-size: 11px; }
@@ -601,7 +602,9 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 
 /* V0.4 industrial image viewer */
 .vision-viewer { min-height: 0; min-width: 0; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--vs-bg-deep); container-type: inline-size; }
-.vision-viewer.is-drawing-circle { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+/* 绘制提示条是工具栏与画布之间的额外一行：直线与圆都要给第 4 行留位，
+   否则画布行被提示条挤成 0 高（2026-11-23 e2e 回归发现）。 */
+.vision-viewer.is-drawing { grid-template-rows: auto auto minmax(0, 1fr) auto; }
 .viewer-toolbar { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 8px; border-bottom: 1px solid var(--vs-border-toolbar); background: var(--vs-bg-viewer-toolbar); }
 .viewer-toolbar .ant-segmented-item-label { min-width: 36px; padding-inline: 5px; font-size: 11px; font-weight: 500; }
 .viewer-toggle { color: var(--vs-text-4); font-size: 12px; white-space: nowrap; }
@@ -787,6 +790,8 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
   padding: 24px;
   background: var(--vs-bg-app);
   color: var(--vs-text-1);
+  /* 运行时全屏页介于弹窗与 kiosk 之间：卡片数字跟随视口短边，1080p 下约 59px */
+  --operator-number-size: clamp(32px, 5.5vmin, 72px);
 }
 .runtime-only-title {
   font-size: 18px;
@@ -1007,6 +1012,35 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .runtime-only-page .production-hero-state .ant-tag { font-size: 22px; line-height: 34px; }
 .runtime-only-page .production-hero-metric b { font-size: 24px; }
 .runtime-only-page .production-actions .ant-btn { height: 44px; padding: 0 26px; font-size: 16px; }
+.runtime-only-page .operator-widget { min-height: 176px; }
+.runtime-only-page .operator-widget h3 { font-size: 15px; }
+
+/* 车间大屏（kiosk）：?view=operator&kiosk=1 —— 无标题/无标签栏，尺寸按 vmin 缩放。 */
+.runtime-only-page.is-kiosk { display: flex; flex-direction: column; height: 100vh; overflow: auto; padding: 12px 14px; --operator-number-size: clamp(48px, 9.5vmin, 200px); }
+.is-kiosk > .ant-space { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.is-kiosk > .ant-space > .ant-space-item:last-of-type { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.is-kiosk .operator-workspace-content { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.is-kiosk .operator-dashboard { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.is-kiosk .workstation-heading h2 { font-size: clamp(18px, 2.4vmin, 44px); }
+.is-kiosk .operator-widgets { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 12px; min-height: 0; }
+.is-kiosk .operator-widget { flex: 1 1 0; min-width: clamp(220px, 20vw, 420px); min-height: 0; justify-content: flex-start; padding: clamp(14px, 2vmin, 34px); gap: clamp(6px, 1vmin, 18px); }
+/* 标题钉在卡片顶部，内容块整体居中：三张卡的标题因此始终对齐 */
+.is-kiosk .operator-widget > h3 + * { margin-top: auto; }
+.is-kiosk .operator-widget > *:last-child:not(h3) { margin-bottom: auto; }
+.is-kiosk .operator-widget[data-widget='Result'] { flex: 1.6 1 0; min-width: clamp(360px, 32vw, 760px); }
+.is-kiosk .operator-widget h3 { font-size: clamp(15px, 2vmin, 34px); }
+.is-kiosk .operator-widget[data-widget='Result'] strong { font-size: clamp(56px, 11vmin, 220px); }
+.is-kiosk .operator-widget small, .is-kiosk .operator-widget span { font-size: clamp(14px, 1.8vmin, 30px); }
+.is-kiosk .operator-preview-widget { flex: 1 1 100%; }
+.is-kiosk .operator-inspection-image { max-height: 46vh; }
+.is-kiosk .operator-alarm-queue h3 { font-size: clamp(15px, 1.8vmin, 32px); }
+.is-kiosk .operator-alarm-queue li { font-size: clamp(13px, 1.5vmin, 24px); }
+.is-kiosk .production-hero { padding: clamp(12px, 1.6vmin, 28px) clamp(16px, 2.2vmin, 40px); }
+.is-kiosk .production-hero-state .ant-tag { font-size: clamp(18px, 2.6vmin, 48px); line-height: 1.25; padding: clamp(2px, .4vmin, 8px) clamp(10px, 1.6vmin, 28px); }
+.is-kiosk .production-hero-metric b { max-width: none; font-size: clamp(18px, 2.8vmin, 52px); }
+.is-kiosk .production-hero-metric span { font-size: clamp(11px, 1.2vmin, 20px); }
+.is-kiosk .production-hero-updated { font-size: clamp(11px, 1.3vmin, 22px); }
+.is-kiosk .production-actions .ant-btn { height: clamp(38px, 5vmin, 84px); padding: 0 clamp(16px, 2.4vmin, 48px); font-size: clamp(14px, 1.9vmin, 30px); }
 
 /* ===== 顶栏三段式 / 底部标签页 / 账号入口（2026-10-07 晚 UI 改版） ===== */
 
@@ -1288,3 +1322,39 @@ body.resizing-x, body.resizing-y { user-select: none; }
 
 /* P2：match.template 的模板资产选择器 */
 .template-asset-picker { margin-bottom: 8px; }
+
+/* SPC 看板：自绘 SVG 控制图（颜色只经主题令牌，2026-11-23） */
+.spc-page { min-height: 100vh; padding: 16px; overflow: auto; background: var(--vs-bg-app); color: var(--vs-text-1); }
+.spc-page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+.spc-page-subtitle { color: var(--vs-text-5); font-size: 12px; margin-top: 4px; }
+.spc-controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.spc-control { display: flex; flex-direction: column; gap: 4px; }
+.spc-control > span { color: var(--vs-text-5); font-size: 11px; }
+.spc-stat-grid { display: grid; grid-template-columns: repeat(7, minmax(96px, 1fr)); gap: 8px; }
+.spc-stat-grid .ant-statistic { padding: 8px 10px; border: 1px solid var(--vs-border-subtle); border-radius: 6px; background: var(--vs-bg-card); }
+.spc-stat-grid .ant-statistic-title { font-size: 10px; }
+.spc-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
+.spc-chart-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--vs-border-subtle); border-radius: 8px; background: var(--vs-bg-card); min-width: 0; }
+.spc-chart { width: 100%; height: auto; display: block; }
+.spc-chart .spc-chart-gridline { stroke: var(--vs-border-subtle); stroke-width: 1; }
+.spc-chart-axis-text { fill: var(--vs-text-5); font-size: 11px; }
+.spc-chart-limit-label { fill: var(--vs-text-4); font-size: 10px; }
+.spc-chart-line-center { stroke: var(--vs-text-4); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.spc-chart-line-limit { stroke: var(--vs-info); stroke-width: 1.4; stroke-dasharray: 7 4; }
+.spc-chart-line-spec { stroke: var(--vs-warn); stroke-width: 1.4; stroke-dasharray: 2 4; }
+.spc-chart-trend { fill: none; stroke: var(--vs-accent); stroke-width: 1.6; }
+.spc-chart-point { fill: var(--vs-accent); }
+.spc-chart-point-violation { fill: var(--vs-warn); }
+.spc-chart-point-beyond { fill: var(--vs-danger); }
+.spc-chart-empty { display: flex; align-items: center; justify-content: center; min-height: 180px; color: var(--vs-text-5); font-size: 12px; border: 1px dashed var(--vs-border-subtle); border-radius: 6px; }
+.spc-legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--vs-text-4); font-size: 11px; }
+.spc-legend-swatch { display: inline-block; width: 14px; height: 0; margin-right: 4px; vertical-align: middle; border-top: 2px solid var(--vs-text-4); }
+.spc-legend-swatch.swatch-center { border-top-style: dashed; border-top-color: var(--vs-text-4); }
+.spc-legend-swatch.swatch-limit { border-top-style: dashed; border-top-color: var(--vs-info); }
+.spc-legend-swatch.swatch-spec { border-top-style: dotted; border-top-color: var(--vs-warn); }
+.spc-legend-swatch.swatch-violation { border-top-color: var(--vs-warn); }
+.spc-legend-swatch.swatch-beyond { border-top-color: var(--vs-danger); }
+.spc-warning-list { margin: 0; padding-left: 18px; }
+.spc-loading { display: flex; align-items: center; gap: 8px; color: var(--vs-text-4); }
+@media (max-width: 1200px) { .spc-stat-grid { grid-template-columns: repeat(4, minmax(96px, 1fr)); } }
+@media (max-width: 720px) { .spc-stat-grid { grid-template-columns: repeat(2, minmax(96px, 1fr)); } }

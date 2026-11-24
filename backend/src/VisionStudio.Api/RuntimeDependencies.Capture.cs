@@ -8,6 +8,7 @@ using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Provenance;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Device;
 using VisionStudio.Engine.Nodes;
@@ -59,7 +60,10 @@ public sealed partial class RuntimeDependencyManifestService
                 if (!string.IsNullOrWhiteSpace(modelAssetId))
                     modelAssetRefs.Add((modelAssetId!, ResolveInt(node, registration.Catalog, "modelAssetVersion")));
             }
-            if (string.Equals(node.Type, "match.template", StringComparison.OrdinalIgnoreCase))
+            if (MatchingTemplateAsset.SupportsNode(node.Type)
+                && (!string.Equals(node.Type, "match.feature", StringComparison.OrdinalIgnoreCase)
+                    || !workflow.Edges.Any(edge => !edge.IsControl && edge.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase)
+                        && edge.TargetPort.Equals("template", StringComparison.OrdinalIgnoreCase))))
             {
                 // 模板图资产与模型资产共用同一份 pin 列表（assetId/version/sha 与 kind 无关）。
                 var templateAssetId = ResolveString(node, registration.Catalog, "templateAssetId");

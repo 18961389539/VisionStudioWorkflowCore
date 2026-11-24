@@ -40,6 +40,10 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
         if (region.Width < 8 || region.Height < 8)
             throw new InvalidOperationException($"recognition.barcodeQuality requires an ROI of at least 8x8 px; got {region.Width}x{region.Height}.");
 
+        var decodePolicy = node.GetString("decodePolicy", "legacy").Trim();
+        if (decodePolicy is not ("requireDecode" or "legacy"))
+            throw new InvalidOperationException("recognition.barcodeQuality decodePolicy must be requireDecode or legacy.");
+
         // ISO 15415 的 SC 取符号区 5%/95% 分位差而不是绝对极值：单个镜面反光点或坏像素
         // 不应把对比度抬高到"看起来可读"的程度。
         double low, high;
@@ -51,7 +55,7 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
             high = PreprocessGapMath.Percentile(bins, pixelCount, 95);
         }
         var symbolContrast = high - low;
-        if (!double.IsFinite(symbolContrast) || symbolContrast < 5)
+        if (!double.IsFinite(symbolContrast) || (symbolContrast < 5 && decodePolicy == "legacy"))
             throw new InvalidOperationException(
                 $"recognition.barcodeQuality found symbol contrast {symbolContrast:0.#} in the ROI; there is no readable symbol (needs at least 5 gray levels).");
 
@@ -84,7 +88,7 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
         {
             // MOD 近似：每个单元偏离全局中值的程度（中值上的单元没有调制）。取最差单元。
             var half = symbolContrast / 2d;
-            modulation = means.Min(mean => Math.Clamp(Math.Abs(mean - mid) / half, 0d, 1d));
+            modulation = half > 0 ? means.Min(mean => Math.Clamp(Math.Abs(mean - mid) / half, 0d, 1d)) : 0d;
             // AN 按 ISO 15415 定义：左右/上下半区均值差比的较大者。
             var left = RangeMean(means, cols, 0, rows, 0, cols / 2);
             var right = RangeMean(means, cols, 0, rows, cols / 2, cols);
@@ -99,20 +103,28 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
             detail["axialNonUniformity"] = axial;
         }
 
-        // 解不出来就是不合格：ISO 里解码失败直接 F，不看其他参数。
-        var decodeOk = !context.TryGetValue("decodeOk", out var decodeValue) || decodeValue.Require<bool>("decodeOk");
+        bool? decodeOk = context.TryGetValue("decodeOk", out var decodeValue) ? decodeValue.Require<bool>("decodeOk") : null;
+        var decodeStatus = decodeOk switch { true => "decoded", false => "failed", null => "unverified" };
         detail["decodeOk"] = decodeOk;
-        var grade = decodeOk ? Worst(grades) : "F";
+        detail["decodeStatus"] = decodeStatus;
+        detail["decodePolicy"] = decodePolicy;
+        outputs["decodeStatus"] = VisionValue.String(decodeStatus);
+        var enableGrade = node.GetBool("enableGrade", true);
+        if (decodeOk is null && decodePolicy == "legacy" && enableGrade)
+            detail["warning"] = "Legacy grading with no decode result. Connect recognition.barcode.found and select Require Decode Result to verify the symbol.";
+        // The contrast-derived indicator remains available without a decoder. Release requires an observed decode.
+        var grade = decodeOk == false ? "F" : Worst(grades);
         var numericGrade = NumericGrade(grade);
 
-        if (node.GetBool("enableGrade", true))
+        if (enableGrade)
         {
             outputs["grade"] = VisionValue.String(grade);
             outputs["numericGrade"] = VisionValue.Double(numericGrade);
             var minGrade = node.GetString("minGrade", "C").Trim().ToUpperInvariant();
             if (minGrade is not ("A" or "B" or "C" or "D"))
                 throw new InvalidOperationException("recognition.barcodeQuality minGrade must be A, B, C or D.");
-            outputs["pass"] = VisionValue.Boolean(numericGrade >= NumericGrade(minGrade));
+            if (decodeOk.HasValue || decodePolicy == "legacy")
+                outputs["pass"] = VisionValue.Boolean(numericGrade >= NumericGrade(minGrade));
             detail["minGrade"] = minGrade;
         }
 

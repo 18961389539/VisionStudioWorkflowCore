@@ -6,6 +6,12 @@ public interface IVisionNodeExecutor
     ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken);
 }
 
+/// <summary>Checks node-specific parameters and wiring during compilation, without executing the node.</summary>
+public interface IVisionNodeDefinitionValidator
+{
+    void ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs);
+}
+
 public sealed record NodeExecutorResult(
     IReadOnlyDictionary<string, VisionValue> Outputs,
     IReadOnlyDictionary<string, object?> Summary,
@@ -52,6 +58,12 @@ public sealed class NodeExecutionContext
     }
 
     public IReadOnlyDictionary<string, VisionValue> Inputs => _inputs;
+
+    /// <summary>Stable workflow identity for data that outlives a compiled plan.</summary>
+    public string? WorkflowId { get; init; }
+
+    /// <summary>True for single-node, partial or breakpoint executions.</summary>
+    public bool IsDebugRun { get; init; }
 
     /// <summary>模型资产读取端口；由运行时从当前运行的宿主注入，节点不直接依赖 Api。</summary>
     public IModelAssetSource? ModelAssets { get; }

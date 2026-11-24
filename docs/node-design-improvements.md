@@ -21,6 +21,18 @@
 `legacyNodes` 的兼容映射已清空，画布上的「兼容」徽标与配置页提示一并删除。
 剩下的重复只有别名执行器——它们没有自己的算法，进不了目录。
 
+## 跨轮计数、图像回放和特征点模板
+
+- 在 `value.counter` 选择「按事件持久化」，将稳定的业务事件 ID 接到 `eventId`。按工作流 ID、计数器 ID 和事件 ID 去重，重复提交返回首次的计数与 `reused=true`。新模式使用独立计数，从首次事件开始记录。单节点、断点和部分流程调试只预演。数据库迁移 36 保存已提交事件及其计数，复位不会删除事件记录。
+- `image.load` 可以生成并保存带内容哈希的回放清单。TIFF 页索引独立于文件序号。详见 [读取图像文件](image-load-node.md)。
+- `match.feature` 可以通过「从资产选择」绑定模板图的具体版本。运行时依次使用模板端口、已绑定资产、本地模板文件。启用的资产缺失时报告错误。诊断记录模板来源、资产 ID 和版本，发布依赖及回收保护会跟踪该绑定。
+
+## 多帧融合的图像对齐
+
+- `image.fuse` 的新节点默认要求各输入声明同一已知图像坐标系。使用已配准输入前，需确认所有图像映射到同一参考图。未配置对齐策略的旧节点使用兼容策略。
+- 同步采集对齐的是拍摄时间。原始多相机帧可经 `frameset.image` 分别取图，用 `image.register` 相对同一参考图求变换，再通过 `image.warpAffine` 将各输入变换到参考图大小后接入融合节点的图像端口。
+- 帧组运行诊断列出实际参与融合的相机 ID。图像端口运行诊断列出参与的端口及其坐标系。
+
 ## 已关闭的历史遗留
 
 第五十二轮记录过一个遗留：`nodeValidation.test.ts`「参数密集节点至少分两组」失败，
@@ -1195,6 +1207,44 @@ static-audit exit 0、metric floor 通过。
 
 验证：Api 504、前端 98 文件 / 1174 项、typecheck/build 通过；warning baseline 22 条无新增；
 static-audit exit 0、metric floor 通过。
+
+## 第一百零九轮：实例分割的逐实例轮廓出口（2026-11-23）
+
+- `inference.instanceSegmentation` 新增 `contours` 输出（`Contour`）：每个保留实例一条外轮廓，`Index` 与 `detections` 的 `Index` 对齐，可直接接 `contour.*` / `measure.*` 链路；此前逐实例信息只存在于无内置消费者的 `instances` RLE JSON。
+- 轮廓经 `JLVisionOperators` 取该实例掩膜的最大外环：掩膜碎裂为多个连通域时只保留最大环，再按 2000 点预算均匀抽稀；掩膜为空时输出零面积空轮廓，保证两个列表始终等长。
+- 合成 `mask`、`detections` 与 `instances` 的既有契约不变。
+
+验证：Engine 全量 2317 项通过（含 `InferenceNodeOnnxTests` 新增轮廓断言与契约/目录/成熟度定向子集 66 项）；前端全量 1307 项通过；`npm run build` 与 lint 通过。
+
+## 第一百一十轮：分割掩膜的编码契约与叠加图配色（2026-11-23）
+
+- **掩膜编码显式化**：`inference.segmentation` 与 `inference.instanceSegmentation` 新增整数输出 `maskClassOffset`，契约统一为 `maskValue = classId + maskClassOffset`，像素 0 恒为背景。语义分割直接存类别号（offset 0），实例分割保留 0 作背景（offset 1）。此前这条规则只存在于实例节点的合成逻辑和注释里，下游取 classId 必须知道该减 0 还是减 1。
+- **叠加图按 classId 取色**：`BuildOverlay` 新增 `maskClassOffset` 参数，按 `classId` 查调色板槽位（slot = classId + 1，与 `inference.detection` / `inference.pose` 现有约定一致）。此前语义分割用 maskValue（即 classId）直接查槽，导致同一个类别在语义节点与实例/检测节点相差一格颜色（类 1 在语义节点是红、在检测节点是绿）。
+- 行为边界：掩膜像素值、逐类统计、`classes` / `instances` JSON 均不变；实例节点 `result` JSON 增加 `maskClassOffset` 字段；语义分割的 overlay 颜色整体前移一格（类 1 红 → 绿），实例/检测/姿态颜色不变。`SegmentationColorBgr` 仅修正文档（参数实为调色板槽位），函数行为不变。
+- 目录与文案：两个节点的长描述写明编码公式与配色一致性；端口 `maskClassOffset` 补中文「掩膜类别偏移」；`catalog.generated.json` 重新生成（hash `6e640b9a…`）。
+
+验证：Engine 全量 2321 项通过（含 `OnnxPreprocessingTests` 新增跨编码同色断言、实例节点 `maskClassOffset` 与 overlay 颜色断言）；前端全量 115 文件 / 1307 项通过（含端口中文覆盖率基线 0）；`CatalogExporter --check` 通过。
+
+## 第一百一十一轮：实例分割输出去重与类型升级（2026-11-23）
+
+- **`instances` 升级为 `Json`**：输出从 `String` 改为 `VisionDataType.Json`（`VisionJson`），画布与脚本节点可按 JSON 文档消费；`CSharpScriptNode` 已把 Json 端口解成文本。
+- **公共字段提到顶层**：文档改为 `{ maskWidth, maskHeight, [maskRunOrder], instances: [...] }`，逐实例条目不再重复 `maskSize` / `maskRunOrder`，只保留 `index/classId/label/score/x1,y1,x2,y2/area`（开启 RLE 时再加 `maskRuns`）。
+- **`result` 只留摘要**：不再把整个 `instances` 数组再序列化一遍，只保留 `count/maskClassOffset/layout/nmsMode/tensorOrder/detShape/protoShape`；大帧多实例时字符串体积不再翻倍。
+- **`includeMaskRuns` 默认关闭**：RLE 目前没有内置消费者（`region.fromMask` / `contour.fromMask` 都直接吃合成掩膜），默认不再写逐实例游程；需要实例级重叠的脚本显式开启即可，合成 `mask`、`contours`、`detections` 不受影响。
+- 兼容性：`instances` 的端口类型与文档结构都变了，仓库内无示例工作流或内置节点依赖它（仅测试与脚本解析），测试已同步。
+- 目录与文案：长描述写明 Json 文档结构与 result 摘要；`includeMaskRuns` 的默认值与中英文说明同步；`catalog.generated.json` 重新生成（hash `5d44847c…`）。
+
+验证：Engine 全量 2322 项通过；前端全量 115 文件 / 1307 项通过；`CatalogExporter --check` 通过。
+
+## 第一百一十二轮：实例分割掩膜合成性能与坐标映射收口（2026-11-23）
+
+- **掩膜合成只算框内**：`ComposeYoloSegMask` 改为只在 proto 框内计算 `sigmoid(coeffs · prototypes)`（`boxW × boxH`），输出像素直接经坐标映射采样该框，框外按 Ultralytics crop_mask 语义读 0。此前每个实例要先把整张 proto 合成一遍，再分配一张 input 分辨率的 float 重采样缓冲（640×640 约 1.6 MB/实例，100 实例即百 MB 级）；现在每个实例只剩框大小的一张。阈值语义不变，含 `maskThreshold=0` 时框外读 0 仍判为 255 的既有行为。
+- **抽出 `LetterboxMapping`**：source ↔ model-input 的正反映射统一为一个 readonly struct（letterbox = 等比缩放 + 居中 padding，stretch = 两轴独立缩放）。检测、姿态、OBB、实例分割及 `ComposeYoloSegMask` 里的多份 MapX/MapY 副本全部改用同一实现；姿态节点顺带把 `inputWidth/inputHeight/letterbox` 显式传给 `PrepareInput`，避免参数缺省时预处理按 224、映射按 640 各算一套。
+- **NMS 移到 input 空间**：`inference.detection`、`inference.pose`、`inference.instanceSegmentation` 的候选同时保留原始 input 框与裁剪后的 source 框；IoU 一律用 input 框，输出仍用 source 框。此前先映射并裁剪到图像边界再算 IoU，贴边候选的重叠判断会被裁剪扭曲。
+- **去掉全尺寸掩膜拷贝**：实例节点原先 `maskMat` → `Clone()` → `CloneOwned()` 共三份同内容缓冲；现在 `maskMat` 填好后直接交给 `mask` 输出，overlay 复用同一份像素，仅异常路径释放。
+- 行为边界：端口、参数、JSON 结构与目录均不变（无需重新生成 catalog）。框完全落在图像内时输出与之前一致；只有贴着边界的候选在 NMS 判断上可能更贴近模型原始几何。
+
+验证：Engine 全量 2324 项通过（新增 `LetterboxMapping` 正反映射与 stretch 逐轴采样测试，`OnnxPreprocessingTests` / `Yolo26InferenceTests` 定向 27 项通过）；static-audit 仅剩既有 route inventory 偏差（expected 339, got 341，与本次无关）；前端无改动。
 
 ## 历史轮次索引（第一 ~ 五十一轮）
 

@@ -105,6 +105,50 @@ public sealed class DatabaseWriteNodeTests
         Assert.Contains("dataset 'd'", error.Message);
     }
 
+    [Fact]
+    public async Task DefaultPolicyUsesLegacyStoreContract()
+    {
+        var store = new LegacyIdempotentStore();
+        var result = await new DatabaseWriteNode(store).ExecuteAsync(
+            Ctx(("value", VisionValue.Double(1)), ("idempotencyKey", VisionValue.String(" inspection-1 "))),
+            Def(), CancellationToken.None);
+
+        Assert.Equal("inspection-1", Assert.Single(store.Keys));
+        Assert.Equal("original", result.Outputs["recordId"].Require<string>("recordId"));
+        Assert.True(result.Outputs["reused"].Require<bool>("reused"));
+        Assert.False(result.Outputs["idempotencyConflict"].Require<bool>("idempotencyConflict"));
+        Assert.False(result.Outputs.ContainsKey("warningCount"));
+    }
+
+    [Theory]
+    [InlineData("warn")]
+    [InlineData("fail")]
+    public async Task CheckedPoliciesRejectUnsupportedStoreWithoutFallingBackToWrite(string policy)
+    {
+        var store = new LegacyIdempotentStore();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => new DatabaseWriteNode(store).ExecuteAsync(
+            Ctx(("value", VisionValue.Double(1))), Def(("idempotencyKey", "inspection-1"), ("idempotencyConflictPolicy", policy)),
+            CancellationToken.None).AsTask());
+
+        Assert.IsType<NotSupportedException>(error.InnerException);
+        Assert.Empty(store.Keys);
+    }
+
+    [Theory]
+    [InlineData("warn")]
+    [InlineData("fail")]
+    public async Task BlankIdempotencyPortAppendsRegardlessOfConflictPolicy(string policy)
+    {
+        var store = new CapturingStore();
+        var result = await new DatabaseWriteNode(store).ExecuteAsync(
+            Ctx(("value", VisionValue.Double(1)), ("idempotencyKey", VisionValue.String(" "))),
+            Def(("idempotencyKey", "inspection-1"), ("idempotencyConflictPolicy", policy)), CancellationToken.None);
+
+        Assert.Single(store.Records);
+        Assert.False(result.Outputs["reused"].Require<bool>("reused"));
+        Assert.False(result.Outputs["idempotencyConflict"].Require<bool>("idempotencyConflict"));
+    }
+
     // ===== 夹具 =====
 
     private sealed class CapturingStore : IResultRecordStore
@@ -121,6 +165,21 @@ public sealed class DatabaseWriteNodeTests
     {
         public Task AppendAsync(ResultRecord record, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("disk I/O error");
+    }
+
+    private sealed class LegacyIdempotentStore : IResultRecordStore
+    {
+        public List<string> Keys { get; } = [];
+
+        public Task AppendAsync(ResultRecord record, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Expected an idempotent store call.");
+
+        public Task<(string RecordId, int PayloadBytes, bool Reused)> AppendIdempotentAsync(
+            ResultRecord record, string idempotencyKey, CancellationToken cancellationToken = default)
+        {
+            Keys.Add(idempotencyKey);
+            return Task.FromResult(("original", 10, true));
+        }
     }
 
     private static NodeExecutionContext Ctx(params (string Port, VisionValue Value)[] inputs)

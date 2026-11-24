@@ -438,6 +438,138 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/security/service-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ServiceTokenDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateServiceTokenRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ServiceTokenCreated"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/security/service-tokens/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ServiceTokenCreated"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/security/service-tokens/{id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ServiceTokenDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/audit": {
         parameters: {
             query?: never;
@@ -466,6 +598,41 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["AuditEventDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/security/audit/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuditChainVerification"];
                     };
                 };
             };
@@ -8753,7 +8920,9 @@ export interface paths {
         put: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    "If-Match"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -8770,6 +8939,24 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ProductionRuntimeConfig"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Precondition Required */
+                428: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -9043,6 +9230,7 @@ export interface paths {
             parameters: {
                 query?: {
                     activeOnly?: boolean;
+                    pendingOnly?: boolean;
                     skip?: number | string;
                     take?: number | string;
                 };
@@ -9059,6 +9247,41 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["AlarmRecord"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alarms/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AlarmSummary"];
                     };
                 };
             };
@@ -9098,6 +9321,410 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["AlarmRecord"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/operator-layout/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OperatorLayout"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "If-Match"?: string;
+                };
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["OperatorLayout"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OperatorLayout"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Precondition Required */
+                428: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/stations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationOverview"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/stations/local": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationStatus"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/operator-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    ngOnly?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionOperatorPreview"];
+                    };
+                };
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/recipe-rollouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecipeRolloutBatch"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RecipeRolloutRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecipeRolloutBatch"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/recipe-rollouts/latest-by-station": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StationRecipeRollout"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/recipe-deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecipeDeliveryReceipt"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["StationRecipeDelivery"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecipeDeliveryReceipt"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/recipe-deliveries/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PublishRecipeDeliveryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobDescriptor"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AcknowledgementRequired"];
                     };
                 };
             };
@@ -10164,6 +10791,88 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spc/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpcDatasetSummary"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spc/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    dataset: string;
+                    chartType?: string;
+                    subgroupSize?: number | string;
+                    grouping?: string;
+                    from?: string;
+                    to?: string;
+                    limit?: number | string;
+                    lsl?: number | string;
+                    usl?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpcAnalysis"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11475,9 +12184,25 @@ export interface components {
             /** Format: date-time */
             acknowledgedAt?: null | string;
             runId?: null | string;
+            /** Format: date-time */
+            lastRaisedAt?: null | string;
+            /**
+             * Format: int32
+             * @default 1
+             */
+            occurrenceCount: number | string;
         };
         /** @enum {unknown} */
         AlarmSeverity: "Info" | "Warning" | "Error" | "Critical";
+        AlarmSummary: {
+            /** Format: int32 */
+            activeCount: number | string;
+            /** Format: int32 */
+            criticalCount: number | string;
+            latestActiveMessage: null | string;
+            /** Format: int32 */
+            pendingCount: number | string;
+        };
         AppendShapeModelVersionRequest: {
             modelBase64: string;
             trainingConfig: string;
@@ -11536,6 +12261,19 @@ export interface components {
         };
         /** @enum {unknown} */
         AssetKind: "Camera" | "Device" | "Robot";
+        AuditChainVerification: {
+            valid: boolean;
+            /** Format: int64 */
+            checked: number | string;
+            /** Format: int64 */
+            firstInvalidSeq: null | number | string;
+            firstInvalidReason: null | string;
+            /** Format: int64 */
+            lastSeq: null | number | string;
+            lastHash: null | string;
+            /** Format: date-time */
+            verifiedAt: string;
+        };
         AuditEventDto: {
             /** Format: int64 */
             sequence: number | string;
@@ -12856,6 +13594,12 @@ export interface components {
             displayName: string;
             role: string;
             password: string;
+        };
+        CreateServiceTokenRequest: {
+            name: string;
+            scopes: null | string[];
+            /** Format: int32 */
+            expiresInDays: null | number | string;
         };
         CreateShapeModelAssetRequest: {
             id: null | string;
@@ -14219,6 +14963,7 @@ export interface components {
             outputFrames?: null | components["schemas"]["NodeOutputFrameRule"][];
             roiImageBindings?: null | components["schemas"]["NodeRoiImageBinding"][];
             maturity?: components["schemas"]["NodeMaturity"];
+            minimumConnectedInputs?: null | components["schemas"]["NodeInputMinimum"][];
             declaresActions: boolean;
             declaresFrames: boolean;
             declaresTransformFrames: boolean;
@@ -14273,6 +15018,11 @@ export interface components {
         };
         /** @enum {unknown} */
         NodeImageFramePolicy: "PreserveInput" | "NewSpatialFrame" | "NewFixedFrame" | "TransformTarget" | "InputFrame";
+        NodeInputMinimum: {
+            dataType: components["schemas"]["VisionDataType"];
+            /** Format: int32 */
+            count: number | string;
+        };
         /**
          * @default Stable
          * @enum {unknown}
@@ -14462,6 +15212,12 @@ export interface components {
             dispositionChanged: boolean;
             executionModel: string;
         };
+        OperatorLayout: {
+            title: null | string;
+            widgets: components["schemas"]["OperatorWidget"][];
+        };
+        /** @enum {unknown} */
+        OperatorWidget: "Result" | "Counts" | "Timing" | "Alarms" | "Preview";
         ParameterDescriptor: {
             name: string;
             label: string;
@@ -14934,6 +15690,22 @@ export interface components {
             required: boolean;
             requiredWhen?: null | components["schemas"]["ParameterVisibility"];
         };
+        ProblemDetails: {
+            type?: null | string;
+            title?: null | string;
+            /** Format: int32 */
+            status?: null | number | string;
+            detail?: null | string;
+            instance?: null | string;
+        };
+        ProductionOperatorPreview: {
+            runId: string;
+            /** Format: date-time */
+            startedAt: string;
+            disposition: string;
+            /** Format: int32 */
+            jobVersion: number | string;
+        };
         ProductionPtpGuardGroupStatus: {
             groupId: string;
             groupName: string;
@@ -15153,9 +15925,54 @@ export interface components {
             recoveryAttempts: number | string;
             /** @default false */
             hasDeviceSideEffects: boolean;
+            statusEpoch?: null | string;
+            /**
+             * Format: int64
+             * @default 0
+             */
+            statusVersion: number | string;
         };
         ProductionStartRequest: {
             jobId?: null | string;
+        };
+        ProductionStationOverview: {
+            id: string;
+            name: string;
+            operatorUrl: string;
+            connection: components["schemas"]["StationConnection"];
+            /** Format: date-time */
+            lastCheckedAt: null | string;
+            /** Format: date-time */
+            lastSeenAt: null | string;
+            status: null | components["schemas"]["ProductionStationStatus"];
+            target: null | components["schemas"]["StationVersionTarget"];
+            versionCheck: components["schemas"]["StationVersionCheck"];
+            /** @default false */
+            recipeDeliveryEnabled: boolean;
+        };
+        ProductionStationStatus: {
+            stationId: string;
+            state: components["schemas"]["ProductionRuntimeState"];
+            jobId: null | string;
+            job: null | components["schemas"]["StationJob"];
+            /** Format: int32 */
+            lockedVersion: null | number | string;
+            lockedWorkflowHash: null | string;
+            /** Format: int64 */
+            cycleCount: number | string;
+            /** Format: int64 */
+            okCount: number | string;
+            /** Format: int64 */
+            ngCount: number | string;
+            lastDisposition: null | string;
+            /** Format: date-time */
+            lastCycleAt: null | string;
+            /** Format: int32 */
+            activeAlarms: number | string;
+            /** Format: int32 */
+            criticalAlarms: number | string;
+            /** Format: int32 */
+            pendingAlarms: number | string;
         };
         ProductionSynchronizationGuardGroupStatus: {
             groupId: string;
@@ -15248,6 +16065,58 @@ export interface components {
             /** Format: date-time */
             at: string;
             dependencyManifestHash?: null | string;
+        };
+        PublishRecipeDeliveryRequest: {
+            /** Format: date-time */
+            expectedUpdatedAt: string;
+            /** @default false */
+            acknowledgeMaturityNodes: boolean;
+        };
+        /** @enum {unknown} */
+        RecipeDeliveryOutcome: "Unconfirmed" | "Received" | "Rejected";
+        RecipeDeliveryReceipt: {
+            id: string;
+            stationId: string;
+            jobId: string;
+            jobName: string;
+            /** Format: int32 */
+            sourceVersion: number | string;
+            workflowHash: string;
+            /** Format: int32 */
+            localVersion: number | string;
+            requiresValidation: boolean;
+            /** Format: int32 */
+            publishedVersion: null | number | string;
+            /** Format: date-time */
+            jobUpdatedAt: string;
+            /** Format: date-time */
+            receivedAt: string;
+        };
+        RecipeRolloutBatch: {
+            id: string;
+            jobId: string;
+            jobName: string;
+            /** Format: int32 */
+            sourceVersion: number | string;
+            workflowHash: string;
+            /** Format: date-time */
+            createdAt: string;
+            stations: components["schemas"]["RecipeRolloutStation"][];
+        };
+        RecipeRolloutRequest: {
+            jobId: string;
+            /** Format: int32 */
+            sourceVersion: number | string;
+            workflowHash: string;
+            stationIds: string[];
+        };
+        RecipeRolloutStation: {
+            stationId: string;
+            stationName: string;
+            outcome: components["schemas"]["RecipeDeliveryOutcome"];
+            /** Format: int32 */
+            localVersion?: null | number | string;
+            detail?: null | string;
         };
         ReplaceParameterValuesRequest: {
             values: {
@@ -15708,6 +16577,25 @@ export interface components {
             /** Format: date-time */
             passwordChangedAt: string;
         };
+        ServiceTokenCreated: {
+            token: string;
+            details: components["schemas"]["ServiceTokenDto"];
+        };
+        ServiceTokenDto: {
+            id: string;
+            name: string;
+            prefix: string;
+            scopes: string[];
+            /** Format: date-time */
+            createdAt: string;
+            createdBy: null | string;
+            /** Format: date-time */
+            expiresAt: null | string;
+            /** Format: date-time */
+            lastUsedAt: null | string;
+            /** Format: date-time */
+            revokedAt: null | string;
+        };
         SessionUserResponse: {
             /** Format: date-time */
             expiresAt: string;
@@ -15777,6 +16665,102 @@ export interface components {
             createdAt: string;
             createdBy: string;
         };
+        SpcAnalysis: {
+            dataset: string;
+            chartType: string;
+            /** Format: int32 */
+            subgroupSize: number | string;
+            grouping: string;
+            /** Format: int32 */
+            recordsRead: number | string;
+            /** Format: int32 */
+            recordsUsed: number | string;
+            /** Format: int32 */
+            recordsIgnored: number | string;
+            /** Format: int32 */
+            samplesUsed: number | string;
+            /** Format: int32 */
+            samplesDropped: number | string;
+            /** Format: int32 */
+            nonFiniteSamples: number | string;
+            /** Format: int32 */
+            subgroupCount: number | string;
+            /** Format: double */
+            mean: null | number | string;
+            /** Format: double */
+            lowerSpecificationLimit: null | number | string;
+            /** Format: double */
+            upperSpecificationLimit: null | number | string;
+            capability: null | components["schemas"]["SpcCapability"];
+            primaryChart: components["schemas"]["SpcChart"];
+            secondaryChart: null | components["schemas"]["SpcChart"];
+            warnings: string[];
+            truncated: boolean;
+            /** Format: date-time */
+            firstSampleAt: null | string;
+            /** Format: date-time */
+            lastSampleAt: null | string;
+        };
+        SpcCapability: {
+            /** Format: double */
+            cp: null | number | string;
+            /** Format: double */
+            cpk: null | number | string;
+            /** Format: double */
+            pp: null | number | string;
+            /** Format: double */
+            ppk: null | number | string;
+            /** Format: double */
+            lowerSpecificationLimit: null | number | string;
+            /** Format: double */
+            upperSpecificationLimit: null | number | string;
+            /** Format: double */
+            withinSigma: null | number | string;
+            /** Format: double */
+            overallSigma: null | number | string;
+            /** Format: int32 */
+            outOfSpecificationCount: number | string;
+        };
+        SpcChart: {
+            kind: string;
+            label: string;
+            /** Format: double */
+            centerLine: null | number | string;
+            /** Format: double */
+            upperControlLimit: null | number | string;
+            /** Format: double */
+            lowerControlLimit: null | number | string;
+            points: components["schemas"]["SpcChartPoint"][];
+            violations: components["schemas"]["SpcViolation"][];
+        };
+        SpcChartPoint: {
+            /** Format: int32 */
+            index: number | string;
+            /** Format: double */
+            value: number | string;
+            /** Format: date-time */
+            timestamp: string;
+            beyondLimits: boolean;
+        };
+        SpcDatasetSummary: {
+            dataset: string;
+            /** Format: int32 */
+            recordCount: number | string;
+            /** Format: int64 */
+            payloadBytes: number | string;
+            /** Format: date-time */
+            firstRecordAt: null | string;
+            /** Format: date-time */
+            lastRecordAt: null | string;
+        };
+        SpcViolation: {
+            rule: string;
+            /** Format: int32 */
+            startIndex: number | string;
+            /** Format: int32 */
+            endIndex: number | string;
+            description: string;
+        };
         StartPluginBenchmarkRequest: {
             datasetId: string;
             validationRunId: string;
@@ -15791,6 +16775,43 @@ export interface components {
             baselineRunId?: null | string;
             regressionPolicy?: null | components["schemas"]["PluginBenchmarkRegressionPolicy"];
             baselineSnapshot?: null | components["schemas"]["PluginBenchmarkBaselineSnapshot"];
+        };
+        /** @enum {unknown} */
+        StationConnection: "Waiting" | "Online" | "Offline" | "Timeout" | "Unauthorized" | "InvalidResponse" | "IdentityMismatch";
+        StationJob: {
+            name: string;
+            /** Format: int32 */
+            publishedVersion: null | number | string;
+            publishedWorkflowHash: null | string;
+        };
+        StationRecipeDelivery: {
+            stationId: string;
+            jobId: string;
+            jobName: string;
+            /** Format: int32 */
+            sourceVersion: number | string;
+            workflowHash: string;
+            requiresValidation: boolean;
+            workflow: components["schemas"]["WorkflowDefinition"];
+        };
+        StationRecipeRollout: {
+            batchId: string;
+            jobId: string;
+            jobName: string;
+            /** Format: int32 */
+            sourceVersion: number | string;
+            workflowHash: string;
+            /** Format: date-time */
+            createdAt: string;
+            delivery: components["schemas"]["RecipeRolloutStation"];
+        };
+        /** @enum {unknown} */
+        StationVersionCheck: "NotConfigured" | "Unverified" | "Matches" | "PublishedOnly" | "Mismatch";
+        StationVersionTarget: {
+            jobId: string;
+            /** Format: int32 */
+            version: number | string;
+            workflowHash: null | string;
         };
         StorageBackupCreateRequest: {
             includeArtifacts?: null | boolean;

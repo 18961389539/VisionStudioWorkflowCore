@@ -49,7 +49,10 @@ export const traces = {
   replay: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/replay`),
   replayContext: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/replay/context`),
   replayInput: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/replay/input`),
-  preview: (runId: string, query: string) => apiUrl(`traces/${encodeURIComponent(runId)}/preview?${query}`)
+  preview: (runId: string, query?: string) => {
+    const base = apiUrl(`traces/${encodeURIComponent(runId)}/preview`);
+    return query ? `${base}?${query}` : base;
+  }
 } as const;
 
 // ── scripts ───────────────────────────────────────────────────────────────────
@@ -161,6 +164,13 @@ export const debug = {
 export const production = {
   status: apiUrl('production/status'),
   config: apiUrl('production/config'),
+  operatorLayout: (jobId: string) => apiUrl(`production/operator-layout/${encodeURIComponent(jobId)}`),
+  stations: apiUrl('production/stations'),
+  recipeRollouts: apiUrl('production/recipe-rollouts'),
+  latestStationRollouts: apiUrl('production/recipe-rollouts/latest-by-station'),
+  recipeDeliveries: apiUrl('production/recipe-deliveries'),
+  publishRecipeDelivery: (id: string) => apiUrl(`production/recipe-deliveries/${encodeURIComponent(id)}/publish`),
+  operatorPreview: (ngOnly = false) => apiUrl('production/operator-preview' + (ngOnly ? '?ngOnly=true' : '')),
   start: apiUrl('production/start'),
   stop: apiUrl('production/stop'),
   recover: apiUrl('production/recover'),
@@ -295,6 +305,13 @@ export const investigations = {
   verificationEvidence: (id: string) => apiUrl(`investigations/${encodeURIComponent(id)}/verification-evidence`)
 } as const;
 
+// ── spc ───────────────────────────────────────────────────────────────────────
+export const spc = {
+  datasets: apiUrl('spc/datasets'),
+  datasetsQuery: (query: string) => apiUrl(`spc/datasets?${query}`),
+  series: (query: string) => apiUrl(`spc/series?${query}`)
+} as const;
+
 // ── media ─────────────────────────────────────────────────────────────────────
 export const media = {
   status: apiUrl('media/status'),
@@ -318,10 +335,18 @@ export const storage = {
 } as const;
 
 // ── alarms ────────────────────────────────────────────────────────────────────
+export type AlarmFilter = 'all' | 'active' | 'pending';
+
+const alarmFilterQuery: Record<AlarmFilter, string> = {
+  all: '',
+  active: '&activeOnly=true',
+  pending: '&pendingOnly=true',
+};
+
 export const alarms = {
   list: apiUrl('alarms'),
-  // take 显式写明（2026-10-26）：服务端默认只返回最近 200 条，客户端不要依赖"默认全量"。
-  active: apiUrl('alarms?activeOnly=false&take=200'),
+  page: (skip: number, take: number, filter: AlarmFilter = 'all') => apiUrl(`alarms?skip=${skip}&take=${take}${alarmFilterQuery[filter]}`),
+  summary: apiUrl('alarms/summary'),
   ack: (id: string) => apiUrl(`alarms/${encodeURIComponent(id)}/ack`)
 } as const;
 

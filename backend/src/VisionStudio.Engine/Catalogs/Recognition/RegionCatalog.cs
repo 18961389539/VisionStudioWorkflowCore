@@ -10,6 +10,18 @@ public static class RegionCatalog
     private static readonly PortDescriptor[] RangeImages = [Exec, new("image", VisionDataType.Image, Required: false), new("domainImage", VisionDataType.DomainImage, Required: false), new("region", VisionDataType.Region, Required: false), new("minGray", VisionDataType.Double, Required: false), new("maxGray", VisionDataType.Double, Required: false)];
     // count 是区域对象数（阈值区域不自动拆分连通域），blobCount 才是目标个数，单独成端口避免误读。
     private static readonly PortDescriptor[] RangeOutputs = [Region, new("image", VisionDataType.Image), new("count", VisionDataType.Integer), new("blobCount", VisionDataType.Integer), new("area", VisionDataType.Double), new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String, Required: false), Next];
+    internal static IReadOnlyList<ParameterDescriptor> MaskParameters { get; } =
+    [
+        new("maskMode", "Mask Mode", "select", "byte", Group: "Mask",
+            Options: [new("8-bit Grayscale", "byte"), new("Float Probability", "probability")],
+            Description: "Select the existing 8-bit grayscale conversion or threshold a single-channel float probability image directly."),
+        new("threshold", "Mask Threshold", "number", 1, 1, 255, 1, Group: "Mask", VisibleWhen: new("maskMode", ["byte"]),
+            Description: "Pixels at or above this level are foreground. 1 selects all non-zero pixels.") { Integer = true },
+        new("probabilityThreshold", "Probability Threshold", "number", 0.5, 0, 1, 0.01, Group: "Mask", VisibleWhen: new("maskMode", ["probability"]),
+            Description: "Compare float32 or float64 probabilities in their original 0 to 1 value range. Values at or above the threshold are foreground."),
+        new("invert", "Invert Mask", "boolean", false, Group: "Mask", Description: "Swap foreground and background after thresholding.")
+    ];
+
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
         new("region.fromRange", "Range Segmentation (band)", "Region", RangeImages, RangeOutputs,
@@ -49,8 +61,7 @@ public static class RegionCatalog
             "Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Emits found (area>0) and diagnostics; emptyPolicy=fail rejects an empty region while passthrough emits an empty domain. Connect domainImage to region.fromRange; regular Image ports deliberately reject it to prevent silent domain loss.", "builtin"),
         new("region.fromMask", "Region From Mask", "Region", [Exec, new("image", VisionDataType.Image)],
             [new("region", VisionDataType.Region), new("image", VisionDataType.Image), new("count", VisionDataType.Integer), new("area", VisionDataType.Integer), new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
-            [new("threshold", "Mask Threshold", "number", 1, 1, 255, 1, Group: "Mask", Description: "Pixels at or above this level belong to the region; 1 means any non-zero pixel, which is the usual case for segmentation masks.") { Integer = true },
-             new("invert", "Invert Mask", "boolean", false, Group: "Mask", Description: "Swap foreground and background, for models or defects that encode the object as dark instead of bright.")],
-            "Turn a mask image (for example the mask output of ONNX segmentation) directly into a Region instead of thresholding it again with region.fromRange. The mask is split into 8-connected components, so downstream region.properties / region.filter counts real blobs rather than one merged area; the binary mask is echoed on the image port and area reports the foreground pixel count. found is false when the mask is empty.", Capabilities: new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: [])
+            MaskParameters,
+            "Convert an 8-bit mask or a float probability map into 8-connected regions. The image output echoes a binary 0/255 mask and area counts its foreground pixels. found is false when the mask has no foreground.", Capabilities: new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: [])
     ];
 }

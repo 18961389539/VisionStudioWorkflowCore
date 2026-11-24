@@ -5,9 +5,21 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
-public sealed class ContourThicknessNode : IVisionNodeExecutor
+public sealed class ContourThicknessNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "measure.contourThickness";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        var minimum = MeasurementDefinitionValidation.Number(node, catalog, "minThickness");
+        var maximum = MeasurementDefinitionValidation.Number(node, catalog, "maxThickness");
+        if (maximum > 0 && maximum < minimum)
+            throw new InvalidOperationException($"Node '{node.Id}' maxThickness must be zero (unlimited) or at least minThickness.");
+        var budget = MeasurementDefinitionValidation.Number(node, catalog, "maxSamplesPerBoundary");
+        if (budget != Math.Truncate(budget))
+            throw new InvalidOperationException($"Node '{node.Id}' maxSamplesPerBoundary must be an integer.");
+    }
+
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {

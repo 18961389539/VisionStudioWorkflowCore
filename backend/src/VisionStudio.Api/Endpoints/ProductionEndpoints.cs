@@ -1,5 +1,6 @@
 using VisionStudio.Api.Security;
 using VisionStudio.Api.Infrastructure;
+using Microsoft.AspNetCore.Mvc;
 
 namespace VisionStudio.Api.Endpoints;
 
@@ -10,8 +11,12 @@ public static class ProductionEndpoints
         app.MapGet("/api/production/status", (ProductionRuntimeService production) => Results.Ok(production.Status))
             .Produces<ProductionRuntimeStatus>();
 
-        app.MapGet("/api/production/config", async (ProductionRuntimeService production, CancellationToken ct) =>
-            Results.Ok(await production.GetConfigAsync(ct)))
+        app.MapGet("/api/production/config", async (ProductionRuntimeService production, HttpContext http, CancellationToken ct) =>
+        {
+            var config = await production.GetConfigAsync(ct);
+            http.Response.Headers.ETag = ProductionRuntimeConfigStore.RevisionOf(config);
+            return Results.Ok(config);
+        })
             .Produces<ProductionRuntimeConfig>();
 
         app.MapGet("/api/production/ptp-guard", (ProductionRuntimeService production) =>
@@ -22,14 +27,20 @@ public static class ProductionEndpoints
             Results.Ok(production.Status.SynchronizationGuard))
             .Produces<ProductionSynchronizationGuardSnapshot>();
 
-        app.MapPut("/api/production/config", async (ProductionRuntimeConfig request, ProductionRuntimeService production, CancellationToken ct) =>
-            Results.Ok(await production.UpdateConfigAsync(request, ct))).Produces<ProductionRuntimeConfig>().RequireEngineer("production.config.update", "production");
-
-        app.MapPost("/api/production/start", async (ProductionStartRequest request, ProductionRuntimeService production, PluginPerformanceBenchmarkService benchmarks, CancellationToken ct) =>
+        app.MapPut("/api/production/config", async (ProductionRuntimeConfig request, [FromHeader(Name = "If-Match")] string? expectedRevision,
+            ProductionRuntimeService production, HttpContext http, CancellationToken ct) =>
         {
-            if (benchmarks.HasActiveRuns) throw new ApiConflictException("A plugin performance benchmark is running. Cancel or finish it before starting Production Runtime.");
-            return Results.Ok(await production.StartAsync(request.JobId, ct));
-        }).Produces<ProductionRuntimeStatus>().RequireOperator("production.start", "production");
+            if (string.IsNullOrWhiteSpace(expectedRevision))
+                return Results.Problem(statusCode: StatusCodes.Status428PreconditionRequired, detail: "Read the production configuration and send its ETag in If-Match.");
+            var saved = await production.UpdateConfigAsync(request, ct, expectedRevision);
+            http.Response.Headers.ETag = ProductionRuntimeConfigStore.RevisionOf(saved);
+            return Results.Ok(saved);
+        }).Produces<ProductionRuntimeConfig>().ProducesProblem(StatusCodes.Status428PreconditionRequired).ProducesProblem(StatusCodes.Status409Conflict)
+            .RequireEngineer("production.config.update", "production");
+
+        app.MapPost("/api/production/start", async (ProductionStartRequest request, ProductionRuntimeService production, CancellationToken ct) =>
+            Results.Ok(await production.StartAsync(request.JobId, ct)))
+            .Produces<ProductionRuntimeStatus>().RequireOperator("production.start", "production");
 
         app.MapPost("/api/production/stop", async (ProductionRuntimeService production, CancellationToken ct) =>
             Results.Ok(await production.StopAsync(ct))).Produces<ProductionRuntimeStatus>().RequireOperator("production.stop", "production");
@@ -97,12 +108,15 @@ public static class ProductionEndpoints
 
         // 分页 + 总数（2026-10-26）：此前返回全量数组，报警历史只增不减时会一次拉进手机端/看板。
         // 保持响应体仍是数组（前端不必改），总数放 X-Total-Count；take 上限由 Store 夹紧。
-        app.MapGet("/api/alarms", async (bool? activeOnly, int? skip, int? take, HttpContext http, AlarmStore alarms, CancellationToken ct) =>
+        app.MapGet("/api/alarms", async (bool? activeOnly, bool? pendingOnly, int? skip, int? take, HttpContext http, AlarmStore alarms, CancellationToken ct) =>
         {
-            var page = await alarms.ListAsync(activeOnly ?? false, skip ?? 0, take ?? AlarmStore.DefaultPageSize, ct);
+            var page = await alarms.ListAsync(activeOnly ?? false, skip ?? 0, take ?? AlarmStore.DefaultPageSize, ct, pendingOnly ?? false);
             http.Response.Headers["X-Total-Count"] = page.Total.ToString(System.Globalization.CultureInfo.InvariantCulture);
             return Results.Ok(page.Items);
         }).Produces<IReadOnlyList<AlarmRecord>>();
+
+        app.MapGet("/api/alarms/summary", async (AlarmStore alarms, CancellationToken ct) =>
+            Results.Ok(await alarms.GetSummaryAsync(ct))).Produces<AlarmSummary>();
 
         app.MapPost("/api/alarms/{id}/ack", async (string id, AlarmStore alarms, CancellationToken ct) =>
             Results.Ok(await alarms.AcknowledgeAsync(id, ct))).Produces<AlarmRecord>().RequireOperator("alarm.ack", "alarm");

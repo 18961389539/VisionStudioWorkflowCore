@@ -258,6 +258,9 @@ public static partial class BuiltInNodeCatalog
                 new("xTag", "X Tag", "text", "resultX", Group: "Mapping", Description: "Tag receiving the X coordinate; empty disables that write."),
                 new("yTag", "Y Tag", "text", "resultY", Group: "Mapping", Description: "Tag receiving the Y coordinate; empty disables that write."),
                 new("rTag", "R Tag", "text", "resultR", Group: "Mapping", Description: "Tag receiving the rotation R in degrees; empty disables that write."),
+                new("xValidTag", "X Validity Tag", "text", "", Group: "Mapping", Description: "Optional PLC tag for the X validity flag. True when an upstream X value was written; false for skipped, disabled or substituted X."),
+                new("yValidTag", "Y Validity Tag", "text", "", Group: "Mapping", Description: "Optional PLC tag for the Y validity flag. True when an upstream Y value was written; false for skipped, disabled or substituted Y."),
+                new("rValidTag", "R Validity Tag", "text", "", Group: "Mapping", Description: "Optional PLC tag for the R validity flag. True when an upstream R value was written; false for skipped, disabled or substituted R."),
                 new("autoConnect", "Auto Connect", "boolean", true, Group: "Device", Description: "Connect the device first when it is disconnected.")
             ,
 
@@ -274,7 +277,7 @@ public static partial class BuiltInNodeCatalog
 
 
                 ],
-            "Writes in order Ready=0, OK/NG and enabled coordinates, Ready=1. An empty coordinate tag disables that field; a missing input is skipped, rejected, or written as zero according to the policy. Validation completes before writing and duplicate tags are rejected. tagsWritten counts actual write operations (including the two Ready writes), not distinct tags. The legacy payloadFormat/onOverflow parameters are no longer used.",
+            "Writes in order Ready=0, OK/NG and enabled coordinates, configured coordinate validity flags, Ready=1. A missing input is skipped, rejected, or written as zero according to the policy. An optional validity tag tells the PLC whether the corresponding value came from this result's upstream input. Duplicate or invalid tags are rejected before writing. tagsWritten includes both Ready writes. Dispatch errors report the failed phase and the last confirmed tag.",
             "builtin",
             new VisionToolCapabilities(Deterministic: false, SupportsParallel: false, SupportsRunNode: false),
             Actions: [new(NodeActionKind.DeviceWrite, NodeActionCompletion.Synchronous)],

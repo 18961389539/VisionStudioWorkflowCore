@@ -30,8 +30,11 @@ public static class EndpointMapping
         app.MapProductRecipeEndpoints();
         app.MapRecipeParameterEndpoints();
         app.MapProductionEndpoints();
+        app.MapProductionWorkstationEndpoints();
+        app.MapRecipeDeliveryEndpoints();
         app.MapTraceEndpoints();
         app.MapInvestigationEndpoints();
+        app.MapSpcEndpoints();
         app.MapReplayEndpoints();
         app.MapDatasetValidationEndpoints();
         app.MapModelPackageEndpoints();

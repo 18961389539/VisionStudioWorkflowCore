@@ -24,4 +24,15 @@ CREATE TABLE IF NOT EXISTS alarms (
 CREATE INDEX IF NOT EXISTS ix_alarms_raised_at ON alarms(raised_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_alarms_active_code_source ON alarms(code, source) WHERE active = 1;
 """;
+
+    private const string LegacyAlarmImportSchemaSql = """
+CREATE TABLE legacy_alarm_import (
+    id INTEGER PRIMARY KEY CHECK (id = 1)
+);
+""";
+
+    private const string AlarmOccurrencesSchemaSql = """
+ALTER TABLE alarms ADD COLUMN last_raised_at TEXT NULL;
+ALTER TABLE alarms ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 1;
+""";
 }

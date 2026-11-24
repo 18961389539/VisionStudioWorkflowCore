@@ -58,6 +58,7 @@
 | [`perf-optimization-2026-10-26.md`](perf-optimization-2026-10-26.md) | 性能优化记录 |
 | [`comment-code-audit-2026-10-29.md`](comment-code-audit-2026-10-29.md) | 注释与代码一致性审计 |
 | [`quality-gates.md`](quality-gates.md) | 门禁口径与棘轮 |
+| [`engine-benchmark.md`](engine-benchmark.md) | 引擎算法微基准：固定夹具、夜间固定机器、25% 中位耗时容差 |
 | [`archive/node-design-improvements-rounds-1-51.md`](archive/node-design-improvements-rounds-1-51.md) | 早期 51 轮节点改造记录（历史） |
 
 ## 4. 运维、安全与可观测性
@@ -65,6 +66,11 @@
 | 文档 | 内容 |
 |---|---|
 | [`diagnostic-bundle.md`](diagnostic-bundle.md) | 一键诊断包：打包什么、**刻意不打包什么**、日志尾部截断 |
+| [`auto-backup.md`](auto-backup.md) | 每日自动备份、`/api/health` 新鲜度字段、为什么"备份陈旧"不阻断就绪 |
+| [`security-headers.md`](security-headers.md) | CSP/HSTS/XFO 等响应头：取值理由、antd/SignalR/blob 预览的放宽边界 |
+| [`service-tokens.md`](service-tokens.md) | MES/上位机服务令牌：作用域、哈希存储、轮换/吊销、调用审计 |
+| [`audit-integrity.md`](audit-integrity.md) | 审计哈希链：能发现哪些篡改、**不能发现哪些**、校验端点与外部锚点 |
+| [`windows-service.md`](windows-service.md) | Windows 服务安装/卸载/升级、`UseWindowsService` 取舍、WER 崩溃转储与敏感材料处理 |
 | [`login-lockout.md`](login-lockout.md) | 登录失败计数与账号锁定（429 而非 401）、按 IP 限流与按账号锁定的分工 |
 | [`engine-telemetry.md`](engine-telemetry.md) | 节点级 `ActivitySource` 遥测：标签口径、span 建在校验之后的原因 |
 | [`frame-mat-pool.md`](frame-mat-pool.md) | 相机帧 `Mat` 复用池：归还点、容量上限、不清零的安全前提、`/api/health` 计数 |

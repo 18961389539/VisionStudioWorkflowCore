@@ -15,6 +15,10 @@ export type SecurityUser = { id: string; username: string; displayName: string; 
 type SecurityAccount = { enabled: boolean; user?: SecurityUser; busy: boolean; logout: () => Promise<void> };
 const SecurityAccountContext = createContext<SecurityAccount>({ enabled: false, busy: false, logout: async () => undefined });
 
+export function useSecurityAccount() {
+  return useContext(SecurityAccountContext);
+}
+
 /** 账号徽标：角色色点 + 显示名，点击展开角色/用户信息与退出登录。 */
 export function SecurityAccountBadge() {
   const { enabled, user, busy, logout } = useContext(SecurityAccountContext);

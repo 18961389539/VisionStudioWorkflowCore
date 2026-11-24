@@ -8,7 +8,7 @@ namespace VisionStudio.Abstractions;
 /// 这样换存储（SQLite → PostgreSQL → 时序库）不需要改配方。
 /// </summary>
 public sealed record ResultRecord(
-    /// <summary>记录主键，由节点生成，便于重试时判重。</summary>
+    /// <summary>记录主键，由节点生成。</summary>
     string Id,
     /// <summary>逻辑数据集名（配方里配置，例如 "caliper-width"、"ng-parts"）。</summary>
     string Dataset,
@@ -34,4 +34,18 @@ public interface IResultRecordStore
 {
     /// <summary>追加一条记录。实现需保证单条写入的原子性（要么整条落库，要么失败）。</summary>
     Task AppendAsync(ResultRecord record, CancellationToken cancellationToken = default);
+
+    /// <summary>Atomically claim the key within the dataset or return the first committed record for that key.</summary>
+    Task<(string RecordId, int PayloadBytes, bool Reused)> AppendIdempotentAsync(
+        ResultRecord record, string idempotencyKey, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This result store does not support idempotent writes.");
+
+    /// <summary>
+    /// Atomically claim the key within the dataset or return the first committed record for that key.
+    /// On reuse, report a conflict when the business record key or exact serialized payload differs.
+    /// A conflict never replaces the committed record. Run metadata is excluded from the comparison.
+    /// </summary>
+    Task<(string RecordId, int PayloadBytes, bool Reused, bool Conflict)> AppendCheckedIdempotentAsync(
+        ResultRecord record, string idempotencyKey, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This result store does not support idempotent conflict checks.");
 }

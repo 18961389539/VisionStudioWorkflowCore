@@ -167,11 +167,19 @@ public sealed class DeviceManager : IAsyncDisposable
     /// Use this for ordered PLC transactions (for example Ready=0, payload, Ready=1): while the command
     /// holds the device lock, all other writes on the same device queue behind it instead of interleaving.
     /// </summary>
-    public async Task WriteSequenceAsync(
+    public Task WriteSequenceAsync(
         string deviceId,
         IReadOnlyList<(string TagId, object? Value)> writes,
         bool autoConnect = true,
         CancellationToken cancellationToken = default)
+        => WriteSequenceAsync(deviceId, writes, autoConnect, cancellationToken, null);
+
+    internal async Task WriteSequenceAsync(
+        string deviceId,
+        IReadOnlyList<(string TagId, object? Value)> writes,
+        bool autoConnect,
+        CancellationToken cancellationToken,
+        Action<int, bool>? reportProgress)
     {
         ArgumentNullException.ThrowIfNull(writes);
         var entry = RequireEntry(deviceId);
@@ -181,10 +189,20 @@ public sealed class DeviceManager : IAsyncDisposable
         {
             // A02：真实派发前校验所有权代次——失去所有权的旧调用不能再写设备。
             using var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Device, deviceId);
+            // Reject invalid mappings and conversions before clearing Ready or sending any payload.
             foreach (var (tagId, value) in writes)
             {
+                var tag = RequireTag(entry, tagId);
+                if (!tag.Writable) throw new DeviceWriteNotAllowedException($"Tag '{tag.Id}' is read-only.");
+                _ = DeviceValueConversion.ConvertTo(tag.DataType, value);
+            }
+            for (var index = 0; index < writes.Count; index++)
+            {
                 cancellationToken.ThrowIfCancellationRequested();
+                var (tagId, value) = writes[index];
+                reportProgress?.Invoke(index, false);
                 await WriteTagCoreAsync(entry, tagId, value, cancellationToken);
+                reportProgress?.Invoke(index, true);
             }
         }
         finally { entry.CommandGate.Release(); }

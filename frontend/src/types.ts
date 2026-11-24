@@ -982,3 +982,18 @@ export type NodeSpanRecord = ContractDto<'NodeSpanRecord'>;
  * 展示时必须让这一点可见，否则会把"最近 64 条"误读成"全部都很慢"。
  */
 export type NodeSpanSnapshot = ContractDto<'NodeSpanSnapshot'>;
+
+/**
+ * SPC 数据集摘要（`spc/datasets`）。
+ * 数据集就是结果记录表里的 `dataset` 列；记录数与时间范围用于选择分析窗口。
+ */
+export type SpcDatasetSummary = ContractDto<'SpcDatasetSummary'>;
+
+/**
+ * SPC 分析结果（`spc/series`）。图表类型 / 子组大小 / 规格限由查询参数决定，
+ * 后端返回算好的控制限、违例与过程能力，前端只负责呈现。
+ */
+export type SpcAnalysis = ContractDto<'SpcAnalysis'>;
+
+/** 单张控制图：主图（I / X̄）与波动图（MR / R / S）共用此视图。 */
+export type SpcControlChart = SpcAnalysis['primaryChart'];

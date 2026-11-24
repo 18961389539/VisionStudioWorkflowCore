@@ -29,7 +29,11 @@ var source = context.RequireImage("image").Mat;
             throw new InvalidOperationException("Pose with crop=true is unsupported. Set crop=false.");
         using var net = OnnxInferenceHelpers.LoadNet(node);
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
-        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
+        var letterbox = node.GetBool("letterbox", true);
+        var inputWidth = node.GetInt("inputWidth", 640);
+        var inputHeight = node.GetInt("inputHeight", 640);
+        if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("inputWidth/inputHeight must be positive.");
+        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node, (inputWidth, inputHeight), letterbox).Blob;
         cancellationToken.ThrowIfCancellationRequested();
         using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
@@ -54,11 +58,7 @@ var source = context.RequireImage("image").Mat;
         var coordinates = node.GetString("coordinates", "pixels").Trim().ToLowerInvariant();
         if (coordinates is not ("normalized" or "pixels"))
             throw new InvalidOperationException($"Unsupported coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
-        var letterbox = node.GetBool("letterbox", true);
         var drawSkeleton = node.GetBool("drawSkeleton", true);
-        var inputWidth = node.GetInt("inputWidth", 640);
-        var inputHeight = node.GetInt("inputHeight", 640);
-        if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("inputWidth/inputHeight must be positive.");
 
         var tensorOrder = node.GetString("tensorOrder", "auto").Trim().ToLowerInvariant();
         if (tensorOrder is not ("auto" or "channelsfirst" or "channelslast"))
@@ -67,20 +67,9 @@ var source = context.RequireImage("image").Mat;
             ? InferenceStats.DecodeYoloPose(values, shape, numKeypoints, keypointDims, tensorOrder)
             : InferenceStats.DecodeYoloPoseXyxy(values, shape, numKeypoints, keypointDims);
 
-        double MapX(double inputX)
-        {
-            if (!letterbox) return inputX * source.Width / inputWidth;
-            var scale = Math.Min((double)inputWidth / source.Width, (double)inputHeight / source.Height);
-            return (inputX - (inputWidth - source.Width * scale) / 2) / scale;
-        }
-        double MapY(double inputY)
-        {
-            if (!letterbox) return inputY * source.Height / inputHeight;
-            var scale = Math.Min((double)inputWidth / source.Width, (double)inputHeight / source.Height);
-            return (inputY - (inputHeight - source.Height * scale) / 2) / scale;
-        }
+        var mapping = new LetterboxMapping(source.Width, source.Height, inputWidth, inputHeight, letterbox);
 
-        var scored = new List<(double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts)>();
+        var scored = new List<PoseCandidate>();
         for (var i = 0; i < decoded.Length; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -95,10 +84,14 @@ var source = context.RequireImage("image").Mat;
             {
                 x1 *= inputWidth; x2 *= inputWidth; y1 *= inputHeight; y2 *= inputHeight;
             }
-            var left = Math.Clamp(Math.Min(MapX(x1), MapX(x2)), 0, source.Width);
-            var top = Math.Clamp(Math.Min(MapY(y1), MapY(y2)), 0, source.Height);
-            var right = Math.Clamp(Math.Max(MapX(x1), MapX(x2)), 0, source.Width);
-            var bottom = Math.Clamp(Math.Max(MapY(y1), MapY(y2)), 0, source.Height);
+            var inputLeft = Math.Min(x1, x2);
+            var inputTop = Math.Min(y1, y2);
+            var inputRight = Math.Max(x1, x2);
+            var inputBottom = Math.Max(y1, y2);
+            var left = Math.Clamp(mapping.ToSourceX(inputLeft), 0, source.Width);
+            var top = Math.Clamp(mapping.ToSourceY(inputTop), 0, source.Height);
+            var right = Math.Clamp(mapping.ToSourceX(inputRight), 0, source.Width);
+            var bottom = Math.Clamp(mapping.ToSourceY(inputBottom), 0, source.Height);
             if (right <= left || bottom <= top) continue;
 
             var mappedKpts = new double[c.Keypoints.Length];
@@ -109,15 +102,16 @@ var source = context.RequireImage("image").Mat;
                 var ky = c.Keypoints[baseIdx + 1];
                 var kc = keypointDims == 3 ? c.Keypoints[baseIdx + 2] : 1.0;
                 if (coordinates == "normalized") { kx *= inputWidth; ky *= inputHeight; }
-                mappedKpts[baseIdx] = MapX(kx);
-                mappedKpts[baseIdx + 1] = MapY(ky);
+                mappedKpts[baseIdx] = mapping.ToSourceX(kx);
+                mappedKpts[baseIdx + 1] = mapping.ToSourceY(ky);
                 if (keypointDims == 3) mappedKpts[baseIdx + 2] = kc;
             }
-            scored.Add((left, top, right, bottom, c.Score, c.ClassId, mappedKpts));
+            // NMS runs on input-space boxes; the clamped source box is only for output.
+            scored.Add(new PoseCandidate(left, top, right, bottom, c.Score, c.ClassId, mappedKpts, inputLeft, inputTop, inputRight, inputBottom));
         }
 
         var applyNms = layout == "yolo";
-        var kept = new List<(double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts)>();
+        var kept = new List<PoseCandidate>();
         var truncated = InferenceNmsCap.Fill(scored.OrderByDescending(x => x.Score), maxCount, kept,
             (existing, candidate) => applyNms && existing.Any(x => x.ClassId == candidate.ClassId && BoxIoU(x, candidate) > nmsThreshold),
             cancellationToken);
@@ -127,7 +121,8 @@ var source = context.RequireImage("image").Mat;
         var posePayload = new List<object>();
         for (var i = 0; i < kept.Count; i++)
         {
-            var (left, top, right, bottom, score, classId, kpts) = kept[i];
+            var item = kept[i];
+            var (left, top, right, bottom, score, classId, kpts) = (item.Left, item.Top, item.Right, item.Bottom, item.Score, item.ClassId, item.Kpts);
             var w = right - left; var h = bottom - top;
             detections.Add(new VisionDetection(i, left, top, w, h, w * h, 0, 0,
                 new VisionCircle((left + right) / 2, (top + bottom) / 2, Math.Sqrt(w * w + h * h) / 2),
@@ -161,21 +156,22 @@ var source = context.RequireImage("image").Mat;
             new Dictionary<string, object?> { ["count"] = detections.Count, ["layout"] = layout, ["tensorOrder"] = tensorOrder, ["letterbox"] = letterbox, ["nmsApplied"] = applyNms, ["numKeypoints"] = numKeypoints, ["keypointDims"] = keypointDims, ["outputShape"] = shape }));
     }
 
-    private static double BoxIoU(
-        (double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts) a,
-        (double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts) b)
+    private static double BoxIoU(PoseCandidate a, PoseCandidate b)
     {
-        var iw = Math.Max(0, Math.Min(a.Right, b.Right) - Math.Max(a.Left, b.Left));
-        var ih = Math.Max(0, Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Top, b.Top));
+        var iw = Math.Max(0, Math.Min(a.InputRight, b.InputRight) - Math.Max(a.InputLeft, b.InputLeft));
+        var ih = Math.Max(0, Math.Min(a.InputBottom, b.InputBottom) - Math.Max(a.InputTop, b.InputTop));
         var intersection = iw * ih;
-        var areaA = (a.Right - a.Left) * (a.Bottom - a.Top);
-        var areaB = (b.Right - b.Left) * (b.Bottom - b.Top);
+        var areaA = (a.InputRight - a.InputLeft) * (a.InputBottom - a.InputTop);
+        var areaB = (b.InputRight - b.InputLeft) * (b.InputBottom - b.InputTop);
         return intersection / (areaA + areaB - intersection + 1e-9);
     }
 
+    private sealed record PoseCandidate(double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts,
+        double InputLeft, double InputTop, double InputRight, double InputBottom);
+
     private static Mat BuildPoseOverlay(
         Mat source,
-        List<(double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts)> poses,
+        IReadOnlyList<PoseCandidate> poses,
         int numKeypoints, int keypointDims, double keypointThreshold, bool drawSkeleton)
     {
         var overlay = new Mat();

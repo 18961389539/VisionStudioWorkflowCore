@@ -226,7 +226,9 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
               { title: '判定', dataIndex: 'disposition', width: 65, render: (v: string) => <Tag color={v === 'OK' ? 'green' : 'red'}>{v === 'OK' ? '合格' : '不合格'}</Tag> },
               { title: '运行 ID', dataIndex: 'runId', render: (v: string) => <Typography.Text code>{v.slice(0, 8)}</Typography.Text> }
             ]} />
-          <Button block type="primary" disabled={!selectedTraceIds.length} onClick={() => void addSelected()}>添加 {selectedTraceIds.length || ''} 条运行追踪</Button>
+          <Button block type="primary" disabled={!selectedTraceIds.length} onClick={() => void addSelected()}>
+            {selectedTraceIds.length ? `添加 ${selectedTraceIds.length} 条运行追踪` : '添加运行追踪'}
+          </Button>
         </Card>
         <Card size="small" title="添加媒体库图像" style={{ marginTop: 12 }}>
           <Table size="small" pagination={{ pageSize: 6 }} rowKey="relativePath" dataSource={labeledMediaItems}
@@ -235,12 +237,15 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
               { title: '标签', dataIndex: 'label', width: 72, render: (v: string) => <Tag color={v === 'OK' ? 'green' : v === 'NG' ? 'red' : 'default'}>{v === 'OK' ? '合格' : v === 'NG' ? '不合格' : v}</Tag> },
               { title: '图像', dataIndex: 'name', ellipsis: true }
             ]} />
-          <Button block type="primary" ghost disabled={!selectedMediaRefs.length} onClick={() => void addSelectedMedia()}>添加 {selectedMediaRefs.length || ''} 张图像</Button>
+          <Button block type="primary" ghost disabled={!selectedMediaRefs.length} onClick={() => void addSelectedMedia()}>
+            {selectedMediaRefs.length ? `添加 ${selectedMediaRefs.length} 张图像` : '添加图像'}
+          </Button>
         </Card>
       </Col>
       <Col span={19}>
         <Card size="small" title="已标注数据集">
-          <Table size="small" pagination={{ pageSize: 7 }} rowKey="itemId" dataSource={detail?.items ?? []} columns={[
+          <Table size="small" pagination={{ pageSize: 7 }} rowKey="itemId" dataSource={detail?.items ?? []}
+            locale={{ emptyText: '还没有样本：在左侧勾选运行追踪，或添加图像后加入本数据集' }} columns={[
             { title: '#', dataIndex: 'sortOrder', width: 50 },
             { title: '来源类型', dataIndex: 'sourceKind', width: 80, render: (v: string) => <Tag color={v === 'TRACE' ? 'blue' : 'purple'}>{v === 'TRACE' ? '运行追踪' : v === 'MEDIA' ? '媒体' : v}</Tag> },
             { title: '来源', dataIndex: 'sourceRef', width: 180, render: (v: string) => <Typography.Text code>{v.length > 28 ? `${v.slice(0, 25)}…` : v}</Typography.Text> },
@@ -266,7 +271,9 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
                 <Button onClick={() => { if (!currentWorkflow) return; setWorkflowSourceRunId(undefined); setWorkflowText(JSON.stringify(currentWorkflow, null, 2)); }}>使用当前设计器</Button>
               </Space.Compact>
               <Input.TextArea rows={10} value={workflowText} onChange={(e) => setWorkflowText(e.target.value)} placeholder="加载来源工作流后，可编辑参数或 ROI JSON。留空时将直接使用来源工作流。" />
-              <Button style={{ marginTop: 8 }} block type="primary" loading={busy} disabled={!detail?.items.length} onClick={() => void startRun()}>运行数据集验证</Button>
+              <Button style={{ marginTop: 8 }} block type="primary" loading={busy} disabled={!detail?.items.length}
+                title={!detail?.items.length ? '先添加至少一个样本：没有样本就没有可回放的输入' : undefined}
+                onClick={() => void startRun()}>运行数据集验证</Button>
             </Card>
           </Col>
           <Col span={14}>

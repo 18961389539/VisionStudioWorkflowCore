@@ -11,9 +11,11 @@ public static class TraceEndpoints
 {
     public static IEndpointRouteBuilder MapTraceEndpoints(this IEndpointRouteBuilder app)
     {
+        // 结果读取（P3-6）：人类 Operator 及以上，或服务令牌 results:read（MES 取结果）。
+        // 服务令牌的每次读取进审计 trace.read，人类轮询不写审计。
         app.MapGet("/api/traces", async (int? take, string? jobId, string? disposition, TraceabilityStore traces, CancellationToken ct) =>
             Results.Ok(await traces.ListAsync(take ?? 100, jobId, disposition, ct)))
-            .Produces<IReadOnlyList<RunTraceRecord>>();
+            .RequireResultsRead("trace.read", "trace").Produces<IReadOnlyList<RunTraceRecord>>();
 
         app.MapGet("/api/traces/page", async (
             int? offset, int? limit,
@@ -28,7 +30,7 @@ public static class TraceEndpoints
                 offset ?? 0, limit ?? 50, jobId, jobVersion, disposition,
                 executionStatus, source, runIdPrefix, workflow, errorCode, from, to, includeReports ?? true);
             return Results.Ok(await traces.PageAsync(query, ct));
-        }).Produces<TracePage>();
+        }).RequireResultsRead("trace.read", "trace").Produces<TracePage>();
 
         // 统计与列表共用同一组过滤谓词：带上任一过滤参数即按筛选口径统计；
         // allTime 显式请求无时间限制；否则无筛选时保留旧的“近 N 天”口径。
@@ -45,13 +47,13 @@ public static class TraceEndpoints
             return Results.Ok(filtered
                 ? await traces.StatsAsync(new TraceQuery(0, 0, jobId, jobVersion, disposition, executionStatus, source, runIdPrefix, workflow, errorCode, from, to), ct)
                 : await traces.StatsAsync(days ?? 7, ct));
-        }).Produces<TraceStats>();
+        }).RequireResultsRead("trace.read", "trace").Produces<TraceStats>();
 
         app.MapGet("/api/traces/{runId}", async (string runId, TraceabilityStore traces, CancellationToken ct) =>
         {
             var trace = await traces.GetAsync(runId, ct);
             return trace is null ? Results.NotFound() : Results.Ok(trace);
-        }).Produces<RunTraceRecord>();
+        }).RequireResultsRead("trace.read", "trace").Produces<RunTraceRecord>();
 
         app.MapGet("/api/traces/{runId}/observability", async (string runId, int? days, int? history, RunObservabilityService observability, CancellationToken ct) =>
             Results.Ok(await observability.GetAsync(runId, days ?? 7, history ?? 100, ct)))
@@ -136,13 +138,13 @@ public static class TraceEndpoints
         // 混合状态当成已验证恢复。解锁的唯一路径是管理员完整恢复端点——StorageBackupService
         // 在校验并安装哈希匹配的备份后调用 ClearFailureLock。
         app.MapPost("/api/storage/maintenance/recover", async (StorageMaintenanceCoordinator coordinator, SqliteMetadataDatabase database,
-            IWebHostEnvironment env, HttpContext http, CancellationToken ct) =>
+            HttpContext http, CancellationToken ct) =>
         {
             AuditContext.SetTarget(http, "storage-failure-lock");
             if (!coordinator.IsFailureLocked)
                 return Results.Ok(new { recovered = false, maintenanceActive = coordinator.IsMaintenanceActive, reason = coordinator.Reason });
 
-            var dataRoot = VisionStudioDataRoot.Resolve(env.ContentRootPath);
+            var dataRoot = database.DataRoot;
             var artifactsRoot = Path.Combine(dataRoot, "artifacts");
             var problems = new List<string>();
             var databaseReadable = false;

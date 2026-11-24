@@ -1,4 +1,7 @@
 using OpenCvSharp;
+using System.Text.Json;
+using VisionStudio.Abstractions;
+using VisionStudio.Api.Endpoints;
 using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api.Tests;
@@ -99,5 +102,25 @@ public sealed class TemplateAssetStoreTests
         // 引擎只认通用资产源：模板图与形状模型走同一条读取路径。
         Assert.Equal(bytes, assets.ReadBytesSync("tpl-e", 0));
         Assert.Equal(bytes, assets.ReadBytesSync("tpl-e", 1));
+        Assert.Equal(bytes, assets.ReadBytesSync("tpl-e", 1, kind: "template"));
+        Assert.Null(assets.ReadBytesSync("tpl-e", 1, kind: "shape"));
+    }
+
+    [Fact]
+    public async Task FeatureMatchBindingsAreIncludedInTemplateDeletionProtection()
+    {
+        using var environment = new TempWebHostEnvironment();
+        var workflows = new WorkflowStore(environment);
+        var workflow = new WorkflowDefinition("feature-template", "Feature template",
+            [new NodeDefinition("feature", "match.feature", null, null,
+                new Dictionary<string, JsonElement>
+                {
+                    ["templateAssetId"] = JsonSerializer.SerializeToElement("template-one"),
+                    ["templateAssetVersion"] = JsonSerializer.SerializeToElement(2)
+                })], []);
+        await workflows.SaveAsync(workflow.Id, workflow, CancellationToken.None);
+        var reference = Assert.Single(await TemplateAssetEndpoints.FindReferencesAsync("template-one", workflows, CancellationToken.None));
+        Assert.Equal("feature-template", reference.WorkflowId);
+        Assert.Equal("feature", reference.NodeId);
     }
 }

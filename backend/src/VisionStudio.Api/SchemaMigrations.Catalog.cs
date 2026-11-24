@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Data.Sqlite;
+
 namespace VisionStudio.Api;
 
 /// <summary>
@@ -54,6 +58,52 @@ public sealed partial class SqliteSchemaMigrationRunner
         // 都要读全量、改一条、重写整个文件；报警风暴时写放大与 GC 一起放大。表结构保持与
         // AlarmRecord 一一对应，旧文件由 AlarmStore 在首次使用时导入并归档。
         new(29, "Alarm history in SQLite", AlarmHistorySchemaSql,
-            checksumSeed: "alarms + ix_alarms_raised_at + ux_alarms_active_code_source")
+            checksumSeed: "alarms + ix_alarms_raised_at + ux_alarms_active_code_source"),
+        new(30, "Track legacy alarm import with its database transaction", LegacyAlarmImportSchemaSql),
+        new(31, "Track repeated alarm occurrences", AlarmOccurrencesSchemaSql),
+        // 2026-11-23（P3）：MES/上位机不再共用操作员账号。令牌按作用域授权、只存哈希、
+        // 支持轮换/吊销；管理动作与令牌调用（trace.read）都进审计。
+        new(32, "Service account tokens with scopes and rotation", ServiceTokenSchemaSql,
+            checksumSeed: "security_service_tokens + ix_security_service_tokens_created + ix_security_service_tokens_prefix"),
+        // 2026-11-23（P3）：审计行加 prev_hash/hash 链。旧行在迁移事务内按 seq 顺序回填，
+        // 此后所有写入都必须经链式追加（AuditEventStore 的 BEGIN IMMEDIATE 事务）。
+        new(33, "Tamper-evident audit hash chain", "", ApplyAuditChainAsync,
+            "audit_events.prev_hash + audit_events.hash + backfill ordered by seq"),
+        new(34, "Result records idempotent writes", "", ApplyResultRecordIdempotencyAsync,
+            "result_records.idempotency_key + ux_result_records_dataset_idempotency_key"),
+        new(35, "Station recipe deliveries and rollout batches", RecipeDeliverySchemaSql),
+        new(36, "Durable per-workflow counter events", DurableCounterSchemaSql),
+        new(37, "Latest station rollout and retained NG preview lookup", ProductionWorkstationLookupSchemaSql)
     ];
+
+    private sealed class Migration
+    {
+        private readonly string? _legacyWindowsChecksum;
+
+        public Migration(int version, string name, string sql, Func<SqliteConnection, SqliteTransaction, CancellationToken, Task>? customApply = null, string? checksumSeed = null)
+        {
+            Version = version;
+            Name = name;
+            Sql = sql;
+            CustomApply = customApply;
+            var canonicalSql = sql.Trim().ReplaceLineEndings("\n");
+            var canonicalSeed = (checksumSeed ?? string.Empty).ReplaceLineEndings("\n");
+            Checksum = ComputeChecksum(version, name, canonicalSql, canonicalSeed);
+            // 已发布到 v30 的迁移曾按源文件换行计算校验值。
+            if (version <= 30)
+                _legacyWindowsChecksum = ComputeChecksum(version, name, canonicalSql.ReplaceLineEndings("\r\n"), canonicalSeed.ReplaceLineEndings("\r\n"));
+        }
+
+        private static string ComputeChecksum(int version, string name, string sql, string seed)
+            => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{version}\n{name}\n{sql}\n{seed}"))).ToLowerInvariant();
+
+        public bool MatchesChecksum(string checksum)
+            => string.Equals(checksum, Checksum, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(checksum, _legacyWindowsChecksum, StringComparison.OrdinalIgnoreCase);
+        public int Version { get; }
+        public string Name { get; }
+        public string Sql { get; }
+        public Func<SqliteConnection, SqliteTransaction, CancellationToken, Task>? CustomApply { get; }
+        public string Checksum { get; }
+    }
 }

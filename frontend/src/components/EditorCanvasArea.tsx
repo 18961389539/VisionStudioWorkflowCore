@@ -3,7 +3,7 @@
  * React Flow 画布、草稿恢复提示、端口连接选点与节点右键菜单、图像预览。
  * 纯展示：状态与回调由 App 注入，行为与拆分前一致。
  */
-import { useCallback, useEffect, type RefObject } from 'react';
+import { lazy, Suspense, useCallback, useEffect, type RefObject } from 'react';
 import { Alert, Button, Dropdown, Input, Segmented, Switch, Tag, type InputRef, type MenuProps } from 'antd';
 import {
   Background, Controls, ReactFlow, useReactFlow, type Connection, type Edge, type FitViewOptions,
@@ -11,6 +11,9 @@ import {
 } from '@xyflow/react';
 import Toolbox from './Toolbox';
 import CanvasMiniMap from './CanvasMiniMap';
+
+// 首次引导只在未关闭时出现一次，不占首屏体积（主包 JS 预算已接近上限）
+const OnboardingCard = lazy(() => import('./OnboardingCard'));
 import WorkflowImagePreview from './WorkflowImagePreview';
 import type { LayoutPreset, LayoutState } from '../layout';
 import type { WorkflowDraft } from '../draft';
@@ -86,6 +89,16 @@ export type EditorCanvasAreaProps = {
   resultStale: boolean;
   running: boolean;
   debugBusy: boolean;
+  /** 首次上手引导：仅在画布已有节点时显示——空画布已经有更聚焦的空态引导。 */
+  onboarding?: {
+    open: boolean;
+    onClose: () => void;
+    onOpenTemplates: () => void;
+    onOpenCameras: () => void;
+    onOpenCommand: () => void;
+    onOpenValidation: () => void;
+    onOpenJobs: () => void;
+  };
 };
 
 export default function EditorCanvasArea({
@@ -99,7 +112,7 @@ export default function EditorCanvasArea({
   draftNotice, locale, restoreDraft, discardDraft, showTemplates, openWorkflowPicker,
   connectionPicker, connectionPickerRef, catalog, recentNodeTypes, addNode,
   nodeContextMenu, setNodeContextMenu, nodeContextMenuItems,
-  designerWorkflowId, nodeLabels, result, resultStale, running, debugBusy
+  designerWorkflowId, nodeLabels, result, resultStale, running, debugBusy, onboarding
 }: EditorCanvasAreaProps) {
   // 缩放分级（far/mid/near）：直接写画布容器 dataset，不经 React 状态——拖画布不会触发整树重渲；
   // CSS 按级别显隐端口文字/类型/摘要（Handle 恒在，连线落点不受影响）
@@ -318,6 +331,17 @@ export default function EditorCanvasArea({
             <Controls />
             <CanvasMiniMap nodeCount={nodes.length} />
           </ReactFlow>
+
+          {/* 首次上手：画布已有节点时给一条五步主线；空画布交给更聚焦的空态引导 */}
+          {onboarding?.open && nodes.length > 0 && <Suspense fallback={null}>
+            <OnboardingCard
+              onClose={onboarding.onClose}
+              onOpenTemplates={onboarding.onOpenTemplates}
+              onOpenCameras={onboarding.onOpenCameras}
+              onOpenCommand={onboarding.onOpenCommand}
+              onOpenValidation={onboarding.onOpenValidation}
+              onOpenJobs={onboarding.onOpenJobs} />
+          </Suspense>}
 
           {/* 节点右键菜单：锚点为不可见占位，Dropdown 受控打开；点击菜单项或菜单外自动关闭 */}
           {connectionPicker && (

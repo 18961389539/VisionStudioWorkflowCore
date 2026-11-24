@@ -8,9 +8,13 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
-public sealed class SaveImageNode : IVisionNodeExecutor
+public sealed class SaveImageNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "output.saveImage";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+        => ImageSavePlan.ValidateConnections(node, connectedInputs);
+
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
         => ImageFileWriter.ExecuteAsync(context, node, cancellationToken);

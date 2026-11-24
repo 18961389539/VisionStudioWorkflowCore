@@ -40,6 +40,8 @@ const degreeAngleOutputTypes = new Set([
 ]);
 const degreeAngleErrorTypes = new Set(['measure.parallelism', 'measure.perpendicularity']);
 const pixelLengthOutputs: Record<string, string[]> = {
+  'measure.profileFilter': ['cutoff', 'length', 'usableLength', 'actualSampleStep', 'maxObservedInputGap', 'residualPeak', 'wavinessPeak', 'residualRms'],
+  'measure.roughness': ['cutoff', 'evaluationLength', 'actualSampleStep', 'maxObservedInputGap', 'ra', 'rq', 'rz', 'rp', 'rv', 'rmax'],
   'measure.wallThickness': ['centerDistance', 'minThickness', 'maxThickness', 'meanThickness', 'stdDev', 'variation'],
   'measure.lineSpacing': ['distance', 'min', 'max', 'stdDev', 'deviation'],
   'measure.contourThickness': ['minThickness', 'maxThickness', 'meanThickness', 'stdDev', 'variation'],
@@ -56,6 +58,10 @@ const pixelAreaOutputs: Record<string, string[]> = {
 const grayLevelOutputs: Record<string, string[]> = {
   'measure.regionIntensity': ['stdDev', 'min', 'max']
 };
+const threadOutputLabels: Record<string, Record<Lang, string>> = {
+  pitchDiameter: { zh: '估算中径（px）', en: 'Estimated Pitch Diameter (px)' },
+  pitchDiameterMethod: { zh: '中径估算方法', en: 'Pitch Diameter Estimation Method' }
+};
 
 export function canonicalParameterGroup(group?: string | null): string {
   if (!group) return 'General';
@@ -66,10 +72,15 @@ export function canonicalParameterGroup(group?: string | null): string {
   return group;
 }
 
-/** Localize a backend catalog for the active language. English is a pass-through.
+/** Localize a backend catalog for the active language. English keeps backend labels unless a port has a unit or measurement qualifier.
  *  `lang` defaults to Chinese so pre-existing single-argument call sites keep compiling. */
 export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): NodeCatalogItem[] {
-  if (lang === 'en' || !data) return items;
+  if (lang === 'en') return items.map((item) => item.type === 'measure.thread'
+    ? { ...item, outputs: item.outputs.map((port) => threadOutputLabels[port.name]
+      ? { ...port, label: threadOutputLabels[port.name].en }
+      : port) }
+    : item);
+  if (!data) return items;
   const { nodeNames, categories, descriptions, parameterDescriptions, parameterGroups, parameterLabels, optionLabels, variantLabels } = data;
   return items.map((item) => ({
     ...item,
@@ -91,6 +102,7 @@ export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): No
       : port.name === 'angleError' && degreeAngleErrorTypes.has(item.type) ? '角度误差 (°)'
       : item.type === 'measure.caliperArray' && ['widthMean', 'widthMin', 'widthMax', 'widthStd'].includes(port.name) ? `${localizePortName(port.name)} (px)`
       : item.type === 'measure.caliperWidth' && port.name === 'width' ? '宽度 (px)'
+      : item.type === 'measure.thread' && threadOutputLabels[port.name] ? threadOutputLabels[port.name].zh
       : item.type === 'calibration.planar' && port.name === 'rmse' ? '均方根误差'
       : item.type === 'calibration.planar' && port.name === 'maxError' ? '最大误差'
       : pixelLengthOutputs[item.type]?.includes(port.name) ? `${localizePortName(port.name)} (px)`

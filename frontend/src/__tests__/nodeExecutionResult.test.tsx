@@ -31,7 +31,57 @@ function mount(type = catalog.type, runResult = result(false, 'too-few-edge-poin
 
 afterEach(cleanup);
 
+it('lists the participating cameras from a fusion report even when output ports are present', () => {
+  const run = result(true, 'ok');
+  run.nodeReports[0].nodeType = 'image.fuse';
+  run.nodeReports[0].summary = { cameraIds: ['camera-a', 'camera-b'] };
+  mount('image.fuse', run);
+  expect(screen.getByText('参与融合的相机')).toBeTruthy();
+  expect(screen.getByText('camera-a、camera-b')).toBeTruthy();
+});
+
+it('shows a result-store conflict warning for a successful reuse', () => {
+  const run = result(true, 'ok');
+  run.nodeReports[0].nodeType = 'output.database';
+  run.nodeReports[0].summary = { reused: true, idempotencyConflict: true };
+  mount('output.database', run);
+  expect(screen.getByText('幂等冲突')).toBeTruthy();
+  expect(screen.getByText('结果落库发生幂等冲突')).toBeTruthy();
+  expect(screen.getByText(/已保留并返回首条记录/)).toBeTruthy();
+});
+
+it('identifies an unverified legacy barcode verdict and shows how to enable decode verification', () => {
+  const run = result(true, 'ok');
+  run.nodeReports[0].nodeType = 'recognition.barcodeQuality';
+  run.nodeReports[0].summary = { decodeStatus: 'unverified', warning: 'Legacy grading with no decode result' };
+  mount('recognition.barcodeQuality', run);
+  expect(screen.getByText('条码解码未验证')).toBeTruthy();
+  expect(screen.getByText(/兼容策略，仍可输出判定/)).toBeTruthy();
+});
+
 describe('NodeExecutionResult measurement status', () => {
+  it('explains when an optical profile fails the input gap check', () => {
+    const run = result(false, 'profile-input-gap-exceeded');
+    run.nodeReports[0].summary.maxObservedInputGap = 4;
+    mount('measure.profileFilter', run);
+    expect(screen.getByText(/最大间距超过设定上限/)).toBeTruthy();
+  });
+
+  it('shows the roughness kernel and short-window Rz indicators', () => {
+    const run = result(true, 'ok');
+    run.nodeReports[0].summary = { found: true, kernelTruncated: true, rzSamplingLengths: 0 };
+    mount('measure.roughness', run);
+    expect(screen.getByText('轮廓长度限制了高斯核')).toBeTruthy();
+    expect(screen.getByText('Rz 采用整段峰谷差')).toBeTruthy();
+  });
+
+  it('distinguishes a rejected interval from a rejected nominal', () => {
+    const run = result(true, 'ok');
+    run.nodeReports[0].summary = { found: true, gateEnabled: true, gateMode: 'interval', withinTolerance: false };
+    mount('tolerance.stackup', run);
+    expect(screen.getByText('计算区间至少有一端越界。')).toBeTruthy();
+  });
+
   it.each([
     ['contours-intersect-or-touch', '内外轮廓相交或接触'],
     ['normal-pairing-failed', '部分法向测量线再次穿过孔洞'],

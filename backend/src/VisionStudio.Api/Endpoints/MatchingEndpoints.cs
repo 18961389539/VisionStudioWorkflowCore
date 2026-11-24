@@ -212,8 +212,8 @@ public static class MatchingEndpoints
         var roots = new List<string>
         {
             Path.GetFullPath(environment.ContentRootPath),
-            Path.GetFullPath(VisionStudioDataRoot.Resolve(environment.ContentRootPath)),
-            Path.GetFullPath(VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configuration["MediaLibrary:RootPath"])),
+            Path.GetFullPath(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration)),
+            Path.GetFullPath(VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configuration["MediaLibrary:RootPath"], configuration)),
             Path.GetFullPath(Directory.GetCurrentDirectory()),
             Path.GetFullPath(AppContext.BaseDirectory)
         };

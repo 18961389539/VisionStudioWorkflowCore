@@ -163,7 +163,10 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
                 <RunClock startedAt={run.startedAt} />
                 <Button danger onClick={run.onAbort} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">{text('中止', 'Abort')}</Button>
               </>
-            : <Button type="primary" onClick={run.onRun} disabled={run.debugBusy || debug.inSession} title={debug.inSession ? '请先结束调试会话，再运行流程' : undefined}>{text('运行', 'Run')}</Button>}
+            : <Button type="primary" onClick={run.onRun} disabled={run.debugBusy || debug.inSession}
+              title={debug.inSession
+                ? text('请先结束调试会话，再运行流程', 'End the debug session before running the workflow')
+                : text('运行整个流程（从起点到终点）；只跑单个节点请用左侧「运行与调试」', 'Run the whole workflow; use Run & debug for a single node')}>{text('运行', 'Run')}</Button>}
         </div>
       </div>
     </header>

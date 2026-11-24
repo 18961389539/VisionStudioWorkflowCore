@@ -19,7 +19,8 @@ namespace VisionStudio.Engine.Nodes;
 /// 先复位再计数，是为了让"复位后这一件"算作第 1 件，而不是第 0 件——这一步搞反会让
 /// 连续 NG 门限整体偏移一件，是最容易差一件的地方。
 /// </summary>
-public sealed class ValueCounterNode(IRunCounterStore? store = null) : IVisionNodeExecutor
+public sealed class ValueCounterNode(IRunCounterStore? store = null, IDurableRunCounterStore? durableStore = null)
+    : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "value.counter";
 
@@ -34,15 +35,27 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null) : IVisionNo
         "(services.AddSingleton<IRunCounterStore, InMemoryRunCounterStore>()) or construct the node with a store. " +
         "Running without one would reset counters on every restart and share them across workflows.");
 
-    public ValueTask<NodeExecutorResult> ExecuteAsync(
+    public void ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+        => _ = ReadDurability(node);
+
+    private static string ReadDurability(NodeDefinition node)
+    {
+        var durability = node.GetString("durability", "snapshot").Trim().ToLowerInvariant();
+        if (durability is not ("snapshot" or "durable"))
+            throw new InvalidOperationException("value.counter durability must be snapshot or durable.");
+        if (durability == "durable" && !node.GetString("scope", "workflow").Trim().Equals("workflow", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("value.counter durable mode requires workflow scope.");
+        return durability;
+    }
+
+    public async ValueTask<NodeExecutorResult> ExecuteAsync(
         NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 
-        // 先确认宿主装配完整，否则参数写错时抛出的校验异常会把"没注册计数器存储"这个根因挡住。
-        _ = Store;
+        var durability = ReadDurability(node);
 
         var counterId = node.GetString("counterId", "counter").Trim();
         if (counterId.Length is < 1 or > 64)
@@ -60,38 +73,45 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null) : IVisionNo
         var pass = hasPass && passInput.Require<bool>("pass");
         var manualReset = context.TryGetValue("reset", out var resetInput) && resetInput.Require<bool>("reset");
 
-        // 作用域键：workflow 跨 run 保留，run 跟随单次运行；两者都缺失时退化成进程级默认桶（单测场景）。
-        var scopeKey = scopeMode == "run"
-            ? context.RunId ?? context.WorkflowScope ?? "local"
-            : context.WorkflowScope ?? "local";
-        var state = Store.GetOrAdd(scopeKey, counterId);
-
-        long count;
-        long total;
-        long passCount;
-        long failCount;
-        lock (state)
+        var reset = manualReset || (pass && resetOnPass) || (!pass && hasPass && resetOnFail);
+        var increment = (long)Math.Round(step, MidpointRounding.AwayFromZero);
+        bool? passResult = hasPass ? pass : null;
+        RunCounterReading reading;
+        var reused = false;
+        if (durability == "durable")
         {
-            if (manualReset || (pass && resetOnPass) || (!pass && hasPass && resetOnFail)) state.Reset();
-            state.Count += (long)Math.Round(step, MidpointRounding.AwayFromZero);
-            if (hasPass)
+            var eventId = context.Require<string>("eventId").Trim();
+            if (eventId.Length is < 1 or > 256)
+                throw new InvalidOperationException("value.counter eventId must be 1..256 characters in durable mode.");
+            if (string.IsNullOrWhiteSpace(context.WorkflowId))
+                throw new InvalidOperationException("value.counter durable mode requires a stable workflow ID.");
+            var target = durableStore ?? throw new InvalidOperationException("value.counter durable mode requires an IDurableRunCounterStore.");
+            (reading, reused) = await target.ApplyAsync(
+                new DurableCounterEvent(context.WorkflowId, counterId, eventId, increment, passResult, reset),
+                context.IsDebugRun, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var scopeKey = scopeMode == "run"
+                ? context.RunId ?? context.WorkflowScope ?? "local"
+                : context.WorkflowScope ?? "local";
+            var state = Store.GetOrAdd(scopeKey, counterId);
+            lock (state)
             {
-                state.Total++;
-                if (pass) state.Pass++; else state.Fail++;
+                reading = new RunCounterReading(state.Count, state.Total, state.Pass, state.Fail).Apply(increment, passResult, reset);
+                (state.Count, state.Total, state.Pass, state.Fail) = reading;
             }
-            count = state.Count;
-            total = state.Total;
-            passCount = state.Pass;
-            failCount = state.Fail;
         }
 
+        var (count, total, passCount, failCount) = reading;
         var rate = total == 0 ? 0d : passCount / (double)total;
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("counterId", counterId), ("scope", scopeMode), ("count", count), ("total", total),
             ("passCount", passCount), ("failCount", failCount), ("rate", rate),
-            ("reset", manualReset), ("step", step));
+            ("reset", manualReset), ("step", step), ("durability", durability), ("reused", reused),
+            ("preview", durability == "durable" && context.IsDebugRun));
 
-        return ValueTask.FromResult(new NodeExecutorResult(
+        return new NodeExecutorResult(
             new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
             {
                 ["count"] = VisionValue.Integer(count),
@@ -99,13 +119,15 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null) : IVisionNo
                 ["passCount"] = VisionValue.Integer(passCount),
                 ["failCount"] = VisionValue.Integer(failCount),
                 ["rate"] = VisionValue.Double(rate),
+                ["reused"] = VisionValue.Boolean(reused),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["counterId"] = counterId, ["scope"] = scopeMode, ["count"] = count, ["total"] = total,
                 ["passCount"] = passCount, ["failCount"] = failCount, ["rate"] = rate,
-                ["reset"] = manualReset, ["step"] = step, ["diagnostics"] = diagnostics
-            }));
+                ["reset"] = manualReset, ["step"] = step, ["durability"] = durability, ["reused"] = reused,
+                ["preview"] = durability == "durable" && context.IsDebugRun, ["diagnostics"] = diagnostics
+            });
     }
 }

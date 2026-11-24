@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace VisionStudio.Api.Tests;
 
@@ -74,6 +75,40 @@ public sealed class ApiSmokeTests : IClassFixture<VisionStudioApiFactory>
         Assert.Contains("virtual-modbus-1", devicesJson.ToLowerInvariant());
     }
 
+
+    [Fact]
+    public async Task WorkflowEngineDispatchesDurableCountersWithStableIdentity()
+    {
+        async Task<JsonElement> RunAsync(string eventId)
+        {
+            var workflow = new
+            {
+                id = "durable-counter-smoke",
+                name = "Durable counter smoke",
+                nodes = new object[]
+                {
+                    new { id = "event", type = "value.string", parameters = new { template = eventId } },
+                    new { id = "counter", type = "value.counter", parameters = new { durability = "durable" } }
+                },
+                edges = new object[]
+                {
+                    new { id = "control", sourceNodeId = "event", sourcePort = "next", targetNodeId = "counter", targetPort = "exec", kind = "control" },
+                    new { id = "event-id", sourceNodeId = "event", sourcePort = "textValue", targetNodeId = "counter", targetPort = "eventId", kind = "data" }
+                }
+            };
+            using var response = await _client.PostAsJsonAsync("/api/run", workflow);
+            var payload = await response.Content.ReadAsStringAsync();
+            Assert.True(response.IsSuccessStatusCode, payload);
+            using var json = JsonDocument.Parse(payload);
+            Assert.True(json.RootElement.GetProperty("success").GetBoolean(), payload);
+            return json.RootElement.GetProperty("nodeReports").EnumerateArray()
+                .Single(report => report.GetProperty("nodeId").GetString() == "counter").GetProperty("summary").Clone();
+        }
+
+        Assert.Equal(1, (await RunAsync("inspection-1")).GetProperty("count").GetInt64());
+        Assert.True((await RunAsync("inspection-1")).GetProperty("reused").GetBoolean());
+        Assert.Equal(2, (await RunAsync("inspection-2")).GetProperty("count").GetInt64());
+    }
 
     [Fact]
     public async Task OfflineReplay_ReexecutesSoftwareWorkflow_AndReturnsNodeSnapshots()
@@ -227,40 +262,16 @@ public sealed class ApiSmokeTests : IClassFixture<VisionStudioApiFactory>
     }
 }
 
-public sealed class VisionStudioApiFactory : WebApplicationFactory<Program>
+public sealed class VisionStudioApiFactory : IsolatedApiFactory
 {
-    // F01: this factory uses the real content root (src/VisionStudio.Api). A cancelled side-effect
-    // cycle would otherwise persist the device-action safety marker / Unknown manual intents into
-    // the source tree and block production starts / ad-hoc runs in *other* hosts that share the
-    // same data root — isolate both files per instance.
-    private readonly string _safetyFile = Path.Combine(Path.GetTempPath(), $"vs-safety-{Guid.NewGuid():N}.json");
-    private readonly string _manualIntentFile = Path.Combine(Path.GetTempPath(), $"vs-manual-intents-{Guid.NewGuid():N}.json");
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("Security:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Port", "0");
-        builder.UseSetting("Production:DeviceActionSafetyFile", _safetyFile);
-        builder.UseSetting("Production:ManualActionIntentFile", _manualIntentFile);
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        base.Dispose(disposing);
-        if (disposing)
-        {
-            try { if (File.Exists(_safetyFile)) File.Delete(_safetyFile); } catch { }
-            try { if (File.Exists(_manualIntentFile)) File.Delete(_manualIntentFile); } catch { }
-            try
-            {
-                var resolutions = _manualIntentFile + ".resolutions";
-                if (Directory.Exists(resolutions)) Directory.Delete(resolutions, recursive: true);
-            }
-            catch { }
-        }
-    }
 }
 
 public sealed class RuntimeOnlyHostTests
@@ -291,12 +302,70 @@ public sealed class RuntimeOnlyHostTests
     }
 }
 
-public sealed class RuntimeOnlyApiFactory : WebApplicationFactory<Program>
+public sealed class ProductionConfigApiTests
 {
-    // F01: same isolation as VisionStudioApiFactory (shared real content root).
-    private readonly string _safetyFile = Path.Combine(Path.GetTempPath(), $"vs-safety-{Guid.NewGuid():N}.json");
-    private readonly string _manualIntentFile = Path.Combine(Path.GetTempPath(), $"vs-manual-intents-{Guid.NewGuid():N}.json");
+    [Fact]
+    public async Task SaveRequiresRevisionAndRejectsAnotherClientsStaleWrite()
+    {
+        using var factory = new VisionStudioApiFactory();
+        using var first = factory.CreateClient();
+        using var second = factory.CreateClient();
+        using var before = await first.GetAsync("/api/production/config");
+        var revision = before.Headers.ETag!.ToString();
 
+        using var missing = await first.PutAsJsonAsync("/api/production/config", new ProductionRuntimeConfig());
+        Assert.Equal((HttpStatusCode)428, missing.StatusCode);
+        using var saved = await first.PutProductionConfigAsync(new ProductionRuntimeConfig(CycleDelayMs: 120), revision);
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        Assert.NotEqual(revision, saved.Headers.ETag!.ToString());
+        using var stale = await second.PutProductionConfigAsync(new ProductionRuntimeConfig(RecoveryDelayMs: 500), revision);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var current = await second.GetFromJsonAsync<JsonElement>("/api/production/config");
+        Assert.Equal(120, current.GetProperty("cycleDelayMs").GetInt32());
+    }
+
+    [Fact]
+    public void TestFactoriesKeepIndependentDataRootsOutsideTheSourceTree()
+    {
+        using var first = new VisionStudioApiFactory();
+        using var second = new RuntimeOnlyApiFactory();
+        var firstRoot = first.Services.GetRequiredService<SqliteMetadataDatabase>().DataRoot;
+        var secondRoot = second.Services.GetRequiredService<SqliteMetadataDatabase>().DataRoot;
+        Assert.NotEqual(firstRoot, secondRoot);
+        Assert.StartsWith(Path.GetTempPath(), firstRoot, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith(Path.GetTempPath(), secondRoot, StringComparison.OrdinalIgnoreCase);
+        var sourceRoot = first.Services.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
+        Assert.NotEqual(Path.Combine(sourceRoot, "data"), firstRoot);
+    }
+
+    [Fact]
+    public void HostRejectsConcurrentOwnershipOfTheSameDataRoot_AndReleasesItOnDisposal()
+    {
+        using var directory = new TempWebHostEnvironment();
+        var root = directory.ContentRootPath;
+        using (var first = Host(root))
+        {
+            using var firstClient = first.CreateClient();
+            using var duplicate = Host(Path.Combine(root, "."));
+            var error = Assert.ThrowsAny<Exception>(() => duplicate.CreateClient());
+            Assert.Contains("exclusive ownership of VisionStudio data root", error.ToString());
+        }
+
+        using var restarted = Host(root);
+        using var client = restarted.CreateClient();
+
+        static WebApplicationFactory<Program> Host(string root) =>
+            new IsolatedApiFactory(root).WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.UseSetting("Security:Enabled", "false");
+                builder.UseSetting("RobotTcpSimulator:Enabled", "false");
+            });
+    }
+}
+
+public sealed class RuntimeOnlyApiFactory : IsolatedApiFactory
+{
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -304,23 +373,6 @@ public sealed class RuntimeOnlyApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("Security:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Port", "0");
-        builder.UseSetting("Production:DeviceActionSafetyFile", _safetyFile);
-        builder.UseSetting("Production:ManualActionIntentFile", _manualIntentFile);
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        base.Dispose(disposing);
-        if (disposing)
-        {
-            try { if (File.Exists(_safetyFile)) File.Delete(_safetyFile); } catch { }
-            try { if (File.Exists(_manualIntentFile)) File.Delete(_manualIntentFile); } catch { }
-            try
-            {
-                var resolutions = _manualIntentFile + ".resolutions";
-                if (Directory.Exists(resolutions)) Directory.Delete(resolutions, recursive: true);
-            }
-            catch { }
-        }
-    }
 }

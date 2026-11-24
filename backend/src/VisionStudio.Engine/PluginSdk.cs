@@ -31,7 +31,8 @@ public sealed class VisionNodeRegistration : IDisposable
         VisionExecutorConcurrency concurrency,
         IVisionNodeExecutor? singleton,
         bool ownsSingleton,
-        VisionPluginToolIdentity? toolIdentity = null)
+        VisionPluginToolIdentity? toolIdentity,
+        IVisionNodeDefinitionValidator? definitionValidator)
     {
         Catalog = catalog;
         Source = source;
@@ -40,6 +41,7 @@ public sealed class VisionNodeRegistration : IDisposable
             ? VisionExecutorConcurrency.Serialized
             : concurrency;
         ToolIdentity = toolIdentity;
+        DefinitionValidator = definitionValidator ?? singleton as IVisionNodeDefinitionValidator;
         _factory = factory;
         _singleton = singleton;
         _ownsSingleton = ownsSingleton;
@@ -54,6 +56,7 @@ public sealed class VisionNodeRegistration : IDisposable
     public VisionExecutorLifetime Lifetime { get; }
     public VisionExecutorConcurrency Concurrency { get; }
     public VisionPluginToolIdentity? ToolIdentity { get; }
+    internal IVisionNodeDefinitionValidator? DefinitionValidator { get; }
 
     public async ValueTask<NodeExecutorResult> ExecuteAsync(
         NodeExecutionContext context,
@@ -224,7 +227,8 @@ public sealed class VisionNodeRegistry : IDisposable
     {
         if (!catalog.Type.Equals(pluginNode.Catalog.Type, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Host catalog type '{catalog.Type}' does not match plugin node type '{pluginNode.Catalog.Type}'.");
-        RegisterFactory(catalog, pluginNode.Factory, source, pluginNode.Lifetime, pluginNode.Concurrency, pluginNode.ToolIdentity);
+        RegisterFactory(catalog, pluginNode.Factory, source, pluginNode.Lifetime, pluginNode.Concurrency,
+            pluginNode.ToolIdentity, pluginNode.DefinitionValidator);
     }
 
     public void RegisterFactory(
@@ -234,6 +238,16 @@ public sealed class VisionNodeRegistry : IDisposable
         VisionExecutorLifetime lifetime,
         VisionExecutorConcurrency concurrency,
         VisionPluginToolIdentity? toolIdentity = null)
+        => RegisterFactory(catalog, factory, source, lifetime, concurrency, toolIdentity, definitionValidator: null);
+
+    private void RegisterFactory(
+        NodeCatalogItem catalog,
+        Func<IVisionNodeExecutor> factory,
+        string source,
+        VisionExecutorLifetime lifetime,
+        VisionExecutorConcurrency concurrency,
+        VisionPluginToolIdentity? toolIdentity,
+        IVisionNodeDefinitionValidator? definitionValidator)
     {
         ArgumentNullException.ThrowIfNull(factory);
         IVisionNodeExecutor? probe = null;
@@ -243,13 +257,13 @@ public sealed class VisionNodeRegistry : IDisposable
             ValidateType(catalog, probe);
             if (lifetime == VisionExecutorLifetime.Singleton)
             {
-                Add(catalog, factory, source, lifetime, concurrency, probe, ownsSingleton: true, toolIdentity);
+                Add(catalog, factory, source, lifetime, concurrency, probe, ownsSingleton: true, toolIdentity, definitionValidator);
                 probe = null;
             }
             else
             {
                 // Transient and PerNode retain no probe. PerNode creates its first owned instance lazily for a real node id.
-                Add(catalog, factory, source, lifetime, concurrency, singleton: null, ownsSingleton: false, toolIdentity);
+                Add(catalog, factory, source, lifetime, concurrency, singleton: null, ownsSingleton: false, toolIdentity, definitionValidator);
             }
         }
         finally
@@ -274,9 +288,11 @@ public sealed class VisionNodeRegistry : IDisposable
         VisionExecutorConcurrency concurrency,
         IVisionNodeExecutor? singleton,
         bool ownsSingleton,
-        VisionPluginToolIdentity? toolIdentity)
+        VisionPluginToolIdentity? toolIdentity,
+        IVisionNodeDefinitionValidator? definitionValidator = null)
     {
-        var registration = new VisionNodeRegistration(catalog, factory, source, lifetime, concurrency, singleton, ownsSingleton, toolIdentity);
+        var registration = new VisionNodeRegistration(catalog, factory, source, lifetime, concurrency, singleton,
+            ownsSingleton, toolIdentity, definitionValidator);
         if (!_nodes.TryAdd(catalog.Type, registration))
         {
             registration.Dispose();

@@ -4,6 +4,8 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const apiTarget = process.env.VISIONSTUDIO_E2E_API ?? 'http://localhost:5180';
+
 export default defineConfig({
   plugins: [react()],
   // Vite/Vitest 的磁盘缓存（2026-11-12）：默认落在 node_modules/.vite 与
@@ -40,8 +42,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:5180',
-      '/hubs': { target: 'http://localhost:5180', ws: true }
+      '/api': apiTarget,
+      '/hubs': { target: apiTarget, ws: true }
     }
   },
   test: {

@@ -40,6 +40,36 @@ describe('生产配置草稿', () => {
     expect(result.current.conflict).toBe(false);
   });
 
+  it('合并各自修改的字段，以最新配置为基线保留草稿', () => {
+    const { result, rerender } = mount();
+    act(() => result.current.changeConfig({ jobId: 'B' }));
+    rerender({ config: { ...baseline, maxCycleMs: 20_000, maxRecoveryAttempts: 8 } });
+    expect(result.current.merge?.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: 'jobId', source: 'draft' }),
+      expect.objectContaining({ field: 'maxRecoveryAttempts', source: 'remote' }),
+    ]));
+    act(() => { expect(result.current.merge?.apply({})).toBe(true); });
+    expect(result.current.readCurrent()).toMatchObject({
+      config: { jobId: 'B', maxCycleMs: 20_000, maxRecoveryAttempts: 8 }, dirty: true, conflict: false,
+    });
+  });
+
+  it('重叠字段必须逐项选择，服务端再次变化会使旧合并失效', () => {
+    const { result, rerender } = mount();
+    act(() => result.current.changeConfig({ jobId: 'B', cycleDelayMs: 100 }));
+    rerender({ config: { ...baseline, jobId: 'C', cycleDelayMs: 45 } });
+    const preview = result.current.merge!;
+    act(() => { expect(preview.apply({ jobId: 'draft' })).toBe(false); });
+
+    rerender({ config: { ...baseline, jobId: 'C', cycleDelayMs: 50 } });
+    act(() => { expect(preview.apply({ jobId: 'draft', cycleDelayMs: 'remote' })).toBe(false); });
+    expect(result.current.config).toMatchObject({ jobId: 'B', cycleDelayMs: 100 });
+    act(() => { expect(result.current.merge?.apply({ jobId: 'draft', cycleDelayMs: 'remote' })).toBe(true); });
+    expect(result.current.readCurrent()).toMatchObject({
+      config: { jobId: 'B', cycleDelayMs: 50 }, dirty: true, conflict: false,
+    });
+  });
+
   it('同一事件内连续修改不同字段不会相互覆盖，旧回调也读取最新草稿', () => {
     const { result } = mount();
     const read = result.current.readCurrent;
@@ -168,6 +198,9 @@ describe('生产配置草稿', () => {
     expect(result.current.dirty).toBe(true);
     expect(result.current.conflict).toBe(true);
     expect(result.current.readCurrent()).toMatchObject({ dirty: true, conflict: true });
+    expect(result.current.merge?.fields).toContainEqual({
+      field: 'cycleDelayMs', draft: baseline.cycleDelayMs, latest: 45, source: 'choice',
+    });
     act(() => result.current.discard());
     expect(result.current.config.cycleDelayMs).toBe(45);
     expect(result.current.dirty).toBe(false);

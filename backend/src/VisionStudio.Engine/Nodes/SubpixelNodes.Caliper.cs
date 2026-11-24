@@ -11,9 +11,13 @@ namespace VisionStudio.Engine.Nodes;
 /// 输出 found / point / strength / fitError / sampleCount / searchLine；
 /// 未找到超过对比度阈值的边缘时 found=false（summary.reason 说明原因），不抛异常。
 /// </summary>
-public sealed class EdgeSubpixelNode : IVisionNodeExecutor
+public sealed class EdgeSubpixelNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "feature.edgeSubpixel";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+        => MeasurementDefinitionValidation.SearchLine(node, catalog, connectedInputs);
+
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
         => CaliperNode.ExecuteShared(context, node, cancellationToken, "minContrast", 8, "parabolic");
@@ -23,9 +27,16 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
 /// 5B-2 · measure.caliperLine：卡尺找线——沿搜索线定位最强（或指定方向）边缘，
 /// 输出过边缘点且垂直于搜索方向的直线（搜索线横穿边缘时即工件边缘本身）。
 /// </summary>
-public sealed class CaliperLineNode : IVisionNodeExecutor
+public sealed class CaliperLineNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "measure.caliperLine";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        MeasurementDefinitionValidation.SearchLine(node, catalog, connectedInputs);
+        MeasurementDefinitionValidation.CaliperSamples(node, catalog, 3);
+    }
+
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
@@ -279,9 +290,46 @@ var sourceImage = context.RequireImage("image");
 /// 对有效边缘点做最小二乘圆拟合，输出圆/半径/圆度（半径极差）与拟合误差。
 /// 有效边缘点少于 3 个时 found=false（退化拟合不抛异常，由 reason 说明）。
 /// </summary>
-public sealed class CaliperCircleNode : IVisionNodeExecutor
+public sealed class CaliperCircleNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "measure.caliperCircle";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        var start = MeasurementDefinitionValidation.Number(node, catalog, "angleStartDeg");
+        var end = MeasurementDefinitionValidation.Number(node, catalog, "angleEndDeg");
+        if (ArcSpan(start, end).Span == 0)
+            throw new InvalidOperationException(
+                $"Node '{node.Id}' arc start and end angles are equal, producing only one radial caliper. Widen the arc angle range to fit a circle.");
+
+        var angleStep = Math.Clamp(MeasurementDefinitionValidation.Number(node, catalog, "angleStepDeg"), 0.5, 45);
+        var count = SamplingMode(node) == "count"
+            ? MeasurementDefinitionValidation.Rounded(node, catalog, "caliperCount", 3, 361)
+            : BuildAnglesByStep(start, end, angleStep, out _).Length;
+        if (count < 3)
+            throw new InvalidOperationException(
+                $"Node '{node.Id}' arc and angleStepDeg generate only {count} radial caliper(s); circle fitting requires at least 3. " +
+                "Widen the arc or reduce angleStepDeg.");
+
+        var minimum = MeasurementDefinitionValidation.Rounded(node, catalog, "minValidCalipers", 3, 361);
+        if (minimum > count)
+            throw new InvalidOperationException(
+                $"Node '{node.Id}' requires {minimum} valid calipers, but its arc and sampling settings generate only {count}. " +
+                "Lower minValidCalipers, widen the arc, or increase sampling density.");
+    }
+
+    private static string SamplingMode(NodeDefinition node)
+    {
+        var requested = node.GetString("samplingMode", "").Trim().ToLowerInvariant();
+        return requested switch
+        {
+            "count" or "step" => requested,
+            // Existing workflows with only angleStepDeg retain their fixed-step spacing.
+            "" => node.Parameters?.ContainsKey("angleStepDeg") == true ? "step" : "count",
+            _ => throw new InvalidOperationException("Parameter 'samplingMode' must be one of [count, step].")
+        };
+    }
+
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
@@ -326,15 +374,7 @@ var sourceImage = context.RequireImage("image");
         if (!double.IsFinite(center.X) || !double.IsFinite(center.Y)
             || Math.Abs(center.X) > 10_000_000 || Math.Abs(center.Y) > 10_000_000)
             throw new InvalidOperationException("Caliper circle center after coordinate correction must be finite and within +/-10000000 pixels.");
-        var requestedMode = node.GetString("samplingMode", "").Trim().ToLowerInvariant();
-        // Old workflows only have angleStepDeg. Keep their fixed-step spacing until the user
-        // explicitly switches to count mode; new nodes use a direct caliper count.
-        var samplingMode = requestedMode switch
-        {
-            "count" or "step" => requestedMode,
-            "" => node.Parameters?.ContainsKey("angleStepDeg") == true ? "step" : "count",
-            _ => throw new InvalidOperationException("Parameter 'samplingMode' must be one of [count, step].")
-        };
+        var samplingMode = SamplingMode(node);
         var angleStep = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "angleStepDeg", 5), 0.5, 45);
         var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 72, 3, 361);
         var minValidCalipers = SubpixelEdgeCore.ClampedIntParameter(node, "minValidCalipers", 3, 3, 361);

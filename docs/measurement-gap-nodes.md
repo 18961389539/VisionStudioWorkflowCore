@@ -60,16 +60,22 @@
 - `coordinate.transformAffine` ≠ `calibration.planar`：后者是像素→mm 的单应（已覆盖各向异性），
   前者用于工程坐标系内部的缩放/剪切。
 
-## 四、已知限制（必须在报告里说清）
+## 四、判定依据与采样范围
+
+- **公差叠加**默认检查名义值。选择「整段计算区间」时，上下限均须落在目标值 ± `tolerance` 内。`margin` 是允许偏差减去实际判定偏差。`gateEnabled=false` 表示本次未启用门限。`limitModel` 标明极限来源，`unit` 沿用输入单位标签。
+- **轮廓滤波**输出实际轴向步距、最大原始点间距和可用长度。启用 `maxInputGap` 后，在插值前检查间距。丢弃端部模式只保留高斯核完整覆盖的样本，区间太短时返回 `found=false`。镜像模式若缩短核，会标记 `kernelTruncated=true`。
+- **影像粗糙度**按实际保留样本的首尾距离报告评定长度，单位为像素。可选丢弃端部后再评定。窗口不足三个样本时返回 `found=false`。当 `rzSamplingLengths=0` 时，Rz 取整段峰谷差。有足够样本时取五个分段峰谷差的平均。
+
+## 五、适用范围
 
 - `measure.roughness` / `measure.profileFilter` 的输入必须是**已采样轮廓**，且名义上直的边：
   曲面上先给名义线，否则最小二乘主轴会把形状误差当成粗糙度。影像法结果只当趋势，不替代触针。
-- `measure.thread` 是轮廓法（silhouette），看不到中径牙根，`pitchDiameter` 只是 (大径+小径)/2 的估计。
+- `measure.thread` 的 `pitchDiameter` 显示为「估算中径（px）」，数值为大径和小径的算术平均。下游可读取 `pitchDiameterMethod=arithmeticMeanOfMajorAndMinor` 识别算法来源。`withinTolerance` 检查齿距一致性。
 - `measure.gear` 只做直齿（螺旋角按 0），变位系数限 ±2。
 - `tolerance.stackup` 的 RSS 按各环 ±3σ 独立假设，不处理相关环；增环/减环靠 `sign` 显式给出。
 - 多轮廓逐个测量仍需复制节点：`flow.forEach` 只吃 `DetectionList`（gap 分析 S3，待引擎侧泛化）。
 
-## 五、验证
+## 六、验证
 
 - 引擎 2022（本批新增 18 条行为用例，全部断言落在解析解附近：Ra=2A/π、弧长=θR、最坏情况±Σ、行列式=sx·sy）。
 - API 443（新增 2 条：13 个节点全量注册 + pipeline 资格 + 无副作用；`contour.toPoints → tolerance.profile` 端口连通）。

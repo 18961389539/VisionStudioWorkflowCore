@@ -92,10 +92,8 @@ public sealed class WorkflowStoreEndpointTests
     }
 
     [Fact]
-    public async Task Put_WhenRevisionFinalizeFails_ReportsDeferredCommitInsteadOfClaimingNotWritten()
+    public async Task Put_WithLockedLegacyRevisionFile_ReturnsRevisionFromCommittedContent()
     {
-        // Q06：修订文件被占用时，旧实现内容已提交却返回 500、前端提示"未写入后端"。
-        // 现在：204 + X-Workflow-Revision-Deferred，内容确实已提交，反馈与事实一致。
         using var factory = new StorageVisionStudioApiFactory();
         using var client = factory.CreateClient();
 
@@ -110,7 +108,7 @@ public sealed class WorkflowStoreEndpointTests
         var baseline = created.Headers.GetValues("X-Workflow-Revision").Single();
 
         var revisionPath = Path.Combine(factory.ContentRoot, "data", "workflows", "q06-doc.revision.json");
-        // 允许读取、阻止写入/替换——精确命中"修订落定失败"（与审查探针的锁模式一致）。
+        await File.WriteAllTextAsync(revisionPath, "legacy");
         using var lockHandle = new FileStream(revisionPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         var response = await client.PutAsJsonAsync($"/api/workflows/q06-doc?expectedRevision={baseline}", new
         {
@@ -120,15 +118,12 @@ public sealed class WorkflowStoreEndpointTests
             edges = Array.Empty<object>()
         });
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.True(response.Headers.TryGetValues("X-Workflow-Revision-Deferred", out var deferred));
-        Assert.Equal("true", deferred.Single());
+        Assert.False(response.Headers.Contains("X-Workflow-Revision-Deferred"));
 
-        // 内容已提交（探针场景的旧实现在这里内容已更新但 UI 说未写入）。
         var loaded = await client.GetFromJsonAsync<WorkflowPayloadShape>("/api/workflows/q06-doc");
         Assert.Equal("CONTENT-COMMITTED-REVISION-FAILED", loaded!.Name);
 
         lockHandle.Dispose();
-        // 自愈后 GET 的修订与保存响应头一致（内容为权威）。
         var healed = await client.GetAsync("/api/workflows/q06-doc");
         Assert.Equal(response.Headers.GetValues("X-Workflow-Revision").Single(),
             healed.Headers.GetValues("X-Workflow-Revision").Single());

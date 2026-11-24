@@ -285,7 +285,6 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         var sourceImage = context.RequireImage("image");
         var source = sourceImage.Mat;
         if (source.Empty()) throw new InvalidOperationException("image.threshold requires a non-empty image.");
-        // 端口优先：上游统计（良品均值±3σ 等）可以逐批驱动阈值，参数只作默认值。
         var threshold = node.GetDouble("threshold", 128);
         if (!double.IsFinite(threshold) || threshold is < 0 or > 255)
             throw new InvalidOperationException("Manual threshold must be finite in 0..255.");
@@ -300,8 +299,7 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         Mat? output = null;
         try
         {
-            // manual 的阈值是常量，不需要统计域来定阈值；但保留 ROI 包围盒裁剪，才能在占比异常时给出 Otsu 建议值。
-            using var domain = ThresholdStatisticsDomain.Create(gray, roi, 0, crop: true, cancellationToken);
+            using var domain = ThresholdStatisticsDomain.Create(gray, roi, cancellationToken);
             var thresholded = ImageTransformOutput.Create(target =>
                 JLVisionOperators.Threshold(gray, target, threshold, maxValue, invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
             output = PreprocessImageHelpers.ApplyMask(thresholded, domain.Mask, cancellationToken);
@@ -333,7 +331,7 @@ public sealed class ThresholdNode : IVisionNodeExecutor
             // 正常取值不付这份代价。前景占比已含 ROI 口径，所以告警对 ROI 同样成立。
             if (fgRatio <= ThresholdNode.ExtremeLowRatio || fgRatio >= ThresholdNode.ExtremeHighRatio)
             {
-                var suggested = OtsuThresholdCore.Level(domain.Gray);
+                var suggested = OtsuThresholdCore.Level(gray, domain, cancellationToken);
                 var warning = $"manual threshold {threshold:0.###} selected {fgRatio * 100:0.###}% of the domain ({Convert.ToInt64(summary["nonZeroCount"])} px of {domain.PixelCount}); Otsu suggests {suggested:0.###}. Check the level, invert, or the ROI.";
                 outputs["warningCount"] = VisionValue.Integer(1);
                 summary["warningCount"] = 1;

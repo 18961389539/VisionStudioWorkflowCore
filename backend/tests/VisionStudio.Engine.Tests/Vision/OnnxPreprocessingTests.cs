@@ -45,6 +45,31 @@ public sealed class OnnxPreprocessingTests
     }
 
     [Fact]
+    public void LetterboxMapping_MapsPaddingAndInvertsInBothModes()
+    {
+        // 640x480 source into a 640x640 letterbox: scale 1, 80px bars top and bottom.
+        var letterbox = new LetterboxMapping(sourceWidth: 640, sourceHeight: 480, inputWidth: 640, inputHeight: 640, letterbox: true);
+        Assert.Equal(1, letterbox.ScaleX, 9);
+        Assert.Equal(0, letterbox.PadX, 9);
+        Assert.Equal(80, letterbox.PadY, 9);
+        Assert.Equal(80, letterbox.ToInputY(0), 9);
+        Assert.Equal(560, letterbox.ToInputY(480), 9);
+        Assert.Equal(123.5, letterbox.ToSourceX(letterbox.ToInputX(123.5)), 9);
+        Assert.Equal(234.5, letterbox.ToSourceY(letterbox.ToInputY(234.5)), 9);
+
+        // Stretch scales each axis independently and round-trips through the inverse.
+        var stretch = new LetterboxMapping(sourceWidth: 64, sourceHeight: 32, inputWidth: 640, inputHeight: 480, letterbox: false);
+        Assert.Equal(10, stretch.ScaleX, 9);
+        Assert.Equal(15, stretch.ScaleY, 9);
+        Assert.Equal(10, stretch.ToInputX(1), 9);
+        Assert.Equal(15, stretch.ToInputY(1), 9);
+        Assert.Equal(32, stretch.ToSourceX(stretch.ToInputX(32)), 9);
+        Assert.Equal(16, stretch.ToSourceY(stretch.ToInputY(16)), 9);
+
+        Assert.Throws<InvalidOperationException>(() => new LetterboxMapping(0, 32, 64, 64, letterbox: true));
+    }
+
+    [Fact]
     public void SegmentationOverlayBlendsLabelledPixelsAndKeepsBackground()
     {
         using var source = new Mat(1, 2, MatType.CV_8UC3);
@@ -53,13 +78,32 @@ public sealed class OnnxPreprocessingTests
         using var mask = new Mat(1, 2, MatType.CV_8UC1, Scalar.All(0));
         mask.Set(0, 1, (byte)1);
 
-        using var overlay = OnnxSegmentationNode.BuildOverlay(source, mask);
+        using var overlay = OnnxSegmentationNode.BuildOverlay(source, mask, maskClassOffset: 0);
 
         Assert.Equal(source.At<Vec3b>(0, 0), overlay.At<Vec3b>(0, 0));
-        var color = InferenceStats.SegmentationColorBgr(1);
+        var color = InferenceStats.SegmentationColorBgr(2); // classId 1 -> palette slot 2
         var blended = overlay.At<Vec3b>(0, 1);
         Assert.Equal((byte)((200 + color.B) / 2), blended.Item0);
         Assert.Equal((byte)((210 + color.G) / 2), blended.Item1);
         Assert.Equal((byte)((220 + color.R) / 2), blended.Item2);
+    }
+
+    [Fact]
+    public void SegmentationOverlayColoursOneClassIdIdenticallyAcrossMaskEncodings()
+    {
+        using var source = new Mat(1, 2, MatType.CV_8UC3, Scalar.All(0));
+        using var semanticMask = new Mat(1, 2, MatType.CV_8UC1, Scalar.All(0));
+        semanticMask.Set(0, 0, (byte)1); // class 1, maskClassOffset 0
+        using var instanceMask = new Mat(1, 2, MatType.CV_8UC1, Scalar.All(0));
+        instanceMask.Set(0, 1, (byte)2); // class 1, maskClassOffset 1
+
+        using var semanticOverlay = OnnxSegmentationNode.BuildOverlay(source, semanticMask, maskClassOffset: 0);
+        using var instanceOverlay = OnnxSegmentationNode.BuildOverlay(source, instanceMask, maskClassOffset: 1);
+
+        Assert.Equal(semanticOverlay.At<Vec3b>(0, 0), instanceOverlay.At<Vec3b>(0, 1));
+        var color = InferenceStats.SegmentationColorBgr(2); // classId 1 -> palette slot 2
+        Assert.Equal(new Vec3b((byte)(color.B / 2), (byte)(color.G / 2), (byte)(color.R / 2)),
+            instanceOverlay.At<Vec3b>(0, 1));
+        Assert.Equal(default(Vec3b), instanceOverlay.At<Vec3b>(0, 0));
     }
 }

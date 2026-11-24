@@ -147,8 +147,10 @@ public sealed class NodeMaturityGateTests
         return id;
     }
 
-    private sealed class RecipeApiFactory : WebApplicationFactory<Program>
+    private sealed class RecipeApiFactory : IsolatedApiFactory
     {
+        protected override string DataRoot => Path.Combine(_environment.ContentRootPath, "data");
+
         private readonly TempWebHostEnvironment _environment = new();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

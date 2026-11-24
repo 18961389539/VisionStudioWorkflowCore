@@ -51,7 +51,7 @@ public sealed partial class TraceabilityStore
     public TraceabilityStore(SqliteMetadataDatabase db, IWebHostEnvironment env, IOptions<TraceRetentionOptions> retention)
     {
         _db = db;
-        _artifactRoot = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "artifacts");
+        _artifactRoot = Path.Combine(db.DataRoot, "artifacts");
         Directory.CreateDirectory(_artifactRoot);
         _retention = retention.Value;
     }

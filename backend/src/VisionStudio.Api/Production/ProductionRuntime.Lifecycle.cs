@@ -11,8 +11,8 @@ public sealed partial class ProductionRuntimeService
     public async Task<ProductionRuntimeStatus> RecoverAsync(CancellationToken ct)
     {
         if (Status.State != ProductionRuntimeState.Faulted) return Status;
-        if (_loopTask is { IsCompleted: false })
-            throw new InvalidOperationException("Cannot recover while the previous execution loop is still alive. Stop/terminate the blocked operation first.");
+        if (Volatile.Read(ref _stopCompletion) is not null || _loopTask is { IsCompleted: false })
+            throw new InvalidOperationException("Cannot recover while the previous execution loop is running or still completing its stop.");
 
         // R01：手动/临时运行的未闭合意图同样阻断恢复启动。
         _authorization?.EnsureProductionStartAllowed();

@@ -10,9 +10,9 @@ public sealed record ModelPackageImportRequest(string SourcePath, string? Packag
 public sealed record ModelPackageSmokeRequest(bool OpenOnnxSession = false);
 
 /// <summary>Filesystem registry of imported external-train packages under data/model-packages.</summary>
-public sealed class ModelPackageService(IWebHostEnvironment env)
+public sealed class ModelPackageService(IWebHostEnvironment env, IConfiguration? configuration = null)
 {
-    private readonly string _root = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "model-packages");
+    private readonly string _root = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "model-packages");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public string Root => _root;

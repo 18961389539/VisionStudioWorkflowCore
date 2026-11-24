@@ -120,7 +120,7 @@ public sealed class ListenBoundaryTests : IDisposable
     private WebApplicationFactory<Program> ProductionHost(params (string Key, string Value)[] settings)
     {
         Directory.CreateDirectory(_lab);
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new IsolatedApiFactory(Path.Combine(_lab, "data")).WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Production");
             builder.UseContentRoot(_lab);
@@ -157,7 +157,7 @@ public sealed class RecoveryBudgetValidationTests : IDisposable
             await client.GetStringAsync("/api/production/config"))!;
         config["maxRecoveryAttempts"] = JsonSerializer.SerializeToElement(value);
 
-        var response = await client.PutAsJsonAsync("/api/production/config", config);
+        var response = await client.PutProductionConfigAsync(config);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         using var document = JsonDocument.Parse(await client.GetStringAsync("/api/production/config"));
@@ -176,7 +176,7 @@ public sealed class RecoveryBudgetValidationTests : IDisposable
             await client.GetStringAsync("/api/production/config"))!;
         config["maxRecoveryAttempts"] = JsonSerializer.SerializeToElement(value);
 
-        var response = await client.PutAsJsonAsync("/api/production/config", config);
+        var response = await client.PutProductionConfigAsync(config);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var document = JsonDocument.Parse(await client.GetStringAsync("/api/production/config"));

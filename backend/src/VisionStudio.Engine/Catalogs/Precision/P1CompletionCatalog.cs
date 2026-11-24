@@ -67,7 +67,13 @@ internal static class P1CompletionCatalog
                 [
                     new("Image ports (image1..image8)", "images"),
                     new("Synchronized FrameSet", "frameSet")
-                ], Description: "images reads image1..image8. frameSet reads every camera image of a camera.syncCapture FrameSet in camera-id order, so a multi-camera stack needs one wire instead of eight; the two sources are mutually exclusive."),
+                ], Description: "images reads image1..image8. frameSet reads the camera images of a synchronized FrameSet in camera-ID order. FrameSet synchronization aligns capture times. Choose one input source."),
+                new("alignmentPolicy", "Alignment Policy", "select", "sameFrame", Group: "Fusion", Options:
+                [
+                    new("Require Common Image Frame", "sameFrame"),
+                    new("Use Prealigned Inputs", "prealigned"),
+                    new("Legacy (No Alignment Check)", "legacy")
+                ], Description: "Require Common Image Frame checks that all inputs declare the same known image coordinate frame. Use Prealigned Inputs only after verifying the images align in a common reference. Legacy mode preserves older pixelwise workflows without checking their frames."),
                 new("mode", "Fusion Mode", "select", "mean", Group: "Fusion", Options:
                 [
                     new("Mean (random noise / sqrt(N))", "mean"),
@@ -78,7 +84,7 @@ internal static class P1CompletionCatalog
                 new("maxPixels", "Maximum Input Pixels", "number", 16000000, 1000, 200000000, 1000000, Group: "Limits",
                     Description: "Hard cap on the input area. Median holds every input plus the output in memory, so a full-resolution stack multiplies quickly."),
             ],
-            "Fuse 2..8 aligned frames pixel by pixel: mean, median, min or max. Wire: image1..image8 -> image, or sourceMode=frameSet + frameSet (synchronized capture) -> image. All inputs must share size, channel count and depth - a mismatched stack fails instead of producing a smeared result. Accumulation runs in float32 and converts back to the source depth with saturation. Median is 8-bit only and noticeably slower than mean; use it when transient specks matter more than cycle time.",
+            "Fuse registered images pixel by pixel using mean, median, min or max. Images must share size, channel count and depth. Connect two to eight individual image inputs or one synchronized FrameSet. For raw camera images, extract each frame, register and warp it to a shared reference grid, then connect the aligned images to the individual inputs. The default alignment policy checks known coordinate frame metadata, and FrameSet diagnostics list the camera IDs. Mean accumulates in float32 and converts back to the source depth with saturation. Median supports 8-bit inputs.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
             Actions: []),
 

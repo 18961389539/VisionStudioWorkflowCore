@@ -16,9 +16,17 @@ namespace VisionStudio.Engine.Nodes;
 /// editor, no multi-pair ranking beyond the shared direction selector, and no
 /// fixture-trained expected-width model.
 /// </summary>
-public sealed class CaliperArrayNode : IVisionNodeExecutor
+public sealed class CaliperArrayNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "measure.caliperArray";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        MeasurementDefinitionValidation.SearchLine(node, catalog, connectedInputs);
+        MeasurementDefinitionValidation.WidthLimits(node, catalog);
+        MeasurementDefinitionValidation.CaliperSamples(node, catalog, 1);
+    }
+
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {

@@ -84,7 +84,8 @@ public sealed partial class VisionWorkflowCompiler
 
         foreach (var node in workflow.Nodes)
         {
-            var catalog = registry.Require(node.Type).Catalog;
+            var registration = registry.Require(node.Type);
+            var catalog = registration.Catalog;
             var connectedInputPorts = workflow.Edges
                 .Where(edge => !WorkflowGraph.IsControlEdge(edge)
                     && edge.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase))
@@ -120,49 +121,27 @@ public sealed partial class VisionWorkflowCompiler
             }
 
             ValidateNodeParameters(node, catalog, connectedInputPorts);
-            if (node.Type == "output.saveImage") Nodes.ImageSavePlan.ValidateConnections(node, connectedInputPorts);
-            ValidateMeasurementGeometry(node, catalog, connectedInputPorts);
-            ValidateCaliperWidthLimits(node, catalog);
-            ValidateContourThicknessLimits(node, catalog);
-            ValidateCaliperCircleArc(node, catalog);
-            ValidateCaliperSampleRequirements(node, catalog);
+            registration.DefinitionValidator?.ValidateDefinition(node, catalog, connectedInputPorts);
         }
     }
 
-    /// <summary>
-    /// Measurement transforms are meaningful only in the pixel frame of the image being sampled.
-    /// Transform2D values carry named frames, but several image-producing nodes use generic names
-    /// such as CurrentImage/CropImage. Trace the graph as well so unrelated image branches cannot
-    /// silently appear to share a frame just because their labels match.
-    /// </summary>
-
     private static void ValidateNodeParameters(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputPorts)
     {
-        if (catalog.Type is "measure.fitLine" or "measure.fitCircle")
+        foreach (var requirement in catalog.MinimumConnectedInputs ?? [])
         {
-            var minimum = catalog.Type == "measure.fitCircle" ? 3 : 2;
-            var count = catalog.Inputs.Count(port => port.DataType == VisionDataType.Point2D && connectedInputPorts.Contains(port.Name));
-            if (count < minimum)
-                throw new InvalidOperationException($"Node '{node.Id}' ({catalog.Type}) requires at least {minimum} connected point inputs; received {count}.");
+            var count = catalog.Inputs.Count(port => port.DataType == requirement.DataType && connectedInputPorts.Contains(port.Name));
+            if (count < requirement.Count)
+                throw new InvalidOperationException(
+                    $"Node '{node.Id}' ({catalog.Type}) requires at least {requirement.Count} connected {requirement.DataType} inputs; received {count}.");
         }
-        if (catalog.Type == "measure.regionIntensity") Nodes.RegionIntensityNode.ValidateParameters(node);
-        if (catalog.Type == "image.flatFieldCorrect")
-        {
-            var mode = node.GetString("referenceMode", "gainOffset");
-            if (mode != "offset" && !connectedInputPorts.Contains("bright"))
-                throw new InvalidOperationException($"Node '{node.Id}' gain correction requires a bright reference.");
-            if (mode != "gain" && node.GetString("darkPolicy", "skip") == "fail" && !connectedInputPorts.Contains("dark"))
-                throw new InvalidOperationException($"Node '{node.Id}' requires a dark reference under its current policy.");
-        }
+
         if (node.Parameters is null || node.Parameters.Count == 0) return;
 
         foreach (var parameter in catalog.Parameters)
         {
             var descriptor = OperatorParameterForms.Resolve(node, catalog, parameter);
             if (!IsParameterVisible(node, catalog, descriptor)) continue;
-            if (IsParameterOverriddenByConnectedInput(catalog, descriptor.Name, connectedInputPorts)) continue;
-            if (catalog.Type == "jlvision.restoration" && node.GetString("operator", "harmonic") is "psfMotion" or "psfDefocus"
-                && connectedInputPorts.Contains("image") && descriptor.Name is "width" or "height") continue;
+            if (descriptor.OverriddenByPorts?.Any(connectedInputPorts.Contains) == true) continue;
             if (!node.Parameters.TryGetValue(descriptor.Name, out var value)) continue;
             if (descriptor.Optional && value.ValueKind == JsonValueKind.Null) continue;
 
@@ -209,169 +188,6 @@ public sealed partial class VisionWorkflowCompiler
                     break;
             }
         }
-        if (catalog.Type == "device.waitTag")
-        {
-            foreach (var name in new[] { "timeoutMs", "pollMs", "stableMs" })
-            {
-                var value = GetNumericParameter(node, catalog, name);
-                if (value != Math.Truncate(value))
-                    throw new InvalidOperationException($"Node '{node.Id}' {name} must be an integer number of milliseconds.");
-            }
-            var timeout = GetNumericParameter(node, catalog, "timeoutMs");
-            if (GetNumericParameter(node, catalog, "pollMs") > timeout || GetNumericParameter(node, catalog, "stableMs") > timeout)
-                throw new InvalidOperationException($"Node '{node.Id}' pollMs and stableMs must not exceed timeoutMs.");
-        }
-        if (catalog.Type == "flow.if" && node.GetString("mode", "threshold").Equals("range", StringComparison.OrdinalIgnoreCase))
-        {
-            var minimum = node.GetDouble("rangeMin", 0);
-            var maximum = node.GetDouble("rangeMax", 100);
-            if (minimum > maximum)
-                throw new InvalidOperationException($"Node '{node.Id}' rangeMin {minimum} is greater than rangeMax {maximum}.");
-        }
-    }
-
-    private static bool IsParameterOverriddenByConnectedInput(
-        NodeCatalogItem catalog,
-        string parameterName,
-        IReadOnlySet<string> connectedInputPorts)
-    {
-        var parameter = catalog.Parameters.FirstOrDefault(candidate =>
-            candidate.Name.Equals(parameterName, StringComparison.OrdinalIgnoreCase));
-        return parameter?.OverriddenByPorts is { Count: > 0 } ports
-            && ports.Any(port => connectedInputPorts.Contains(port));
-    }
-
-    private static void ValidateMeasurementGeometry(
-        NodeDefinition node,
-        NodeCatalogItem catalog,
-        IReadOnlySet<string> connectedInputPorts)
-    {
-        if (connectedInputPorts.Contains("searchLine")
-            && catalog.Inputs.Any(input => input.Name.Equals("searchLine", StringComparison.OrdinalIgnoreCase)
-                && input.DataType == VisionDataType.Line2D))
-            return;
-        if (catalog.Type is not ("feature.edgeSubpixel" or "measure.caliper" or "measure.caliperWidth" or "measure.caliperArray" or "measure.caliperLine"))
-            return;
-
-        var dx = GetNumericParameter(node, catalog, "endX") - GetNumericParameter(node, catalog, "startX");
-        var dy = GetNumericParameter(node, catalog, "endY") - GetNumericParameter(node, catalog, "startY");
-        if (Math.Sqrt(dx * dx + dy * dy) < 2)
-            throw new InvalidOperationException(
-                $"Node '{node.Id}' search line must be at least 2 px long. Adjust its start/end coordinates or connect a valid searchLine input.");
-    }
-
-    private static void ValidateCaliperWidthLimits(NodeDefinition node, NodeCatalogItem catalog)
-    {
-        if (!catalog.Type.Equals("measure.caliperWidth", StringComparison.OrdinalIgnoreCase)
-            && !catalog.Type.Equals("measure.caliperArray", StringComparison.OrdinalIgnoreCase)) return;
-        var minimum = GetNumericParameter(node, catalog, "minWidth");
-        var maximum = GetNumericParameter(node, catalog, "maxWidth");
-        if (maximum > 0 && maximum < minimum)
-            throw new InvalidOperationException($"Node '{node.Id}' maxWidth must be zero (unlimited) or at least minWidth.");
-        if (node.GetString("direction", "strongest").Equals("closestwidth", StringComparison.OrdinalIgnoreCase)
-            && GetNumericParameter(node, catalog, "nominalWidth") <= 0)
-            throw new InvalidOperationException($"Node '{node.Id}' nominalWidth must be positive for closest-width selection.");
-    }
-
-    private static void ValidateContourThicknessLimits(NodeDefinition node, NodeCatalogItem catalog)
-    {
-        if (!catalog.Type.Equals("measure.contourThickness", StringComparison.OrdinalIgnoreCase)) return;
-        var minimum = GetNumericParameter(node, catalog, "minThickness");
-        var maximum = GetNumericParameter(node, catalog, "maxThickness");
-        if (maximum > 0 && maximum < minimum)
-            throw new InvalidOperationException($"Node '{node.Id}' maxThickness must be zero (unlimited) or at least minThickness.");
-        var budget = GetNumericParameter(node, catalog, "maxSamplesPerBoundary");
-        if (budget != Math.Truncate(budget))
-            throw new InvalidOperationException($"Node '{node.Id}' maxSamplesPerBoundary must be an integer.");
-    }
-
-    private static void ValidateCaliperCircleArc(NodeDefinition node, NodeCatalogItem catalog)
-    {
-        if (!catalog.Type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)) return;
-        var start = GetNumericParameter(node, catalog, "angleStartDeg");
-        var end = GetNumericParameter(node, catalog, "angleEndDeg");
-        if (Math.Abs(end - start) < 1e-9)
-            throw new InvalidOperationException(
-                $"Node '{node.Id}' arc start and end angles are equal, producing only one radial caliper. Widen the arc angle range to fit a circle.");
-    }
-
-    private static void ValidateCaliperSampleRequirements(NodeDefinition node, NodeCatalogItem catalog)
-    {
-        if (catalog.Type.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase))
-        {
-            var count = RoundedIntParameter(node, catalog, "caliperCount", 9, 3, 101);
-            var minimum = RoundedIntParameter(node, catalog, "minValidCalipers", 3, 3, 101);
-            if (minimum > count)
-                throw new InvalidOperationException(
-                    $"Node '{node.Id}' requires {minimum} valid calipers, but caliperCount is {count}. " +
-                    "Lower minValidCalipers or increase caliperCount.");
-            return;
-        }
-
-        if (catalog.Type.Equals("measure.caliperArray", StringComparison.OrdinalIgnoreCase))
-        {
-            var count = RoundedIntParameter(node, catalog, "caliperCount", 9, 1, 101);
-            var minimum = RoundedIntParameter(node, catalog, "minValidCalipers", 1, 1, 101);
-            if (minimum > count)
-                throw new InvalidOperationException(
-                    $"Node '{node.Id}' requires {minimum} valid calipers, but caliperCount is {count}. " +
-                    "Lower minValidCalipers or increase caliperCount.");
-            return;
-        }
-
-        if (!catalog.Type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)) return;
-
-        var mode = node.GetString("samplingMode", string.Empty).Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(mode))
-            mode = node.Parameters?.ContainsKey("angleStepDeg") == true ? "step" : "count";
-
-        var countAvailable = mode == "count"
-            ? RoundedIntParameter(node, catalog, "caliperCount", 72, 3, 361)
-            : CircleCaliperCountByStep(node, catalog);
-        if (countAvailable < 3)
-            throw new InvalidOperationException(
-                $"Node '{node.Id}' arc and angleStepDeg generate only {countAvailable} radial caliper(s); circle fitting requires at least 3. " +
-                "Widen the arc or reduce angleStepDeg.");
-
-        var minimumValid = RoundedIntParameter(node, catalog, "minValidCalipers", 3, 3, 361);
-        if (minimumValid > countAvailable)
-            throw new InvalidOperationException(
-                $"Node '{node.Id}' requires {minimumValid} valid calipers, but its arc and sampling settings generate only {countAvailable}. " +
-                "Lower minValidCalipers, widen the arc, or increase sampling density.");
-    }
-
-    private static int CircleCaliperCountByStep(NodeDefinition node, NodeCatalogItem catalog)
-    {
-        var start = GetNumericParameter(node, catalog, "angleStartDeg");
-        var end = GetNumericParameter(node, catalog, "angleEndDeg");
-        var rawSpan = end - start;
-        var span = rawSpan % 360;
-        var fullCircle = Math.Abs(rawSpan) >= 1e-9 && Math.Abs(span) < 1e-9;
-        if (Math.Abs(rawSpan) < 1e-9) return 1;
-        if (fullCircle) span = 360;
-        else if (span < 0) span += 360;
-
-        var step = Math.Clamp(GetNumericParameter(node, catalog, "angleStepDeg"), 0.5, 45);
-        var intervalCount = span / step;
-        var nearestIntervalCount = (int)Math.Round(intervalCount);
-        var reachesEnd = nearestIntervalCount > 0
-            && Math.Abs(nearestIntervalCount * step - span) <= 1e-9;
-        var count = fullCircle && reachesEnd
-            ? nearestIntervalCount
-            : (int)Math.Floor(intervalCount) + 1;
-        var maximumCount = fullCircle ? 360 : 361;
-        return Math.Min(count, maximumCount);
-    }
-
-    private static int RoundedIntParameter(NodeDefinition node, NodeCatalogItem catalog, string name, int fallback, int minimum, int maximum)
-        => (int)Math.Clamp(Math.Floor(GetNumericParameter(node, catalog, name) + 0.5), minimum, maximum);
-
-    private static double GetNumericParameter(NodeDefinition node, NodeCatalogItem catalog, string name)
-    {
-        var descriptor = catalog.Parameters.First(parameter =>
-            parameter.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        var fallback = Convert.ToDouble(descriptor.DefaultValue, System.Globalization.CultureInfo.InvariantCulture);
-        return node.GetDouble(name, fallback);
     }
 
     private static bool IsParameterVisible(NodeDefinition node, NodeCatalogItem catalog, ParameterDescriptor descriptor)

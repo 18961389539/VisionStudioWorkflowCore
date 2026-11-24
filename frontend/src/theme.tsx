@@ -45,6 +45,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     <ThemeContext.Provider value={value}>
       <ConfigProvider
         locale={lang === 'en' ? enUS : zhCN}
+        // antd 默认给两个汉字的按钮中间插空格（"运 行"/"保 存"），那是西文排版习惯；
+        // 中文两字词是整体，插空格反而像被拆开。关掉后按钮更紧凑，也便于按名称定位。
+        button={{ autoInsertSpace: false }}
         theme={{
           algorithm: mode === 'dark' ? theme.darkAlgorithm : theme.defaultAlgorithm,
           token: {

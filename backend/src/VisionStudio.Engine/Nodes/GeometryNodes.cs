@@ -350,9 +350,13 @@ var sourceImage = context.RequireImage("image");
     }
 }
 
-public sealed class CaliperNode : IVisionNodeExecutor
+public sealed class CaliperNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "measure.caliper";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+        => MeasurementDefinitionValidation.SearchLine(node, catalog, connectedInputs);
+
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
         => ExecuteShared(context, node, cancellationToken, "edgeThreshold", 12, "none");

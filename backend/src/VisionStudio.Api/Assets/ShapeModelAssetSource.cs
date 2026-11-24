@@ -16,4 +16,7 @@ public sealed class ShapeModelAssetSource(ShapeModelAssetStore store, IConfigura
 
     public byte[]? TryRead(string assetId, int version)
         => string.IsNullOrWhiteSpace(assetId) ? null : store.ReadBytesSync(assetId.Trim(), version);
+
+    public byte[]? TryReadTemplate(string assetId, int version)
+        => string.IsNullOrWhiteSpace(assetId) ? null : store.ReadTemplateBytesSync(assetId.Trim(), version);
 }

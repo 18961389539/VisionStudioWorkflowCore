@@ -1,9 +1,97 @@
 using VisionStudio.Engine.Device;
+using VisionStudio.Abstractions;
+using VisionStudio.Engine.Nodes;
+using System.Text.Json;
 
 namespace VisionStudio.Engine.Tests;
 
 public sealed class DeviceManagerTests
 {
+    private static readonly DeviceTagDefinition[] VisionResultTags =
+    [
+        new("resultReady", "Ready", "sim:ready", DeviceTagDataType.Boolean, Writable: true),
+        new("resultOk", "OK", "sim:ok", DeviceTagDataType.Boolean, Writable: true),
+        new("resultX", "X", "sim:x", DeviceTagDataType.Double, Writable: true),
+        new("resultY", "Y", "sim:y", DeviceTagDataType.Double, Writable: true),
+        new("validX", "X Valid", "sim:x-valid", DeviceTagDataType.Boolean, Writable: true),
+        new("validY", "Y Valid", "sim:y-valid", DeviceTagDataType.Boolean, Writable: true),
+        new("validR", "R Valid", "sim:r-valid", DeviceTagDataType.Boolean, Writable: true)
+    ];
+
+    [Theory]
+    [InlineData("skip", false)]
+    [InlineData("zero", true)]
+    public async Task WriteVisionResultPublishesValidityFlagsBeforeReady(string missingPolicy, bool writesZero)
+    {
+        var driver = new RecordingDeviceDriver("vision-plc", 0, VisionResultTags);
+        await using var manager = new DeviceManager();
+        manager.Register(driver);
+
+        var result = await WriteVisionResult(manager, ("missingCoordinatePolicy", missingPolicy));
+
+        var expected = new List<(string, object?)> { ("resultReady", false), ("resultOk", true), ("resultX", 12.5) };
+        if (writesZero) expected.Add(("resultY", 0d));
+        expected.AddRange([("validX", true), ("validY", false), ("validR", false), ("resultReady", true)]);
+        Assert.Equal(expected, driver.Writes);
+        Assert.Equal(expected.Count, result.Outputs["tagsWritten"].Require<long>("tagsWritten"));
+        Assert.Equal(writesZero, result.Outputs["yWritten"].Require<bool>("yWritten"));
+    }
+
+    [Theory]
+    [InlineData("resultOk", "payload", "resultReady", 1)]
+    [InlineData("resultReady", "ready-publish", "validR", 6)]
+    public async Task WriteVisionResultReportsUncertainWriteAndLastAcknowledgedTag(string failingTag, string stage, string confirmedTag, int count)
+    {
+        var driver = new RecordingDeviceDriver("vision-plc", 0, VisionResultTags,
+            (tag, value) => tag == failingTag && value is true);
+        await using var manager = new DeviceManager();
+        manager.Register(driver);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => WriteVisionResult(manager));
+
+        Assert.Contains($"at {stage}", error.Message);
+        Assert.Contains($"last confirmed tag: {confirmedTag}", error.Message);
+        Assert.Contains($"write with unknown outcome: {failingTag}", error.Message);
+        Assert.Equal(count, driver.Writes.Count);
+        Assert.DoesNotContain(("resultReady", (object?)true), driver.Writes);
+    }
+
+    [Fact]
+    public async Task WriteVisionResultValidatesAllMappingsBeforeClearingReady()
+    {
+        var driver = new RecordingDeviceDriver("vision-plc", 0, VisionResultTags);
+        await using var manager = new DeviceManager();
+        manager.Register(driver);
+
+        var unknown = await Assert.ThrowsAsync<InvalidOperationException>(() => WriteVisionResult(manager, ("rValidTag", "unknown")));
+        Assert.Contains("at preflight", unknown.Message);
+        Assert.Contains("unknown", unknown.Message);
+        var duplicate = await Assert.ThrowsAsync<InvalidOperationException>(() => WriteVisionResult(manager, ("rValidTag", "resultReady")));
+        Assert.Contains("PLC 结果标签重复", duplicate.Message);
+        Assert.Empty(driver.Writes);
+    }
+
+    private static Task<NodeExecutorResult> WriteVisionResult(DeviceManager manager, params (string Key, string Value)[] overrides)
+    {
+        var parameters = new Dictionary<string, JsonElement>
+        {
+            ["deviceId"] = JsonSerializer.SerializeToElement("vision-plc"),
+            ["rTag"] = JsonSerializer.SerializeToElement(""),
+            ["xValidTag"] = JsonSerializer.SerializeToElement("validX"),
+            ["yValidTag"] = JsonSerializer.SerializeToElement("validY"),
+            ["rValidTag"] = JsonSerializer.SerializeToElement("validR")
+        };
+        foreach (var (key, value) in overrides)
+            parameters[key] = JsonSerializer.SerializeToElement(value);
+        var node = new NodeDefinition("write-plc", "device.writeVisionResult", null, null, parameters);
+        var context = new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["pass"] = VisionValue.Boolean(true),
+            ["x"] = VisionValue.Double(12.5)
+        });
+        return new DeviceWriteVisionResultNode(manager).ExecuteAsync(context, node, CancellationToken.None).AsTask();
+    }
+
     [Fact]
     public async Task Polling_WritesHostHeartbeatAndMaintainsGoodQuality()
     {
@@ -162,15 +250,18 @@ public sealed class DeviceManagerTests
     private sealed class RecordingDeviceDriver : IDeviceDriver
     {
         private readonly int _writeDelayMs;
+        private readonly Func<string, object?, bool>? _shouldFail;
         private readonly object _sync = new();
         private readonly List<(string TagId, object? Value)> _writes = new();
         private DeviceConnectionState _state = DeviceConnectionState.Disconnected;
 
-        public RecordingDeviceDriver(string id, int writeDelayMs)
+        public RecordingDeviceDriver(string id, int writeDelayMs, IReadOnlyList<DeviceTagDefinition>? tags = null,
+            Func<string, object?, bool>? shouldFail = null)
         {
             Id = id;
             _writeDelayMs = writeDelayMs;
-            Tags =
+            _shouldFail = shouldFail;
+            Tags = tags ??
             [
                 new DeviceTagDefinition("a", "A", "sim:a", DeviceTagDataType.Integer, Writable: true),
                 new DeviceTagDefinition("b", "B", "sim:b", DeviceTagDataType.Integer, Writable: true),
@@ -217,6 +308,7 @@ public sealed class DeviceManagerTests
         public async Task WriteAsync(string tagId, object? value, CancellationToken cancellationToken = default)
         {
             if (_state != DeviceConnectionState.Connected) throw new DeviceDisconnectedException("Disconnected");
+            if (_shouldFail?.Invoke(tagId, value) == true) throw new IOException("Simulated write acknowledgement loss.");
             lock (_sync) _writes.Add((tagId, value));
             if (_writeDelayMs > 0) await Task.Delay(_writeDelayMs, cancellationToken);
         }

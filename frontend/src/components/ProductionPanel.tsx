@@ -1,41 +1,122 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
-  Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table,
+  Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Radio, Segmented, Select, Space, Table,
   Tabs, Tag, Typography
 } from 'antd';
 import type { AlarmRecord, ProductionRuntimeStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { isProductionConfig, isProductionStatus } from '../productionConfig';
-import { useProductionMonitor, type DeviceActionPendingState } from '../useProductionMonitor';
-import { useProductionConfigDraft } from '../useProductionConfigDraft';
+import { ALARM_PAGE_SIZE, useProductionMonitor, type DeviceActionPendingState } from '../useProductionMonitor';
+import { useProductionConfigDraft, type ProductionConfigMerge } from '../useProductionConfigDraft';
 import { useProductionActions } from '../useProductionActions';
 import { apiUrl, alarms as alarmEndpoints } from '../endpoints';
+import { useSecurityAccount } from '../security';
+import { OperatorDashboard } from './OperatorDashboard';
+import './ProductionWorkstation.css';
+
+const ProductionStations = lazy(() => import('./ProductionStations'));
+const OperatorAlarmQueue = lazy(() => import('./OperatorAlarmQueue'));
+const OperatorLayoutDialog = lazy(() => import('./OperatorLayoutDialog'));
+const RecipeDeliveryInbox = lazy(() => import('./ProductionRecipeRollouts').then((module) => ({ default: module.RecipeDeliveryInbox })));
 
 export type { DeviceActionPendingState } from '../useProductionMonitor';
 
-type Props = { open: boolean; onClose: () => void; embedded?: boolean };
+type Props = { open: boolean; onClose: () => void; embedded?: boolean; runtimeOnly?: boolean; initialView?: 'operator' | 'stations';
+  /** 车间大屏形态：只渲染操作员工作台，隐藏标签栏与工程师入口（`?view=operator&kiosk=1`）。 */
+  kiosk?: boolean };
 
 const severityLabels: Record<string, string> = { Critical: '严重', Error: '错误', Warning: '警告', Info: '信息' };
+const maxStopTimeoutMs = 60_000;
+const configFieldLabels: Record<string, string> = {
+  jobId: '生产作业', autoStart: '自动启动', cycleDelayMs: '周期延迟', maxCycleMs: '单周期超时',
+  maxConsecutiveFailures: '连续失败上限', autoRecover: '自动恢复', recoveryDelayMs: '恢复等待',
+  maxRecoveryAttempts: '自动恢复次数', stopTimeoutMs: '停止超时', ptpDriftGuardEnabled: 'PTP 漂移保护',
+  synchronizationHealthGuardEnabled: '同步健康保护',
+};
 
-export default function ProductionPanel({ open, onClose, embedded = false }: Props) {
+function displayConfigValue(value: unknown): string {
+  if (value == null) return '—';
+  if (typeof value === 'boolean') return value ? '启用' : '关闭';
+  return String(value);
+}
+
+function ProductionConfigConflict({ merge, disabled, onStale }: {
+  merge: ProductionConfigMerge;
+  disabled: boolean;
+  onStale: () => void;
+}) {
+  const [choices, setChoices] = useState<Parameters<ProductionConfigMerge['apply']>[0]>({});
+  const overlapping = merge.fields.filter(({ source }) => source === 'choice');
+  return <Alert type="warning" showIcon title="服务端配置已变更，当前编辑已保留" description={
+    <Space orientation="vertical" align="start">
+      <div>{overlapping.length > 0 ? '请为同时修改的字段选择要保留的值。' : '草稿与服务端修改了不同字段，可以直接合并。'}合并只更新草稿。</div>
+      <details open={overlapping.length > 0}>
+        <summary>比较配置差异</summary>
+        <ul>{merge.fields.map(({ field, draft, latest, source }) => {
+          const label = configFieldLabels[field] ?? field;
+          return <li key={field}>
+            <span>{label} · 当前草稿 {displayConfigValue(draft)} · 服务端 {displayConfigValue(latest)}</span>
+            {source === 'choice' && <Radio.Group
+              aria-label={`${label}合并方式`}
+              value={choices[field]} disabled={disabled}
+              onChange={(event) => setChoices((previous) => ({ ...previous, [field]: event.target.value }))}
+            >
+              <Radio value="draft">保留草稿值</Radio>
+              <Radio value="remote">使用服务端值</Radio>
+            </Radio.Group>}
+          </li>;
+        })}</ul>
+      </details>
+      <Button disabled={disabled || overlapping.some(({ field }) => !choices[field])}
+        onClick={() => { if (!merge.apply(choices)) onStale(); }}>
+        合并到最新配置
+      </Button>
+    </Space>
+  } />;
+}
+
+export default function ProductionPanel({ open, onClose, embedded = false, runtimeOnly = false, initialView, kiosk = false }: Props) {
   const [messageApi, contextHolder] = message.useMessage();
-  const monitor = useProductionMonitor(open);
-  const { status, jobs, alarms, pending: pendingActions, errors, lastUpdatedAt, statusFresh, configReady } = monitor;
-  const { config, dirty, conflict, changeConfig, beginSave, acceptSaved, discard, readCurrent } = useProductionConfigDraft(monitor.config, open);
+  const { enabled: securityEnabled, user } = useSecurityAccount();
+  const canReconcile = !securityEnabled || user?.role === 'Administrator';
+  const canEngineer = !securityEnabled || user?.role === 'Engineer' || user?.role === 'Administrator';
+  const canConfigure = !runtimeOnly && canEngineer;
+  const monitor = useProductionMonitor(open, canReconcile);
+  const { status, jobs, alarms, alarmSummary, alarmTotal, alarmPage, alarmFilter, alarmsLoading, setAlarmPage, setAlarmFilter,
+    pending: pendingActions, errors, lastUpdatedAt, statusFresh, configReady } = monitor;
+  const { config, dirty, conflict, merge, changeConfig, beginSave, acceptSaved, discard, readCurrent } = useProductionConfigDraft(monitor.config, open);
   const { busy, error: operationError, call } = useProductionActions(open, messageApi, monitor.refresh);
+  // kiosk 下没有标签栏可切：固定停在操作员页，避免默认的“运行监控”把 hero 指标重复一遍。
+  const [activeTab, setActiveTab] = useState(kiosk ? 'operator' : initialView ?? 'monitor');
+  const [tabGroup, setTabGroup] = useState<'run' | 'configure'>('run');
+  const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
+  const [layoutRevision, setLayoutRevision] = useState(0);
   const [resolveOpen, setResolveOpen] = useState(false);
   const [resolveTarget, setResolveTarget] = useState<{ kind: 'production'; pending: DeviceActionPendingState } | { kind: 'manual'; runId: string; action: string }>({ kind: 'production', pending: {} });
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
   const resolveRequest = useRef<object | undefined>(undefined);
   const [resolveForm] = Form.useForm<{ evidence: string; identityEvidence: string; reason?: string }>();
   useEffect(() => {
-    if (!open) { setResolveOpen(false); setResolveSubmitting(false); }
+    if (!open) { setResolveOpen(false); setResolveSubmitting(false); setLayoutEditorOpen(false); }
     return () => { resolveRequest.current = undefined; };
   }, [open]);
 
-  const acceptStatus = (data: unknown) => {
+  const applyStatus = (data: unknown) => {
     if (!isProductionStatus(data)) throw new Error('响应未包含有效的生产状态');
     monitor.acceptStatus(data);
+    return data;
+  };
+  const acceptStatus = (data: unknown) => { applyStatus(data); };
+  const stopProduction = () => {
+    void call({
+      url: apiUrl('production/stop'), action: 'stop', timeoutMs: maxStopTimeoutMs + 10_000, successMessage: '生产已停止',
+      onSuccess: (data) => {
+        const next = applyStatus(data);
+        if (next.state === 'Stopped' && !next.productionLocked) return;
+        return { error: typeof next.lastError === 'string' && next.lastError
+          ? next.lastError : '生产尚未完成停止，请查看运行状态。' };
+      },
+    });
   };
   const startProduction = () => {
     const current = readCurrent();
@@ -44,32 +125,39 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   };
   const saveConfig = async () => {
     const current = readCurrent();
-    if (!statusFresh || !configReady || locked || !current.dirty || current.conflict || !current.config) return;
+    if (!statusFresh || !configReady || locked || !current.dirty || current.conflict || !current.config || !monitor.configRevision) return;
     const submitted = current.config;
     const finishSave = beginSave();
     if (!finishSave) return;
     try {
-      await call({ url: apiUrl('production/config'), method: 'PUT', body: submitted, successMessage: '生产配置已保存', action: 'save', onSuccess: (data) => {
+      await call({ url: apiUrl('production/config'), method: 'PUT', body: submitted, headers: { 'If-Match': monitor.configRevision },
+        successMessage: '生产配置已保存', action: 'save', onSuccess: (data, response) => {
         if (!isProductionConfig(data)) throw new Error('响应未包含有效的生产配置');
+        const revision = response.headers.get('ETag');
+        if (!revision) throw new Error('响应未包含生产配置修订号');
         acceptSaved(submitted, data);
-        monitor.acceptConfig(data);
+        monitor.acceptConfig(data, revision);
       } });
     } finally { finishSave(); }
   };
 
   const locked = Boolean(status?.productionLocked);
   const state = status?.state ?? 'Stopped';
-  const configLocked = locked || !configReady || !statusFresh;
+  const configLocked = !canConfigure || locked || !configReady || !statusFresh;
   const stateColor = state === 'Running' ? 'green' : state === 'Faulted' ? 'red' : state === 'Recovering' ? 'orange' : state === 'Starting' || state === 'Stopping' ? 'processing' : 'default';
-  const selectedJobId = status?.jobId ?? config.jobId ?? undefined;
+  const selectedJobId = status?.jobId ?? monitor.config?.jobId ?? undefined;
   const activeJob = jobs.find((x) => x.id === selectedJobId);
-  const activeAlarms = alarms.filter((a) => a.active);
-  const criticalAlarms = activeAlarms.filter((a) => a.severity === 'Critical');
-  const latestAlarm = [...activeAlarms].sort((a, b) => Date.parse(b.raisedAt) - Date.parse(a.raisedAt))[0];
+  const activeAlarmCount = alarmSummary?.activeCount ?? 0;
+  const criticalAlarmCount = alarmSummary?.criticalCount ?? 0;
+  const pendingAlarmCount = alarmSummary?.pendingCount ?? 0;
+  const latestActiveMessage = alarmSummary?.latestActiveMessage;
   const jobLabel = activeJob
     ? activeJob.name
     : selectedJobId ?? '未选择';
   const jobVersion = status?.lockedJobVersion ?? activeJob?.publishedVersion ?? null;
+  const stateDetail = !statusFresh ? '生产状态尚未确认'
+    : locked ? `已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}`
+      : canConfigure ? '当前已停止：可以编辑生产配置' : '当前已停止';
   const startBlockedReason = !statusFresh ? '生产状态尚未确认，请等待刷新或核对连接。'
     : locked ? '生产运行中：启动前需要先停止当前运行。'
       : !configReady ? '生产配置尚未读取成功，暂不能启动。'
@@ -81,16 +169,19 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   const hero = (
     <div className="production-hero">
       <div className="production-hero-state">
-        <Tag color={stateColor}>{status ? localizeStatus(state) : '读取中'}</Tag>
-        <span className="production-hero-sub">{!statusFresh ? '生产状态尚未确认' : locked ? `已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}` : '当前已停止：可以编辑生产配置'}</span>
+        {/* 过期时不再用绿/红表示状态：颜色本身会被读成"当前在线"，与"状态未确认"矛盾 */}
+        <Tag color={!status || !statusFresh ? 'default' : stateColor}>{status ? localizeStatus(state) : '读取中'}</Tag>
+        <span className="production-hero-sub">{stateDetail}</span>
       </div>
       <div className="production-hero-metrics">
         <div className="production-hero-metric"><b title={jobLabel}>{jobLabel}</b><span>作业 / 配方</span></div>
-        <div className="production-hero-metric"><b>{jobVersion != null ? `V${jobVersion}` : '-'}</b><span>版本</span></div>
-        <div className="production-hero-metric"><b>{status?.cycleCount ?? 0}</b><span>周期数</span></div>
-        <div className="production-hero-metric"><b>{status?.okCount ?? 0}</b><span>合格</span></div>
-        <div className="production-hero-metric"><b>{status?.ngCount ?? 0}</b><span>不合格</span></div>
-        <div className="production-hero-metric"><b>{(status?.lastDurationMs ?? 0).toFixed(1)}</b><span>最近耗时（毫秒）</span></div>
+        <div className="production-hero-metric"><b>{jobVersion != null ? `V${jobVersion}` : '-'}</b><span>{locked ? '运行版本' : '已发布版本'}</span></div>
+        {activeTab !== 'operator' && <>
+          <div className="production-hero-metric"><b>{status?.cycleCount ?? 0}</b><span>周期数</span></div>
+          <div className="production-hero-metric"><b>{status?.okCount ?? 0}</b><span>合格</span></div>
+          <div className="production-hero-metric"><b>{status?.ngCount ?? 0}</b><span>不合格</span></div>
+          <div className="production-hero-metric"><b>{(status?.lastDurationMs ?? 0).toFixed(1)}</b><span>最近耗时（毫秒）</span></div>
+        </>}
       </div>
       <span className={`production-hero-updated${!statusFresh ? ' stale' : ''}`}>
         {!statusFresh
@@ -107,7 +198,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         title="停止生产运行"
         description={`当前锁定在 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}。停止后产线不再接受触发，恢复需要重新启动。`}
         okText="停止" cancelText="取消" okButtonProps={{ danger: true }}
-        onConfirm={() => void call({ url: apiUrl('production/stop'), successMessage: '生产已停止', action: 'stop', onSuccess: acceptStatus })}
+        onConfirm={stopProduction}
         disabled={!locked && statusFresh}>
         <Button danger disabled={!locked && statusFresh} loading={busy.has('stop')}>停止</Button>
       </Popconfirm>
@@ -121,7 +212,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       <Alert
         type={locked ? 'warning' : 'info'}
         showIcon
-        title={!statusFresh ? '生产状态尚未确认' : locked ? `生产已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}` : '当前已停止：可以编辑生产配置'}
+        title={statusFresh && locked ? `生产已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}` : stateDetail}
         description={locked ? `工作流：${status?.lockedWorkflowHash ?? '-'} · 依赖：${status?.lockedDependencyManifestHash?.slice(0, 12) ?? '-'}。发布作业或编辑依赖不会热切换当前运行时。` : '启动时会校验并锁定当前已发布作业及运行时依赖清单，直到停止。'}
       />
 
@@ -209,25 +300,43 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     </Space>
   );
 
+  const acknowledgeAlarm = (id: string) => call({
+    url: alarmEndpoints.ack(id), successMessage: '告警已确认', action: `ack:${id}`,
+    onSuccess: (data) => {
+      const alarm = data as Partial<AlarmRecord> | undefined;
+      if (alarm?.id !== id || alarm.acknowledged !== true) throw new Error('告警确认回执无效');
+      monitor.invalidateAlarmReads();
+    },
+  });
+
   const alarmsTab = (
     <>
-      {/* 服务端自 2026-10-26 起按保留策略裁剪历史，并默认只返回最近 200 条：
-          不写清楚会让用户以为「更早的告警凭空消失了」。 */}
+      <Radio.Group aria-label="告警筛选" value={alarmFilter} onChange={(event) => setAlarmFilter(event.target.value)}>
+        <Radio.Button value="all">全部</Radio.Button>
+        <Radio.Button value="active">活动告警</Radio.Button>
+        <Radio.Button value="pending">待确认</Radio.Button>
+      </Radio.Group>
       <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
-        最多显示最近 200 条告警；已恢复且超出保留上限（2000 条）的历史会按时间清理，活动告警不会被裁剪。
+        活动告警全部保留，已恢复告警按时间保留至总数上限（2000 条）。
       </Typography.Text>
     <Table
       size="small"
       rowKey="id"
-      pagination={{ pageSize: 8 }}
+      loading={alarmsLoading && alarms.length === 0}
+      locale={{ emptyText: errors.alarms ? '告警记录暂不可用'
+        : alarmFilter === 'pending' ? '没有待确认的活动告警'
+          : alarmFilter === 'active' ? '没有活动告警' : '暂无告警记录' }}
+      pagination={{ current: alarmPage, pageSize: ALARM_PAGE_SIZE, total: alarmTotal, showSizeChanger: false, onChange: setAlarmPage }}
       dataSource={alarms}
       columns={[
         { title: '状态', width: 90, render: (_: unknown, a: AlarmRecord) => <Tag color={a.active ? 'red' : 'green'}>{a.active ? '活动' : '已恢复'}</Tag> },
         { title: '级别', dataIndex: 'severity', width: 90, render: (v: string) => severityLabels[v] ?? v },
         { title: '代码', dataIndex: 'code', width: 150 },
         { title: '消息', dataIndex: 'message' },
-        { title: '发生时间', dataIndex: 'raisedAt', width: 180, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
-        { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> : <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void call({ url: alarmEndpoints.ack(a.id), successMessage: '告警已确认', action: `ack:${a.id}` })}>确认</Button> }
+        { title: '最近发生', width: 180, render: (_: unknown, a: AlarmRecord) => new Date(a.lastRaisedAt ?? a.raisedAt).toLocaleString('zh-CN') },
+        { title: '次数', dataIndex: 'occurrenceCount', width: 72, render: (value: AlarmRecord['occurrenceCount']) => value ?? 1 },
+        { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> :
+          <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void acknowledgeAlarm(a.id)}>确认</Button> }
       ]}
       />
     </>
@@ -261,7 +370,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         <span>看门狗超时</span><InputNumber aria-label="看门狗超时" disabled={configLocked} min={100} max={600000} value={config.maxCycleMs} addonAfter="毫秒" onChange={v => changeConfig({ maxCycleMs: Number(v ?? 15000) })} />
         <span>最大连续失败次数</span><InputNumber disabled={configLocked} min={1} max={1000} value={config.maxConsecutiveFailures} onChange={v => changeConfig({ maxConsecutiveFailures: Number(v ?? 3) })} />
         <span>恢复延迟</span><InputNumber disabled={configLocked} min={0} max={600000} value={config.recoveryDelayMs} addonAfter="毫秒" onChange={v => changeConfig({ recoveryDelayMs: Number(v ?? 1000) })} />
-        <span>停止超时</span><InputNumber disabled={configLocked} min={100} max={60000} value={config.stopTimeoutMs} addonAfter="毫秒" onChange={v => changeConfig({ stopTimeoutMs: Number(v ?? 5000) })} />
+        <span>停止超时</span><InputNumber disabled={configLocked} min={100} max={maxStopTimeoutMs} value={config.stopTimeoutMs} addonAfter="毫秒" onChange={v => changeConfig({ stopTimeoutMs: Number(v ?? 5000) })} />
       </Space>
       {saveRow}
     </Space>
@@ -304,14 +413,13 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     </Space>
   );
 
-  const body = (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
-      {contextHolder}
+  const localDetails = (
+    <>
       {hero}
       {actions}
       {/* R05：待核对设备动作——管理员必须在产品内看到清单、提交可追溯的证据；
           核对前所有设备动作入口（生产/手动/临时运行）都会被统一授权闸门拒绝。 */}
-      {errors.pending && (
+      {canReconcile && errors.pending && (
         <Alert
           type="warning"
           showIcon
@@ -319,7 +427,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
           description={`${errors.pending}。保留最后读取到的清单，请核对连接和权限。`}
         />
       )}
-      {pendingActions && (
+      {canReconcile && pendingActions && (
         <Alert
           type="error"
           showIcon
@@ -348,7 +456,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         />
       )}
       <Modal
-        open={resolveOpen}
+        open={canReconcile && resolveOpen}
         onCancel={() => { if (!resolveRequest.current) setResolveOpen(false); }}
         closable={!resolveSubmitting} keyboard={!resolveSubmitting} mask={{ closable: !resolveSubmitting }}
         confirmLoading={resolveSubmitting} cancelButtonProps={{ disabled: resolveSubmitting }}
@@ -406,7 +514,9 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       {errors.config && <Alert type="warning" showIcon title="生产配置暂不可用" description={errors.config} action={<Button onClick={monitor.refresh}>重试读取</Button>} />}
       {errors.jobs && <Alert type="warning" showIcon title="配方列表已过期" description={errors.jobs} />}
       {errors.alarms && <Alert type="warning" showIcon title="告警记录已过期" description={errors.alarms} />}
-      {conflict && <Alert type="warning" showIcon title="服务端配置已变更，当前编辑已保留" description="请核对并载入最新配置后重新修改；当前草稿不会自动覆盖服务端的新配置。" />}
+      {errors.alarmSummary && <Alert type="warning" showIcon title="活动告警统计未更新" description={errors.alarmSummary} />}
+      {merge && <ProductionConfigConflict key={JSON.stringify(merge.fields)} merge={merge} disabled={configLocked || busy.size > 0}
+        onStale={() => { void messageApi.warning('配置已再次变更，请重新核对差异。'); }} />}
       {dirty && !conflict && <Alert type="info" showIcon title="生产配置有未保存修改" description="实时监控继续刷新，配置草稿会保留；保存配置后才可启动生产。" />}
       {status?.ptpGuard?.enabled && !status.ptpGuard.healthy && (
         <Alert type="error" showIcon title="PTP 生产保护已阻止运行" description={status.ptpGuard.summary ?? `${status.ptpGuard.groups.length} 个受保护的同步组未就绪。`} />
@@ -419,27 +529,88 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
           description={status.synchronizationGuard.summary ?? `${status.synchronizationGuard.groups.length} 个同步相机组未达标。`}
         />
       )}
-      {activeAlarms.length > 0 && (
+      {activeAlarmCount > 0 && (
         <Alert
           type="warning"
           showIcon
-          title={`${activeAlarms.length} 条活动告警${criticalAlarms.length ? ` · ${criticalAlarms.length} 条严重` : ''}`}
-          description={latestAlarm ? `最近：${latestAlarm.message}` : undefined}
+          title={`${activeAlarmCount} 条活动告警${criticalAlarmCount ? ` · ${criticalAlarmCount} 条严重` : ''}`}
+          description={latestActiveMessage ? `最近：${latestActiveMessage}` : undefined}
+          action={!kiosk && pendingAlarmCount > 0 && <Button size="small" onClick={() => { setAlarmFilter('pending'); setActiveTab('alarms'); }}>
+            查看待确认告警（{pendingAlarmCount}）
+          </Button>}
         />
       )}
+    </>
+  );
+
+  const operatorTab = open && <div className="operator-workspace-content">
+    {pendingAlarmCount > 0 && <Suspense fallback={<span role="status">正在读取待确认告警…</span>}>
+      <OperatorAlarmQueue busy={busy} onAcknowledge={acknowledgeAlarm} />
+    </Suspense>}
+    <OperatorDashboard key={`${selectedJobId ?? ''}-${layoutRevision}`} jobId={selectedJobId} status={status} statusFresh={statusFresh}
+      alarmSummary={alarmSummary} alarmFresh={!errors.alarmSummary && Boolean(alarmSummary)} kiosk={kiosk} lastUpdatedAt={lastUpdatedAt}
+      onEdit={canConfigure && !kiosk && jobs.length > 0 ? () => setLayoutEditorOpen(true) : undefined} />
+  </div>;
+
+  // kiosk：没有标签栏，只有操作员工作台——车间大屏上任何可切换的入口都是误触来源。
+  // 标签分两组：运行（操作员/监控/告警/工位/收件箱）与配置（生产配置/PTP/同步健康）。
+  // 此前 8 个同层标签挤在一起，"PTP 保护"要扫过整排才找得到，且操作与配置语义混在一处。
+  const runTabKeys = ['operator', 'monitor', 'alarms', 'stations', ...(canEngineer ? ['deliveries'] : [])];
+  const configTabKeys = canConfigure ? ['config', 'ptp', 'sync'] : [];
+  // 回退用"工程师最常用的运行监控"而不是列表第一项（第一项是操作员预览，只适合操作员视角）
+  const runFallbackTab = canConfigure ? 'monitor' : 'operator';
+  const shownTab = (tabGroup === 'run' ? runTabKeys : configTabKeys).includes(activeTab)
+    ? activeTab : (tabGroup === 'run' ? runFallbackTab : 'config');
+  const switchTabGroup = (next: 'run' | 'configure') => {
+    setTabGroup(next);
+    const keys = next === 'run' ? runTabKeys : configTabKeys;
+    if (!keys.includes(activeTab)) setActiveTab(next === 'run' ? runFallbackTab : 'config');
+  };
+  const runTabItems = [
+    { key: 'operator', label: '操作员', children: shownTab === 'operator' && operatorTab },
+    { key: 'monitor', label: '运行监控', children: monitorTab },
+    { key: 'alarms', label: `告警${activeAlarmCount ? `（${activeAlarmCount}）` : ''}`, children: alarmsTab },
+    { key: 'stations', label: '多工位', children: open && shownTab === 'stations' &&
+      <Suspense fallback={<span role="status">正在加载工位总览…</span>}><ProductionStations canSend={canConfigure} /></Suspense> },
+    ...(canEngineer ? [{ key: 'deliveries', label: '配方收件箱', children: open && shownTab === 'deliveries' &&
+      <Suspense fallback={<span role="status">正在加载配方收件箱…</span>}>
+        <RecipeDeliveryInbox onPublished={monitor.refresh} />
+      </Suspense> }] : []),
+  ];
+  const configTabItems = canConfigure ? [
+    { key: 'config', label: '生产配置', children: configTab },
+    { key: 'ptp', label: 'PTP 保护', children: ptpTab },
+    { key: 'sync', label: '同步健康保护', children: syncTab },
+  ] : [];
+
+  const body = kiosk ? (
+    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      {contextHolder}
+      {localDetails}
+      {operatorTab}
+    </Space>
+  ) : (
+    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      {contextHolder}
+      {shownTab !== 'stations' && shownTab !== 'deliveries' && localDetails}
+      {canConfigure && <Segmented size="small" value={tabGroup}
+        onChange={(value) => switchTabGroup(value as 'run' | 'configure')}
+        options={[{ label: '运行', value: 'run' }, { label: '配置', value: 'configure' }]} />}
       <Tabs
-        defaultActiveKey="monitor"
-        items={[
-          { key: 'monitor', label: '运行监控', children: monitorTab },
-          { key: 'alarms', label: `告警${activeAlarms.length ? `（${activeAlarms.length}）` : ''}`, children: alarmsTab },
-          { key: 'config', label: '生产配置', children: configTab },
-          { key: 'ptp', label: 'PTP 保护', children: ptpTab },
-          { key: 'sync', label: '同步健康保护', children: syncTab }
-        ]}
+        activeKey={shownTab}
+        onChange={setActiveTab}
+        items={tabGroup === 'run' ? runTabItems : configTabItems}
       />
+      {open && canConfigure && layoutEditorOpen && <Suspense fallback={<span role="status">正在加载操作员布局…</span>}>
+        <OperatorLayoutDialog jobs={jobs} initialJobId={selectedJobId}
+          onClose={() => setLayoutEditorOpen(false)} onSaved={() => setLayoutRevision((revision) => revision + 1)} />
+      </Suspense> }
     </Space>
   );
 
-  if (embedded) return <div className="runtime-only-page"><div className="runtime-only-title">VISIONSTUDIO · 生产运行</div>{body}</div>;
+  if (embedded) return <div className={`runtime-only-page${kiosk ? ' is-kiosk' : ''}`}>
+    {!kiosk && <div className="runtime-only-title">VisionStudio · 生产运行</div>}
+    {body}
+  </div>;
   return <Modal open={open} onCancel={onClose} footer={null} title="生产运行" width={1120}>{body}</Modal>;
 }

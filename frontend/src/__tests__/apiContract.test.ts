@@ -29,6 +29,7 @@ const REQUIRED_SPEC_DTOS = [
   'NodeCatalogItem',
   'RobotDescriptor',
   'AlarmRecord',
+  'AlarmSummary',
   'JobDescriptor',
   'RunTraceRecord',
   'TracePage',
@@ -142,7 +143,14 @@ const REQUIRED_SPEC_DTOS = [
   'DebugSessionRunResponse',
   'DebugSessionSnapshotResponse',
   'MatchingAutoTuneHttpResponse',
-  'ParameterTuningPreviewResult'
+  'ParameterTuningPreviewResult',
+  // SPC 看板（2026-11-23 响应具名化）：数据集清单与分析结果都由前端直接消费。
+  'SpcDatasetSummary',
+  'SpcAnalysis',
+  'SpcCapability',
+  'SpcChart',
+  'SpcChartPoint',
+  'SpcViolation'
 ] as const;
 
 describe('API contract snapshot', () => {
@@ -202,6 +210,10 @@ describe('API contract snapshot', () => {
     // 2026-11-10 刷新时补入 model-assets/template-assets（此前快照停在 2026-10-29）。
     // 这里只锁"已经存在于快照的域"，避免刷新后的端点再次被旧快照覆盖。
     const requiredPaths = ['/api/validate', '/api/compile', '/api/model-assets', '/api/template-assets', '/api/diagnostics/node-durations', '/api/validation/datasets', '/api/validation/runs/{runId}', '/api/traces/{runId}', '/api/traces/{runId}/replay/context', '/api/storage/backups', '/api/catalog/meta', '/api/diagnostics/summary', '/api/plugins', '/api/plugins/sdk', '/api/auth/status', '/api/security/users', '/api/audit', '/api/calibration/providers', '/api/calibration/capture-grid', '/api/calibration/solve', '/api/calibrations', '/api/camera-intrinsics', '/api/cameras', '/api/cameras/discover', '/api/media/status', '/api/media/collections', '/api/media/items', '/api/devices', '/api/devices/{id}/tags/{tagId}', '/api/device-profiles', '/api/device-address-templates', '/api/jobs', '/api/jobs/{id}', '/api/jobs/{id}/versions/{version}', '/api/jobs/{id}/dependencies', '/api/robots', '/api/robot-traces', '/api/robot-traces/{traceId}', '/api/production/status', '/api/production/config', '/api/production/ptp-guard', '/api/production/synchronization-guard', '/api/camera-sync/groups', '/api/camera-sync/groups/{id}/status', '/api/camera-sync/runs', '/api/camera-sync/groups/{id}/statistics', '/api/camera-sync/groups/{id}/ptp-diagnostics', '/api/camera-sync/groups/{id}/gige-network-diagnostics', '/api/camera-sync/commissioning-tests/{testId}', '/api/cameras/{id}/commissioning', '/api/cameras/{id}/features', '/api/camera-feature-profiles', '/api/plugin-packages', '/api/plugin-publishers', '/api/model-packages', '/api/model-packages/{id}', '/api/modules', '/api/modules/{id}', '/api/modules/{id}/versions/{version}', '/api/modules/extract', '/api/investigations', '/api/investigations/trends', '/api/investigations/{id}', '/api/investigations/{id}/verification-evidence', '/api/hardware-provenance', '/api/hardware-provenance/{kind}/{id}', '/api/scripts/validate', '/api/scripts/complete', '/api/scripts/format', '/api/recipes', '/api/jobs/{id}/versions/{fromVersion}/diff/{toVersion}', '/api/plugin-benchmarks', '/api/plugin-benchmarks/{runId}', '/api/plugin-benchmarks/{runId}/ci-spec', '/api/plugin-workers', '/api/plugin-workers/performance', '/api/workflows', '/api/workflows/{id}', '/api/jobs/{id}/parameters', '/api/jobs/{id}/parameterization/resolve', '/api/debug/sessions', '/api/debug/sessions/{sessionId}', '/api/matching/auto-tune', '/api/tuning/preview'];
+    requiredPaths.push('/api/production/operator-layout/{jobId}', '/api/production/stations', '/api/production/stations/local',
+      '/api/production/recipe-rollouts', '/api/production/recipe-rollouts/latest-by-station', '/api/production/recipe-deliveries', '/api/production/recipe-deliveries/{id}/publish',
+      '/api/production/operator-preview');
+    requiredPaths.push('/api/spc/datasets', '/api/spc/series');
     expect(requiredPaths.filter((path) => !(path in spec.paths))).toEqual([]);
   });
 });

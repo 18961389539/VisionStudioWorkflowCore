@@ -153,13 +153,8 @@ internal static class PreprocessImageHelpers
 }
 
 /// <summary>
-/// 阈值统计域。ROI 存在时把 8 位灰度图裁剪到 ROI 包围盒，让 Otsu / 自适应阈值只统计 ROI 内的像素
-/// （此前 ROI 只在输出阶段清零，阈值本身仍由全图直方图决定，ROI 外的高亮会把阈值拉偏）。
-/// 同时给出 ROI 覆盖的像素数，作为前景占比的分母——用整图面积做分母会让 ROI 越小、占比越接近 0。
-///
-/// 裁剪而非掩膜的原因：JLVision 的 Otsu / 局部均值都按直方图或邻域计算，掩膜清零会引入一个
-/// 巨大的 0 值尖峰并污染邻域。矩形 ROI 裁剪即精确；圆形/多边形/画笔取包围盒，统计会含少量框外像素。
-/// <c>padding</c> 用于自适应阈值：外扩半个窗口，保证 ROI 内每个像素的邻域与整图计算时完全相同。
+/// 栅格化 ROI 并计算前景占比的分母。手动和 Otsu 共用掩膜，局部自适应另取外扩半个窗口的
+/// 灰度裁剪，以保留选区内每个像素在整图中的邻域。
 /// </summary>
 internal sealed class ThresholdStatisticsDomain : IDisposable
 {
@@ -187,7 +182,7 @@ internal sealed class ThresholdStatisticsDomain : IDisposable
     /// <summary>ROI 掩膜；未设置 ROI 时为 null。交给 <see cref="PreprocessImageHelpers.ApplyMask"/> 以免重复栅格化。</summary>
     public Mat? Mask => _mask;
 
-    public static ThresholdStatisticsDomain Create(Mat gray8, VisionRoi? roi, int padding, bool crop, CancellationToken cancellationToken)
+    public static ThresholdStatisticsDomain Create(Mat gray8, VisionRoi? roi, CancellationToken cancellationToken, int neighborhoodPadding = 0)
     {
         var whole = new Rect(0, 0, gray8.Width, gray8.Height);
         if (roi is null) return new ThresholdStatisticsDomain(gray8, whole, null, gray8.Total(), null);
@@ -199,9 +194,9 @@ internal sealed class ThresholdStatisticsDomain : IDisposable
             if (pixelCount <= 0)
                 throw new InvalidOperationException(
                     $"{roi.Type} ROI covers no pixels in the {gray8.Width}×{gray8.Height} image; threshold statistics would be empty. Move or enlarge the ROI.");
-            if (!crop) return new ThresholdStatisticsDomain(gray8, whole, null, pixelCount, mask);
+            if (neighborhoodPadding == 0) return new ThresholdStatisticsDomain(gray8, whole, null, pixelCount, mask);
 
-            var rect = Inflate(VisionRoiOpenCvExtensions.BoundsOf(mask), padding, gray8.Size());
+            var rect = Inflate(VisionRoiOpenCvExtensions.BoundsOf(mask), neighborhoodPadding, gray8.Size());
             using var view = new Mat(gray8, rect);
             var cropped = view.Clone();
             return new ThresholdStatisticsDomain(cropped, rect, cropped, pixelCount, mask);
@@ -615,7 +610,7 @@ internal static class AdaptiveThresholdCore
         try
         {
             // 自适应阈值取局部窗口：外扩半个窗口，ROI 内每个像素的邻域才与整图计算时一致。
-            using var domain = ThresholdStatisticsDomain.Create(gray, roi, blockSize / 2, crop: true, cancellationToken);
+            using var domain = ThresholdStatisticsDomain.Create(gray, roi, cancellationToken, neighborhoodPadding: blockSize / 2);
             var binary = ImageTransformOutput.Create(target => JLVisionOperators.AdaptiveThreshold(
                 domain.Gray, target, maxValue,
                 method == "gaussian" ? AdaptiveThresholdTypes.GaussianC : AdaptiveThresholdTypes.MeanC,
@@ -661,12 +656,18 @@ internal static class AdaptiveThresholdCore
 
 internal static class OtsuThresholdCore
 {
-
-    /// <summary>在给定灰度图上求 Otsu 全局阈值。Otsu 模式与手动模式的建议值共用，避免两套算法口径。</summary>
-    public static double Level(Mat gray)
+    /// <summary>用同一统计域求自动阈值和手动模式的建议值。</summary>
+    public static double Level(Mat gray, ThresholdStatisticsDomain domain, CancellationToken cancellationToken)
     {
-        using var discard = new Mat();
-        return JLVisionOperators.Threshold(gray, discard, 0, 255, ThresholdTypes.Otsu | ThresholdTypes.Binary);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (domain.Mask is not { } mask)
+            return JLVisionOperators.OtsuLevel(gray, null, cancellationToken);
+
+        // 只处理包围盒大小的缓冲；包围盒内未被 ROI 选中的像素也要从直方图排除。
+        var bounds = VisionRoiOpenCvExtensions.BoundsOf(mask);
+        using var patch = new Mat(gray, bounds);
+        using var maskPatch = domain.PixelCount == (long)bounds.Width * bounds.Height ? null : new Mat(mask, bounds);
+        return JLVisionOperators.OtsuLevel(patch, maskPatch, cancellationToken);
     }
 
     public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
@@ -687,10 +688,8 @@ internal static class OtsuThresholdCore
         Mat? output = null;
         try
         {
-            // 阈值只由统计域决定：ROI 存在时只用包围盒内的像素求 Otsu，ROI 外的高亮不再参与直方图。
-            using var domain = ThresholdStatisticsDomain.Create(gray, roi, 0, crop: true, cancellationToken);
-            // Otsu：由直方图自动求全局阈值——输出阈值供追溯与"光照漂移"监控。
-            var computed = OtsuThresholdCore.Level(domain.Gray);
+            using var domain = ThresholdStatisticsDomain.Create(gray, roi, cancellationToken);
+            var computed = Level(gray, domain, cancellationToken);
             var binary = ImageTransformOutput.Create(target => JLVisionOperators.Threshold(gray, target, computed, maxValue,
                 invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
             output = PreprocessImageHelpers.ApplyMask(binary, domain.Mask, cancellationToken);

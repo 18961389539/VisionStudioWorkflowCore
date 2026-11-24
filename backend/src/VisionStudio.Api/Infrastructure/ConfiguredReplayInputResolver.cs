@@ -23,8 +23,8 @@ public sealed class ConfiguredReplayInputResolver : IReplayInputResolver
     {
         var roots = new List<string>
         {
-            VisionStudioDataRoot.Resolve(environment.ContentRootPath),
-            VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configuration["MediaLibrary:RootPath"])
+            VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration),
+            VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configuration["MediaLibrary:RootPath"], configuration)
         };
         var configured = configuration[ConfigurationKey];
         if (!string.IsNullOrWhiteSpace(configured))

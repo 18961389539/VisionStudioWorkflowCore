@@ -25,11 +25,14 @@ export function isProductionConfig(value: unknown): value is ProductionRuntimeCo
       || (typeof config[key] === typeof fallback && (typeof fallback !== 'number' || Number.isFinite(config[key]))));
 }
 
+export function differingProductionConfigFields(a: ProductionRuntimeConfig, b: ProductionRuntimeConfig): Array<keyof ProductionRuntimeConfig> {
+  // 比较全部标量字段，包括还未在表单中显示的服务端字段。
+  const fields = new Set([...Object.keys(a), ...Object.keys(b)] as Array<keyof ProductionRuntimeConfig>);
+  return [...fields].filter((field) => !Object.is(a[field], b[field]));
+}
+
 export function productionConfigsEqual(a: ProductionRuntimeConfig, b: ProductionRuntimeConfig): boolean {
-  // 配置字段为标量；同时保留并比较服务端新增的字段，不能因对象键顺序不同误报修改。
-  const left = a as unknown as Record<string, unknown>;
-  const right = b as unknown as Record<string, unknown>;
-  return [...new Set([...Object.keys(left), ...Object.keys(right)])].every((key) => Object.is(left[key], right[key]));
+  return differingProductionConfigFields(a, b).length === 0;
 }
 
 export function isProductionStatus(value: unknown): value is ProductionRuntimeStatus {

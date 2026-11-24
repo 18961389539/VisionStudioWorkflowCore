@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Runtime;
 
@@ -26,7 +27,7 @@ namespace VisionStudio.Engine.Nodes;
 /// - 匹配不足不抛异常，返回 found=false 并在 diagnostics 里写明 reason（与 match.shape 一致），
 ///   只有配置错误（模板无特征、参数越界）才硬失败。
 /// </summary>
-public sealed class FeatureMatchNode : IVisionNodeExecutor
+public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "match.feature";
 
@@ -96,7 +97,8 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor
         // 场景与模板都统一转成 8 位单通道：SIFT/ORB 只接受 8 位图，16 位按 1/257 线性压到 8 位
         // （与 image.threshold / measure.caliper 的 16 位处理口径保持一致，不做隐式截断）。
         using var sceneGray = ToGray8(scene.Mat, "scene");
-        using var templateGray = AcquireTemplateGray(context, node);
+        var (template, templateSource, templateAssetId, templateAssetVersion) = AcquireTemplateGray(context, node);
+        using var templateGray = template;
 
         using var detector = CreateDetector(options);
         using var sceneMask = options.SceneRoi?.BuildMask(sceneGray.Size(), cancellationToken);
@@ -126,6 +128,9 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor
             var diagnostics = CoordinateValidation.Diagnostics(
                 Type,
                 ("detector", options.Detector),
+                ("templateSource", templateSource),
+                ("templateAssetId", templateAssetId),
+                ("templateAssetVersion", templateAssetVersion),
                 ("transformType", options.TransformType),
                 ("found", outcome.Found),
                 ("reason", outcome.Reason),
@@ -183,6 +188,9 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor
             return new NodeExecutorResult(outputs, new Dictionary<string, object?>
             {
                 ["detector"] = options.Detector,
+                ["templateSource"] = templateSource,
+                ["templateAssetId"] = templateAssetId,
+                ["templateAssetVersion"] = templateAssetVersion,
                 ["transformType"] = options.TransformType,
                 ["found"] = outcome.Found,
                 ["reason"] = outcome.Reason,
@@ -308,14 +316,35 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor
         return gray;
     }
 
-    /// <summary>模板来源优先级：template 端口 &gt; templatePath。</summary>
-    private static Mat AcquireTemplateGray(NodeExecutionContext context, NodeDefinition node)
+    public void ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        if (!connectedInputs.Contains("template") && !string.IsNullOrWhiteSpace(node.GetString("templateAssetId", "")))
+            _ = ReadPinnedTemplateVersion(node);
+    }
+
+    private static int ReadPinnedTemplateVersion(NodeDefinition node)
+    {
+        var version = node.GetInt("templateAssetVersion", 0);
+        if (version <= 0)
+            throw new InvalidOperationException("match.feature requires a positive templateAssetVersion when using a template asset.");
+        return version;
+    }
+
+    private static (Mat Image, string Source, string? AssetId, int? AssetVersion) AcquireTemplateGray(NodeExecutionContext context, NodeDefinition node)
     {
         if (context.TryGetValue("template", out _))
         {
             // RequireImage 同时兼容引擎自有 VisionImage 与插件传入的 IVisionImage（借出 Mat）。
             var template = context.RequireImage("template");
-            return ToGray8(template.Mat, "template");
+            return (ToGray8(template.Mat, "template"), "input-port", null, null);
+        }
+
+        var assetId = node.GetString("templateAssetId", "").Trim();
+        if (assetId.Length != 0)
+        {
+            var version = ReadPinnedTemplateVersion(node);
+            using var assetImage = MatchingTemplateAsset.Load(context, node, assetId, version, ImreadModes.Unchanged);
+            return (ToGray8(assetImage, "template"), "asset", assetId, version);
         }
 
         var path = node.GetString("templatePath", string.Empty).Trim();
@@ -325,7 +354,7 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor
         using var fileImage = Cv2.ImRead(System.IO.Path.GetFullPath(path), ImreadModes.Grayscale);
         if (fileImage.Empty())
             throw new InvalidOperationException($"match.feature could not read templatePath '{path}'.");
-        return ToGray8(fileImage, "template");
+        return (ToGray8(fileImage, "template"), "file", null, null);
     }
 
     private static Feature2D CreateDetector(Options options) => options.Detector == "orb"

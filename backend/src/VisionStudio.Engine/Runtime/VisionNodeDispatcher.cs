@@ -25,13 +25,24 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
         CancellationToken cancellationToken)
         => ExecuteAsync(node, inputs, workflowScope, cancellationToken, runId: null);
 
-    public async ValueTask<NodeExecutorResult> ExecuteAsync(
+    public ValueTask<NodeExecutorResult> ExecuteAsync(
         NodeDefinition node,
         IReadOnlyDictionary<string, VisionValue> inputs,
         string? workflowScope,
         CancellationToken cancellationToken,
         string? runId,
         IModelAssetSource? modelAssets = null)
+        => ExecuteAsync(node, inputs, workflowScope, cancellationToken, runId, modelAssets, null, false);
+
+    internal async ValueTask<NodeExecutorResult> ExecuteAsync(
+        NodeDefinition node,
+        IReadOnlyDictionary<string, VisionValue> inputs,
+        string? workflowScope,
+        CancellationToken cancellationToken,
+        string? runId,
+        IModelAssetSource? modelAssets,
+        string? workflowId,
+        bool isDebugRun)
     {
         var registration = registry.Require(node.Type);
         ValidateInputs(node, registration.Catalog, inputs);
@@ -48,7 +59,12 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
         NodeExecutorResult result;
         try
         {
-            result = await ExecuteWithTimeoutAsync(registration, node, inputs, workflowScope, runId, modelAssets, timeoutMs, cancellationToken);
+            var context = new NodeExecutionContext(inputs, workflowScope, runId, modelAssets)
+            {
+                WorkflowId = workflowId,
+                IsDebugRun = isDebugRun
+            };
+            result = await ExecuteWithTimeoutAsync(registration, node, context, timeoutMs, cancellationToken);
         }
         catch (NodeTimeoutException)
         {
@@ -101,14 +117,10 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
     private static async ValueTask<NodeExecutorResult> ExecuteWithTimeoutAsync(
         VisionNodeRegistration registration,
         NodeDefinition node,
-        IReadOnlyDictionary<string, VisionValue> inputs,
-        string? workflowScope,
-        string? runId,
-        IModelAssetSource? modelAssets,
+        NodeExecutionContext context,
         int timeoutMs,
         CancellationToken cancellationToken)
     {
-        var context = new NodeExecutionContext(inputs, workflowScope, runId, modelAssets);
         if (timeoutMs == 0)
             return await registration.ExecuteAsync(context, node, cancellationToken);
 

@@ -370,7 +370,7 @@ if (-not (Test-Path -LiteralPath $e2ePlaywrightPackage)) {
 # 这里额外拉起一个真实宿主（独立端口 + 独立数据根），跑 real-backend-smoke.spec.ts：
 # 登录 → 目录 → 真执行 → 追溯落库 → 节点 span。桩化用例照旧，不受影响。
 $e2eApi = 'http://127.0.0.1:5199'
-$e2eData = Join-Path $root 'artifacts/e2e-data'
+$e2eData = Join-Path $root ("artifacts/e2e-data/" + [guid]::NewGuid().ToString('N'))
 $e2eLogDir = Join-Path $results 'e2e-api'
 New-Item $e2eData -ItemType Directory -Force | Out-Null
 New-Item $e2eLogDir -ItemType Directory -Force | Out-Null
@@ -451,7 +451,7 @@ try {
         npx playwright install chromium --no-shell
         Assert-LastExitCode 'playwright browser install'
 
-        # 宿主 URL 通过环境变量传给 real-backend-smoke.spec.ts（默认即 5199）。
+        # API 冒烟和浏览器 Vite 代理共用隔离宿主。
         $env:VISIONSTUDIO_E2E_API = $e2eApi
         # 每轮一个全新的空 outputDir：Playwright 启动会递归清空它，本机安全删除包装器对
         # 单批 >50 个条目要求人工确认，历史 trace 攒到上千个时测试还没开始就红。

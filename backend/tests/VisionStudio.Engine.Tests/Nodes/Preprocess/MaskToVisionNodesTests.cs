@@ -128,6 +128,65 @@ public sealed class MaskToVisionNodesTests
         region.Outputs["image"].Require<VisionImage>("image").Dispose();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProbabilityMasksUseInclusiveThresholdAtOriginalDepth(bool useDouble)
+    {
+        using var mask = VisionImage.Own(new Mat(18, 32, useDouble ? MatType.CV_64FC1 : MatType.CV_32FC1, Scalar.All(0.2)));
+        Cv2.Rectangle(mask.Mat, new Rect(2, 4, 5, 5), Scalar.All(0.69), -1);
+        Cv2.Rectangle(mask.Mat, new Rect(10, 4, 5, 5), Scalar.All(0.7), -1);
+        Cv2.Rectangle(mask.Mat, new Rect(20, 4, 5, 5), Scalar.All(1), -1);
+        var parameters = Node(("maskMode", "probability"), ("probabilityThreshold", "0.7"));
+
+        var region = await Run(new RegionFromMaskNode(), mask, parameters);
+        using var binary = region.Outputs["image"].Require<VisionImage>("image");
+        var contour = await Run(new ContourFromMaskNode(), mask, parameters);
+        Assert.Equal(50L, region.Outputs["area"].Require<long>("area"));
+        Assert.Equal(2L, region.Outputs["count"].Require<long>("count"));
+        Assert.Equal(2L, contour.Outputs["count"].Require<long>("count"));
+        Assert.Equal((byte)0, binary.Mat.At<byte>(5, 3));
+        Assert.Equal((byte)255, binary.Mat.At<byte>(5, 11));
+        Assert.Equal((byte)255, binary.Mat.At<byte>(5, 21));
+        Assert.Equal("probability", contour.Summary["maskMode"]);
+
+        var invertedParameters = Node(("maskMode", "probability"), ("probabilityThreshold", "0.7"), ("invert", "true"), ("retrieval", "all"));
+        var inverted = await Run(new RegionFromMaskNode(), mask, invertedParameters);
+        using var invertedBinary = inverted.Outputs["image"].Require<VisionImage>("image");
+        var invertedContours = await Run(new ContourFromMaskNode(), mask, invertedParameters);
+        Assert.Equal(18L * 32 - 50, inverted.Outputs["area"].Require<long>("area"));
+        Assert.Equal(3L, invertedContours.Outputs["count"].Require<long>("count"));
+        Assert.Equal((byte)0, invertedBinary.Mat.At<byte>(5, 11));
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(-0.001)]
+    [InlineData(1.001)]
+    public async Task BothProbabilityNodesRejectInvalidPixels(double probability)
+    {
+        using var mask = VisionImage.Own(new Mat(4, 4, MatType.CV_64FC1, Scalar.All(probability)));
+        var parameters = Node(("maskMode", "probability"));
+        foreach (var executor in new IVisionNodeExecutor[] { new RegionFromMaskNode(), new ContourFromMaskNode() })
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(executor, mask, parameters));
+            Assert.Contains("finite and within 0..1", error.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ProbabilityModeRejectsByteInputAndInvalidThreshold()
+    {
+        using var mask = Mask((4, 4, new Rect(0, 0, 4, 4)));
+        var executor = new RegionFromMaskNode();
+        var badImage = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(executor, mask, Node(("maskMode", "probability"))));
+        Assert.Contains("float32 or float64", badImage.Message);
+        var badThreshold = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(executor, mask, Node(("maskMode", "probability"), ("probabilityThreshold", "1.01"))));
+        Assert.Contains("probabilityThreshold", badThreshold.Message);
+    }
+
     // ===== 夹具 =====
 
     private static VisionImage Mask(params (int Width, int Height, Rect Rect)[] rects)

@@ -29,6 +29,7 @@
     <PackageReference Include="McMaster.NETCore.Plugins" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
   </ItemGroup>
   <Target Name="CopyPluginWorkerForBuild" AfterTargets="Build">
     <ItemGroup>

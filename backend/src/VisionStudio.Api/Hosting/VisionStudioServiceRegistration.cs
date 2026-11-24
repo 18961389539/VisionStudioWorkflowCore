@@ -17,6 +17,7 @@ using VisionStudio.Api.Security;
 using Microsoft.Extensions.Options;
 using VisionStudio.Api.Media;
 using VisionStudio.Api.Provenance;
+using VisionStudio.Api.Spc;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Device;
 using VisionStudio.Engine.Nodes;
@@ -150,7 +151,7 @@ public static class VisionStudioServiceRegistration
         // 持久滚动文件日志（data/logs，按天、保留 14 天）：现场故障后可直接取日志导出，
         // 不依赖控制台留存。写入失败绝不影响主流程，但丢弃/失败计数经 /api/health 暴露（F10）。
         var fileLogger = new RollingFileLoggerProvider(
-            Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "logs"));
+            Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "logs"));
         services.AddLogging(builder => builder.AddProvider(fileLogger));
         services.AddSingleton(fileLogger);
 
@@ -160,7 +161,9 @@ public static class VisionStudioServiceRegistration
         // 拿到真实客户端 IP / scheme。默认关闭，见 ReverseProxyRegistration 的说明。
         services.AddVisionStudioForwardedHeaders(configuration);
         services.Configure<SecurityOptions>(configuration.GetSection("Security"));
+        services.Configure<SecurityHeadersOptions>(configuration.GetSection("SecurityHeaders"));
         services.AddSingleton<SecurityStore>();
+        services.AddSingleton<ServiceTokenStore>();
         services.AddSingleton<AuditEventStore>();
         services.AddAuthentication(options =>
         {
@@ -169,10 +172,27 @@ public static class VisionStudioServiceRegistration
             options.DefaultForbidScheme = VisionStudioAuthenticationHandler.Scheme;
         }).AddScheme<AuthenticationSchemeOptions, VisionStudioAuthenticationHandler>(VisionStudioAuthenticationHandler.Scheme, _ => { });
         services.AddAuthorizationBuilder()
-            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
+            // 服务令牌必须显式授权（P3-6）：兜底策略的 "已登录即可" 不能落到服务主体上，
+            // 否则一个只读 MES 令牌能调用所有未标注角色的读接口（诊断、资产、配置）。
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .RequireAssertion(context => !context.User.HasClaim(claim => claim.Type == SecurityClaims.ServiceTokenId))
+                .Build())
             .AddPolicy(SecurityPolicies.Operator, policy => policy.RequireRole(SecurityRoles.Operator, SecurityRoles.Engineer, SecurityRoles.Administrator))
             .AddPolicy(SecurityPolicies.Engineer, policy => policy.RequireRole(SecurityRoles.Engineer, SecurityRoles.Administrator))
-            .AddPolicy(SecurityPolicies.Administrator, policy => policy.RequireRole(SecurityRoles.Administrator));
+            .AddPolicy(SecurityPolicies.Administrator, policy => policy.RequireRole(SecurityRoles.Administrator))
+            // 人类角色或服务作用域二选一；服务令牌的 role=Service 不在上述角色列表里。
+            .AddPolicy(SecurityPolicies.ResultsRead, policy => policy.RequireAssertion(context =>
+                context.User.IsInRole(SecurityRoles.Operator) || context.User.IsInRole(SecurityRoles.Engineer) || context.User.IsInRole(SecurityRoles.Administrator) ||
+                context.User.HasClaim(SecurityClaims.Scope, ServiceScopes.ResultsRead)))
+            .AddPolicy(SecurityPolicies.StationRead, policy => policy.RequireAssertion(context =>
+                context.User.IsInRole(SecurityRoles.Operator) || context.User.IsInRole(SecurityRoles.Engineer) || context.User.IsInRole(SecurityRoles.Administrator) ||
+                context.User.HasClaim(SecurityClaims.Scope, ServiceScopes.StationRead)))
+            .AddPolicy(SecurityPolicies.StationDelivery, policy => policy.RequireRole(SecurityRoles.Service)
+                .RequireClaim(SecurityClaims.Scope, ServiceScopes.StationDelivery))
+            .AddPolicy(SecurityPolicies.RunTrigger, policy => policy.RequireAssertion(context =>
+                context.User.IsInRole(SecurityRoles.Engineer) || context.User.IsInRole(SecurityRoles.Administrator) ||
+                context.User.HasClaim(SecurityClaims.Scope, ServiceScopes.RunsRun)));
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -210,6 +230,7 @@ public static class VisionStudioServiceRegistration
             .Validate(o => o.QueueCapacity is >= 1 and <= 1024 && o.MaxRawArtifactBytesPerRun > 0, "Invalid production trace queue limits.")
             .ValidateOnStart();
         services.Configure<StorageMaintenanceOptions>(configuration.GetSection("Storage"));
+        services.Configure<AutoBackupOptions>(configuration.GetSection("Storage:AutoBackup"));
         services.Configure<VendorProvenanceOptions>(configuration.GetSection("VendorProvenance"));
         services.Configure<CameraAdapterOptions>(configuration.GetSection("CameraAdapters"));
         services.Configure<PluginPackageOptions>(configuration.GetSection("PluginPackages"));
@@ -217,6 +238,8 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<SqliteMetadataDatabase>();
         // 结果落库：output.database 节点通过 IResultRecordStore 写 result_records 表（migration 23）。
         services.AddSingleton<IResultRecordStore, SqliteResultRecordStore>();
+        // SPC 看板读同一张表：数据集汇总 + 数值序列，不引入第二套存储（2026-11-23）。
+        services.AddSingleton<SpcSeriesReader>();
 
         // 跨轮计数：value.counter 通过 IRunCounterStore 记住 total/pass/fail。
         // 单例是硬要求，否则每次解析执行器都会得到一份新状态，"连续 NG"永远停在 1。
@@ -224,6 +247,7 @@ public static class VisionStudioServiceRegistration
         // 并在启动时恢复；节点侧不再有 static 兜底（没注册就显式报错）。
         services.AddSingleton<InMemoryRunCounterStore>();
         services.AddSingleton<IRunCounterStore>(provider => provider.GetRequiredService<InMemoryRunCounterStore>());
+        services.AddSingleton<IDurableRunCounterStore, SqliteDurableRunCounterStore>();
         services.AddSingleton<LegacyStorageMigrationService>();
         // F03：失败锁持久化到数据根——重启后仍保留，直到受控恢复入口（或人工）完成核对后解除；
         // 纯内存的旧实现重启即丢锁，半恢复的主机会在多实例资产不一致的状态下放行写入。
@@ -232,7 +256,7 @@ public static class VisionStudioServiceRegistration
         // Q01（2026-10-13 审查）：同时识别旧版离线 CLI 的 .visionstudio-restore-intent.json
         // （现场可能残留；与 restore-transaction.json 同一判定语义），并登记跨进程维护活跃标记
         // maintenance-active.json（Q04：与离线 CLI 的维护互斥）。
-        var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath);
+        var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration);
         var maintenanceDir = Path.Combine(dataRoot, ".storage-maintenance");
         services.AddSingleton(sp => new StorageMaintenanceCoordinator(
             Path.Combine(maintenanceDir, "failure-lock.json"),
@@ -261,7 +285,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<GigENetworkDiagnosticsService>();
         services.AddSingleton<ISynchronizedFrameSetService>(sp => sp.GetRequiredService<CameraSynchronizationService>());
         services.AddSingleton<MediaLibraryService>();
-        services.AddSingleton(_ => new HardwareProvenanceStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "provenance")));
+        services.AddSingleton(_ => new HardwareProvenanceStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "provenance")));
         services.AddSingleton<VendorProvenanceProbeRegistry>();
         services.AddSingleton<HardwareProvenanceService>();
         services.Configure<RobotTraceRetentionOptions>(configuration.GetSection("RobotTraceRetention"));
@@ -275,7 +299,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<IAssetHealthProvider, RobotAssetHealthProvider>();
         services.AddSingleton<DiagnosticsCenterService>();
         services.AddSingleton<DiagnosticBundleService>();
-        services.AddSingleton(_ => new DeviceProfileStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "devices")));
+        services.AddSingleton(_ => new DeviceProfileStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "devices")));
 
         var tcpSimulatorPort = configuration.GetValue("RobotTcpSimulator:Port", 40501);
         services.AddSingleton(_ => new TcpRobotSimulatorServer(tcpSimulatorPort));
@@ -298,6 +322,7 @@ public static class VisionStudioServiceRegistration
                 : provider.GetRequiredService<InProcessScriptExecutionBackend>();
         });
         services.AddSingleton<PluginBenchmarkStore>();
+        services.AddSingleton<RuntimeWorkloadGate>();
         services.AddSingleton<PluginPerformanceBenchmarkService>();
         services.AddSingleton<PluginManager>();
         services.AddSingleton<PluginPackageService>();
@@ -328,6 +353,7 @@ public static class VisionStudioServiceRegistration
         // 设备监视推送（2026-11-12）：单例保存订阅数，后台每秒采集一次描述符，
         // 内容变化才广播。没有订阅者时不做序列化。
         services.AddSingleton<MonitorSubscriptions>();
+        services.AddSingleton<MonitorSnapshotReader>();
         services.AddHostedService<MonitorBroadcastService>();
         services.AddSingleton<VisionNodeDispatcher>();
         services.AddSingleton<VisionNodeRuntime>();
@@ -384,6 +410,16 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ParameterTuningService>();
         services.AddSingleton<AlarmStore>();
         services.AddSingleton<ProductionRuntimeConfigStore>();
+        services.AddSingleton<OperatorLayoutStore>();
+        services.AddSingleton<RecipeRolloutService>();
+        services.AddOptions<ProductionFleetOptions>().Bind(configuration.GetSection("ProductionFleet"))
+            .Validate(options => options.IsValid(), "ProductionFleet requires unique station IDs, valid station URLs, read tokens and complete version targets.")
+            .ValidateOnStart();
+        services.AddSingleton(TimeProvider.System);
+        services.AddHttpClient(ProductionFleet.HttpClientName, client => client.MaxResponseContentBufferSize = 16 * 1024)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, UseProxy = false });
+        services.AddSingleton<ProductionFleet>();
+        services.AddHostedService(sp => sp.GetRequiredService<ProductionFleet>());
         services.AddSingleton<ProductionPtpDriftGuardService>();
         services.AddSingleton<ProductionSynchronizationHealthGuardService>();
         // F01/F02：设备动作安全状态的持久化（副作用故障标记 + 锁定清单跨重启保留）。
@@ -393,6 +429,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<DeviceActionAuthorizationService>();
         services.AddSingleton<ProductionRuntimeService>();
         services.AddSingleton<StorageBackupService>();
+        services.AddSingleton<AutoBackupService>();
         services.AddSingleton<CalibrationWorkspaceService>();
         services.AddSingleton<CameraIntrinsicAssetStore>();
         services.AddSingleton<HandEyeCalibrationAssetStore>();
@@ -424,6 +461,7 @@ public static class VisionStudioServiceRegistration
         // process, then register runtime assets/plugins, start Diagnostics observation, then allow
         // Production AutoStart. Trace retention starts after the runtime is initialized.
         services.AddSingleton<InterruptedRunRecovery>();
+        services.AddHostedService<DataRootOwnership>();
         services.AddHostedService<StorageMigrationHostedService>();
         services.AddHostedService<InterruptedRunRecoveryHostedService>();
         services.AddHostedService<RuntimeBootstrapHostedService>();
@@ -433,6 +471,8 @@ public static class VisionStudioServiceRegistration
         services.AddHostedService<TraceRetentionHostedService>();
         services.AddHostedService<RobotTraceRetentionHostedService>();
         services.AddHostedService<StorageCapacityHostedService>();
+        // P1：每日自动备份。与手工备份共用 StorageBackupService 与保留策略，启动延迟后按间隔检查。
+        services.AddHostedService(provider => provider.GetRequiredService<AutoBackupService>());
         // 跨轮计数落盘：启动即恢复，之后每 5s 有变化才写（停机补写一次）。
         // 先注册具体类型再转发到 IHostedService，诊断端点才能注入它读取落盘状态。
         services.AddSingleton<RunCounterPersistence>();

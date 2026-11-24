@@ -14,7 +14,7 @@
 |---|---|---|
 | `Stable`（默认） | 可以按文档直接用 | 有覆盖算法的行为测试，且文档没有适用性保留 |
 | `Preview` | 可用，但有明确边界 | 有行为测试，但文档写明近似口径 / 只支持子集 / 不能用于合规判定 |
-| `Experimental` | 上线前自行验证 | 算法路径没有行为基线（只有契约测试、错误路径测试，或依赖外部模型/硬件） |
+| `Experimental` | 上线前自行验证 | 部署场景缺少所需的行为基线，例如只验证了合成模型、契约或错误路径 |
 
 字段不改变**执行语义**：Preview / Experimental 节点照样能加进流程、能跑。但自 2026-11-12 起，
 它们不能**静默发布**——见下节「发布门禁」。
@@ -49,21 +49,21 @@
 
 ## 当前清单
 
-**Experimental（3）**——三个推理节点没有可用的模型包，端到端推理与后处理串联未验证；
-解码、旋转 IoU、NMS、掩码合成等纯函数已有数值测试，但节点级 NMS→输出、关键点配对与骨架
-仍未被断言：
+**Experimental（3）**。三个推理节点已用合成 ONNX 夹具覆盖节点入口到输出的链路。
+回归测试检查旋转框 NMS 与角度、关键点配对与可见骨架，以及原型掩码合成和回映射。
+真实训练模型包的兼容性和现场精度仍待验证。
 
 `inference.obb`、`inference.pose`、`inference.instanceSegmentation`
 
 **Preview（16）**——每条的理由都写在 `NodeMaturityCatalog.cs` 里，可对回文档原文：
 
-`contour.fromMask`、`region.fromMask`（软掩码截断 8 位，组件数上限）、
+`contour.fromMask`、`region.fromMask`（支持 8 位掩码和单通道浮点概率图，输出轮廓、点或连通域有硬预算）、
 `device.serialPort`、`device.tcpRequest`、`device.udpMessage`（无长连接/TLS/重传，串口无硬件级测试）、
-`image.load`（无多页 TIFF/RAW）、`match.feature`（single-target）、
+`image.load`（支持 TIFF 选页和清单回放，覆盖常见静态图像）、`match.feature`（single-target）、
 `measure.gear`（只直齿）、`measure.profileFilter`、`measure.roughness`（只当趋势）、
 `measure.thread`（silhouette，中径是估计）、`tolerance.stackup`（RSS ±3σ 独立假设）、
 `recognition.barcodeQuality`（MOD 近似，不能出合规报告）、
-`output.database`（只追加、单条事务）、`value.counter`（5s 快照窗口）、
+`output.database`（只追加、单条事务）、`value.counter`（默认周期快照，按事件持久化需要有效业务 ID）、
 `script.csharp`（进程内 trusted-code 运行时：语法树 denylist 是纵深防御，不是 OS 沙箱；发布含脚本的流程必须显式确认，导入的第三方流程按代码审批）
 
 ## 界面

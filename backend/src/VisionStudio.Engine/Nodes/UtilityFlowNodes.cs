@@ -1,5 +1,8 @@
-﻿using VisionStudio.Abstractions;
+﻿using System.Text.Json;
+using VisionStudio.Abstractions;
+
 namespace VisionStudio.Engine.Nodes;
+
 public sealed class DelayNode : IVisionNodeExecutor
 {
     public string Type => "flow.delay";
@@ -51,27 +54,67 @@ public sealed class BooleanIfConditionNode : IVisionNodeExecutor
 public sealed class SwitchNode : IVisionNodeExecutor
 {
     internal const string DefaultCasesJson = "[\"OK\",\"NG\"]";
+    private static readonly string[] CasePorts = Enumerable.Range(1, 16).Select(index => $"case{index}").ToArray();
+
+    internal sealed record SwitchCase(string Port, string Label);
+
     public string Type => "flow.switch";
 
     internal static StringComparison MatchingComparison(NodeDefinition node)
         => node.GetBool("ignoreCase", false) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    internal static string[] ReadCases(NodeDefinition node)
+    internal static SwitchCase[] ReadCases(NodeDefinition node)
     {
         var casesJson = node.GetString("casesJson", DefaultCasesJson);
-        string[] cases;
-        try { cases = System.Text.Json.JsonSerializer.Deserialize<string[]>(casesJson) ?? []; }
-        catch (System.Text.Json.JsonException ex) { throw new InvalidOperationException($"Switch '{node.Id}' casesJson must be a JSON string array.", ex); }
-        // 与运行时匹配口径一致：trimValues 同时作用于标签，否则"OK"标签永远匹配不到被裁剪过的输入。
-        if (node.GetBool("trimValues", false)) cases = cases.Select(label => label.Trim()).ToArray();
+        var message = $"Switch '{node.Id}' casesJson must contain 1-16 case labels or objects with a port and label.";
+        JsonDocument document;
+        try { document = JsonDocument.Parse(casesJson); }
+        catch (JsonException ex) { throw new InvalidOperationException(message, ex); }
+        using var caseDocument = document;
+        var entries = caseDocument.RootElement;
+        if (entries.ValueKind != JsonValueKind.Array || entries.GetArrayLength() is < 1 or > 16)
+            throw new InvalidOperationException(message);
+
+        var legacy = entries[0].ValueKind == JsonValueKind.String;
+        var trim = node.GetBool("trimValues", false);
         var comparison = MatchingComparison(node);
         var comparer = comparison == StringComparison.OrdinalIgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        if (cases.Length is < 1 or > 16 || cases.Any(string.IsNullOrWhiteSpace) || cases.Distinct(comparer).Count() != cases.Length)
-            throw new InvalidOperationException(
-                $"Switch '{node.Id}' requires 1-16 non-empty unique case labels" +
-                (comparison == StringComparison.OrdinalIgnoreCase
-                    ? "; ignoreCase=true makes labels that differ only by case ambiguous and rejected."
-                    : "."));
+        var ports = new HashSet<string>(StringComparer.Ordinal);
+        var labels = new HashSet<string>(comparer);
+        var cases = new SwitchCase[entries.GetArrayLength()];
+        for (var index = 0; index < cases.Length; index++)
+        {
+            var entry = entries[index];
+            string port;
+            string label;
+            if (legacy && entry.ValueKind == JsonValueKind.String)
+            {
+                port = CasePorts[index];
+                label = entry.GetString()!;
+            }
+            else if (!legacy && entry.ValueKind == JsonValueKind.Object &&
+                entry.TryGetProperty("port", out var portElement) && portElement.ValueKind == JsonValueKind.String &&
+                entry.TryGetProperty("label", out var labelElement) && labelElement.ValueKind == JsonValueKind.String)
+            {
+                port = portElement.GetString()!;
+                label = labelElement.GetString()!;
+            }
+            else
+            {
+                throw new InvalidOperationException(message);
+            }
+
+            if (!CasePorts.Contains(port, StringComparer.Ordinal) || !ports.Add(port))
+                throw new InvalidOperationException($"Switch '{node.Id}' casesJson requires one unique port (case1 through case16) per case label.");
+            if (trim) label = label.Trim();
+            if (string.IsNullOrWhiteSpace(label) || !labels.Add(label))
+                throw new InvalidOperationException(
+                    $"Switch '{node.Id}' requires 1-16 non-empty unique case labels" +
+                    (comparison == StringComparison.OrdinalIgnoreCase
+                        ? "; ignoreCase=true makes labels that differ only by case ambiguous and rejected."
+                        : "."));
+            cases[index] = new SwitchCase(port, label);
+        }
         return cases;
     }
 
@@ -84,7 +127,9 @@ public sealed class SwitchNode : IVisionNodeExecutor
         if (node.GetBool("trimValues", false)) key = key.Trim();
         if (key.Length > 256) throw new InvalidOperationException("flow.switch input value text is too long (max 256 chars).");
         var comparison = MatchingComparison(node);
-        var index = Array.FindIndex(cases, x => string.Equals(x, key, comparison)); var matched = index >= 0; var selected = matched ? $"case{index + 1}" : "default";
+        var index = Array.FindIndex(cases, item => string.Equals(item.Label, key, comparison));
+        var matched = index >= 0;
+        var selected = matched ? cases[index].Port : "default";
         var diag = CoordinateValidation.Diagnostics(Type, ("value", key), ("selected", selected), ("matched", matched), ("caseCount", cases.Length), ("caseIndex", matched ? index : -1), ("comparison", comparison == StringComparison.OrdinalIgnoreCase ? "ignoreCase" : "ordinal"));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["selected"] = VisionValue.String(selected), ["selectedCase"] = VisionValue.String(selected), ["matched"] = VisionValue.Boolean(matched), ["caseCount"] = VisionValue.Integer(cases.Length), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["selected"] = selected, ["caseCount"] = cases.Length, ["diagnostics"] = diag }));
     }

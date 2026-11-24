@@ -33,7 +33,7 @@ public sealed class DiagnosticBundleService(
     NodeSpanBuffer nodeSpans,
     RollingFileLoggerProvider logs,
     AuditEventStore audits,
-    IWebHostEnvironment environment)
+    IWebHostEnvironment environment, IConfiguration? configuration = null)
 {
     /// <summary>单个日志文件最多打包的字节数；超出部分从文件尾部回读。</summary>
     public const int MaxLogBytes = 512 * 1024;
@@ -49,7 +49,7 @@ public sealed class DiagnosticBundleService(
 
     public async Task<byte[]> CreateAsync(CancellationToken cancellationToken = default)
     {
-        var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath);
+        var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration);
         var generatedAt = DateTimeOffset.Now;
         using var buffer = new MemoryStream();
         using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))

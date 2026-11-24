@@ -150,6 +150,62 @@ public sealed class ImageLoadNodeTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(() => Run(Node(), S(("path", broken))));
     }
 
+    [Fact]
+    public async Task CapturedManifestKeepsFileOrderAndReportsContentChangesAndMissingImages()
+    {
+        WriteImage("img2.png", 2, 4);
+        var later = WriteImage("img10.png", 10, 4);
+        var captured = await Run(Node(("captureManifest", "true")), S(("path", _root)));
+        using var preview = Image(captured);
+        var manifest = captured.Outputs["manifestJson"].Require<string>("manifestJson");
+
+        WriteImage("img1.png", 1, 4);
+        var saved = Node(("pathMode", "manifest"), ("manifestJson", manifest));
+        var replay = await Run(saved, S(("path", _root)));
+        using var replayImage = Image(replay);
+        Assert.Equal(2, replayImage.Width);
+        Assert.Equal(2L, replay.Outputs["frameCount"].Require<long>("frameCount"));
+
+        WriteImage("img2.png", 7, 4);
+        var changed = await Assert.ThrowsAsync<InvalidDataException>(() => Run(saved, S(("path", _root))));
+        Assert.Contains("content changed: 'img2.png'", changed.Message);
+
+        File.Delete(later);
+        var missing = await Assert.ThrowsAsync<FileNotFoundException>(() =>
+            Run(Node(("pathMode", "manifest"), ("manifestJson", manifest), ("index", "1")), S(("path", _root))));
+        Assert.Contains("missing: 'img10.png'", missing.Message);
+    }
+
+    [Fact]
+    public async Task ManifestRejectsTraversalEntries()
+    {
+        var manifest = JsonSerializer.Serialize(new { version = 1, files = new[] { new { path = "../outside.png", sha256 = new string('0', 64) } } });
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(Node(("pathMode", "manifest"), ("manifestJson", manifest)), S(("path", _root))));
+        Assert.Contains("relative image paths", error.Message);
+    }
+
+    [Fact]
+    public async Task TiffPageIsIndependentOfFrameIndexAndWorksWithManifest()
+    {
+        var path = Path.Combine(_root, "img2.tiff");
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "Fixtures", "replay-two-page.tiff"), path);
+        WriteImage("img1.png", 3, 4);
+
+        var captured = await Run(Node(("captureManifest", "true")), S(("path", _root)));
+        using var preview = Image(captured);
+        var manifest = captured.Outputs["manifestJson"].Require<string>("manifestJson");
+        var result = await Run(Node(("pathMode", "manifest"), ("manifestJson", manifest), ("index", "1"), ("pageIndex", "1")), S(("path", _root)));
+        using var page = Image(result);
+        Assert.Equal((11, 12), (page.Width, page.Height));
+        Assert.Equal((byte)210, page.Mat.At<byte>(0, 0));
+        Assert.Equal(1L, result.Outputs["pageIndex"].Require<long>("pageIndex"));
+        Assert.Equal(1L, result.Outputs["sequence"].Require<long>("sequence"));
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => Run(Node(("pageIndex", "2")), S(("path", path))));
+        Assert.Contains("has 2 pages", error.Message);
+    }
+
     // ===== 夹具 =====
 
     private string WriteImage(string name, int width, int height, int channels = 1)

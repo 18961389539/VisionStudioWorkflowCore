@@ -27,6 +27,11 @@ public static class MeasurementGapCatalog
     // contour-wide measurement nodes above, its executor fallback has always been false.
     private static readonly ParameterDescriptor OpenProfile = new("closed", "Closed Contour", "boolean", false,
         Description: "Treat the polyline as closed when sampling (repeats the first point implicitly).");
+    private static readonly ParameterDescriptor MaxInputGap = new("maxInputGap", "Maximum Input Gap (0=off)", "number", 0, 0, 1000000, .1,
+        Unit: "px", Group: "Filter", Description: "Reject a profile when adjacent projected input points are farther apart than this distance. 0 disables the check.");
+    private static readonly ParameterDescriptor ProfileEndEffect = new("endEffect", "End Handling", "select", "reflect", Group: "Filter",
+        Options: [new("Reflect ends", "reflect"), new("Discard ends", "discard")],
+        Description: "Reflect keeps the full profile using mirrored samples at the ends. Discard uses only samples with full Gaussian kernel support.");
 
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
@@ -124,21 +129,19 @@ public static class MeasurementGapCatalog
              new("waviness", VisionDataType.PointList), new("residual", VisionDataType.PointList),
              new("residualPeak", VisionDataType.Double, Required: false), new("wavinessPeak", VisionDataType.Double, Required: false),
              new("residualRms", VisionDataType.Double, Required: false),
+             new("actualSampleStep", VisionDataType.Double, Required: false), new("maxObservedInputGap", VisionDataType.Double, Required: false),
+             new("usableLength", VisionDataType.Double, Required: false), new("kernelTruncated", VisionDataType.Boolean, Required: false),
              new("length", VisionDataType.Double), new("removedPointCount", VisionDataType.Integer), Diagnostics, Next],
             [
                 Index,
                 new("cutoffWavelength", "Cutoff Wavelength (0=auto)", "number", 0, 0, 1000000, .1, Unit: "px", Group: "Filter",
                     Description: "ISO 16610-21 Gaussian cutoff. 0 derives cutoff = length/5, the usual evaluation-length rule."),
                 new("sampleStep", "Sample Step", "number", 1, .01, 10000, .1, Unit: "px", Group: "Filter",
-                    Description: "Arc-length resampling before filtering. The cutoff must stay well above this step or the filter cannot resolve the wavelength."),
-                new("endEffect", "End Handling", "select", "reflect", Group: "Filter", Options:
-                [
-                    new("Reflect ends", "reflect"),
-                    new("Discard ends", "discard")
-                ], Description: "Gaussian filtering shortens the usable profile by half a cutoff at each end. Reflect keeps the full length; discard drops the ends honestly instead of inventing data."),
+                    Description: "Maximum axial spacing for the uniform resampling grid. The actual spacing is reported in actualSampleStep."),
+                MaxInputGap, ProfileEndEffect,
                 OpenProfile,
             ],
-            "Splits a sampled profile into waviness and residual with an ISO 16610-21 Gaussian filter, emitting both as PointLists so downstream roughness or tolerance.profile can consume them. Wire: contours -> waviness/residual. The mean line is the least-squares axis, so the input must be a nominally straight edge; curved surfaces need a nominal first. Units: pixels.", "builtin",
+            "Splits a nominally straight sampled edge into waviness and residual using a Gaussian filter on an axial grid. Reports the usable pixel span, actual sample spacing, largest input gap and whether the kernel had to be shortened. Discard mode requires full support at the retained points.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         new("measure.roughness", "Profile Roughness", "Measurement",
@@ -147,6 +150,9 @@ public static class MeasurementGapCatalog
              new("cutoff", VisionDataType.Double), new("ra", VisionDataType.Double), new("rq", VisionDataType.Double),
              new("rz", VisionDataType.Double), new("rp", VisionDataType.Double), new("rv", VisionDataType.Double),
              new("rmax", VisionDataType.Double), new("zeroCrossings", VisionDataType.Integer),
+             new("actualSampleStep", VisionDataType.Double, Required: false), new("maxObservedInputGap", VisionDataType.Double, Required: false),
+             new("rzSamplingLengths", VisionDataType.Integer, Required: false), new("kernelTruncated", VisionDataType.Boolean, Required: false),
+             new("gateEnabled", VisionDataType.Boolean, Required: false), new("unit", VisionDataType.String, Required: false),
              new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 new("index", "Zero-based Index", "number", 0, 0, 1999, 1,
@@ -154,13 +160,14 @@ public static class MeasurementGapCatalog
                 new("cutoffWavelength", "Cutoff Wavelength (0=auto)", "number", 0, 0, 1000000, .1, Unit: "px", Group: "Filter",
                     Description: "Gaussian cutoff separating roughness from waviness. 0 derives length/5."),
                 new("evaluationLength", "Evaluation Length (0=all)", "number", 0, 0, 1000000, .1, Unit: "px", Group: "Filter",
-                    Description: "Trailing window actually evaluated; 0 uses the whole profile. Rz averages 5 sampling lengths, so shorter windows report fewer sub-lengths."),
+                    Description: "Maximum length of the trailing evaluation window. 0 uses the full usable span. The result reports the span between the first and last evaluated samples."),
                 new("sampleStep", "Sample Step", "number", 1, .01, 10000, .1, Unit: "px", Group: "Filter",
-                    Description: "Arc-length resampling before filtering. Must stay well below cutoffWavelength."),
+                    Description: "Maximum axial spacing for uniform resampling before filtering."),
+                MaxInputGap, ProfileEndEffect,
                 new("maxRa", "Max Ra (0=off)", "number", 0, 0, 1000000, .001, Unit: "px", Group: "Limits",
                     Description: "Optional gate: withinTolerance reports ra <= limit. 0 disables it."),
             ],
-            "Amplitude roughness parameters of a sampled profile: Ra, Rq, Rz, Rp, Rv and Rmax after an ISO 16610-21 Gaussian mean-line removal. Wire: contours (or pointList) -> ra/rz/rmax. Rz averages the 5 sampling lengths required by ISO 4287; with a shorter window it averages what fits. Image-based values are only as good as the edge sampling, so report them as a trend, not a substitute for a stylus. Units follow the input coordinates.", "builtin",
+            "Estimates roughness trends in pixels from a nominally straight sampled image edge. Reports the evaluated sample span and Gaussian end handling. Rz averages five segments when enough samples are available. In a shorter window it reports the whole-window range with rzSamplingLengths=0.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：轮廓间距 ──────────────────────────────────────────────
@@ -196,7 +203,8 @@ public static class MeasurementGapCatalog
             [Exec, new("contours", VisionDataType.Contour), new("axis", VisionDataType.Line2D)],
             [Found, new("crestCount", VisionDataType.Integer), new("sampleCount", VisionDataType.Integer),
              new("pitch", VisionDataType.Double), new("majorDiameter", VisionDataType.Double), new("minorDiameter", VisionDataType.Double),
-             new("pitchDiameter", VisionDataType.Double), new("threadAngleDeg", VisionDataType.Double), new("threadDepth", VisionDataType.Double),
+             new("pitchDiameter", VisionDataType.Double), new("pitchDiameterMethod", VisionDataType.String, Required: false),
+             new("threadAngleDeg", VisionDataType.Double), new("threadDepth", VisionDataType.Double),
              new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 Index,
@@ -210,7 +218,7 @@ public static class MeasurementGapCatalog
                 new("sampleStep", "Sample Step", "number", 1, .01, 10000, .1, Unit: "px", Group: "Thread",
                     Description: "Arc-length resampling along the profile before crest detection."),
             ],
-            "Image-based thread inspection against a supplied axis: pitch from crest spacing, major/minor diameter from the radial extrema, average thread angle from the flank slopes. Wire: contours + axis Line2D -> pitch/majorDiameter/threadAngleDeg. Optically this is a silhouette measurement: it cannot see the pitch diameter root, so pitchDiameter is the (major+minor)/2 estimate. Units: pixels.", "builtin",
+            "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. pitchDiameter is an estimate in pixels. pitchDiameterMethod identifies the arithmetic mean of the major and minor diameters. The tolerance flag applies to pitch consistency.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：齿轮（纯算量） ─────────────────────────────────────────
@@ -245,6 +253,8 @@ public static class MeasurementGapCatalog
              new("worstCaseMax", VisionDataType.Double), new("worstCaseMin", VisionDataType.Double),
              new("rssTolerance", VisionDataType.Double), new("upperLimit", VisionDataType.Double), new("lowerLimit", VisionDataType.Double),
              new("margin", VisionDataType.Double), new("utilization", VisionDataType.Double),
+             new("gateMode", VisionDataType.String), new("gateEnabled", VisionDataType.Boolean),
+             new("evaluatedDeviation", VisionDataType.Double), new("limitModel", VisionDataType.String), new("unit", VisionDataType.String),
              new("contributionsJson", VisionDataType.String), new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 new("contributionsJson", "Contributions JSON", "textarea",
@@ -255,15 +265,18 @@ public static class MeasurementGapCatalog
                 [
                     new("Worst case (arithmetic)", "worstCase"),
                     new("Statistical (RSS)", "rss")
-                ], Description: "Worst case adds every tolerance (100% interchangeability). RSS assumes independent +-3 sigma contributors and gives the statistical limit, which is what a process capability claim needs."),
-                new("targetNominal", "Target Nominal (0=off)", "number", 0, -1000000, 1000000, .001, Group: "Limits",
-                    Description: "Drawing nominal the chain should close at. The gate compares nominal against it; left at 0 with tolerance 0 the gate stays open."),
+                ], Description: "Worst case combines all signed tolerance bounds. RSS estimates symmetric limits around nominal assuming independent contributors with each full tolerance width treated as six sigma."),
+                new("gateMode", "Acceptance Basis", "select", "nominal", Group: "Limits",
+                    Options: [new("Nominal Only", "nominal"), new("Full Calculated Interval", "interval")],
+                    Description: "Check either the chain nominal or both calculated bounds against the target tolerance."),
+                new("targetNominal", "Target Nominal", "number", 0, -1000000, 1000000, .001, Group: "Limits",
+                    Description: "Center of the acceptance interval. Zero is a valid target."),
                 new("tolerance", "Tolerance", "number", 0, 0, 1000000, .001, Group: "Limits",
-                    Description: "Allowed absolute gap between nominal and targetNominal, in the chain's unit (see Unit Label). 0 disables the gate."),
+                    Description: "Allowed absolute deviation from the target in the chain's unit. 0 disables the gate."),
                 new("unit", "Unit Label", "text", "mm", Group: "Reporting",
-                    Description: "Label only, no conversion (1..16 chars). Set it to whatever unit the contributions are in."),
+                    Description: "Report the unit used by the inputs. Up to 16 characters. Values are used as supplied."),
             ],
-            "Closes a 1D dimension chain: worst-case (arithmetic) or statistical (RSS, +-3 sigma) limits, the resulting upper/lower limit, closure margin against a target and per-contributor share. Wire: optional a..f to replace the first six nominals. Every existing tolerance.* node evaluates ONE feature against ONE tolerance; this node is the only place where several contributions are combined.", "builtin",
+            "Combines a one-dimensional tolerance chain using worst-case or RSS limits. Reports the limit model, which values were checked against the target, the resulting margin and the input unit. Optional inputs a through f replace the first six nominal values.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: false), Actions: []),
 
         // ── P2：多基准基准系 ─────────────────────────────────────────

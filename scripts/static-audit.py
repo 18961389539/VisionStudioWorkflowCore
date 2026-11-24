@@ -229,6 +229,10 @@ BOOL_FALLBACK_RE = re.compile(r'node\.GetBool\(\s*"([A-Za-z0-9_]+)"\s*,\s*(true|
 # 旧版 step 语义，目录里的 "count" 只用于新建节点。新增例外必须在注释里说明原因。
 DEFAULT_DRIFT_EXEMPT = {
     ('measure.caliperCircle', 'samplingMode'),
+    # A missing field on a saved barcode recipe keeps legacy grading. New nodes explicitly save requireDecode.
+    ('recognition.barcodeQuality', 'decodePolicy'),
+    # A saved fusion node without an alignment policy keeps its pixelwise behavior. New nodes save sameFrame.
+    ('image.fuse', 'alignmentPolicy'),
 }
 REQUIRE_GENERIC_RE = re.compile(r'context\.Require<\s*([A-Za-z0-9_.]+)\s*>\(\s*"([^"]+)"')
 REQUIRE_IMAGE_RE = re.compile(r'context\.RequireImage\(\s*"([^"]+)"')
@@ -899,7 +903,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 322  # 2026-11-13：321 + 匿名探针 /healthz（详细 /api/health 改为认证后读取）；新增端点必须同步此值（这本身就是一次可见的评审）
+expected_routes = 339  # 338 + 各工位最新下发。
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
@@ -943,7 +947,7 @@ security_schema=read_safe('backend/src/VisionStudio.Api/Storage/SqliteMetadataDa
 for token in ['security_users','security_sessions','audit_events',CURRENT_SCHEMA_TOKEN]:
     if token not in security_schema: fail(f'V0.24 security schema missing: {token}')
 for token in ['Rfc2898DeriveBytes.Pbkdf2','CryptographicOperations.FixedTimeEquals','SHA256.HashData','At least one enabled Administrator must remain']:
-    if token not in security_store: fail(f'Credential/session hardening missing: {token}')
+    if token not in security_store + read_safe('backend/src/VisionStudio.Api/Security/ServiceTokenStore.cs'): fail(f'Credential/session hardening missing: {token}')
 if 'password TEXT' in security_schema.lower() or 'password TEXT' in security_store:
     fail('Plaintext password persistence detected')
 if 'CookieName' not in security_models or 'vs_session' not in security_models: fail('HttpOnly session cookie option is missing')
@@ -992,6 +996,38 @@ if 'simulated: true' not in bootstrap_source:
 if 'bool Simulated' not in read_safe('backend/src/VisionStudio.Engine/Robot/RobotContracts.cs'):
     fail('RobotDescriptor must expose a Simulated flag (otherwise a virtual robot is indistinguishable in UI/audit)')
 ok('V0.24 RBAC + PBKDF2 local users + revocable sessions + audit trail present')
+
+# P3 (2026-11-23) 服务账号令牌 + 审计防篡改链
+# 服务令牌：MES/上位机不再共用操作员账号。守的是"哈希存储 + 作用域默认拒绝 + 可轮换/吊销 + 调用可审计"，
+# 不是某个具体端点实现；路由清单另行守住端点数量。
+service_token_store=read_safe('backend/src/VisionStudio.Api/Security/ServiceTokenStore.cs')
+service_token_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Operations/ServiceTokenTests.cs')
+audit_chain_source=read_safe('backend/src/VisionStudio.Api/Security/AuditChain.cs')
+audit_chain_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Operations/AuditChainTests.cs')
+for token in ['security_service_tokens','token_hash','scopes','revoked_at','last_used_at']:
+    if token not in schema_migration_source: fail(f'P3 service-token schema missing: {token}')
+for token in ['vst_','SHA256.HashData','RandomNumberGenerator.GetBytes(32)','NormalizeScopes','RotateAsync','RevokeAsync','last_used_at']:
+    if token not in service_token_store: fail(f'P3 service-token store missing: {token}')
+for token in ['SecurityRoles.Service','ServiceTokenId','class ServiceScopes','results:read','runs:run','ResultsReadOrScope','RunTriggerOrScope']:
+    if token not in security_models + auth_handler: fail(f'P3 service-token scope model missing: {token}')
+for token in ['SecurityPolicies.ResultsRead','SecurityPolicies.RunTrigger','SecurityClaims.ServiceTokenId']:
+    if token not in host_registration: fail(f'P3 service-token policy registration missing: {token}')
+for token in ['/api/security/service-tokens','/api/security/audit/verify']:
+    if token not in security_endpoints: fail(f'P3 service-token/audit-verify endpoint missing: {token}')
+# 审计链：库内 prev_hash/hash 列 + 规范哈希 + 写入独占事务 + 只读校验端点。
+for token in ['prev_hash','ApplyAuditChainAsync','audit_events']:
+    if token not in schema_migration_source: fail(f'P3 audit-chain schema missing: {token}')
+for token in ['GenesisHash','AuditChainEntry','ComputeHash']:
+    if token not in audit_chain_source: fail(f'P3 audit-chain hash implementation missing: {token}')
+for token in ['ReadChainHeadAsync','VerifyChainAsync','deferred: false','prev_hash','hash']:
+    if token not in audit_source: fail(f'P3 audit-chain append/verify missing: {token}')
+for token in ['ServiceToken_IsStoredHashed','ResultsReadToken_ReadsTraces','RotationReplacesTheSecret']:
+    if token not in service_token_tests: fail(f'P3 service-token regression test missing: {token}')
+for token in ['ModifiedRow_IsReportedWithItsSequence','DeletedMiddleRow_BreaksTheLinkAtTheNextRow','VerificationEndpoint_RequiresAdministrator']:
+    if token not in audit_chain_tests: fail(f'P3 audit-chain regression test missing: {token}')
+for doc in ['docs/service-tokens.md','docs/audit-integrity.md']:
+    if not (ROOT / doc).exists(): fail(f'P3 documentation missing: {doc}')
+ok('P3 scoped hashed service tokens + tamper-evident audit hash chain present')
 
 # V0.25 RuntimeDependencyManifest / production provenance
 trace_store_dependency=read_family('backend/src/VisionStudio.Api/Trace/TraceabilityStore*.cs')
@@ -1735,6 +1771,116 @@ for key in ['WarningFreeBytes','CriticalFreeBytes','MaxArtifactBytes','MaxBackup
     if key not in storage_settings: fail(f'V0.28 Storage configuration missing: {key}')
 ok('V0.28 schema migration runner + online backup/restore + disk capacity guard present')
 
+# P1 automatic backup + freshness disclosure (2026-11-23)
+auto_backup=read_family('backend/src/VisionStudio.Api/Storage/AutoBackup*.cs')
+auto_backup_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Storage/AutoBackupTests.cs')
+auto_backup_doc=read_safe('docs/auto-backup.md')
+for token in ['AutoBackupOptions','CreateAsync','ListAsync','IsDue','IsStale','BackgroundService']:
+    if token not in auto_backup: fail(f'P1 automatic backup missing: {token}')
+if 'services.AddSingleton<AutoBackupService>();' not in host_registration or 'GetRequiredService<AutoBackupService>()' not in host_registration:
+    fail('P1 automatic backup service is not registered as a hosted service')
+early_health=read_safe('backend/src/VisionStudio.Api/Endpoints/SystemEndpoints.cs')
+for token in ['AutoBackupService','GetStatusAsync','lastBackupAt','lastBackupAgeHours','stale','lastError','listError']:
+    if token not in early_health: fail(f'P1 /api/health backup freshness disclosure missing: {token}')
+auto_backup_settings=storage_settings.get('AutoBackup', {})
+for key in ['Enabled','IntervalHours','StaleAfterHours','IncludeArtifacts']:
+    if key not in auto_backup_settings: fail(f'P1 Storage:AutoBackup configuration missing: {key}')
+if 'AutomaticBackup_IsRestorable_Drill' not in auto_backup_tests:
+    fail('P1 automatic backup restore drill test missing')
+if 'stale' not in auto_backup_doc or 'degradedReasons' not in auto_backup_doc:
+    fail('P1 auto backup documentation must state that a stale backup does not change readiness')
+ok('P1 automatic backup + freshness disclosure present')
+
+# P1 security response headers (2026-11-23)
+security_headers=read_safe('backend/src/VisionStudio.Api/Security/SecurityHeaders.cs')
+security_header_tests=read_safe('backend/tests/VisionStudio.Api.Tests/SecurityHeadersTests.cs')
+security_header_doc=read_safe('docs/security-headers.md')
+for token in ['ContentSecurityPolicy','XContentTypeOptions','XFrameOptions','Referrer-Policy','StrictTransportSecurity','frame-ancestors','IsHttps','OnStarting']:
+    if token not in security_headers: fail(f'P1 security response headers missing: {token}')
+if 'services.Configure<SecurityHeadersOptions>' not in host_registration:
+    fail('P1 SecurityHeaders options are not bound')
+if 'app.UseMiddleware<SecurityHeadersMiddleware>();' not in program:
+    fail('P1 SecurityHeadersMiddleware is not wired into the pipeline')
+else:
+    forwarded_at=program.index('app.UseForwardedHeaders();')
+    security_at=program.index('app.UseMiddleware<SecurityHeadersMiddleware>();')
+    static_at=program.index('app.UseStaticFiles();')
+    exception_at=program.index('app.UseExceptionHandler();')
+    if not (forwarded_at < security_at < static_at) or security_at > exception_at:
+        fail('P1 SecurityHeadersMiddleware must run after forwarded headers and before static files/exception handling')
+security_headers_settings=appsettings.get('SecurityHeaders', {})
+for key in ['Enabled','ContentSecurityPolicy','Hsts','ReferrerPolicy','FrameOptions']:
+    if key not in security_headers_settings: fail(f'P1 SecurityHeaders configuration missing: {key}')
+for token in ['ProblemDetailsErrorResponse_AlsoCarriesSecurityHeaders','HttpsRequest_CarriesHsts','DisabledConfiguration_EmitsNoSecurityHeaders']:
+    if token not in security_header_tests: fail(f'P1 security header regression test missing: {token}')
+if 'ws:' not in security_header_doc or 'unsafe-inline' not in security_header_doc:
+    fail('P1 security headers documentation must explain the SignalR/antd CSP allowances')
+ok('P1 security response headers present')
+
+# P1 Windows service hosting + crash dump configuration (2026-11-23)
+api_csproj=read_safe('backend/src/VisionStudio.Api/VisionStudio.Api.csproj')
+package_props=read_safe('backend/Directory.Packages.props')
+install_service_script=read_safe('scripts/install-windows-service.ps1')
+uninstall_service_script=read_safe('scripts/uninstall-windows-service.ps1')
+crash_dump_script=read_safe('scripts/configure-crash-dumps.ps1')
+windows_service_doc=read_safe('docs/windows-service.md')
+if 'Microsoft.Extensions.Hosting.WindowsServices' not in api_csproj or 'Microsoft.Extensions.Hosting.WindowsServices' not in package_props:
+    fail('P1 Windows service hosting package is not referenced/version-pinned')
+if 'builder.Host.UseWindowsService();' not in program:
+    fail('P1 UseWindowsService is not wired into the host builder')
+for token in ['New-Service','sc.exe failure','delayed-auto','DataRoot must live outside','WaitForStatus']:
+    if token not in install_service_script: fail(f'P1 Windows service install script missing: {token}')
+if 'sc.exe delete' not in uninstall_service_script or 'WaitForStatus' not in uninstall_service_script:
+    fail('P1 Windows service uninstall script does not stop gracefully before deletion')
+for token in ['LocalDumps','DumpFolder','DumpType','DumpCount','Remove']:
+    if token not in crash_dump_script: fail(f'P1 crash dump script missing: {token}')
+for token in ['UseWindowsService','LocalDumps','DOTNET_DbgEnableMiniDump','WindowsServiceLifetime','DataRoot']:
+    if token not in windows_service_doc: fail(f'P1 Windows service documentation missing: {token}')
+if 'windows-service.md' not in read_safe('docs/README.md'):
+    fail('P1 Windows service documentation is not indexed')
+ok('P1 Windows service hosting + crash dump configuration present')
+
+# P2 engine algorithm performance regression gate (2026-11-23)
+engine_bench_program=read_safe('backend/src/VisionStudio.Benchmark.Cli/Program.cs')
+engine_bench_source=read_safe('backend/src/VisionStudio.Benchmark.Cli/EngineBenchmark.cs')
+engine_bench_project=read_safe('backend/src/VisionStudio.Benchmark.Cli/VisionStudio.Benchmark.Cli.csproj')
+engine_bench_gate=read_safe('scripts/engine-benchmark-gate.ps1')
+engine_bench_workflow=read_safe('.github/workflows/engine-performance-gate.yml')
+engine_bench_doc=read_safe('docs/engine-benchmark.md')
+if 'VisionStudio.Engine.csproj' not in engine_bench_project:
+    fail('P2 engine benchmark CLI does not reference the engine project')
+if 'EngineBenchmark.Run' not in engine_bench_program:
+    fail('P2 --engine-bench dispatch is not wired into the benchmark CLI')
+elif 'CliOptions.Parse(args)' in engine_bench_program and engine_bench_program.index('EngineBenchmark.Run') > engine_bench_program.index('CliOptions.Parse(args)'):
+    fail('P2 --engine-bench must dispatch before CliOptions.Parse (the plugin parser rejects unknown flags)')
+for token in ['--engine-bench','--update-baseline','MACHINE_MISMATCH','TolerancePercent','ExitRegression','ExitBenchmarkFailed','Stopwatch']:
+    if token not in engine_bench_source: fail(f'P2 engine benchmark implementation missing: {token}')
+for token in ['preprocess.gaussian.640x480','preprocess.threshold.640x480','preprocess.gaussian.1280x960','match.shape.managedChamfer.640x480']:
+    if token not in engine_bench_source: fail(f'P2 engine benchmark case missing: {token}')
+for token in ['--engine-bench','UpdateBaseline','TolerancePercent','$LASTEXITCODE']:
+    if token not in engine_bench_gate: fail(f'P2 engine benchmark gate script missing: {token}')
+if 'runs-on: self-hosted' not in engine_bench_workflow or 'cron:' not in engine_bench_workflow:
+    fail('P2 engine performance gate must run nightly on a fixed self-hosted machine')
+for token in ['engine-benchmark-gate.ps1','update_baseline','ci/engine-benchmark-baseline.json']:
+    if token not in engine_bench_workflow: fail(f'P2 engine performance workflow missing: {token}')
+engine_bench_baseline=json.loads(read_safe('ci/engine-benchmark-baseline.json'))
+if engine_bench_baseline.get('schemaVersion') != 1:
+    fail('P2 engine benchmark baseline schemaVersion must be 1')
+if not engine_bench_baseline.get('machine'):
+    fail('P2 engine benchmark baseline must record the machine identity')
+baseline_cases=engine_bench_baseline.get('cases', {})
+for case_id in ['preprocess.gaussian.640x480','preprocess.threshold.640x480','preprocess.gaussian.1280x960','match.shape.managedChamfer.640x480']:
+    entry=baseline_cases.get(case_id)
+    if not isinstance(entry, dict) or float(entry.get('medianMs', 0)) <= 0:
+        fail(f'P2 engine benchmark baseline median missing or non-positive: {case_id}')
+if '25%' not in engine_bench_doc or 'MACHINE_MISMATCH' not in engine_bench_doc:
+    fail('P2 engine benchmark documentation must state the 25% tolerance and machine-mismatch behaviour')
+if 'engine-benchmark.md' not in read_safe('docs/README.md'):
+    fail('P2 engine benchmark documentation is not indexed')
+if 'engine-performance-gate.yml' not in read_safe('docs/quality-gates.md'):
+    fail('P2 engine performance gate is not documented in quality-gates.md')
+ok('P2 engine algorithm performance regression gate present')
+
 # V0.26 shared Asset Health + SignalR diagnostics center
 asset_health=read_safe('backend/src/VisionStudio.Engine/Diagnostics/AssetHealth.cs')
 diagnostics_service=read_safe('backend/src/VisionStudio.Api/Diagnostics/DiagnosticsCenterService.cs')
@@ -1798,7 +1944,11 @@ for token in ['NodeMaturityCatalog.Declarations', 'AcknowledgementRequired', 'NO
     if token not in maturity_gate: fail(f'Node maturity gate implementation missing: {token}')
 for token in ['NodeMaturityGate.Scan', 'acknowledgeMaturityNodes', 'AuditContext.SetTarget']:
     if token not in job_endpoints_source: fail(f'Job publish path does not enforce node maturity: {token}')
-if 'NodeMaturityGate.Scan' in read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs').split('/rollback/')[-1]:
+publish_route = job_endpoints_source.split('/versions/{version:int}/publish', 1)[-1].split('app.Map', 1)[0]
+if 'PublishVersionAsync' not in publish_route:
+    fail('Job publish route does not invoke its shared publication checks')
+rollback_route = job_endpoints_source.split('/rollback/', 1)[-1].split('app.Map', 1)[0]
+if any(token in rollback_route for token in ('NodeMaturityGate.Scan', 'PublishVersionAsync')):
     fail('Rollback must not be gated by node maturity (the target version was already acknowledged)')
 if 'acknowledgeMaturityNodes=true' not in read_safe('frontend/src/endpoints.ts'):
     fail('Frontend cannot acknowledge the maturity gate (publish would always fail on Preview nodes)')
@@ -1893,7 +2043,7 @@ ok(f'Test source: Fact={facts}, Theory={theories}, SoakTraits={soaks}')
 # Traditional image processing must use JLVision; OpenCV is retained only at IO,
 # synthetic-image drawing and legacy camera/plugin buffer boundaries. Two explicit
 # exceptions cover the 3D pose solver and OBB visualization; image algorithms stay native.
-allowed_cv_node_calls = {'ImRead', 'ImEncode', 'ImWrite', 'Circle', 'Rectangle', 'Line', 'Polylines'}
+allowed_cv_node_calls = {'ImRead', 'ImDecode', 'ImEncode', 'ImWrite', 'Circle', 'Rectangle', 'Line', 'Polylines'}
 allowed_cv_node_exceptions = {
     # The added 3D pose solver deliberately uses OpenCV's hand-eye methods.
     ('HandEye3DCalibrationNode.cs', 'HandEye3DCalibrationNode', 'CalibrateHandEye'),
@@ -1924,8 +2074,10 @@ allowed_cv_node_exceptions = {
     ('CharucoBoardNode.cs', 'CharucoBoardNode', 'Aruco'),
     # 2026-10-26 mask-to-region/contour landed with OpenCV connected-components/contour primitives;
     # register them so the audit gate does not stay red for an already delivered batch.
-    ('MaskToVisionNodes.cs', 'RegionFromMaskNode', 'Threshold'),
-    ('MaskToVisionNodes.cs', 'RegionFromMaskNode', 'BitwiseNot'),
+    ('MaskToVisionNodes.cs', 'MaskThreshold', 'Threshold'),
+    ('MaskToVisionNodes.cs', 'MaskThreshold', 'BitwiseNot'),
+    # Probability masks compare the original float32/float64 samples without converting them to byte.
+    ('MaskToVisionNodes.cs', 'MaskThreshold', 'InRange'),
     ('MaskToVisionNodes.cs', 'RegionFromMaskNode', 'ConnectedComponents'),
     ('MaskToVisionNodes.cs', 'ContourFromMaskNode', 'FindContours'),
     ('MaskToVisionNodes.cs', 'ContourFromMaskNode', 'ContourArea'),

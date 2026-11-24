@@ -86,7 +86,7 @@ public class ManualActionIntentStore
     {
         var configured = configuration.GetValue<string>("Production:ManualActionIntentFile");
         _path = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "production", "manual-action-intents.json")
+            ? Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "production", "manual-action-intents.json")
             : configured;
         _logger = logger;
     }

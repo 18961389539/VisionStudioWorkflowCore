@@ -567,6 +567,34 @@ CREATE INDEX IF NOT EXISTS ix_result_records_dataset_created ON result_records(d
 CREATE INDEX IF NOT EXISTS ix_result_records_key ON result_records(record_key);
 """;
 
+    private static async Task ApplyResultRecordIdempotencyAsync(SqliteConnection connection, SqliteTransaction tx, CancellationToken ct)
+    {
+        await EnsureColumnAsync(connection, tx, "result_records", "idempotency_key", "TEXT NULL", ct);
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = """
+CREATE UNIQUE INDEX IF NOT EXISTS ux_result_records_dataset_idempotency_key
+ON result_records(dataset, idempotency_key);
+""";
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private const string DurableCounterSchemaSql = """
+CREATE TABLE IF NOT EXISTS durable_counter_events (
+    seq INTEGER PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    counter_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    count_value INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    pass_count INTEGER NOT NULL,
+    fail_count INTEGER NOT NULL,
+    UNIQUE(workflow_id, counter_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS ix_durable_counter_events_latest
+ON durable_counter_events(workflow_id, counter_id, seq DESC);
+""";
+
     private const string CameraIntrinsicAssetSchemaSql = """
 CREATE TABLE IF NOT EXISTS camera_intrinsic_assets (
     id TEXT PRIMARY KEY,

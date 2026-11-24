@@ -245,8 +245,10 @@ public sealed class SecurityTests
     }
 }
 
-public sealed class SecureVisionStudioApiFactory : WebApplicationFactory<Program>
+public sealed class SecureVisionStudioApiFactory : IsolatedApiFactory
 {
+    protected override string DataRoot => Path.Combine(_root, "data");
+
     private readonly string _root = Path.Combine(Path.GetTempPath(), "visionstudio-security-tests", Guid.NewGuid().ToString("N"));
     private readonly bool _autoLoginAdmin;
     private readonly string? _autoLoginUsername;

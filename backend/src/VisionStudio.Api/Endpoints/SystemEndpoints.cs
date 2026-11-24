@@ -38,11 +38,15 @@ public static class SystemEndpoints
             return Results.Ok(new { status = health.Status, ready = health.Ready, productionReady = health.ProductionReady });
         }).AllowAnonymous();
 
-        app.MapGet("/api/health", (AuditEventStore audits, RollingFileLoggerProvider logs, StorageMaintenanceCoordinator maintenance,
+        app.MapGet("/api/health", async (AuditEventStore audits, RollingFileLoggerProvider logs, StorageMaintenanceCoordinator maintenance,
             ProductionRuntimeService production, DeviceManager devices, RobotManager robots, DeviceActionAuthorizationService authorization,
-            DeviceProfileStore deviceProfiles, ScriptWorkerSupervisor scriptWorkers) =>
+            DeviceProfileStore deviceProfiles, ScriptWorkerSupervisor scriptWorkers, AutoBackupService autoBackups, CancellationToken ct) =>
         {
             var health = EvaluateHealth(audits, logs, maintenance, production, devices, robots, authorization, deviceProfiles, scriptWorkers);
+            // P1：备份新鲜度只做信息披露，不进入 degradedReasons/ProductionBlockers——
+            // "今天还没备份"是可操作告警，但不该把健康主机判为不可接单。
+            var backup = await autoBackups.GetStatusAsync(ct);
+            var backupNow = DateTimeOffset.UtcNow;
             return Results.Ok(new
             {
                 status = health.Status,
@@ -57,6 +61,24 @@ public static class SystemEndpoints
                 workflowEngine = "Workflow Core 3.21.0",
                 pluginLoader = "McMaster.NETCore.Plugins 2.0.0",
                 mvp = "V0.63 case verification gate + dataset regression evidence",
+                // P1：自动备份调度状态与最近一次备份（含手工备份）的新鲜度。
+                backup = new
+                {
+                    autoEnabled = autoBackups.Enabled,
+                    intervalHours = autoBackups.IntervalHours,
+                    staleAfterHours = autoBackups.StaleAfterHours,
+                    lastBackupId = backup.LatestBackupId,
+                    lastBackupAt = backup.LatestBackupAt,
+                    lastBackupAgeHours = backup.LatestBackupAt is { } at
+                        ? Math.Round((backupNow - at).TotalHours, 1)
+                        : (double?)null,
+                    lastBackupIncludesArtifacts = backup.LatestBackupIncludesArtifacts,
+                    stale = AutoBackupService.IsStale(backupNow, backup.LatestBackupAt, TimeSpan.FromHours(autoBackups.StaleAfterHours)),
+                    lastAttemptAt = backup.LastAttemptAt,
+                    nextCheckAt = backup.NextCheckAt,
+                    lastError = backup.LastError,
+                    listError = backup.ListError
+                },
                 // 审计链健康：持久化失败会让审计记录静默丢失，失败计数/最近错误在此可见
                 audit = new
                 {

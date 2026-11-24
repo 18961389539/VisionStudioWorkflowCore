@@ -89,9 +89,19 @@ internal static class DefectNodeHelpers
     }
 }
 
-public sealed class FlatFieldCorrectNode : IVisionNodeExecutor
+public sealed class FlatFieldCorrectNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "image.flatFieldCorrect";
+
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+    {
+        var mode = node.GetString("referenceMode", "gainOffset");
+        if (mode != "offset" && !connectedInputs.Contains("bright"))
+            throw new InvalidOperationException($"Node '{node.Id}' gain correction requires a bright reference.");
+        if (mode != "gain" && node.GetString("darkPolicy", "skip") == "fail" && !connectedInputs.Contains("dark"))
+            throw new InvalidOperationException($"Node '{node.Id}' requires a dark reference under its current policy.");
+    }
+
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
         => FlatFieldCorrection.ExecuteAsync(context, node, cancellationToken);
 }
@@ -561,14 +571,16 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
     }
 }
 
-public sealed class RegionIntensityNode : IVisionNodeExecutor
+public sealed class RegionIntensityNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "measure.regionIntensity";
 
+    void IVisionNodeDefinitionValidator.ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs)
+        => _ = ReadSettings(node);
+
+
     private sealed record Settings(double Nominal, double Tolerance, double MinimumMean, double MaximumMean,
         double MinimumArea, double MaximumStd, double MaximumCv, string EmptyPolicy, string DiagnosticsLevel);
-
-    internal static void ValidateParameters(NodeDefinition node) => _ = ReadSettings(node);
 
     private static Settings ReadSettings(NodeDefinition node)
     {
