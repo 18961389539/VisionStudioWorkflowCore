@@ -5,12 +5,44 @@ import { apiFetch } from '../apiClient';
 import { production, traces } from '../endpoints';
 import { localizeStatus } from '../i18n';
 import { useProductionPoll } from '../useProductionPoll';
+import { demoInspectionPreviews } from '../productionDemoData';
 
 type Preview = ContractDto<'ProductionOperatorPreview'>;
 type View = 'latest' | 'ng';
 
-export default function OperatorInspectionPreview({ status }: { status?: ProductionRuntimeStatus }) {
+export default function OperatorInspectionPreview({ status, simulation = false }: {
+  status?: ProductionRuntimeStatus;
+  simulation?: boolean;
+}) {
   const [view, setView] = useState<View>('latest');
+  const [selectedDemo, setSelectedDemo] = useState(0);
+  if (simulation) {
+    const previews = demoInspectionPreviews();
+    const current = previews[selectedDemo]!;
+    return <div className="operator-demo-inspection">
+      <div className="operator-demo-toolbar">
+        <span>开发仿真 · 3 帧</span>
+        <strong data-result={current.disposition}>{current.disposition}</strong>
+      </div>
+      <div className="operator-demo-preview-stage">
+        <div className="operator-demo-main-frame">
+          <img className="operator-inspection-image" src={current.imageUrl} alt={current.label} />
+          <div className="operator-demo-frame-meta">
+            <strong>{current.label}</strong>
+            <span>{current.disposition} · {current.durationMs.toFixed(1)} ms</span>
+          </div>
+        </div>
+        <div className="operator-demo-thumbnails" role="group" aria-label="仿真检验帧">
+          {previews.map((preview, index) => <button key={preview.id} type="button"
+            className={index === selectedDemo ? 'selected' : ''} aria-pressed={index === selectedDemo}
+            aria-label={`${preview.label} ${preview.disposition}`} onClick={() => setSelectedDemo(index)}>
+            <img src={preview.imageUrl} alt="" />
+            <span>{index + 1} · {preview.disposition}</span>
+          </button>)}
+        </div>
+      </div>
+    </div>;
+  }
   const version = status?.productionLocked ? status.lockedJobVersion : undefined;
   if (version == null || !status?.startedAt) return <span>生产会话启动后显示本次检验留图。</span>;
   const key = [status.startedAt, status.jobId, version, view].join('/');

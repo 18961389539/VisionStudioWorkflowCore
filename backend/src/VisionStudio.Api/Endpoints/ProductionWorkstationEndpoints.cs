@@ -35,6 +35,13 @@ public static class ProductionWorkstationEndpoints
         app.MapGet("/api/production/stations", (ProductionFleet fleet) => Results.Ok(fleet.Snapshot()))
             .Produces<IReadOnlyList<ProductionStationOverview>>().RequireAuthorization(SecurityPolicies.Operator);
 
+        app.MapPost("/api/production/stations/control", async (StationProductionControlRequest request,
+            ProductionFleet fleet, HttpContext http, CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, $"{request.Action}:{string.Join(',', request.StationIds)}");
+            return Results.Ok(await fleet.ControlAsync(request, ct));
+        }).Produces<StationProductionControlBatch>().RequireOperator("production.station-batch-control", "production");
+
         app.MapGet("/api/production/stations/local", async (IOptions<ProductionFleetOptions> options, ProductionRuntimeService production,
             JobStore jobs, AlarmStore alarms, CancellationToken ct) =>
         {
@@ -47,16 +54,16 @@ public static class ProductionWorkstationEndpoints
                 runtime.LastCycleAt, alarm.ActiveCount, alarm.CriticalCount, alarm.PendingCount));
         }).Produces<ProductionStationStatus>().Produces(StatusCodes.Status404NotFound).RequireAuthorization(SecurityPolicies.StationRead);
 
-        app.MapGet("/api/production/operator-preview", async (bool? ngOnly, ProductionRuntimeService production,
+        app.MapGet("/api/production/operator-preview", async (string? stationId, bool? ngOnly, ProductionRuntimeService production,
             TraceabilityStore traces, CancellationToken ct) =>
         {
-            var state = production.Status;
+            var state = string.IsNullOrWhiteSpace(stationId) ? production.Status : ToRuntimeStatus(production.GetStatus(stationId));
             if (!state.ProductionLocked || state.JobId is not { } jobId || state.LockedJobVersion is not { } version ||
                 state.StartedAt is not { } startedAt)
                 return Results.NoContent();
 
             var preview = await traces.GetOperatorPreviewAsync(jobId, version, startedAt, ct, ngOnly == true);
-            var current = production.Status;
+            var current = string.IsNullOrWhiteSpace(stationId) ? production.Status : ToRuntimeStatus(production.GetStatus(stationId));
             if (preview is null || !current.ProductionLocked || current.StartedAt != startedAt || current.JobId != jobId || current.LockedJobVersion != version)
                 return Results.NoContent();
             return Results.Ok(preview);
@@ -64,6 +71,13 @@ public static class ProductionWorkstationEndpoints
 
         return app;
     }
+
+    private static ProductionRuntimeStatus ToRuntimeStatus(ProductionStationRuntimeStatus status) => new(
+        status.State, status.JobId, status.LockedJobVersion, status.LockedWorkflowHash, status.LockedDependencyManifestHash,
+        status.StartedAt, status.LastCycleAt, status.CurrentRunId, status.CycleCount, status.OkCount, status.NgCount,
+        status.ErrorCount, status.ConsecutiveFailures, status.WatchdogTrips, status.LastDurationMs, status.LastDisposition,
+        status.LastError, status.ProductionLocked, status.PtpGuard, status.SynchronizationGuard, status.PendingTraceCount,
+        status.TraceQueueCapacity, status.RecoveryAttempts, status.HasDeviceSideEffects, status.StatusEpoch, status.StatusVersion);
 
     private static async Task RequireJobAsync(JobStore jobs, string jobId, CancellationToken ct)
     {

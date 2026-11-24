@@ -6,8 +6,11 @@ using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api;
 
-public sealed partial class ProductionRuntimeService
+internal sealed partial class ProductionStationRuntime
 {
+    private readonly string _stationId;
+    private readonly string _alarmSource;
+    private readonly string _traceSource;
     private readonly JobStore _jobs;
     private readonly IVisionWorkflowRunner _runner;
     private readonly TraceabilityStore _traces;
@@ -19,7 +22,7 @@ public sealed partial class ProductionRuntimeService
     private readonly ProductionPtpDriftGuardService _ptpGuard;
     private readonly ProductionSynchronizationHealthGuardService _synchronizationGuard;
     private readonly DeviceLeaseRegistry _leases;
-    private readonly ILogger<ProductionRuntimeService> _logger;
+    private readonly ILogger _logger;
     private readonly ProductionTraceOptions _traceOptions;
     private readonly DeviceActionSafetyStore? _safetyStore;
     /// <summary>R01：统一动作授权——生产启动必须同时检查其它入口（手动/临时运行）登记的意图。</summary>
@@ -28,6 +31,9 @@ public sealed partial class ProductionRuntimeService
     /// <summary>扩展安全契约：显式动作声明的目录解析入口（可选；缺省走内置兼容分类）。</summary>
     private readonly VisionNodeRegistry? _nodes;
     private readonly RuntimeWorkloadGate _workloads;
+    private readonly SemaphoreSlim? _executionSlotGate;
+    private readonly Action<ProductionStationResultSnapshot>? _onCycleCompleted;
+    private SemaphoreSlim _triggerSignal = new(0);
     private IDisposable? _workloadLease;
     private ProductionTraceWriter? _traceWriter;
     /// <summary>
@@ -86,7 +92,8 @@ public sealed partial class ProductionRuntimeService
     private int _synchronizationGuardUnhealthyChecks;
     private int _synchronizationGuardHealthyChecks;
 
-    public ProductionRuntimeService(
+    public ProductionStationRuntime(
+        string stationId,
         JobStore jobs,
         IVisionWorkflowRunner runner,
         TraceabilityStore traces,
@@ -98,14 +105,20 @@ public sealed partial class ProductionRuntimeService
         ProductionPtpDriftGuardService ptpGuard,
         ProductionSynchronizationHealthGuardService synchronizationGuard,
         DeviceLeaseRegistry leases,
-        ILogger<ProductionRuntimeService> logger,
+        ILogger logger,
         Microsoft.Extensions.Options.IOptions<ProductionTraceOptions>? traceOptions = null,
         DeviceActionSafetyStore? safetyStore = null,
         WorkflowModuleExpander? moduleExpander = null,
         DeviceActionAuthorizationService? authorization = null,
         VisionNodeRegistry? nodes = null,
-        RuntimeWorkloadGate? workloads = null)
+        RuntimeWorkloadGate? workloads = null,
+        SemaphoreSlim? executionSlotGate = null,
+        Action<ProductionStationResultSnapshot>? onCycleCompleted = null)
     {
+        _stationId = ProductionRuntimeStationIds.Normalize(stationId);
+        var isDefault = ProductionRuntimeStationIds.IsDefault(_stationId);
+        _alarmSource = isDefault ? "ProductionRuntime" : $"ProductionRuntime:{_stationId}";
+        _traceSource = isDefault ? "ProductionRuntime" : $"ProductionRuntime:{_stationId}";
         _jobs = jobs;
         _runner = runner;
         _traces = traces;
@@ -124,6 +137,8 @@ public sealed partial class ProductionRuntimeService
         _moduleExpander = moduleExpander;
         _nodes = nodes;
         _workloads = workloads ?? new RuntimeWorkloadGate();
+        _executionSlotGate = executionSlotGate;
+        _onCycleCompleted = onCycleCompleted;
 
         // F01：加载持久化的"设备动作不确定"状态——重启后标记与锁定清单必须复现，
         // 否则自动/人工启动都会跳过设备核对。文件损坏时按"不可核对"处理（保守拒绝启动）。
@@ -181,6 +196,10 @@ public sealed partial class ProductionRuntimeService
             }
         }
     }
+
+    public string StationId => _stationId;
+
+    public ProductionStationRuntimeStatus StationStatus => ProductionStationRuntimeStatus.From(_stationId, Status);
 
     public Task<ProductionRuntimeConfig> GetConfigAsync(CancellationToken ct) => _configStore.GetAsync(ct);
 
@@ -264,7 +283,7 @@ public sealed partial class ProductionRuntimeService
                     throw new ApiConflictException("Published workflow module versions or hashes differ from the locked dependency manifest.");
                 snapshot = snapshot with { ExpandedWorkflow = expanded.Workflow };
             }
-            await _alarms.RecoverAsync("PROD-DEPENDENCY-DRIFT", "ProductionRuntime", ct);
+            await _alarms.RecoverAsync("PROD-DEPENDENCY-DRIFT", _alarmSource, ct);
 
             // R01：手动/临时运行登记的动作意图（含本进程正在进行的动作）同样阻断生产启动。
             _authorization?.EnsureProductionStartAllowed();
@@ -294,18 +313,21 @@ public sealed partial class ProductionRuntimeService
             }
             await RecoverSynchronizationGuardAlarmsAsync(ct);
 
-            await _alarms.RecoverAsync("PROD-START", "ProductionRuntime", ct);
-            await _alarms.RecoverAsync("PROD-STOP-TIMEOUT", "ProductionRuntime", ct);
+            await _alarms.RecoverAsync("PROD-START", _alarmSource, ct);
+            await _alarms.RecoverAsync("PROD-STOP-TIMEOUT", _alarmSource, ct);
             _runtimeCts?.Dispose();
             _runtimeCts = new CancellationTokenSource();
             lock (_stateSync)
             {
                 // Lease acquisition is atomic with the locked snapshot: a conflicting holder (debug
                 // session, run or manual operation) blocks the start instead of silently sharing hardware.
+                var leaseOwner = ProductionRuntimeStationIds.IsDefault(_stationId)
+                    ? DeviceLeaseOwner.Production(snapshot.JobId)
+                    : new DeviceLeaseOwner("Production", $"{_stationId}:{snapshot.JobId}", $"Production Runtime ({_stationId})");
                 var lease = _leases.AcquireOrThrow(
-                    DeviceLeaseOwner.Production(snapshot.JobId),
+                    leaseOwner,
                     LeaseResources(snapshot),
-                    $"Cannot start Production Runtime for job '{snapshot.JobId}'");
+                    $"Cannot start Production Runtime ({_stationId}) for job '{snapshot.JobId}'");
                 _lease?.Dispose();
                 _lease = lease;
                 _workloadLease ??= startupLease;
@@ -328,6 +350,7 @@ public sealed partial class ProductionRuntimeService
             }
 
             var token = _runtimeCts.Token;
+            _triggerSignal = new SemaphoreSlim(0);
             _loopTask = Task.Run(() => LoopGuardedAsync(snapshot, token));
             return Status;
         }
@@ -339,13 +362,41 @@ public sealed partial class ProductionRuntimeService
                 _lastError = ex.Message;
             }
             if (ex.Message.Contains("dependency", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("manifest", StringComparison.OrdinalIgnoreCase))
-                await _alarms.RaiseAsync("PROD-DEPENDENCY-DRIFT", AlarmSeverity.Critical, "ProductionRuntime", ex.Message, null, CancellationToken.None);
-            await _alarms.RaiseAsync("PROD-START", AlarmSeverity.Critical, "ProductionRuntime", ex.Message, null, CancellationToken.None);
+                await _alarms.RaiseAsync("PROD-DEPENDENCY-DRIFT", AlarmSeverity.Critical, _alarmSource, ex.Message, null, CancellationToken.None);
+            await _alarms.RaiseAsync("PROD-START", AlarmSeverity.Critical, _alarmSource, ex.Message, null, CancellationToken.None);
             throw;
         }
         finally
         {
             startupLease?.Dispose();
+            _gate.Release();
+        }
+    }
+
+    public void TriggerOnce()
+    {
+        var state = Status.State;
+        if (state != ProductionRuntimeState.Running)
+            throw new ApiConflictException($"Cannot trigger station '{_stationId}' because its state is {state} (must be Running).");
+        _triggerSignal.Release();
+    }
+
+    public async Task DeleteConfigAsync(CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (Status.State != ProductionRuntimeState.Stopped || _loopTask is { IsCompleted: false })
+                throw new ApiConflictException($"Stop station '{_stationId}' before removing it.");
+            lock (_stateSync)
+            {
+                if (_deviceActionStateUnknown)
+                    throw new ApiConflictException($"Station '{_stationId}' has unresolved device actions; resolve them before removing the station.");
+            }
+            await _configStore.DeleteAsync(ct);
+        }
+        finally
+        {
             _gate.Release();
         }
     }

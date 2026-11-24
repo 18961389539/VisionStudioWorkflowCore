@@ -15,6 +15,7 @@ export const defaultProductionConfig: ProductionRuntimeConfig = {
   synchronizationGuardMaximumSequenceGapRate: 0.01, synchronizationGuardCheckEveryCycles: 5,
   synchronizationGuardUnhealthyChecksToFault: 2, synchronizationGuardHealthyChecksToRecover: 3,
   synchronizationGuardRecoveryTimeoutMs: 30000,
+  triggerMode: 'Continuous', triggerTimeoutMs: 30000,
 };
 
 export function isProductionConfig(value: unknown): value is ProductionRuntimeConfig {

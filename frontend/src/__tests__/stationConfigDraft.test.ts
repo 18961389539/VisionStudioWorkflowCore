@@ -7,6 +7,7 @@ const valid: StationConfigDraft = {
   baseUrl: 'https://inspection-a.example/',
   token: 'vst_read_token',
   deliveryToken: 'vst_deliver_token',
+  controlToken: 'vst_control_token',
   expectedJobId: 'front-cover',
   expectedVersion: '4',
   expectedWorkflowHash: '',
@@ -43,9 +44,10 @@ describe('多工位配置草稿校验（对齐后端 IsValid）', () => {
     expect(fields({ ...valid, baseUrl: 'https://inspection-a.example/#x' })).toContain('baseUrl');
   });
 
-  it('令牌必须带 vst_ 前缀，且下发令牌不能与读取令牌相同', () => {
+  it('令牌必须带 vst_ 前缀，且三个令牌不能重复', () => {
     expect(fields({ ...valid, token: 'read-token' })).toContain('token');
     expect(fields({ ...valid, deliveryToken: valid.token })).toContain('deliveryToken');
+    expect(fields({ ...valid, controlToken: valid.deliveryToken })).toContain('controlToken');
   });
 
   it('期望版本与配方 ID 必须成对出现', () => {
@@ -88,8 +90,8 @@ describe('生成可粘贴的配置片段', () => {
     expect(JSON.parse(json).ProductionFleet.Stations[0]).not.toHaveProperty('ExpectedVersion');
   });
 
-  it('令牌按列表下标写入环境变量，未填下发令牌时不生成该行', () => {
-    expect(stationEnvText(valid, 0)).toBe('ProductionFleet__Stations__0__Token=vst_read_token\nProductionFleet__Stations__0__DeliveryToken=vst_deliver_token');
-    expect(stationEnvText({ ...valid, deliveryToken: '' }, 3)).toBe('ProductionFleet__Stations__3__Token=vst_read_token');
+  it('令牌按列表下标写入环境变量，可选令牌留空时不生成对应行', () => {
+    expect(stationEnvText(valid, 0)).toBe('ProductionFleet__Stations__0__Token=vst_read_token\nProductionFleet__Stations__0__DeliveryToken=vst_deliver_token\nProductionFleet__Stations__0__ControlToken=vst_control_token');
+    expect(stationEnvText({ ...valid, deliveryToken: '', controlToken: '' }, 3)).toBe('ProductionFleet__Stations__3__Token=vst_read_token');
   });
 });

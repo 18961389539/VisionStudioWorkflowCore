@@ -29,6 +29,7 @@ public static class SecurityPolicies
     public const string RunTrigger = "RunTriggerOrScope";
     public const string StationRead = "StationReadOrScope";
     public const string StationDelivery = "StationRecipeDeliveryScope";
+    public const string StationControl = "StationProductionControlScope";
 }
 
 public static class SecurityClaims
@@ -45,7 +46,8 @@ public static class ServiceScopes
     public const string StationRead = "stations:read";
 
     public const string StationDelivery = "stations:deliver";
-    public static readonly string[] All = [ResultsRead, RunsRun, StationRead, StationDelivery];
+    public const string StationControl = "stations:control";
+    public static readonly string[] All = [ResultsRead, RunsRun, StationRead, StationDelivery, StationControl];
 
     public static bool IsValid(string scope) => All.Contains(scope, StringComparer.OrdinalIgnoreCase);
 }

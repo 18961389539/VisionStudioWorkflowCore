@@ -39,6 +39,7 @@ public static class MetricsEndpoints
                 spans.Snapshot(0),
                 durations.Snapshot(),
                 production.Status,
+                production.ListStatuses(),
                 audits.PersistFailures,
                 logs,
                 scriptWorkers.Status,
@@ -54,6 +55,7 @@ public static class MetricsEndpoints
         NodeSpanSnapshot spans,
         IReadOnlyList<NodeDurationStatistic> statistics,
         ProductionRuntimeStatus production,
+        IReadOnlyList<ProductionStationRuntimeStatus> runtimes,
         long auditPersistFailures,
         RollingFileLoggerProvider logs,
         PluginWorkerStatus scriptWorker,
@@ -114,6 +116,47 @@ public static class MetricsEndpoints
         builder.AppendLine("# HELP visionstudio_production_locked Whether production is locked after a failure (1 = locked).");
         builder.AppendLine("# TYPE visionstudio_production_locked gauge");
         builder.Append("visionstudio_production_locked ").AppendLine(production.ProductionLocked ? "1" : "0");
+
+        builder.AppendLine("# HELP visionstudio_station_production_state Per-station production runtime state (one-hot).");
+        builder.AppendLine("# TYPE visionstudio_station_production_state gauge");
+        foreach (var runtime in runtimes)
+        {
+            var stationLabel = Escape(runtime.StationId);
+            foreach (var state in Enum.GetValues<ProductionRuntimeState>())
+                builder.Append("visionstudio_station_production_state{station=\"").Append(stationLabel)
+                    .Append("\",state=\"").Append(state).Append("\"} ")
+                    .AppendLine(state == runtime.State ? "1" : "0");
+        }
+
+        builder.AppendLine("# HELP visionstudio_station_production_cycles_total Per-station production cycles executed.");
+        builder.AppendLine("# TYPE visionstudio_station_production_cycles_total counter");
+        foreach (var runtime in runtimes)
+            builder.Append("visionstudio_station_production_cycles_total{station=\"").Append(Escape(runtime.StationId)).Append("\"} ")
+                .AppendLine(runtime.CycleCount.ToString(CultureInfo.InvariantCulture));
+
+        builder.AppendLine("# HELP visionstudio_station_production_ok_total Per-station OK production cycles.");
+        builder.AppendLine("# TYPE visionstudio_station_production_ok_total counter");
+        foreach (var runtime in runtimes)
+            builder.Append("visionstudio_station_production_ok_total{station=\"").Append(Escape(runtime.StationId)).Append("\"} ")
+                .AppendLine(runtime.OkCount.ToString(CultureInfo.InvariantCulture));
+
+        builder.AppendLine("# HELP visionstudio_station_production_ng_total Per-station NG production cycles.");
+        builder.AppendLine("# TYPE visionstudio_station_production_ng_total counter");
+        foreach (var runtime in runtimes)
+            builder.Append("visionstudio_station_production_ng_total{station=\"").Append(Escape(runtime.StationId)).Append("\"} ")
+                .AppendLine(runtime.NgCount.ToString(CultureInfo.InvariantCulture));
+
+        builder.AppendLine("# HELP visionstudio_station_production_errors_total Per-station error production cycles.");
+        builder.AppendLine("# TYPE visionstudio_station_production_errors_total counter");
+        foreach (var runtime in runtimes)
+            builder.Append("visionstudio_station_production_errors_total{station=\"").Append(Escape(runtime.StationId)).Append("\"} ")
+                .AppendLine(runtime.ErrorCount.ToString(CultureInfo.InvariantCulture));
+
+        builder.AppendLine("# HELP visionstudio_station_production_last_duration_milliseconds Per-station last cycle duration in milliseconds.");
+        builder.AppendLine("# TYPE visionstudio_station_production_last_duration_milliseconds gauge");
+        foreach (var runtime in runtimes)
+            builder.Append("visionstudio_station_production_last_duration_milliseconds{station=\"").Append(Escape(runtime.StationId)).Append("\"} ")
+                .AppendLine(Number(runtime.LastDurationMs));
 
         AppendCounter(builder, "visionstudio_audit_persist_failures_total", "Audit records that failed to persist.", auditPersistFailures);
         AppendCounter(builder, "visionstudio_log_dropped_entries_total", "Log entries dropped because the queue was full.", logs.DroppedEntries);

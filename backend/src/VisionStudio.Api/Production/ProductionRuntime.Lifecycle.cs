@@ -6,7 +6,7 @@ using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api;
 
-public sealed partial class ProductionRuntimeService
+internal sealed partial class ProductionStationRuntime
 {
     public async Task<ProductionRuntimeStatus> RecoverAsync(CancellationToken ct)
     {
@@ -41,9 +41,9 @@ public sealed partial class ProductionRuntimeService
         }
 
         await StopAsync(ct); // cleans completed loop/CTS without loading a new version yet.
-        await _alarms.RecoverAsync("PROD-RUN-FAILURE", "ProductionRuntime", ct);
-        await _alarms.RecoverAsync("PROD-WATCHDOG", "ProductionRuntime", ct);
-        await _alarms.RecoverAsync("PROD-STOP-TIMEOUT", "ProductionRuntime", ct);
+        await _alarms.RecoverAsync("PROD-RUN-FAILURE", _alarmSource, ct);
+        await _alarms.RecoverAsync("PROD-WATCHDOG", _alarmSource, ct);
+        await _alarms.RecoverAsync("PROD-STOP-TIMEOUT", _alarmSource, ct);
         await RecoverPtpGuardAlarmsAsync(ct);
         await RecoverSynchronizationGuardAlarmsAsync(ct);
         return await StartAsync(null, ct);
@@ -149,7 +149,7 @@ public sealed partial class ProductionRuntimeService
         catch (Exception ex)
         {
             lock (_stateSync) _lastError = ex.Message;
-            await _alarms.RaiseAsync("PROD-START", AlarmSeverity.Critical, "ProductionRuntime", ex.Message, null, CancellationToken.None);
+            await _alarms.RaiseAsync("PROD-START", AlarmSeverity.Critical, _alarmSource, ex.Message, null, CancellationToken.None);
             _logger.LogError(ex, "Production Runtime auto start failed.");
         }
     }
@@ -170,7 +170,7 @@ public sealed partial class ProductionRuntimeService
                 _lastError = ex.Message;
                 _state = ProductionRuntimeState.Faulted;
             }
-            await _alarms.RaiseAsync("PROD-RUNTIME", AlarmSeverity.Critical, "ProductionRuntime", ex.Message, _currentRunId, CancellationToken.None);
+            await _alarms.RaiseAsync("PROD-RUNTIME", AlarmSeverity.Critical, _alarmSource, ex.Message, _currentRunId, CancellationToken.None);
             _logger.LogError(ex, "Production runtime loop faulted unexpectedly.");
         }
         finally

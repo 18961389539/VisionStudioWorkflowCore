@@ -15,6 +15,7 @@ import { OperatorDashboard } from './OperatorDashboard';
 import './ProductionWorkstation.css';
 
 const ProductionStations = lazy(() => import('./ProductionStations'));
+const LocalParallelRuntimes = lazy(() => import('./LocalParallelRuntimes'));
 const OperatorAlarmQueue = lazy(() => import('./OperatorAlarmQueue'));
 const OperatorLayoutDialog = lazy(() => import('./OperatorLayoutDialog'));
 const RecipeDeliveryInbox = lazy(() => import('./ProductionRecipeRollouts').then((module) => ({ default: module.RecipeDeliveryInbox })));
@@ -555,7 +556,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   // kiosk：没有标签栏，只有操作员工作台——车间大屏上任何可切换的入口都是误触来源。
   // 标签分两组：运行（操作员/监控/告警/工位/收件箱）与配置（生产配置/PTP/同步健康）。
   // 此前 8 个同层标签挤在一起，"PTP 保护"要扫过整排才找得到，且操作与配置语义混在一处。
-  const runTabKeys = ['operator', 'monitor', 'alarms', 'stations', ...(canEngineer ? ['deliveries'] : [])];
+  const runTabKeys = ['operator', 'monitor', 'parallel', 'alarms', 'stations', ...(canEngineer ? ['deliveries'] : [])];
   const configTabKeys = canConfigure ? ['config', 'ptp', 'sync'] : [];
   // 回退用"工程师最常用的运行监控"而不是列表第一项（第一项是操作员预览，只适合操作员视角）
   const runFallbackTab = canConfigure ? 'monitor' : 'operator';
@@ -569,9 +570,15 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   const runTabItems = [
     { key: 'operator', label: '操作员', children: shownTab === 'operator' && operatorTab },
     { key: 'monitor', label: '运行监控', children: monitorTab },
+    { key: 'parallel', label: '本机并行', children: open && shownTab === 'parallel' &&
+      <Suspense fallback={<span role="status">正在加载本机多工位…</span>}>
+        <LocalParallelRuntimes jobs={jobs} canConfigure={canConfigure} />
+      </Suspense> },
     { key: 'alarms', label: `告警${activeAlarmCount ? `（${activeAlarmCount}）` : ''}`, children: alarmsTab },
     { key: 'stations', label: '多工位', children: open && shownTab === 'stations' &&
-      <Suspense fallback={<span role="status">正在加载工位总览…</span>}><ProductionStations canSend={canConfigure} /></Suspense> },
+      <Suspense fallback={<span role="status">正在加载工位总览…</span>}>
+        <ProductionStations canSend={canConfigure} canControl />
+      </Suspense> },
     ...(canEngineer ? [{ key: 'deliveries', label: '配方收件箱', children: open && shownTab === 'deliveries' &&
       <Suspense fallback={<span role="status">正在加载配方收件箱…</span>}>
         <RecipeDeliveryInbox onPublished={monitor.refresh} />
@@ -592,7 +599,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   ) : (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       {contextHolder}
-      {shownTab !== 'stations' && shownTab !== 'deliveries' && localDetails}
+      {shownTab !== 'stations' && shownTab !== 'deliveries' && shownTab !== 'parallel' && localDetails}
       {canConfigure && <Segmented size="small" value={tabGroup}
         onChange={(value) => switchTabGroup(value as 'run' | 'configure')}
         options={[{ label: '运行', value: 'run' }, { label: '配置', value: 'configure' }]} />}

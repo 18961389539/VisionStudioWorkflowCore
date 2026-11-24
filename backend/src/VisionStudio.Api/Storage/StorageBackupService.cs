@@ -167,10 +167,11 @@ public sealed partial class StorageBackupService
         //
         // 仍拒绝**过渡态**（Starting/Stopping/Recovering）：此刻生产正在切换锁定快照/清理资源，
         // 与其并发备份没有意义，等其稳定后再备份。
-        var runtimeState = _production.Status.State;
-        if (runtimeState is ProductionRuntimeState.Starting or ProductionRuntimeState.Stopping or ProductionRuntimeState.Recovering)
+        var transitioning = _production.ListStatuses()
+            .FirstOrDefault(s => s.State is ProductionRuntimeState.Starting or ProductionRuntimeState.Stopping or ProductionRuntimeState.Recovering);
+        if (transitioning is not null)
             throw new ApiConflictException(
-                $"Storage backup requires a stable production runtime; current state is {runtimeState}. " +
+                $"Storage backup requires a stable production runtime; station '{transitioning.StationId}' current state is {transitioning.State}. " +
                 "Wait for production to reach Running, Stopped, or Faulted before creating a backup.");
 
         await using var maintenance = await _maintenance.BeginExclusiveAsync("storage backup", ct);

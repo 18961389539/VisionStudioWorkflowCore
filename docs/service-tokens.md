@@ -24,6 +24,7 @@ vst_<43 字符 base64url>        例：vst_9mQ...（共 47 字符）
 | `results:read` | `GET /api/traces`、`/api/traces/page`、`/api/traces/stats`、`/api/traces/{runId}` | Operator 及以上 |
 | `stations:read` | `GET /api/production/stations/local` | Operator 及以上 |
 | `stations:deliver` | `POST /api/production/recipe-deliveries` | 使用工位独立接收令牌 |
+| `stations:control` | `POST /api/production/start`、`POST /api/production/stop` | Operator 及以上 |
 | `runs:run` | `POST /api/run`（触发一次临时流程运行） | Engineer 及以上 |
 
 规则：
@@ -67,6 +68,7 @@ curl https://host/api/traces/page?limit=20 -H "Authorization: Bearer vst_..."
 - 每次带 `results:read` 的读请求会写一条 `trace.read` 审计（`username=service:<名称>`、
   `role=Service`）。人类轮询同一接口不写，避免把审计表变成访问日志。
 - 触发运行始终写 `workflow.run.adhoc` 审计，与人类 Engineer 同口径。
+- `stations:control` 令牌只允许启停该工位现有生产配置，不能读取配置、切换配方或调用恢复接口。
 
 ## 部署建议
 

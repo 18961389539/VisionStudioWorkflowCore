@@ -6,6 +6,7 @@ import { jobs, production } from '../endpoints';
 import type { ContractDto, JobDescriptor } from '../types';
 import { useProductionActions } from '../useProductionActions';
 import { useProductionPoll } from '../useProductionPoll';
+import { demoRecipeDeliveries, productionDemoEnabled } from '../productionDemoData';
 
 type Station = ContractDto<'ProductionStationOverview'>;
 type Batch = ContractDto<'RecipeRolloutBatch'>;
@@ -156,20 +157,25 @@ export function RecipeRolloutDialog({ stations, onCompleted, onClose }: {
 export function RecipeDeliveryInbox({ onPublished }: { onPublished: () => void }) {
   const deliveries = useList<Receipt>(production.recipeDeliveries);
   const [candidate, setCandidate] = useState<Receipt>();
+  const simulation = productionDemoEnabled && deliveries.data?.length === 0;
+  const rows = simulation ? demoRecipeDeliveries() : deliveries.data;
   return <section className="station-overview" aria-label="工位配方收件箱">
     <div className="workstation-heading">
       <h2>工位配方收件箱</h2><Button onClick={deliveries.refresh}>刷新收件箱</Button>
     </div>
+    {simulation && <Alert type="info" showIcon title="开发仿真收件箱"
+      description="以下配方回执用于预览待发布、待验证和已发布状态；仿真记录不会写入工位或触发真实发布。" />}
     {deliveries.error && <Alert type="warning" showIcon title={deliveries.error} />}
-    {deliveries.data && (deliveries.data.length === 0 ? <Empty description="暂无收到的配方" /> :
-      <Table<Receipt> dataSource={deliveries.data} rowKey="id" size="small" scroll={{ x: 720 }}
+    {rows && (rows.length === 0 ? <Empty description="暂无收到的配方" /> :
+      <Table<Receipt> dataSource={rows} rowKey="id" size="small" scroll={{ x: 720 }}
         pagination={{ pageSize: 8, hideOnSinglePage: true }} columns={[
           { title: '收到的配方', render: (_, row) => <div title={row.workflowHash}>{row.jobName} · {row.jobId}</div> },
           { title: '来源 / 本地', render: (_, row) => versionLabel(row.sourceVersion) + ' / ' + versionLabel(row.localVersion) },
           { title: '当前发布', render: (_, row) => versionLabel(row.publishedVersion) },
           { title: '接收时间', render: (_, row) => timeLabel(row.receivedAt) },
           { title: '处理', render: (_, row) => row.publishedVersion === row.localVersion ? <Tag color="green">已发布</Tag> :
-            <Button size="small" disabled={Boolean(deliveries.error)} onClick={() => setCandidate(row)}>核对并发布</Button> },
+            simulation ? <Tag color="blue">仿真待发布</Tag>
+              : <Button size="small" disabled={Boolean(deliveries.error)} onClick={() => setCandidate(row)}>核对并发布</Button> },
         ]} />)}
     {!deliveries.data && !deliveries.error && <Spin />}
     {candidate && <ReviewRecipeDelivery receipt={candidate} onClose={() => { setCandidate(undefined); deliveries.refresh(); }}

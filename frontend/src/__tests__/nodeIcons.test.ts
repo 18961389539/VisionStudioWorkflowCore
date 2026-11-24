@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { iconForNodeType, iconIdentityForNodeType, nodeIconCode } from '../components/NodeCategoryIcon';
+import { iconForNodeType, iconIdentityForNodeType, nodeIconCode, nodeIconPattern } from '../components/NodeCategoryIcon';
 import { fallbackCatalogRaw } from '../catalog';
 import { nodeCategory } from '../toolboxModel';
 
@@ -66,7 +66,9 @@ describe('node icon mapping', () => {
   });
   it('assigns every built-in node type a unique stable icon identity', () => {
     const identities = fallbackCatalogRaw.map((item) => iconIdentityForNodeType(item.type));
+    const patterns = fallbackCatalogRaw.map((item) => nodeIconPattern(item.type).join(''));
     expect(new Set(identities).size).toBe(fallbackCatalogRaw.length);
+    expect(new Set(patterns).size).toBe(fallbackCatalogRaw.length);
     expect(nodeIconCode('IMAGE.SYNTHETIC')).toBe(nodeIconCode('image.synthetic'));
     expect(iconIdentityForNodeType('vendor.specialWidget')).not.toBe(iconIdentityForNodeType('vendor.otherWidget'));
   });

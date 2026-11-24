@@ -57,7 +57,7 @@ export default function StationSetupWizard({ startIndex, existingIds, stationCou
       <Alert type="info" showIcon title="向导只生成文本，不改配置文件"
         description={<>
           <ol style={{ margin: '4px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
-            <li>在目标工位用管理员创建服务令牌：总览读取用 <code>stations:read</code>，配方下发另加 <code>stations:deliver</code>。</li>
+            <li>在目标工位用管理员创建服务令牌：读取用 <code>stations:read</code>、配方下发用 <code>stations:deliver</code>、远程启停用 <code>stations:control</code>。</li>
             <li>把右侧 JSON 合并进总览宿主的 <code>site-config/appsettings.site.json</code>，令牌写入宿主运行账户的环境变量。</li>
             <li>重启总览宿主（配置文件不热加载），回到「多工位」点「刷新总览」。</li>
           </ol>
@@ -83,6 +83,9 @@ export default function StationSetupWizard({ startIndex, existingIds, stationCou
           </Field>
           <Field label="下发令牌（可选，stations:deliver）" hint="必须与读取令牌不同" error={issueOf('deliveryToken')}>
             <Input value={draft.deliveryToken} onChange={update('deliveryToken')} placeholder="vst_..." aria-label="下发令牌" />
+          </Field>
+          <Field label="控制令牌（可选，stations:control）" hint="用于总览远程启停；必须与其它令牌不同" error={issueOf('controlToken')}>
+            <Input value={draft.controlToken} onChange={update('controlToken')} placeholder="vst_..." aria-label="控制令牌" />
           </Field>
           <Field label="期望配方 ID（可选）" hint="版本核验目标；留空表示不核验" error={issueOf('expectedJobId')}>
             <Input value={draft.expectedJobId} onChange={update('expectedJobId')} placeholder="front-cover" aria-label="期望配方 ID" />

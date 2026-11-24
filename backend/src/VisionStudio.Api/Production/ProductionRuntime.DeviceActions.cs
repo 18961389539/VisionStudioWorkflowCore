@@ -6,7 +6,7 @@ using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api;
 
-public sealed partial class ProductionRuntimeService
+internal sealed partial class ProductionStationRuntime
 {
     private void EnsureNoDrainingTraceWriter()
     {

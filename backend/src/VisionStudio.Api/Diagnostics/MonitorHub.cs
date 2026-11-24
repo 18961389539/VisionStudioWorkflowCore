@@ -68,7 +68,8 @@ public sealed record MonitorSnapshot(
     IReadOnlyList<DeviceDescriptor> Devices,
     IReadOnlyList<RobotDescriptor> Robots,
     ProductionRuntimeStatus Production,
-    string AlarmRevision);
+    string AlarmRevision,
+    IReadOnlyList<ProductionStationRuntimeStatus>? Runtimes = null);
 
 public sealed class MonitorSnapshotReader(
     CameraManager cameras,
@@ -78,7 +79,7 @@ public sealed class MonitorSnapshotReader(
     AlarmStore alarms)
 {
     public MonitorSnapshot Capture()
-        => new(DateTimeOffset.UtcNow, cameras.List(), devices.List(), robots.List(), production.Status, alarms.RevisionStamp());
+        => new(DateTimeOffset.UtcNow, cameras.List(), devices.List(), robots.List(), production.Status, alarms.RevisionStamp(), production.ListStatuses());
 }
 
 /// <summary>
@@ -122,7 +123,8 @@ public sealed class MonitorBroadcastService(
                 var payload = JsonSerializer.Serialize(snapshot with
                 {
                     CapturedAt = DateTimeOffset.MinValue,
-                    Production = snapshot.Production with { StatusVersion = 0 }
+                    Production = snapshot.Production with { StatusVersion = 0 },
+                    Runtimes = snapshot.Runtimes?.Select(r => r with { StatusVersion = 0 }).ToArray()
                 }, Json);
                 if (string.Equals(payload, lastPayload, StringComparison.Ordinal)) continue;
                 lastPayload = payload;

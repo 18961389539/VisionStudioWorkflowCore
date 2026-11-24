@@ -6,7 +6,7 @@
   },
   "servers": [
     {
-      "url": "http://127.0.0.1:5399/"
+      "url": "http://127.0.0.1:5398/"
     }
   ],
   "paths": {
@@ -7753,6 +7753,485 @@
         }
       }
     },
+    "/api/production/runtimes": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/status": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/config": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionRuntimeConfig"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductionRuntimeConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionRuntimeConfig"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/start": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductionStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/stop": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/recover": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/trigger": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/latest-result": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionStationResultSnapshot"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}": {
+      "delete": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/start-all": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/stop-all": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/device-actions/pending": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionDeviceActionPendingState"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/device-actions/resolve": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceActionResolutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionStationRuntimeStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/production/operator-layout/{jobId}": {
       "get": {
         "tags": [
@@ -7868,6 +8347,35 @@
         }
       }
     },
+    "/api/production/stations/control": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StationProductionControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StationProductionControlBatch"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/production/stations/local": {
       "get": {
         "tags": [
@@ -7896,6 +8404,13 @@
           "VisionStudio.Api"
         ],
         "parameters": [
+          {
+            "name": "stationId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "ngOnly",
             "in": "query",
@@ -16354,6 +16869,12 @@
           }
         }
       },
+      "DeviceActionSafetyPhase": {
+        "enum": [
+          "Unknown",
+          "IntentRecorded"
+        ]
+      },
       "DeviceAddressTemplate": {
         "required": [
           "driver",
@@ -24440,6 +24961,80 @@
           }
         }
       },
+      "ProductionDeviceActionPendingState": {
+        "required": [
+          "runId",
+          "manifestHash",
+          "deviceIds",
+          "robotIds",
+          "deviceFingerprints",
+          "phase",
+          "setAt",
+          "reason",
+          "unreadable"
+        ],
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "manifestHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deviceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "robotIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "deviceFingerprints": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "phase": {
+            "$ref": "#/components/schemas/DeviceActionSafetyPhase"
+          },
+          "setAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "unreadable": {
+            "type": "boolean"
+          },
+          "cameraIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "ProductionOperatorPreview": {
         "required": [
           "runId",
@@ -24659,7 +25254,9 @@
           "synchronizationGuardUnhealthyChecksToFault",
           "synchronizationGuardHealthyChecksToRecover",
           "synchronizationGuardRecoveryTimeoutMs",
-          "maxRecoveryAttempts"
+          "maxRecoveryAttempts",
+          "triggerMode",
+          "triggerTimeoutMs"
         ],
         "type": "object",
         "properties": {
@@ -24904,6 +25501,18 @@
             ],
             "format": "int32",
             "default": 3
+          },
+          "triggerMode": {
+            "$ref": "#/components/schemas/ProductionTriggerMode"
+          },
+          "triggerTimeoutMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 30000
           }
         }
       },
@@ -25158,7 +25767,8 @@
           "status",
           "target",
           "versionCheck",
-          "recipeDeliveryEnabled"
+          "recipeDeliveryEnabled",
+          "productionControlEnabled"
         ],
         "type": "object",
         "properties": {
@@ -25214,6 +25824,293 @@
           "recipeDeliveryEnabled": {
             "type": "boolean",
             "default": false
+          },
+          "productionControlEnabled": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "ProductionStationResultSnapshot": {
+        "required": [
+          "stationId",
+          "runId",
+          "jobId",
+          "jobVersion",
+          "success",
+          "disposition",
+          "durationMs",
+          "completedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "stationId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "jobVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "durationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ProductionStationRuntimeStatus": {
+        "required": [
+          "stationId",
+          "state",
+          "jobId",
+          "lockedJobVersion",
+          "lockedWorkflowHash",
+          "lockedDependencyManifestHash",
+          "startedAt",
+          "lastCycleAt",
+          "currentRunId",
+          "cycleCount",
+          "okCount",
+          "ngCount",
+          "errorCount",
+          "consecutiveFailures",
+          "watchdogTrips",
+          "lastDurationMs",
+          "lastDisposition",
+          "lastError",
+          "productionLocked",
+          "ptpGuard",
+          "synchronizationGuard",
+          "pendingTraceCount",
+          "traceQueueCapacity",
+          "recoveryAttempts",
+          "hasDeviceSideEffects",
+          "statusVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "stationId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProductionRuntimeState"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lockedJobVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "lockedWorkflowHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lockedDependencyManifestHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastCycleAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "currentRunId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "cycleCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "okCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "ngCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "errorCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "consecutiveFailures": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "watchdogTrips": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "lastDurationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "lastDisposition": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "productionLocked": {
+            "type": "boolean"
+          },
+          "ptpGuard": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProductionPtpGuardSnapshot"
+              }
+            ]
+          },
+          "synchronizationGuard": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProductionSynchronizationGuardSnapshot"
+              }
+            ]
+          },
+          "pendingTraceCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 0
+          },
+          "traceQueueCapacity": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 8
+          },
+          "recoveryAttempts": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 0
+          },
+          "hasDeviceSideEffects": {
+            "type": "boolean",
+            "default": false
+          },
+          "statusEpoch": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "statusVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
           }
         }
       },
@@ -25708,6 +26605,13 @@
             "format": "double"
           }
         }
+      },
+      "ProductionTriggerMode": {
+        "enum": [
+          "Continuous",
+          "ExternalSignal"
+        ],
+        "default": "Continuous"
       },
       "PublicationEvent": {
         "required": [
@@ -28590,6 +29494,107 @@
             "format": "int32"
           },
           "publishedWorkflowHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "StationProductionAction": {
+        "enum": [
+          "Start",
+          "Stop"
+        ]
+      },
+      "StationProductionControlBatch": {
+        "required": [
+          "action",
+          "requestedAt",
+          "stations"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/StationProductionAction"
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StationProductionControlResult"
+            }
+          }
+        }
+      },
+      "StationProductionControlRequest": {
+        "required": [
+          "stationIds",
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "stationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "action": {
+            "$ref": "#/components/schemas/StationProductionAction"
+          }
+        }
+      },
+      "StationProductionControlResult": {
+        "required": [
+          "stationId",
+          "stationName",
+          "succeeded",
+          "state",
+          "jobId",
+          "lockedVersion",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "stationId": {
+            "type": "string"
+          },
+          "stationName": {
+            "type": "string"
+          },
+          "succeeded": {
+            "type": "boolean"
+          },
+          "state": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProductionRuntimeState"
+              }
+            ]
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lockedVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "detail": {
             "type": [
               "null",
               "string"

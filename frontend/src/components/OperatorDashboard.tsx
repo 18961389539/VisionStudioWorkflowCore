@@ -5,12 +5,14 @@ import { apiFetch } from '../apiClient';
 import { responseErrorMessage } from '../apiErrors';
 import { production } from '../endpoints';
 import { localizeStatus } from '../i18n';
+import { productionDemoEnabled } from '../productionDemoData';
 const OperatorInspectionPreview = lazy(() => import('./OperatorInspectionPreview'));
 
 export type Layout = ContractDto<'OperatorLayout'>;
 export type Widget = ContractDto<'OperatorWidget'>;
 // 与后端 OperatorLayout.Default 保持一致（后端才是默认值的真相源，这里只做读取失败时的兜底）
 const defaultLayout: Layout = { title: null, widgets: ['Result', 'Counts', 'Timing', 'Alarms'] };
+const demoLayout: Layout = { title: '操作员工作台 · 仿真', widgets: ['Result', 'Counts', 'Timing', 'Alarms', 'Preview'] };
 export const widgetLabels: Record<Widget, string> = {
   Result: '最近判定', Counts: '产量与良率', Timing: '检测节拍', Alarms: '活动告警', Preview: '最近检验留图',
 };
@@ -69,7 +71,8 @@ type DashboardProps = {
 
 export function OperatorDashboard({ jobId, status, statusFresh, alarmSummary, alarmFresh, onEdit, kiosk = false, lastUpdatedAt }: DashboardProps) {
   const { snapshot, error, reload } = useOperatorLayout(jobId);
-  const layout = snapshot?.layout ?? defaultLayout;
+  const simulation = productionDemoEnabled && !jobId;
+  const layout = snapshot?.layout ?? (simulation ? demoLayout : defaultLayout);
   // status 是最后一次成功读取的值（失败不会清空它）。过期时保留数字并明示"这是几点钟的数据"，
   // 而不是把它们抹成 —：车间里一条破折号会被读成"今天零产量"，比显示旧值危险得多。
   const live = status;
@@ -115,7 +118,7 @@ export function OperatorDashboard({ jobId, status, statusFresh, alarmSummary, al
           <span>{live?.lastCycleAt ? new Date(live.lastCycleAt).toLocaleTimeString('zh-CN') : '暂无已完成周期'}</span>
         </>}
         {widget === 'Preview' && <Suspense fallback={<span role="status">正在加载检验留图…</span>}>
-          <OperatorInspectionPreview status={live} />
+          <OperatorInspectionPreview status={live} simulation={simulation} />
         </Suspense>}
         {widget === 'Alarms' && <>
           <strong>{alarmActive ?? '—'} <small>条活动告警</small></strong>

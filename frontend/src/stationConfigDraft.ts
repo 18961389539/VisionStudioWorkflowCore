@@ -2,7 +2,7 @@
  * 多工位配置草稿（2026-11-23）。
  *
  * 现场登记工位要同时改三处：`site-config/appsettings.site.json` 的 `ProductionFleet.Stations`、
- * 宿主运行账户里的两个令牌环境变量、然后重启。手写 JSON 最容易错的是**令牌缺失**——
+ * 宿主运行账户里的读取及可选下发/控制令牌环境变量、然后重启。手写 JSON 最容易错的是**令牌缺失**——
  * `VisionStudioServiceRegistration` 对 `ProductionFleetOptions` 用了 `Validate(...)`，
  * 校验失败会在宿主启动时抛 OptionsValidationException，表现为"服务起不来"。
  *
@@ -17,13 +17,14 @@ export type StationConfigDraft = {
   baseUrl: string;
   token: string;
   deliveryToken: string;
+  controlToken: string;
   expectedJobId: string;
   expectedVersion: string;
   expectedWorkflowHash: string;
 };
 
 export const emptyStationDraft: StationConfigDraft = {
-  id: '', name: '', baseUrl: '', token: '', deliveryToken: '',
+  id: '', name: '', baseUrl: '', token: '', deliveryToken: '', controlToken: '',
   expectedJobId: '', expectedVersion: '', expectedWorkflowHash: '',
 };
 
@@ -66,6 +67,7 @@ export function validateStationDraft(
   const baseUrl = draft.baseUrl.trim();
   const token = draft.token.trim();
   const deliveryToken = draft.deliveryToken.trim();
+  const controlToken = draft.controlToken.trim();
   const expectedJobId = draft.expectedJobId.trim();
   const expectedVersion = draft.expectedVersion.trim();
   const expectedWorkflowHash = draft.expectedWorkflowHash.trim();
@@ -86,6 +88,11 @@ export function validateStationDraft(
     issues.push({ field: 'deliveryToken', message: '下发令牌必须以 vst_ 开头，只含字母、数字、- 或 _' });
   } else if (deliveryToken && deliveryToken === token) {
     issues.push({ field: 'deliveryToken', message: '下发令牌必须与读取令牌不同' });
+  }
+  if (controlToken && !isToken(controlToken)) {
+    issues.push({ field: 'controlToken', message: '控制令牌必须以 vst_ 开头，只含字母、数字、- 或 _' });
+  } else if (controlToken && (controlToken === token || controlToken === deliveryToken)) {
+    issues.push({ field: 'controlToken', message: '控制令牌必须与读取令牌、下发令牌均不同' });
   }
 
   if (expectedJobId) {
@@ -144,5 +151,7 @@ export function stationEnvText(draft: StationConfigDraft, index: number): string
   const lines = [`ProductionFleet__Stations__${index}__Token=${draft.token.trim()}`];
   const deliveryToken = draft.deliveryToken.trim();
   if (deliveryToken) lines.push(`ProductionFleet__Stations__${index}__DeliveryToken=${deliveryToken}`);
+  const controlToken = draft.controlToken.trim();
+  if (controlToken) lines.push(`ProductionFleet__Stations__${index}__ControlToken=${controlToken}`);
   return lines.join('\n');
 }

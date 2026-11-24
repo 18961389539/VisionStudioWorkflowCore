@@ -211,14 +211,34 @@ export function iconIdentityForNodeType(type: string): string {
   return `${iconForNodeType(type)}-${nodeIconCode(type)}`;
 }
 
+export function nodeIconPattern(type: string): boolean[] {
+  const raw = parseInt(nodeIconCode(type), 36);
+  const cellCount = raw < 2 ** 9 ? 9 : 16;
+  const multiplier = cellCount === 9 ? 197 : 40503;
+  const value = ((raw + 1) * multiplier) & (2 ** cellCount - 1);
+  return Array.from({ length: cellCount }, (_, index) =>
+    (value & 2 ** index) !== 0
+  );
+}
+
 export default function NodeCategoryIcon({ type }: { type: string }) {
   const icon = iconForNodeType(type);
   const code = nodeIconCode(type);
+  const pattern = nodeIconPattern(type);
+  const columns = pattern.length === 9 ? 3 : 4;
+  const cellSize = columns === 3 ? 5.2 : 3.8;
+  const gap = columns === 3 ? 1.15 : 1;
+  const start = (24 - (columns * cellSize + (columns - 1) * gap)) / 2;
   return <span className="node-icon-badge" aria-hidden="true" title={type}>
     <svg className="node-category-icon" data-icon={icon} data-icon-code={code} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <g transform="translate(-2 -2) scale(.82)">{glyphs[icon].map((path, index) => <path key={index} d={path} />)}</g>
-      <rect className="node-icon-stamp-bg" x="10.5" y="14" width="12" height="8" rx="1.5" />
-      <text className="node-icon-stamp" x="16.5" y="20" textAnchor="middle">{code}</text>
+      <g className="node-icon-semantic">{glyphs[icon].map((path, index) => <path key={index} d={path} />)}</g>
+      <g className="node-icon-pattern">
+        {pattern.map((filled, index) => <rect key={index}
+          className={filled ? 'node-icon-cell filled' : 'node-icon-cell'}
+          x={start + (index % columns) * (cellSize + gap)}
+          y={start + Math.floor(index / columns) * (cellSize + gap)}
+          width={cellSize} height={cellSize} rx={1.1} />)}
+      </g>
     </svg>
   </span>;
 }

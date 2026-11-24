@@ -286,8 +286,10 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .metric-help { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .metric-help:focus-visible { outline: 1px solid var(--vs-text-brand); outline-offset: 3px; }
 .node-icon-badge { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--node-accent, var(--vs-text-brand)) 28%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--node-accent, var(--vs-text-brand)) 11%, transparent); color: var(--node-accent, var(--vs-text-brand)); }
-.node-icon-stamp-bg { fill: color-mix(in srgb, var(--node-accent, var(--vs-text-brand)) 82%, var(--vs-bg-node-title, var(--vs-bg-side))); stroke: none; }
-.node-icon-stamp { fill: var(--vs-bg-side); stroke: none; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 5.4px; font-weight: 800; letter-spacing: .05px; }
+.node-icon-semantic { opacity: .22; }
+.node-icon-pattern { stroke: none; }
+.node-icon-cell { fill: currentColor; opacity: .12; }
+.node-icon-cell.filled { opacity: 1; }
 /* 节点成熟度徽标（2026-10-29）：Stable 不渲染，只在预览/实验节点上提示"验证到什么程度"。
    放到工具箱条目右侧与配置对话框标题栏，颜色跟随主题 warn/danger 变量，暗色主题自动适配。 */
 .maturity-badge { flex: none; padding: 0 5px; border-radius: 999px; border: 1px solid currentColor; font-size: 10px; line-height: 15px; font-weight: 600; letter-spacing: .02em; cursor: help; white-space: nowrap; }

@@ -17,6 +17,23 @@ public enum ProductionRuntimeState
     Faulted
 }
 
+public enum ProductionTriggerMode
+{
+    Continuous,
+    ExternalSignal
+}
+
+public sealed record ProductionStationResultSnapshot(
+    string StationId,
+    string RunId,
+    string? JobId,
+    int? JobVersion,
+    bool Success,
+    string Disposition,
+    double DurationMs,
+    DateTimeOffset CompletedAt,
+    string? Error = null);
+
 public sealed record ProductionRuntimeConfig(
     string? JobId = null,
     bool AutoStart = false,
@@ -48,7 +65,9 @@ public sealed record ProductionRuntimeConfig(
     int SynchronizationGuardHealthyChecksToRecover = 3,
     int SynchronizationGuardRecoveryTimeoutMs = 30000,
     /// <summary>同一故障事件内允许的自动恢复总次数：耗尽后锁定 Faulted，需人工核对与恢复。</summary>
-    int MaxRecoveryAttempts = 3);
+    int MaxRecoveryAttempts = 3,
+    ProductionTriggerMode TriggerMode = ProductionTriggerMode.Continuous,
+    int TriggerTimeoutMs = 30000);
 
 public sealed record ProductionRuntimeStatus(
     ProductionRuntimeState State,
@@ -79,6 +98,92 @@ public sealed record ProductionRuntimeStatus(
     bool HasDeviceSideEffects = false,
     string? StatusEpoch = null,
     long StatusVersion = 0);
+
+public sealed record ProductionStationRuntimeStatus(
+    string StationId,
+    ProductionRuntimeState State,
+    string? JobId,
+    int? LockedJobVersion,
+    string? LockedWorkflowHash,
+    string? LockedDependencyManifestHash,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? LastCycleAt,
+    string? CurrentRunId,
+    long CycleCount,
+    long OkCount,
+    long NgCount,
+    long ErrorCount,
+    int ConsecutiveFailures,
+    long WatchdogTrips,
+    double LastDurationMs,
+    string? LastDisposition,
+    string? LastError,
+    bool ProductionLocked,
+    ProductionPtpGuardSnapshot? PtpGuard,
+    ProductionSynchronizationGuardSnapshot? SynchronizationGuard,
+    int PendingTraceCount = 0,
+    int TraceQueueCapacity = 8,
+    int RecoveryAttempts = 0,
+    bool HasDeviceSideEffects = false,
+    string? StatusEpoch = null,
+    long StatusVersion = 0)
+{
+    public static ProductionStationRuntimeStatus From(string stationId, ProductionRuntimeStatus status) => new(
+        stationId,
+        status.State,
+        status.JobId,
+        status.LockedJobVersion,
+        status.LockedWorkflowHash,
+        status.LockedDependencyManifestHash,
+        status.StartedAt,
+        status.LastCycleAt,
+        status.CurrentRunId,
+        status.CycleCount,
+        status.OkCount,
+        status.NgCount,
+        status.ErrorCount,
+        status.ConsecutiveFailures,
+        status.WatchdogTrips,
+        status.LastDurationMs,
+        status.LastDisposition,
+        status.LastError,
+        status.ProductionLocked,
+        status.PtpGuard,
+        status.SynchronizationGuard,
+        status.PendingTraceCount,
+        status.TraceQueueCapacity,
+        status.RecoveryAttempts,
+        status.HasDeviceSideEffects,
+        status.StatusEpoch,
+        status.StatusVersion);
+}
+
+public static class ProductionRuntimeStationIds
+{
+    public const string DefaultStationId = "default";
+
+    public static bool IsDefault(string? stationId) =>
+        string.IsNullOrWhiteSpace(stationId) ||
+        string.Equals(stationId.Trim(), DefaultStationId, StringComparison.OrdinalIgnoreCase);
+
+    public static string Normalize(string? stationId)
+    {
+        if (string.IsNullOrWhiteSpace(stationId)) return DefaultStationId;
+        var trimmed = stationId.Trim();
+        if (string.Equals(trimmed, DefaultStationId, StringComparison.OrdinalIgnoreCase))
+            return DefaultStationId;
+        if (!ProductionFleetOptions.IsStationId(trimmed))
+            throw new ApiValidationException(
+                "StationId must be 1..64 ASCII letters, digits, '-' or '_'.");
+        return trimmed;
+    }
+
+    public static string? NormalizeOptional(string? stationId)
+    {
+        var normalized = Normalize(stationId);
+        return string.Equals(normalized, DefaultStationId, StringComparison.Ordinal) ? null : normalized;
+    }
+}
 
 public sealed record ProductionStartRequest(string? JobId = null);
 public sealed record DeviceActionResolutionRequest(
@@ -115,7 +220,9 @@ public sealed class ProductionRuntimeConfigStore
     /// </summary>
     public const int MaxRecoveryAttemptsLimit = 100;
 
+    private readonly string _dir;
     private readonly string _path;
+    private readonly string? _stationId;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
     {
@@ -124,10 +231,53 @@ public sealed class ProductionRuntimeConfigStore
     };
 
     public ProductionRuntimeConfigStore(IWebHostEnvironment env, IConfiguration? configuration = null)
+        : this(env, configuration, stationId: null)
+    {
+    }
+
+    public ProductionRuntimeConfigStore(IWebHostEnvironment env, IConfiguration? configuration, string? stationId)
+    {
+        _stationId = ProductionRuntimeStationIds.NormalizeOptional(stationId);
+        _dir = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "production");
+        Directory.CreateDirectory(_dir);
+        _path = _stationId is null
+            ? Path.Combine(_dir, "runtime.json")
+            : Path.Combine(_dir, $"runtime.{_stationId}.json");
+    }
+
+    public string StationId => _stationId ?? ProductionRuntimeStationIds.DefaultStationId;
+
+    public static IReadOnlyList<string> DiscoverStationIds(IWebHostEnvironment env, IConfiguration? configuration = null)
     {
         var dir = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "production");
-        Directory.CreateDirectory(dir);
-        _path = Path.Combine(dir, "runtime.json");
+        if (!Directory.Exists(dir)) return [];
+        var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pattern in new[] { "runtime.*.json", "device-action-safety.*.json" })
+        {
+            var prefix = pattern.StartsWith("runtime.", StringComparison.Ordinal) ? "runtime." : "device-action-safety.";
+            foreach (var file in Directory.GetFiles(dir, pattern))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                var id = name[prefix.Length..];
+                if (ProductionFleetOptions.IsStationId(id) &&
+                    !string.Equals(id, ProductionRuntimeStationIds.DefaultStationId, StringComparison.OrdinalIgnoreCase))
+                {
+                    discovered.Add(id);
+                }
+            }
+        }
+        return discovered.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task DeleteAsync(CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (File.Exists(_path)) File.Delete(_path);
+        }
+        finally { _gate.Release(); }
     }
 
     public async Task<ProductionRuntimeConfig> GetAsync(CancellationToken ct)
@@ -192,6 +342,14 @@ public sealed class ProductionRuntimeConfigStore
         // 读取时收敛到合法区间（保存路径严格校验并 400），让运行语义始终受约束。
         if (config.MaxRecoveryAttempts < 0 || config.MaxRecoveryAttempts > MaxRecoveryAttemptsLimit)
             config = config with { MaxRecoveryAttempts = Math.Clamp(config.MaxRecoveryAttempts, 0, MaxRecoveryAttemptsLimit) };
+        if (!HasProperty(document.RootElement, "triggerMode"))
+        {
+            config = config with
+            {
+                TriggerMode = defaults.TriggerMode,
+                TriggerTimeoutMs = defaults.TriggerTimeoutMs
+            };
+        }
         return config;
     }
 
@@ -231,6 +389,7 @@ public sealed class ProductionRuntimeConfigStore
             throw new ApiValidationException($"MaxRecoveryAttempts must be 0..{MaxRecoveryAttemptsLimit} (0 disables automatic recovery; failures lock Faulted for manual recovery).");
         if (config.RecoveryDelayMs < 0 || config.RecoveryDelayMs > 600000) throw new ApiValidationException("RecoveryDelayMs must be 0..600000.");
         if (config.StopTimeoutMs < 100 || config.StopTimeoutMs > 60000) throw new ApiValidationException("StopTimeoutMs must be 100..60000.");
+        if (config.TriggerTimeoutMs < 100 || config.TriggerTimeoutMs > 300000) throw new ApiValidationException("TriggerTimeoutMs must be 100..300000.");
         if (config.PtpGuardWindowRuns < 5 || config.PtpGuardWindowRuns > 500) throw new ApiValidationException("PtpGuardWindowRuns must be 5..500.");
         if (config.PtpGuardMinimumEvidenceRuns < 1 || config.PtpGuardMinimumEvidenceRuns > config.PtpGuardWindowRuns) throw new ApiValidationException("PtpGuardMinimumEvidenceRuns must be 1..PtpGuardWindowRuns.");
         if (config.PtpGuardMinimumReadyRate < 0.5 || config.PtpGuardMinimumReadyRate > 1.0) throw new ApiValidationException("PtpGuardMinimumReadyRate must be 0.5..1.0.");

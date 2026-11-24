@@ -6,7 +6,7 @@ using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api;
 
-public sealed partial class ProductionRuntimeService
+internal sealed partial class ProductionStationRuntime
 {
     private async Task LoopCoreAsync(PublishedJobSnapshot locked, ProductionTraceWriter writer, CancellationToken ct)
     {
@@ -17,11 +17,17 @@ public sealed partial class ProductionRuntimeService
             ProductionRuntimeConfig config;
             lock (_stateSync) config = _config;
 
+            if (config.TriggerMode == ProductionTriggerMode.ExternalSignal)
+            {
+                var triggered = await _triggerSignal.WaitAsync(config.TriggerTimeoutMs, ct);
+                if (!triggered) continue;
+            }
+
             // 周期开始即分配 RunId 并耐久写入起始记录：执行中/排队中进程被杀或断电时，重启后
             // 能列出"已接受未完成"的周期，而不是整条记录缺失（内存队列只承载大图编码，关键
             // 元数据与恢复标记不再仅驻留内存）。起始记录不可写时不盲跑设备，本周期按失败处理。
             var runId = RunTraceRecorder.NewRunId();
-            var traceContext = new RunTraceContext("ProductionRuntime", locked.JobId, locked.Version, locked.WorkflowHash,
+            var traceContext = new RunTraceContext(_traceSource, locked.JobId, locked.Version, locked.WorkflowHash,
                 DependencyManifestHash: locked.DependencyManifest.ManifestHash);
             string? startRecordError = null;
             try
@@ -66,14 +72,22 @@ public sealed partial class ProductionRuntimeService
                 {
                     try
                     {
-                        // A02：生产循环的真实派发携带生产租约令牌——令牌被换代/撤销后，
-                        // 旧周期的后续设备命令在派发边界被拒绝。
-                        using var commandScope = DeviceCommandOwnership.Enter(_lease);
-                        result = await _runner.RunAsync(
-                            locked.Workflow,
-                            new VisionRunOptions(DebugRunMode.Full, TimeoutMs: config.MaxCycleMs, Artifacts: writer.ArtifactOptions),
-                            runId: runId,
-                            cancellationToken: ct);
+                        if (_executionSlotGate is not null) await _executionSlotGate.WaitAsync(ct);
+                        try
+                        {
+                            // A02：生产循环的真实派发携带生产租约令牌——令牌被换代/撤销后，
+                            // 旧周期的后续设备命令在派发边界被拒绝。
+                            using var commandScope = DeviceCommandOwnership.Enter(_lease);
+                            result = await _runner.RunAsync(
+                                locked.Workflow,
+                                new VisionRunOptions(DebugRunMode.Full, TimeoutMs: config.MaxCycleMs, Artifacts: writer.ArtifactOptions),
+                                runId: runId,
+                                cancellationToken: ct);
+                        }
+                        finally
+                        {
+                            _executionSlotGate?.Release();
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -133,7 +147,7 @@ public sealed partial class ProductionRuntimeService
                     _state = ProductionRuntimeState.Faulted;
                     _lastError = message;
                 }
-                await _alarms.RaiseAsync("PROD-TRACE-TIMEOUT", AlarmSeverity.Critical, "ProductionRuntime", message, result.RunId, CancellationToken.None);
+                await _alarms.RaiseAsync("PROD-TRACE-TIMEOUT", AlarmSeverity.Critical, _alarmSource, message, result.RunId, CancellationToken.None);
                 return;
             }
             catch (Exception ex)
@@ -168,6 +182,16 @@ public sealed partial class ProductionRuntimeService
                 _lastError = result.Error;
                 _cycleCount++;
             }
+            _onCycleCompleted?.Invoke(new ProductionStationResultSnapshot(
+                _stationId,
+                result.RunId,
+                locked.JobId,
+                locked.Version,
+                result.Success,
+                disposition,
+                result.TotalDurationMs,
+                DateTimeOffset.UtcNow,
+                result.Error));
 
             if (result.Success)
             {
@@ -178,8 +202,8 @@ public sealed partial class ProductionRuntimeService
                     if (string.Equals(disposition, "NG", StringComparison.OrdinalIgnoreCase)) _ngCount++;
                     else _okCount++;
                 }
-                await _alarms.RecoverAsync("PROD-RUN-FAILURE", "ProductionRuntime", CancellationToken.None);
-                await _alarms.RecoverAsync("PROD-WATCHDOG", "ProductionRuntime", CancellationToken.None);
+                await _alarms.RecoverAsync("PROD-RUN-FAILURE", _alarmSource, CancellationToken.None);
+                await _alarms.RecoverAsync("PROD-WATCHDOG", _alarmSource, CancellationToken.None);
             }
             else
             {
@@ -196,8 +220,8 @@ public sealed partial class ProductionRuntimeService
                 }
 
                 if (watchdog)
-                    await _alarms.RaiseAsync("PROD-WATCHDOG", AlarmSeverity.Error, "ProductionRuntime", result.Error ?? "Production cycle watchdog timeout.", result.RunId, CancellationToken.None);
-                await _alarms.RaiseAsync("PROD-RUN-FAILURE", AlarmSeverity.Error, "ProductionRuntime", result.Error ?? "Production cycle failed.", result.RunId, CancellationToken.None);
+                    await _alarms.RaiseAsync("PROD-WATCHDOG", AlarmSeverity.Error, _alarmSource, result.Error ?? "Production cycle watchdog timeout.", result.RunId, CancellationToken.None);
+                await _alarms.RaiseAsync("PROD-RUN-FAILURE", AlarmSeverity.Error, _alarmSource, result.Error ?? "Production cycle failed.", result.RunId, CancellationToken.None);
 
                 // 含设备副作用（PLC 写入/机器人动作）的流程：失败一次即锁定。上一周期的真实设备
                 // 动作结果在核对前不可确定，任何重跑都会再次触发物理动作——阈值只适用于可以安全
@@ -215,7 +239,7 @@ public sealed partial class ProductionRuntimeService
                     }
                     // F01/Q01：未知动作标记已在上方（追溯落地之前）统一置位并持久化——此处不再重复写入，
                     // 保证"副作用失败"与"置位"之间不存在任何可被队列故障插入的间隙。
-                    await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, "ProductionRuntime", reason, result.RunId, CancellationToken.None);
+                    await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, _alarmSource, reason, result.RunId, CancellationToken.None);
                     return;
                 }
 
@@ -229,7 +253,7 @@ public sealed partial class ProductionRuntimeService
                             _state = ProductionRuntimeState.Faulted;
                             _lastError = reason;
                         }
-                        await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, "ProductionRuntime", reason, result.RunId, CancellationToken.None);
+                        await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, _alarmSource, reason, result.RunId, CancellationToken.None);
                         return;
                     }
 
@@ -249,7 +273,7 @@ public sealed partial class ProductionRuntimeService
                             _state = ProductionRuntimeState.Faulted;
                             _lastError = exhausted;
                         }
-                        await _alarms.RaiseAsync("PROD-RECOVERY-BUDGET", AlarmSeverity.Critical, "ProductionRuntime", exhausted, result.RunId, CancellationToken.None);
+                        await _alarms.RaiseAsync("PROD-RECOVERY-BUDGET", AlarmSeverity.Critical, _alarmSource, exhausted, result.RunId, CancellationToken.None);
                         return;
                     }
 
@@ -278,7 +302,7 @@ public sealed partial class ProductionRuntimeService
                         _lastError = error;
                     }
                     await RaisePtpGuardIssuesAsync(guard, result.RunId, CancellationToken.None);
-                    await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, "ProductionRuntime", error, result.RunId, CancellationToken.None);
+                    await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, _alarmSource, error, result.RunId, CancellationToken.None);
                     return;
                 }
                 await RecoverPtpGuardAlarmsAsync(CancellationToken.None);
@@ -322,13 +346,14 @@ public sealed partial class ProductionRuntimeService
                             _state = ProductionRuntimeState.Faulted;
                             _lastError = error;
                         }
-                        await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, "ProductionRuntime", error, result.RunId, CancellationToken.None);
+                        await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, _alarmSource, error, result.RunId, CancellationToken.None);
                         return;
                     }
                 }
             }
 
-            if (config.CycleDelayMs > 0) await Task.Delay(config.CycleDelayMs, ct);
+            if (config.TriggerMode != ProductionTriggerMode.ExternalSignal && config.CycleDelayMs > 0)
+                await Task.Delay(config.CycleDelayMs, ct);
         }
     }
 

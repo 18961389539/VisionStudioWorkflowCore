@@ -188,7 +188,7 @@ public sealed class ProductionRuntimeHostedService(
     {
         try
         {
-            await production.StopAsync(cancellationToken);
+            await production.StopAllAsync(cancellationToken);
         }
         catch (Exception ex)
         {

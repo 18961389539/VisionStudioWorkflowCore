@@ -28,11 +28,31 @@ public class DeviceActionSafetyStore
     private readonly ILogger<DeviceActionSafetyStore> _logger;
 
     public DeviceActionSafetyStore(IWebHostEnvironment env, IConfiguration configuration, ILogger<DeviceActionSafetyStore> logger)
+        : this(env, configuration, logger, stationId: null)
     {
+    }
+
+    public DeviceActionSafetyStore(IWebHostEnvironment env, IConfiguration configuration, ILogger<DeviceActionSafetyStore> logger, string? stationId)
+    {
+        var normalizedStation = ProductionRuntimeStationIds.NormalizeOptional(stationId);
         var configured = configuration.GetValue<string>("Production:DeviceActionSafetyFile");
-        _path = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "production", "device-action-safety.json")
-            : configured;
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            var dir = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "production");
+            _path = normalizedStation is null
+                ? Path.Combine(dir, "device-action-safety.json")
+                : Path.Combine(dir, $"device-action-safety.{normalizedStation}.json");
+        }
+        else if (normalizedStation is null)
+        {
+            _path = configured;
+        }
+        else
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(configured))
+                      ?? Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath, configuration), "production");
+            _path = Path.Combine(dir, $"device-action-safety.{normalizedStation}.json");
+        }
         _logger = logger;
     }
 

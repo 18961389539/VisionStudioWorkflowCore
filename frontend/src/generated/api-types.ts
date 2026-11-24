@@ -9331,6 +9331,582 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/production/runtimes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionRuntimeConfig"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "If-Match"?: string;
+                };
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProductionRuntimeConfig"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionRuntimeConfig"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Precondition Required */
+                428: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProductionStartRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/latest-result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationResultSnapshot"];
+                    };
+                };
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/start-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/stop-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/device-actions/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionDeviceActionPendingState"];
+                    };
+                };
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/device-actions/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeviceActionResolutionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionStationRuntimeStatus"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/production/operator-layout/{jobId}": {
         parameters: {
             query?: never;
@@ -9448,6 +10024,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/production/stations/control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["StationProductionControlRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StationProductionControlBatch"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/production/stations/local": {
         parameters: {
             query?: never;
@@ -9500,6 +10115,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    stationId?: string;
                     ngOnly?: boolean;
                 };
                 header?: never;
@@ -13705,6 +14321,8 @@ export interface components {
             manualIntentId?: null | string;
             cameraIds?: null | string[];
         };
+        /** @enum {unknown} */
+        DeviceActionSafetyPhase: "Unknown" | "IntentRecorded";
         DeviceAddressTemplate: {
             driver: string;
             protocol: string;
@@ -15698,6 +16316,21 @@ export interface components {
             detail?: null | string;
             instance?: null | string;
         };
+        ProductionDeviceActionPendingState: {
+            runId: null | string;
+            manifestHash: null | string;
+            deviceIds: string[];
+            robotIds: string[];
+            deviceFingerprints: {
+                [key: string]: string;
+            };
+            phase: components["schemas"]["DeviceActionSafetyPhase"];
+            /** Format: date-time */
+            setAt: null | string;
+            reason: null | string;
+            unreadable: boolean;
+            cameraIds?: null | string[];
+        };
         ProductionOperatorPreview: {
             runId: string;
             /** Format: date-time */
@@ -15874,6 +16507,12 @@ export interface components {
              * @default 3
              */
             maxRecoveryAttempts: number | string;
+            triggerMode: components["schemas"]["ProductionTriggerMode"];
+            /**
+             * Format: int32
+             * @default 30000
+             */
+            triggerTimeoutMs: number | string;
         };
         /** @enum {unknown} */
         ProductionRuntimeState: "Stopped" | "Starting" | "Running" | "Recovering" | "Stopping" | "Faulted";
@@ -15949,6 +16588,78 @@ export interface components {
             versionCheck: components["schemas"]["StationVersionCheck"];
             /** @default false */
             recipeDeliveryEnabled: boolean;
+            /** @default false */
+            productionControlEnabled: boolean;
+        };
+        ProductionStationResultSnapshot: {
+            stationId: string;
+            runId: string;
+            jobId: null | string;
+            /** Format: int32 */
+            jobVersion: null | number | string;
+            success: boolean;
+            disposition: string;
+            /** Format: double */
+            durationMs: number | string;
+            /** Format: date-time */
+            completedAt: string;
+            error?: null | string;
+        };
+        ProductionStationRuntimeStatus: {
+            stationId: string;
+            state: components["schemas"]["ProductionRuntimeState"];
+            jobId: null | string;
+            /** Format: int32 */
+            lockedJobVersion: null | number | string;
+            lockedWorkflowHash: null | string;
+            lockedDependencyManifestHash: null | string;
+            /** Format: date-time */
+            startedAt: null | string;
+            /** Format: date-time */
+            lastCycleAt: null | string;
+            currentRunId: null | string;
+            /** Format: int64 */
+            cycleCount: number | string;
+            /** Format: int64 */
+            okCount: number | string;
+            /** Format: int64 */
+            ngCount: number | string;
+            /** Format: int64 */
+            errorCount: number | string;
+            /** Format: int32 */
+            consecutiveFailures: number | string;
+            /** Format: int64 */
+            watchdogTrips: number | string;
+            /** Format: double */
+            lastDurationMs: number | string;
+            lastDisposition: null | string;
+            lastError: null | string;
+            productionLocked: boolean;
+            ptpGuard: null | components["schemas"]["ProductionPtpGuardSnapshot"];
+            synchronizationGuard: null | components["schemas"]["ProductionSynchronizationGuardSnapshot"];
+            /**
+             * Format: int32
+             * @default 0
+             */
+            pendingTraceCount: number | string;
+            /**
+             * Format: int32
+             * @default 8
+             */
+            traceQueueCapacity: number | string;
+            /**
+             * Format: int32
+             * @default 0
+             */
+            recoveryAttempts: number | string;
+            /** @default false */
+            hasDeviceSideEffects: boolean;
+            statusEpoch?: null | string;
+            /**
+             * Format: int64
+             * @default 0
+             */
+            statusVersion: number | string;
         };
         ProductionStationStatus: {
             stationId: string;
@@ -16058,6 +16769,11 @@ export interface components {
             /** Format: double */
             averageThroughputMbps: null | number | string;
         };
+        /**
+         * @default Continuous
+         * @enum {unknown}
+         */
+        ProductionTriggerMode: "Continuous" | "ExternalSignal";
         PublicationEvent: {
             /** Format: int32 */
             version: number | string;
@@ -16783,6 +17499,28 @@ export interface components {
             /** Format: int32 */
             publishedVersion: null | number | string;
             publishedWorkflowHash: null | string;
+        };
+        /** @enum {unknown} */
+        StationProductionAction: "Start" | "Stop";
+        StationProductionControlBatch: {
+            action: components["schemas"]["StationProductionAction"];
+            /** Format: date-time */
+            requestedAt: string;
+            stations: components["schemas"]["StationProductionControlResult"][];
+        };
+        StationProductionControlRequest: {
+            stationIds: string[];
+            action: components["schemas"]["StationProductionAction"];
+        };
+        StationProductionControlResult: {
+            stationId: string;
+            stationName: string;
+            succeeded: boolean;
+            state: null | components["schemas"]["ProductionRuntimeState"];
+            jobId: null | string;
+            /** Format: int32 */
+            lockedVersion: null | number | string;
+            detail: null | string;
         };
         StationRecipeDelivery: {
             stationId: string;

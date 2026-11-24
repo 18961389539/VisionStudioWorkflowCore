@@ -1,6 +1,6 @@
 namespace VisionStudio.Api;
 
-public sealed partial class ProductionRuntimeService
+internal sealed partial class ProductionStationRuntime
 {
     public async Task<ProductionRuntimeStatus> StopAsync(CancellationToken ct)
     {
@@ -51,7 +51,7 @@ public sealed partial class ProductionRuntimeService
             _logger.LogError("{StopError}", error);
             try
             {
-                await _alarms.RaiseAsync("PROD-STOP-TIMEOUT", AlarmSeverity.Critical, "ProductionRuntime", error, runId, CancellationToken.None);
+                await _alarms.RaiseAsync("PROD-STOP-TIMEOUT", AlarmSeverity.Critical, _alarmSource, error, runId, CancellationToken.None);
             }
             catch (Exception exception)
             {

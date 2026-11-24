@@ -15,7 +15,8 @@ const status: ContractDto<'ProductionStationStatus'> = {
 };
 const station: ContractDto<'ProductionStationOverview'> = {
   id: 'line-a', name: 'Line A', operatorUrl: 'https://example.com/', connection: 'Online',
-  lastSeenAt: '2026-11-23T08:32:00Z', status, versionCheck: 'NotConfigured', recipeDeliveryEnabled: true,
+  lastSeenAt: '2026-11-23T08:32:00Z', status, versionCheck: 'NotConfigured',
+  recipeDeliveryEnabled: true, productionControlEnabled: false,
 };
 
 describe('station rollout progress', () => {

@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Options;
 using VisionStudio.Api;
+using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api.Tests;
 
@@ -71,6 +72,28 @@ public sealed class ProductionWorkstationTests
     }
 
     [Fact]
+    public async Task StationControlTokenOnlyReachesProductionStartAndStop()
+    {
+        using var factory = new SecureVisionStudioApiFactory();
+        using var admin = factory.CreateFreshClient();
+        await SignInAdminAsync(admin);
+        var token = await admin.PostAsJsonAsync("/api/security/service-tokens", new
+        {
+            name = "station-controller", scopes = new[] { "stations:control" }
+        });
+        token.EnsureSuccessStatusCode();
+        var secret = (await token.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
+        using var controller = factory.CreateFreshClient();
+        controller.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secret);
+
+        Assert.Equal(HttpStatusCode.Conflict, (await controller.PostAsJsonAsync("/api/production/start", new { jobId = (string?)null })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await controller.PostAsync("/api/production/stop", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await controller.GetAsync("/api/production/status")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await controller.GetAsync("/api/production/config")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await controller.GetAsync("/api/production/stations/local")).StatusCode);
+    }
+
+    [Fact]
     public async Task FleetVerifiesPublishedAndRunningVersionsAndKeepsOnlyLastVerifiedStatusOnFailure()
     {
         var hash = new string('a', 64);
@@ -123,6 +146,69 @@ public sealed class ProductionWorkstationTests
         Assert.Equal(StationConnection.Unauthorized, Assert.Single(fleet.Snapshot()).Connection);
     }
 
+    [Fact]
+    public async Task FleetControlsConfiguredStationsConcurrentlyAndReportsPartialFailures()
+    {
+        var stations = new[]
+        {
+            new ProductionStationOptions { Id = "inspection-a", Name = "Inspection A", BaseUrl = "https://a.example/", Token = "vst_read_a", ControlToken = "vst_control_a" },
+            new ProductionStationOptions { Id = "inspection-b", Name = "Inspection B", BaseUrl = "https://b.example/", Token = "vst_read_b", ControlToken = "vst_control_b" },
+            new ProductionStationOptions { Id = "inspection-c", Name = "Inspection C", BaseUrl = "https://c.example/", Token = "vst_read_c", ControlToken = "vst_control_c" }
+        };
+        var active = 0;
+        var maximumActive = 0;
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+        using var handler = new StubHandlerAsync(async (request, ct) =>
+        {
+            var current = Interlocked.Increment(ref active);
+            InterlockedMax(ref maximumActive, current);
+            try
+            {
+                Assert.Equal("/api/production/start", request.RequestUri!.AbsolutePath);
+                Assert.StartsWith("vst_control_", request.Headers.Authorization?.Parameter);
+                Assert.Equal("null", (await request.Content!.ReadFromJsonAsync<JsonElement>(cancellationToken: ct))
+                    .GetProperty("jobId").ValueKind == JsonValueKind.Null ? "null" : "unexpected");
+                await Task.Delay(30, ct);
+                var stationId = request.RequestUri.Host is "b.example" ? "inspection-b" : "inspection-a";
+                if (request.RequestUri.Host == "c.example") return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                var status = new ProductionRuntimeStatus(ProductionRuntimeState.Running, stationId, 1, "hash", "manifest",
+                    DateTimeOffset.UtcNow, null, null, 0, 0, 0, 0, 0, 0, 0, null, null, true, null, null);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(status, options: json) };
+            }
+            finally { Interlocked.Decrement(ref active); }
+        });
+        using var fleet = new ProductionFleet(Options.Create(new ProductionFleetOptions { Stations = stations }),
+            new StubClientFactory(handler), TimeProvider.System);
+
+        var batch = await fleet.ControlAsync(
+            new StationProductionControlRequest(["inspection-a", "inspection-b", "inspection-c"], StationProductionAction.Start), default);
+
+        Assert.True(maximumActive > 1);
+        Assert.Equal(2, batch.Stations.Count(result => result.Succeeded));
+        Assert.Equal("HTTP 503", Assert.Single(batch.Stations, result => !result.Succeeded).Detail);
+        Assert.All(fleet.Snapshot(), station => Assert.True(station.ProductionControlEnabled));
+    }
+
+    [Fact]
+    public async Task FleetRejectsUnconfiguredOrExcessiveStationControlRequests()
+    {
+        using var handler = new StubHandler(_ => throw new InvalidOperationException("No request expected."));
+        using var fleet = new ProductionFleet(Options.Create(new ProductionFleetOptions
+        {
+            Stations = [new ProductionStationOptions
+            {
+                Id = "inspection-a", Name = "Inspection A", BaseUrl = "https://a.example/", Token = "vst_read"
+            }]
+        }), new StubClientFactory(handler), TimeProvider.System);
+
+        await Assert.ThrowsAsync<ApiValidationException>(() => fleet.ControlAsync(
+            new StationProductionControlRequest(["inspection-a"], StationProductionAction.Start), default));
+        await Assert.ThrowsAsync<ApiValidationException>(() => fleet.ControlAsync(
+            new StationProductionControlRequest(["inspection-a", "inspection-a"], StationProductionAction.Stop), default));
+        await Assert.ThrowsAsync<ApiValidationException>(() => fleet.ControlAsync(
+            new StationProductionControlRequest(["missing"], StationProductionAction.Stop), default));
+    }
+
     private static async Task CreateRecipeAsync(HttpClient admin, string id)
     {
         var workflow = new
@@ -152,6 +238,23 @@ public sealed class ProductionWorkstationTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(respond(request));
+    }
+
+    private sealed class StubHandlerAsync(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => respond(request, cancellationToken);
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        var current = Volatile.Read(ref target);
+        while (value > current)
+        {
+            var previous = Interlocked.CompareExchange(ref target, value, current);
+            if (previous == current) return;
+            current = previous;
+        }
     }
 
     private sealed class StubClientFactory(HttpMessageHandler handler) : IHttpClientFactory

@@ -1,6 +1,6 @@
 import { HubConnectionBuilder, HubConnectionState, LogLevel, type HubConnection } from '@microsoft/signalr';
 import { useEffect, useState } from 'react';
-import type { CameraDescriptor, DeviceDescriptor, ProductionRuntimeStatus, RobotDescriptor } from './types';
+import type { CameraDescriptor, ContractDto, DeviceDescriptor, ProductionRuntimeStatus, RobotDescriptor } from './types';
 
 /**
  * 设备监视推送（2026-11-12）。
@@ -24,6 +24,8 @@ export type MonitorSnapshot = {
   production: ProductionRuntimeStatus;
   /** 告警数据版本戳。生产面板据此刷新活动告警统计和当前历史页。 */
   alarmRevision: string;
+  /** 本机多工位运行时状态列表。 */
+  runtimes?: ContractDto<'ProductionStationRuntimeStatus'>[] | null;
 };
 
 const retryDelays = [1000, 3000, 10_000, 30_000];

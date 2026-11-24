@@ -190,6 +190,9 @@ public static class VisionStudioServiceRegistration
                 context.User.HasClaim(SecurityClaims.Scope, ServiceScopes.StationRead)))
             .AddPolicy(SecurityPolicies.StationDelivery, policy => policy.RequireRole(SecurityRoles.Service)
                 .RequireClaim(SecurityClaims.Scope, ServiceScopes.StationDelivery))
+            .AddPolicy(SecurityPolicies.StationControl, policy => policy.RequireAssertion(context =>
+                context.User.IsInRole(SecurityRoles.Operator) || context.User.IsInRole(SecurityRoles.Engineer) || context.User.IsInRole(SecurityRoles.Administrator) ||
+                context.User.HasClaim(SecurityClaims.Scope, ServiceScopes.StationControl)))
             .AddPolicy(SecurityPolicies.RunTrigger, policy => policy.RequireAssertion(context =>
                 context.User.IsInRole(SecurityRoles.Engineer) || context.User.IsInRole(SecurityRoles.Administrator) ||
                 context.User.HasClaim(SecurityClaims.Scope, ServiceScopes.RunsRun)));

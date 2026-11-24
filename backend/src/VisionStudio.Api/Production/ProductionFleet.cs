@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
@@ -30,6 +31,7 @@ public sealed class ProductionStationOptions
     public string BaseUrl { get; set; } = "";
     public string Token { get; set; } = "";
     public string? DeliveryToken { get; set; }
+    public string? ControlToken { get; set; }
     public string? ExpectedJobId { get; set; }
     public int? ExpectedVersion { get; set; }
     public string? ExpectedWorkflowHash { get; set; }
@@ -39,7 +41,9 @@ public sealed class ProductionStationOptions
         Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) &&
         (uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)) &&
         uri.UserInfo.Length == 0 && uri.Query.Length == 0 && uri.Fragment.Length == 0 &&
-        IsToken(Token) && (DeliveryToken is null || (DeliveryToken != Token && IsToken(DeliveryToken))) &&
+        IsToken(Token) &&
+        (DeliveryToken is null || (DeliveryToken != Token && IsToken(DeliveryToken))) &&
+        (ControlToken is null || (ControlToken != Token && ControlToken != DeliveryToken && IsToken(ControlToken))) &&
         (ExpectedJobId is null
             ? ExpectedVersion is null && ExpectedWorkflowHash is null
             : ExpectedJobId.Length > 0 && ExpectedJobId.All(c => char.IsLetterOrDigit(c) || c is '-' or '_') &&
@@ -66,7 +70,18 @@ public enum StationVersionCheck { NotConfigured, Unverified, Matches, PublishedO
 public sealed record ProductionStationOverview(
     string Id, string Name, string OperatorUrl, StationConnection Connection, DateTimeOffset? LastCheckedAt,
     DateTimeOffset? LastSeenAt, ProductionStationStatus? Status, StationVersionTarget? Target, StationVersionCheck VersionCheck,
-    bool RecipeDeliveryEnabled = false);
+    bool RecipeDeliveryEnabled = false, bool ProductionControlEnabled = false);
+
+public enum StationProductionAction { Start, Stop }
+
+public sealed record StationProductionControlRequest(string[] StationIds, StationProductionAction Action);
+
+public sealed record StationProductionControlResult(
+    string StationId, string StationName, bool Succeeded, ProductionRuntimeState? State,
+    string? JobId, int? LockedVersion, string? Detail);
+
+public sealed record StationProductionControlBatch(
+    StationProductionAction Action, DateTimeOffset RequestedAt, StationProductionControlResult[] Stations);
 
 public sealed class ProductionFleet(IOptions<ProductionFleetOptions> options, IHttpClientFactory clients, TimeProvider clock)
     : BackgroundService
@@ -82,6 +97,7 @@ public sealed class ProductionFleet(IOptions<ProductionFleetOptions> options, IH
     };
     private readonly ProductionStationOptions[] _stations = options.Value.Stations;
     private readonly ConcurrentDictionary<string, Observation> _observations = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _controlGate = new(1, 1);
 
     private sealed record Observation(StationConnection Connection, DateTimeOffset CheckedAt, DateTimeOffset? LastSeenAt,
         ProductionStationStatus? Status);
@@ -100,8 +116,35 @@ public sealed class ProductionFleet(IOptions<ProductionFleetOptions> options, IH
                 : null;
             return new ProductionStationOverview(station.Id, station.Name, new Uri(BaseUri(station), "?view=operator").AbsoluteUri,
                 connection, last?.CheckedAt, last?.LastSeenAt, last?.Status, target,
-                CheckVersion(target, connection == StationConnection.Online ? last?.Status : null), station.DeliveryToken is not null);
+                CheckVersion(target, connection == StationConnection.Online ? last?.Status : null),
+                station.DeliveryToken is not null, station.ControlToken is not null);
         }).ToArray();
+    }
+
+    public async Task<StationProductionControlBatch> ControlAsync(StationProductionControlRequest request, CancellationToken ct)
+    {
+        if (request.StationIds is not { Length: > 0 and <= 8 } ||
+            request.StationIds.Any(string.IsNullOrWhiteSpace) ||
+            request.StationIds.Distinct(StringComparer.Ordinal).Count() != request.StationIds.Length)
+            throw new ApiValidationException("Select 1 to 8 distinct stations.");
+        if (!Enum.IsDefined(request.Action)) throw new ApiValidationException("Production action must be Start or Stop.");
+
+        var selected = request.StationIds.Select(stationId =>
+            options.Value.Stations.SingleOrDefault(station => station.Id == stationId)
+            ?? throw new ApiValidationException($"Station '{stationId}' is not configured.")).ToArray();
+        var unconfigured = selected.FirstOrDefault(station => station.ControlToken is null);
+        if (unconfigured is not null)
+            throw new ApiValidationException($"Production control is not configured for station '{unconfigured.Id}'.");
+        if (!await _controlGate.WaitAsync(0, ct))
+            throw new ApiConflictException("A station production control batch is already in progress.");
+
+        try
+        {
+            var requestedAt = clock.GetUtcNow();
+            var results = await Task.WhenAll(selected.Select(station => ControlStationAsync(station, request.Action)));
+            return new StationProductionControlBatch(request.Action, requestedAt, results);
+        }
+        finally { _controlGate.Release(); }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -116,6 +159,39 @@ public sealed class ProductionFleet(IOptions<ProductionFleetOptions> options, IH
 
     internal Task PollAsync(CancellationToken ct) => Parallel.ForEachAsync(_stations,
         new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct }, PollStationAsync);
+
+    private async Task<StationProductionControlResult> ControlStationAsync(ProductionStationOptions station, StationProductionAction action)
+    {
+        using var timeout = new CancellationTokenSource(action == StationProductionAction.Stop
+            ? TimeSpan.FromSeconds(65) : TimeSpan.FromSeconds(20));
+        using var client = clients.CreateClient(HttpClientName);
+        var path = action == StationProductionAction.Start ? "api/production/start" : "api/production/stop";
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(ProductionFleet.BaseUri(station), path));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", station.ControlToken);
+        if (action == StationProductionAction.Start)
+        {
+            request.Content = JsonContent.Create(new ProductionStartRequest(), options: StationJson);
+        }
+
+        try
+        {
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+                return Failure(station, $"HTTP {(int)response.StatusCode}");
+            var status = await response.Content.ReadFromJsonAsync<ProductionRuntimeStatus>(StationJson, timeout.Token);
+            if (status is null)
+                return Failure(station, "invalid_response");
+            return new StationProductionControlResult(
+                station.Id, station.Name, true, status.State, status.JobId, status.LockedJobVersion, null);
+        }
+        catch (OperationCanceledException) { return Failure(station, "timeout"); }
+        catch (HttpRequestException) { return Failure(station, "connection_error"); }
+        catch (JsonException) { return Failure(station, "invalid_response"); }
+        catch (NotSupportedException) { return Failure(station, "invalid_response"); }
+    }
+
+    private static StationProductionControlResult Failure(ProductionStationOptions station, string detail)
+        => new(station.Id, station.Name, false, null, null, null, detail);
 
     private async ValueTask PollStationAsync(ProductionStationOptions station, CancellationToken ct)
     {

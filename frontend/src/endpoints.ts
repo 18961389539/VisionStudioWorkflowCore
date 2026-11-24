@@ -166,16 +166,36 @@ export const production = {
   config: apiUrl('production/config'),
   operatorLayout: (jobId: string) => apiUrl(`production/operator-layout/${encodeURIComponent(jobId)}`),
   stations: apiUrl('production/stations'),
+  stationControl: apiUrl('production/stations/control'),
   recipeRollouts: apiUrl('production/recipe-rollouts'),
   latestStationRollouts: apiUrl('production/recipe-rollouts/latest-by-station'),
   recipeDeliveries: apiUrl('production/recipe-deliveries'),
   publishRecipeDelivery: (id: string) => apiUrl(`production/recipe-deliveries/${encodeURIComponent(id)}/publish`),
-  operatorPreview: (ngOnly = false) => apiUrl('production/operator-preview' + (ngOnly ? '?ngOnly=true' : '')),
+  operatorPreview: (ngOnly = false, stationId?: string) => {
+    const params = new URLSearchParams();
+    if (ngOnly) params.set('ngOnly', 'true');
+    if (stationId) params.set('stationId', stationId);
+    const qs = params.toString();
+    return apiUrl('production/operator-preview' + (qs ? `?${qs}` : ''));
+  },
   start: apiUrl('production/start'),
   stop: apiUrl('production/stop'),
   recover: apiUrl('production/recover'),
   pendingActions: apiUrl('production/device-actions/pending'),
-  resolveAction: apiUrl('production/device-actions/resolve')
+  resolveAction: apiUrl('production/device-actions/resolve'),
+  runtimes: apiUrl('production/runtimes'),
+  runtimeStatus: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/status`),
+  runtimeConfig: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/config`),
+  runtimeStart: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/start`),
+  runtimeStop: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/stop`),
+  runtimeRecover: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/recover`),
+  runtimeRemove: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}`),
+  runtimePendingActions: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/device-actions/pending`),
+  runtimeResolveAction: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/device-actions/resolve`),
+  runtimeTrigger: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/trigger`),
+  runtimeLatestResult: (stationId: string) => apiUrl(`production/runtimes/${encodeURIComponent(stationId)}/latest-result`),
+  runtimesStartAll: apiUrl('production/runtimes/start-all'),
+  runtimesStopAll: apiUrl('production/runtimes/stop-all')
 } as const;
 
 // ── camera-sync ───────────────────────────────────────────────────────────────

@@ -12,16 +12,18 @@ public sealed partial class StorageBackupService
 
     public async Task<StorageRestoreResult> RestoreAsync(StorageRestoreRequest request, CancellationToken ct)
     {
-        if (_production.Status.State != ProductionRuntimeState.Stopped)
-            throw new ApiConflictException("Production Runtime must be Stopped before restoring storage.");
+        var activeStation = _production.ListStatuses().FirstOrDefault(s => s.State != ProductionRuntimeState.Stopped);
+        if (activeStation is not null)
+            throw new ApiConflictException($"Production Runtime station '{activeStation.StationId}' must be Stopped before restoring storage (current state: {activeStation.State}).");
 
         // Do not hold the backup gate while waiting for in-flight API requests to drain: an
         // already-running backup/delete request may legitimately be waiting for that same gate.
         // Restore remains available to an authenticated administrator while failure-locked; it is
         // the practical rollback/retry path for unresolved transactions. Ordinary maintenance stays blocked.
         await using var maintenance = await _maintenance.BeginExclusiveAsync("storage restore", ct, allowFailureLockedRestore: true);
-        if (_production.Status.State != ProductionRuntimeState.Stopped)
-            throw new ApiConflictException("Production Runtime changed state while storage restore was waiting for maintenance mode.");
+        activeStation = _production.ListStatuses().FirstOrDefault(s => s.State != ProductionRuntimeState.Stopped);
+        if (activeStation is not null)
+            throw new ApiConflictException($"Production Runtime station '{activeStation.StationId}' changed state ({activeStation.State}) while storage restore was waiting for maintenance mode.");
 
         await _gate.WaitAsync(ct);
         var workspace = Path.Combine(_tempRoot, $"restore-{Guid.NewGuid():N}");
