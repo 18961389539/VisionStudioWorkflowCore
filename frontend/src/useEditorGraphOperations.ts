@@ -10,6 +10,7 @@ import { catalogNodeData, makeDefaultParameters } from './catalog';
 import { graphConnectionVerdict } from './validation';
 import { withSwitchPorts } from './switchPorts';
 import { compatiblePorts } from './toolboxModel';
+import { planControlFanout } from './smartBranching';
 import {
   NEW_NODE_HEIGHT, NEW_NODE_WIDTH, RECENT_NODES_LIMIT, SPOT_GAP, edgePresentation, getPorts, persistRecentNodeTypes,
   type ConnectionPicker, type NodeAttachment
@@ -63,6 +64,13 @@ export function useEditorGraphOperations(options: EditorGraphOptions) {
     }
 
     const kind: 'control' | 'data' = sourcePort?.dataType === 'Control' ? 'control' : 'data';
+    if (kind === 'control') {
+      const plan = planControlFanout(connection, nodesRef.current, edgesRef.current);
+      if (plan.kind === 'manual') {
+        messageApi.warning(plan.reason);
+        return;
+      }
+    }
     pushHistory('连线');
     setEdges((eds) => addEdge({
       ...connection,

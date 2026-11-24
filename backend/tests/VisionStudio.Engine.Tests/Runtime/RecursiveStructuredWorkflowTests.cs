@@ -106,6 +106,56 @@ public sealed class RecursiveStructuredWorkflowTests
     }
 
     [Fact]
+    public void Compiler_CompilesDirectControlFanoutAsImplicitParallel()
+    {
+        var compiler = CreateControlCompiler();
+        var workflow = new WorkflowDefinition(
+            "implicit-parallel",
+            "Implicit Parallel",
+            [
+                Node("source", "test.step"),
+                Node("branch-a", "test.step"),
+                Node("branch-b", "test.step"),
+                Node("join", "flow.join")
+            ],
+            [
+                C("e1", "source", "next", "branch-a", "exec"),
+                C("e2", "source", "next", "branch-b", "exec"),
+                C("e3", "branch-a", "next", "join", "branch1"),
+                C("e4", "branch-b", "next", "join", "branch2")
+            ]);
+
+        var compiled = compiler.Compile(workflow);
+
+        var region = Assert.Single(compiled.ControlRegions.Where(x => x.ControlNodeId == "source"));
+        Assert.Equal("join", region.JoinNodeId);
+        Assert.Equal(["branch-a"], region.BranchNodeIds["branch1"]);
+        Assert.Equal(["branch-b"], region.BranchNodeIds["branch2"]);
+        Assert.Contains("source.__parallel", compiled.DslJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(compiled.OrderedNodeIds, id => id.Contains("__parallel", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Compiler_UsesVirtualJoinForTerminalImplicitParallel()
+    {
+        var compiler = CreateControlCompiler();
+        var workflow = new WorkflowDefinition(
+            "invalid-implicit-parallel",
+            "Invalid Implicit Parallel",
+            [Node("source", "test.step"), Node("branch-a", "test.step"), Node("branch-b", "test.step")],
+            [
+                C("e1", "source", "next", "branch-a", "exec"),
+                C("e2", "source", "next", "branch-b", "exec")
+            ]);
+
+        var compiled = compiler.Compile(workflow);
+        var region = Assert.Single(compiled.ControlRegions);
+        Assert.Equal("source.__implicit_join", region.JoinNodeId);
+        Assert.Contains("source.__implicit_join", compiled.DslJson, StringComparison.Ordinal);
+        Assert.Contains("VisionImplicitJoinStep", compiled.DslJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WorkflowData_KeepsNestedBranchDecisionsIndependent()
     {
         using var data = new VisionWorkflowData();

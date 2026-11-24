@@ -1,4 +1,5 @@
 import { nodeCategory } from '../toolboxModel';
+import { nodeIconCodes } from '../generated/nodeIconCodes';
 
 type NodeIconName =
   | 'camera' | 'image' | 'sparkles' | 'layers' | 'sliders' | 'threshold' | 'histogram' | 'blur'
@@ -172,11 +173,52 @@ export function iconForNodeType(type: string): NodeIconName {
   return prefix?.[1] ?? categoryIcons[nodeCategory(normalized)];
 }
 
+function fallbackIconCode(type: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < type.length; index += 1) {
+    hash ^= type.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36).slice(-3).padStart(3, '0').toUpperCase();
+}
+
+const reservedIconCodes = new Set(Object.values(nodeIconCodes));
+const dynamicIconCodes = new Map<string, string>();
+
+export function nodeIconCode(type: string): string {
+  const normalized = type.trim().toLowerCase();
+  const generated = nodeIconCodes[normalized];
+  if (generated) return generated;
+  const assigned = dynamicIconCodes.get(normalized);
+  if (assigned) return assigned;
+
+  const base = parseInt(fallbackIconCode(normalized), 36);
+  const space = 36 ** 3;
+  let offset = 0;
+  let candidate = base.toString(36).padStart(3, '0').toUpperCase();
+  while (reservedIconCodes.has(candidate) && offset < space) {
+    offset += 1;
+    candidate = ((base + offset) % space).toString(36).padStart(3, '0').toUpperCase();
+  }
+  if (reservedIconCodes.has(candidate))
+    throw new Error('Node icon code space exhausted.');
+  reservedIconCodes.add(candidate);
+  dynamicIconCodes.set(normalized, candidate);
+  return candidate;
+}
+
+export function iconIdentityForNodeType(type: string): string {
+  return `${iconForNodeType(type)}-${nodeIconCode(type)}`;
+}
+
 export default function NodeCategoryIcon({ type }: { type: string }) {
   const icon = iconForNodeType(type);
-  return <span className="node-icon-badge" aria-hidden="true">
-    <svg className="node-category-icon" data-icon={icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      {glyphs[icon].map((path, index) => <path key={index} d={path} />)}
+  const code = nodeIconCode(type);
+  return <span className="node-icon-badge" aria-hidden="true" title={type}>
+    <svg className="node-category-icon" data-icon={icon} data-icon-code={code} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <g transform="translate(-2 -2) scale(.82)">{glyphs[icon].map((path, index) => <path key={index} d={path} />)}</g>
+      <rect className="node-icon-stamp-bg" x="10.5" y="14" width="12" height="8" rx="1.5" />
+      <text className="node-icon-stamp" x="16.5" y="20" textAnchor="middle">{code}</text>
     </svg>
   </span>;
 }

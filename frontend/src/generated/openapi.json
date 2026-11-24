@@ -30517,6 +30517,15 @@
               "null",
               "string"
             ]
+          },
+          "runs": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/VisionRegionRun"
+            }
           }
         }
       },
@@ -30554,7 +30563,8 @@
           "Polygon",
           "Contour",
           "Text",
-          "Polyline"
+          "Polyline",
+          "Region"
         ]
       },
       "VisionPluginIsolationMode": {
@@ -30563,6 +30573,40 @@
           "WorkerProcess"
         ],
         "default": "InProcess"
+      },
+      "VisionRegionRun": {
+        "required": [
+          "row",
+          "startColumn",
+          "endColumn"
+        ],
+        "type": "object",
+        "properties": {
+          "row": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "startColumn": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "endColumn": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
       },
       "VisionRobotTarget2D": {
         "required": [

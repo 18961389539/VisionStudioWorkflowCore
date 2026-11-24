@@ -5,7 +5,7 @@
 import type { Point, ViewState, RoiDragMode, CaliperDiagnosticSelection, RoiMoveBounds } from './imageViewerTypes';
 import type { VisionOverlay, VisionRoi, VisionRoiBrushStroke, OverlayPoint } from '../types';
 import { memo, useEffect, useState } from 'react';
-import { Arrow, Circle, Group, Line, Rect, Text } from 'react-konva';
+import { Arrow, Circle, Group, Line, Rect, Shape, Text } from 'react-konva';
 import { buildCaliperCircleAngles, circleArcSpan, normalizeCaliperAngle } from '../caliperCircleSampling';
 
 export { buildCaliperCircleAngles } from '../caliperCircleSampling';
@@ -510,6 +510,12 @@ export function OverlayShape({ overlay, scale }: { overlay: VisionOverlay; scale
     case 'Polygon':
     case 'Contour':
       return <Line listening={false} points={flatten(overlay.points)} closed={true} stroke={stroke} strokeWidth={strokeWidth} fill={overlay.fill ?? undefined} />;
+    case 'Region':
+      return <Shape listening={false} fill={overlay.fill ?? 'rgba(82, 196, 26, 0.45)'} sceneFunc={(context, shape) => {
+        context.beginPath();
+        for (const run of overlay.runs ?? []) context.rect(run.startColumn, run.row, run.endColumn - run.startColumn + 1, 1);
+        context.fillShape(shape);
+      }} />;
     case 'Text':
       return <Text listening={false} x={x} y={y} text={overlay.label ?? ''} fill={stroke} fontSize={14 / scale} fontFamily="monospace" />;
     default:

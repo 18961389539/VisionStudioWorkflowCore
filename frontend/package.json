@@ -14,7 +14,8 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "generate:api-types": "npm ci --prefix tools/contract-gen --no-audit --no-fund && npm run generate --prefix tools/contract-gen",
-    "generate:type-bindings": "node ../scripts/generate-type-bindings.mjs"
+    "generate:type-bindings": "node ../scripts/generate-type-bindings.mjs",
+    "generate:node-icon-codes": "node scripts/generate-node-icon-codes.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.4",

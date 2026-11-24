@@ -331,6 +331,7 @@ public sealed partial class VisionWorkflowCompiler
         CompileContext context,
         string? loopNodeId = null)
     {
+        var label = parallel.Implicit ? "Implicit parallel fanout" : "Parallel node";
         ValidateParallelCapabilities(parallel.Branch1, parallel.Node.Id, "branch1");
         ValidateParallelCapabilities(parallel.Branch2, parallel.Node.Id, "branch2");
 
@@ -343,8 +344,14 @@ public sealed partial class VisionWorkflowCompiler
             TryCollectFusedBranchNodes(parallel.Branch2, out var branch2Nodes, out _))
         {
             var fusedNodes = branch1Nodes.Concat(branch2Nodes).ToArray();
-            var fusedMarker = CreateVisionStep(parallel.Node.Id, sequenceId, loopNodeId);
-            return [fusedMarker, CreatePipelineStep(fusedNodes, continuationStepId, context, stepIdOverride: sequenceId)];
+            var pipelineNext = parallel.VirtualJoin ? parallel.JoinNodeId : continuationStepId;
+            var pipeline = CreatePipelineStep(fusedNodes, pipelineNext, context, stepIdOverride: sequenceId);
+            var compiled = parallel.Implicit
+                ? new[] { pipeline }
+                : [CreateVisionStep(parallel.Node.Id, sequenceId, loopNodeId), pipeline];
+            return parallel.VirtualJoin
+                ? [.. compiled, CreateImplicitJoinStep(parallel.JoinNodeId, continuationStepId)]
+                : compiled;
         }
 
         // 退化不能静默：画布上写的并行与产物（Sequence）不一致，必须让调用方看到原因。
@@ -359,11 +366,10 @@ public sealed partial class VisionWorkflowCompiler
             sequentialReason = "the branches could not be fused";
         context.AddWarning(new CompileWarning(
             "flow.parallel.sequential",
-            $"Parallel node '{parallel.Node.Id}' runs both branches sequentially: {sequentialReason}. " +
+            $"{label} '{parallel.Node.Id}' runs both branches sequentially: {sequentialReason}. " +
             "Branch outputs and disposition are unchanged; only concurrency (cycle time) is affected.",
             parallel.Node.Id));
 
-        var marker = CreateVisionStep(parallel.Node.Id, sequenceId, loopNodeId);
         var sequence = new Dictionary<string, object?>
         {
             ["Id"] = sequenceId,
@@ -375,10 +381,29 @@ public sealed partial class VisionWorkflowCompiler
             },
             ["ErrorBehavior"] = "Terminate"
         };
-        if (continuationStepId is not null)
-            sequence["NextStepId"] = continuationStepId;
+        var sequenceNext = parallel.VirtualJoin ? parallel.JoinNodeId : continuationStepId;
+        if (sequenceNext is not null)
+            sequence["NextStepId"] = sequenceNext;
 
-        return [marker, sequence];
+        var fallback = parallel.Implicit
+            ? new[] { sequence }
+            : [CreateVisionStep(parallel.Node.Id, sequenceId, loopNodeId), sequence];
+        return parallel.VirtualJoin
+            ? [.. fallback, CreateImplicitJoinStep(parallel.JoinNodeId, continuationStepId)]
+            : fallback;
+    }
+
+    private Dictionary<string, object?> CreateImplicitJoinStep(string joinId, string? nextStepId)
+    {
+        var step = new Dictionary<string, object?>
+        {
+            ["Id"] = joinId,
+            ["StepType"] = _implicitJoinStepType,
+            ["Inputs"] = new Dictionary<string, string> { ["JoinNodeId"] = JsonSerializer.Serialize(joinId) },
+            ["ErrorBehavior"] = "Terminate"
+        };
+        if (nextStepId is not null) step["NextStepId"] = nextStepId;
+        return step;
     }
 
     /// <summary>
@@ -462,7 +487,7 @@ public sealed partial class VisionWorkflowCompiler
                     foreach (var child in EnumerateNodes(breakItem.Remaining)) yield return child;
                     break;
                 case StructuredParallelIr parallel:
-                    yield return parallel.Node;
+                    if (!parallel.Implicit) yield return parallel.Node;
                     foreach (var child in EnumerateNodes(parallel.Branch1)) yield return child;
                     foreach (var child in EnumerateNodes(parallel.Branch2)) yield return child;
                     break;
@@ -479,7 +504,7 @@ public sealed partial class VisionWorkflowCompiler
         StructuredForEachIr loop => loop.Node.Id,
         StructuredLoopIr loop => loop.Node.Id,
         StructuredBreakIr breakItem => breakItem.Node.Id,
-        StructuredParallelIr parallel => parallel.Node.Id,
+        StructuredParallelIr parallel => parallel.Implicit ? $"{parallel.Node.Id}.__parallel" : parallel.Node.Id,
         _ => throw new InvalidOperationException($"Unsupported structured IR item '{item.GetType().Name}'.")
     };
 }

@@ -9,7 +9,8 @@ public enum VisionOverlayType
     Polygon,
     Contour,
     Text,
-    Polyline
+    Polyline,
+    Region
 }
 
 public sealed record VisionOverlayPoint(double X, double Y);
@@ -30,7 +31,8 @@ public sealed record VisionOverlay(
     IReadOnlyList<VisionOverlayPoint>? Points = null,
     string Stroke = "#52c41a",
     double StrokeWidth = 2,
-    string? Fill = null)
+    string? Fill = null,
+    IReadOnlyList<VisionRegionRun>? Runs = null)
 {
     public VisionOverlay ForNode(string nodeId) => this with { NodeId = nodeId };
 }

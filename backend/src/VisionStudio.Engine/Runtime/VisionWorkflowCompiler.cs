@@ -64,6 +64,9 @@ public sealed partial class VisionWorkflowCompiler(VisionNodeRegistry registry)
     private readonly string _pipelineStepType = typeof(VisionPipelineStep).AssemblyQualifiedName
         ?? throw new InvalidOperationException("Cannot resolve VisionPipelineStep assembly name.");
 
+    private readonly string _implicitJoinStepType = typeof(VisionImplicitJoinStep).AssemblyQualifiedName
+        ?? throw new InvalidOperationException("Cannot resolve VisionImplicitJoinStep assembly name.");
+
     /// <summary>通用循环（flow.while / flow.repeat / flow.break）的迭代步类型。</summary>
     private readonly string _loopStepType = typeof(VisionLoopStep).AssemblyQualifiedName
         ?? throw new InvalidOperationException("Cannot resolve VisionLoopStep assembly name.");

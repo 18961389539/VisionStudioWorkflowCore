@@ -227,6 +227,86 @@ export function validateWorkflow(nodes: Node[], catalog: NodeCatalogItem[], edge
     }
   }
 
+  for (const node of nodes) {
+    const outgoingControl = new Map<string, Edge[]>();
+    for (const edge of edges) {
+      if (edge.source !== node.id || edgeKind(edge, getNode) !== 'control') continue;
+      const port = edge.sourceHandle ?? '';
+      outgoingControl.set(port, [...(outgoingControl.get(port) ?? []), edge]);
+    }
+    for (const [port, portEdges] of outgoingControl) {
+      if (portEdges.length <= 1) continue;
+      const descriptor = portsOf(node, 'outputs').find((item) => item.name === port);
+      const portLabel = descriptor ? portDisplayName(descriptor.name, descriptor.label) : localizePortName(port);
+      if (portEdges.length !== 2) {
+        issues.push({
+          id: `control-fanout-${node.id}-${port}`,
+          severity: 'error',
+          source: 'client',
+          nodeId: node.id,
+          message: `节点「${nodeLabel(node.id)}」的控制输出 ${portLabel} 连接了 ${portEdges.length} 个目标；直接并行只支持两个分支`
+        });
+        continue;
+      }
+      if (portEdges.some((edge) => String(byId.get(edge.target)?.data.typeKey ?? '') === 'flow.join')) {
+        issues.push({
+          id: `control-fanout-${node.id}-${port}`,
+          severity: 'error',
+          source: 'client',
+          nodeId: node.id,
+          message: `节点「${nodeLabel(node.id)}」的直接并行分支为空，两个目标都必须先经过业务节点再汇合`
+        });
+        continue;
+      }
+      const reachableJoins = (startId: string): Set<string> => {
+        const found = new Set<string>();
+        const visited = new Set<string>();
+        const queue = [startId];
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          if (visited.has(current)) continue;
+          visited.add(current);
+          const currentNode = byId.get(current);
+          if (currentNode && String(currentNode.data.typeKey ?? '') === 'flow.join') found.add(current);
+          for (const edge of edges) {
+            if (edge.source === current && edgeKind(edge, getNode) === 'control') queue.push(edge.target);
+          }
+        }
+        return found;
+      };
+      const joinsA = reachableJoins(portEdges[0]!.target);
+      const naturallyTerminates = (startId: string): boolean => {
+        const visited = new Set<string>();
+        const queue = [startId];
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          if (visited.has(current)) return false;
+          visited.add(current);
+          const currentNode = byId.get(current);
+          if (currentNode && String(currentNode.data.typeKey ?? '') === 'flow.join') return false;
+          const nextEdges = edges.filter((edge) =>
+            edge.source === current && edgeKind(edge, getNode) === 'control'
+          );
+          if (nextEdges.length === 0) continue;
+          queue.push(...nextEdges.map((edge) => edge.target));
+        }
+        return true;
+      };
+      const hasCommonJoin = [...reachableJoins(portEdges[1]!.target)].some((join) => joinsA.has(join));
+      const terminalBranches = naturallyTerminates(portEdges[0]!.target)
+        && naturallyTerminates(portEdges[1]!.target);
+      if (!hasCommonJoin && !terminalBranches) {
+        issues.push({
+          id: `control-fanout-${node.id}-${port}`,
+          severity: 'error',
+          source: 'client',
+          nodeId: node.id,
+          message: `节点「${nodeLabel(node.id)}」的控制输出 ${portLabel} 形成了继续向后执行的并行分支；请在公共后续步骤前添加 Join`
+        });
+      }
+    }
+  }
+
   return issues;
 }
 

@@ -180,7 +180,7 @@ export type OverlayPoint = ContractDto<'VisionOverlayPoint'>;
 /** UI 视图：type 收窄为封闭图元联合；按图元类型只有部分坐标字段有值，故全部可空。 */
 export type VisionOverlay = {
   id: string;
-  type: 'Point' | 'Line' | 'Circle' | 'Rectangle' | 'Polygon' | 'Contour' | 'Text' | 'Polyline';
+  type: 'Point' | 'Line' | 'Circle' | 'Rectangle' | 'Polygon' | 'Contour' | 'Text' | 'Polyline' | 'Region';
   nodeId?: string | null;
   label?: string | null;
   x?: number | null;
@@ -195,6 +195,7 @@ export type VisionOverlay = {
   stroke?: string;
   strokeWidth?: number;
   fill?: string | null;
+  runs?: VisionRegionRun[] | null;
 };
 
 export type VisionRoi =

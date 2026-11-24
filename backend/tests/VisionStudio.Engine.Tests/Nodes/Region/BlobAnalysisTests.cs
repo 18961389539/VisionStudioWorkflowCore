@@ -52,6 +52,51 @@ public sealed class BlobAnalysisTests
         Assert.Contains("\"area\":300", blobs);
     }
 
+    [Theory]
+    [InlineData("all")]
+    [InlineData("largest")]
+    public async Task Overlay_OnlyHighlightsSelectedPixelsIncludingHoles(string mode)
+    {
+        using var img = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(img, new Rect(10, 10, 20, 20), Scalar.All(255), -1);
+        Cv2.Rectangle(img, new Rect(15, 15, 10, 10), Scalar.All(0), -1);
+        Cv2.Rectangle(img, new Rect(40, 40, 4, 4), Scalar.All(255), -1);
+
+        var result = await new MultiBlobNode().ExecuteAsync(Ctx(new() { ["image"] = Img(img) }),
+            Def("measure.blobs", $$"""{"mode":"{{mode}}","minArea":1,"maxCount":1}"""), CancellationToken.None);
+
+        Assert.DoesNotContain(result.Overlays!, overlay => overlay.Type == VisionOverlayType.Rectangle);
+        var overlay = Assert.Single(result.Overlays!, overlay => overlay.Type == VisionOverlayType.Region);
+        Assert.Equal(VisionOverlayType.Region, overlay.Type);
+        var runs = Assert.IsAssignableFrom<IReadOnlyList<VisionRegionRun>>(overlay.Runs);
+        Assert.Equal(300, runs.Sum(run => run.EndColumn - run.StartColumn + 1));
+        Assert.Contains(runs, run => run.Row == 15 && run.StartColumn == 10 && run.EndColumn == 14);
+        Assert.Contains(runs, run => run.Row == 15 && run.StartColumn == 25 && run.EndColumn == 29);
+        Assert.DoesNotContain(runs, run => run.Row >= 40);
+        Assert.Equal(300d, Convert.ToDouble(result.Outputs["area"].Value), 9);
+        Assert.True(result.Outputs.ContainsKey("circle"));
+        if (mode == "largest")
+        {
+            Assert.Contains(result.Overlays!, item => item.Id == "blob-largest-center" && item.Type == VisionOverlayType.Point);
+        }
+        Assert.DoesNotContain(result.Overlays!, item => item.Id == "blob-largest-circle" || item.Type == VisionOverlayType.Circle);
+    }
+
+    [Fact]
+    public async Task Overlay_FollowsSortAndSelection()
+    {
+        using var img = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(img, new Rect(5, 5, 4, 4), Scalar.All(255), -1);
+        Cv2.Rectangle(img, new Rect(30, 30, 8, 8), Scalar.All(255), -1);
+        var result = await new MultiBlobNode().ExecuteAsync(Ctx(new() { ["image"] = Img(img) }),
+            Def("measure.blobs", """{"minArea":1,"sortBy":"x","descending":false,"maxCount":1}"""), CancellationToken.None);
+
+        Assert.DoesNotContain(result.Overlays!, overlay => overlay.Type == VisionOverlayType.Rectangle);
+        var overlay = Assert.Single(result.Overlays!, overlay => overlay.Type == VisionOverlayType.Region);
+        Assert.All(overlay.Runs!, run => Assert.InRange(run.StartColumn, 5, 8));
+        Assert.Equal(16d, Convert.ToDouble(result.Outputs["area"].Value), 9);
+    }
+
     [Fact]
     public async Task Analysis_HonorsCancellation()
     {
@@ -100,6 +145,8 @@ public sealed class BlobAnalysisTests
 
         Assert.Equal(1L, Convert.ToInt64(result.Outputs["count"].Value));
         Assert.Equal(100d, Convert.ToDouble(result.Outputs["area"].Value), 9);
+        var overlay = Assert.Single(result.Overlays!);
+        Assert.All(overlay.Runs!, run => Assert.InRange(run.Row, 4, 13));
         // 便捷口 x/y 是最小外接圆圆心：块 (4,4)-(13,13) ⇒ 8.5，说明域裁剪没有平移坐标。
         Assert.Equal(8.5d, Convert.ToDouble(result.Outputs["x"].Value), 6);
     }

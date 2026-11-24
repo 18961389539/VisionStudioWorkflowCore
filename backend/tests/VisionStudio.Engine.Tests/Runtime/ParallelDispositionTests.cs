@@ -181,6 +181,32 @@ public sealed class ParallelDispositionTests
             $"s1=[{first.StartOffsetMs:F1},{first.EndOffsetMs:F1}] s2=[{second.StartOffsetMs:F1},{second.EndOffsetMs:F1}]");
     }
 
+    [Fact]
+    public async Task DirectControlFanout_ExecutesTerminalBranchesWithoutParallelOrJoinNode()
+    {
+        var workflow = new WorkflowDefinition(
+            "implicit-par-concurrent",
+            "Implicit Parallel Concurrent",
+            [
+                Node("source", "test.gate", GateParams(true)),
+                Node("s1", "test.slow", SlowParams(200)),
+                Node("s2", "test.slow", SlowParams(200))
+            ],
+            [
+                Control("c1", "source", "next", "s1"),
+                Control("c2", "source", "next", "s2")
+            ]);
+
+        var result = await RunAsync(workflow);
+
+        Assert.True(result.Success, result.Error);
+        Assert.DoesNotContain(result.NodeReports, report => report.NodeType == "flow.parallel");
+        var first = Report(result, "s1");
+        var second = Report(result, "s2");
+        var overlapMs = Math.Min(first.EndOffsetMs, second.EndOffsetMs) - Math.Max(first.StartOffsetMs, second.StartOffsetMs);
+        Assert.True(overlapMs > 100, $"implicit branches did not overlap: {overlapMs:F1}ms");
+    }
+
     private static async Task<WorkflowRunResult> RunAsync(WorkflowDefinition workflow)
     {
         await using var provider = BuildProvider();

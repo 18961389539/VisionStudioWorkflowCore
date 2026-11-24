@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { iconForNodeType } from '../components/NodeCategoryIcon';
+import { iconForNodeType, iconIdentityForNodeType, nodeIconCode } from '../components/NodeCategoryIcon';
 import { fallbackCatalogRaw } from '../catalog';
 import { nodeCategory } from '../toolboxModel';
 
@@ -63,5 +63,11 @@ describe('node icon mapping', () => {
     expect(iconForNodeType('IMAGE.SYNTHETIC')).toBe('sparkles');
     expect(iconForNodeType('camera.vendorCapture')).toBe('camera');
     expect(iconForNodeType('vendor.specialWidget')).toBe('puzzle');
+  });
+  it('assigns every built-in node type a unique stable icon identity', () => {
+    const identities = fallbackCatalogRaw.map((item) => iconIdentityForNodeType(item.type));
+    expect(new Set(identities).size).toBe(fallbackCatalogRaw.length);
+    expect(nodeIconCode('IMAGE.SYNTHETIC')).toBe(nodeIconCode('image.synthetic'));
+    expect(iconIdentityForNodeType('vendor.specialWidget')).not.toBe(iconIdentityForNodeType('vendor.otherWidget'));
   });
 });

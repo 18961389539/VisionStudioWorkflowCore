@@ -117,6 +117,16 @@ internal static partial class JLVisionOperators
     /// 也让 ROI / region 输入 / domainImage 三种限制走同一条路径（域外像素不参与连通）。
     /// </summary>
     public static void FindContours(Mat source, VisionRegion? domain, out Point[][] contours, out double[] pixelAreas, out HierarchyIndex[] hierarchy, RetrievalModes retrieval, ContourApproximationModes approximation)
+        => FindContoursWithRegions(source, domain, out contours, out pixelAreas, out hierarchy, out _, retrieval, false, CancellationToken.None);
+
+    internal static void FindBlobContours(Mat source, VisionRegion? domain, out Point[][] contours, out double[] pixelAreas,
+        out VisionRegionComponent[] regions, CancellationToken token)
+        => FindContoursWithRegions(source, domain, out contours, out pixelAreas, out _, out regions,
+            RetrievalModes.External, true, token);
+
+    private static void FindContoursWithRegions(Mat source, VisionRegion? domain, out Point[][] contours, out double[] pixelAreas,
+        out HierarchyIndex[] hierarchy, out VisionRegionComponent[] regions, RetrievalModes retrieval,
+        bool includeRegions, CancellationToken token)
     {
         using var image = JLVisionImages.FromMat(source);
         JlImage? reduced = null;
@@ -130,7 +140,8 @@ internal static partial class JLVisionOperators
                 reduced = image.ReduceDomain(nativeDomain);
                 scoped = reduced;
             }
-            FindContoursCore(scoped, out contours, out pixelAreas, out hierarchy, retrieval, approximation);
+            FindContoursCore(scoped, source.Width, source.Height, out contours, out pixelAreas, out hierarchy, out regions,
+                retrieval, includeRegions, token);
         }
         finally
         {
@@ -139,19 +150,30 @@ internal static partial class JLVisionOperators
         }
     }
 
-    private static void FindContoursCore(JlImage image, out Point[][] contours, out double[] pixelAreas, out HierarchyIndex[] hierarchy, RetrievalModes retrieval, ContourApproximationModes approximation)
+    private static void FindContoursCore(JlImage image, int width, int height, out Point[][] contours, out double[] pixelAreas,
+        out HierarchyIndex[] hierarchy, out VisionRegionComponent[] regions, RetrievalModes retrieval,
+        bool includeRegions, CancellationToken token)
     {
         using var foreground = image.Threshold(1d, 255d);
         using var components = foreground.Connection();
-        var items = new List<(Point[] Points, int Parent, double PixelArea)>();
+        var items = new List<(Point[] Points, int Parent, double PixelArea, VisionRegionComponent? Region)>();
+        var runCount = 0;
         for (var i = 1; i <= components.CountObj(); i++)
         {
+            token.ThrowIfCancellationRequested();
             using var component = components.SelectObj(i);
             // AreaCenter 的返回值是像素面积；out 参数是标定后的面积/中心，无标定时不是像素数。
             var componentArea = (double)component.AreaCenter(out double _, out double _);
             if (componentArea == 0) continue;
             using var solid = component.FillUp();
-            var parent = items.Count; items.Add((RegionContour(solid), -1, componentArea));
+            VisionRegionComponent? region = null;
+            if (includeRegions)
+            {
+                region = JLVisionRegions.FromNative(component, width, height, token).Components.Single();
+                runCount = checked(runCount + region.Runs.Count);
+                if (runCount > VisionRegion.MaxRuns) throw new InvalidOperationException("Region run budget exceeded (1000000).");
+            }
+            var parent = items.Count; items.Add((RegionContour(solid), -1, componentArea, region));
             if (retrieval == RetrievalModes.External) continue;
             using var holes = solid.Difference(component);
             using var separated = holes.Connection();
@@ -161,7 +183,7 @@ internal static partial class JLVisionOperators
                 var holeArea = (double)hole.AreaCenter(out double _, out double _);
                 if (holeArea == 0) continue;
                 using var border = hole.DilationCircle(1d);
-                items.Add((RegionContour(border), parent, holeArea));
+                items.Add((RegionContour(border), parent, holeArea, null));
             }
         }
         if (retrieval == RetrievalModes.External)
@@ -173,6 +195,7 @@ internal static partial class JLVisionOperators
         contours = items.Select(x => x.Points).ToArray();
         pixelAreas = items.Select(x => x.PixelArea).ToArray();
         hierarchy = items.Select(x => new HierarchyIndex(-1, -1, -1, x.Parent)).ToArray();
+        regions = includeRegions ? items.Select(x => x.Region!).ToArray() : [];
     }
     private static bool Contains(Point[] polygon, Point point)
     {

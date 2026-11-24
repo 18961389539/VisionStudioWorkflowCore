@@ -37,6 +37,7 @@ public sealed class VisionNodeStep(VisionNodeRuntime nodeRuntime) : StepBodyAsyn
                 throw new InvalidOperationException($"ForEach node '{NodeId}' did not publish its validated DetectionList.");
             data.ForEachCollections[NodeId] = detections;
         }
+
         return ExecutionResult.Next();
     }
 
@@ -56,5 +57,19 @@ public sealed class VisionNodeStep(VisionNodeRuntime nodeRuntime) : StepBodyAsyn
             outputs["classId"] = VisionValue.Integer(classId);
         else
             outputs.Remove("classId");
+    }
+}
+
+/// <summary>Runs the completion barrier for a terminal implicit parallel region without adding a visual Join node.</summary>
+public sealed class VisionImplicitJoinStep : StepBody
+{
+    public string JoinNodeId { get; set; } = string.Empty;
+
+    public override ExecutionResult Run(IStepExecutionContext context)
+    {
+        if (context.Workflow.Data is not VisionWorkflowData data)
+            throw new InvalidOperationException("Workflow data is not VisionWorkflowData.");
+        data.ApplyParallelJoin(JoinNodeId);
+        return ExecutionResult.Next();
     }
 }

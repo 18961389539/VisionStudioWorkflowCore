@@ -56,9 +56,10 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
             var domain = AnalysisDomain(context, scopedDomain, roi, gray.Width, gray.Height, cancellationToken);
             // 像素面积来自填充前的连通域：轮廓是填孔后的外边界，多边形面积会把小目标算小
             // （1–3 px 的斑甚至退化成 0），而 area 需要与 region 家族 / region.toDetections 同口径。
-            JLVisionOperators.FindContours(gray, domain, out Point[][] contours, out double[] pixelAreas, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+            JLVisionOperators.FindBlobContours(gray, domain, out Point[][] contours, out double[] pixelAreas,
+                out VisionRegionComponent[] regions, cancellationToken);
 
-            var candidates = new List<VisionDetection>();
+            var candidates = new List<(VisionDetection Detection, VisionRegionComponent Region)>();
             for (var contourIndex = 0; contourIndex < contours.Length; contourIndex++)
             {
                 // 每轮检查取消：上千个连通域时这是唯一能中断的位置。
@@ -81,7 +82,7 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 if (rect.Height < minHeight || maxHeight > 0 && rect.Height > maxHeight) continue;
                 var rectangularity = rect.Width * rect.Height > 0 ? area / (rect.Width * rect.Height) : 0;
                 if (rectangularity < minRectangularity) continue;
-                candidates.Add(new VisionDetection(
+                candidates.Add((new VisionDetection(
                     Index: 0,
                     X: rect.X,
                     Y: rect.Y,
@@ -91,29 +92,27 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                     Perimeter: perimeter,
                     Circularity: circularity,
                     Circle: new VisionCircle(center.X, center.Y, radius),
-                    BoundingBox: new VisionRectangle2D(rect.X, rect.Y, rect.Width, rect.Height)));
+                    BoundingBox: new VisionRectangle2D(rect.X, rect.Y, rect.Width, rect.Height)), regions[contourIndex]));
             }
 
-            IEnumerable<VisionDetection> ordered = sortBy switch
+            IEnumerable<(VisionDetection Detection, VisionRegionComponent Region)> ordered = sortBy switch
             {
                 "circularity" => descending
-                    ? candidates.OrderByDescending(x => x.Circularity).ThenByDescending(x => x.Area)
-                    : candidates.OrderBy(x => x.Circularity).ThenByDescending(x => x.Area),
+                    ? candidates.OrderByDescending(x => x.Detection.Circularity).ThenByDescending(x => x.Detection.Area)
+                    : candidates.OrderBy(x => x.Detection.Circularity).ThenByDescending(x => x.Detection.Area),
                 "x" or "lefttoright" => descending
-                    ? candidates.OrderByDescending(x => x.X).ThenByDescending(x => x.Y)
-                    : candidates.OrderBy(x => x.X).ThenBy(x => x.Y),
+                    ? candidates.OrderByDescending(x => x.Detection.X).ThenByDescending(x => x.Detection.Y)
+                    : candidates.OrderBy(x => x.Detection.X).ThenBy(x => x.Detection.Y),
                 "y" or "toptobottom" => descending
-                    ? candidates.OrderByDescending(x => x.Y).ThenByDescending(x => x.X)
-                    : candidates.OrderBy(x => x.Y).ThenBy(x => x.X),
+                    ? candidates.OrderByDescending(x => x.Detection.Y).ThenByDescending(x => x.Detection.X)
+                    : candidates.OrderBy(x => x.Detection.Y).ThenBy(x => x.Detection.X),
                 _ => descending
-                    ? candidates.OrderByDescending(x => x.Area).ThenBy(x => x.X)
-                    : candidates.OrderBy(x => x.Area).ThenBy(x => x.X)
+                    ? candidates.OrderByDescending(x => x.Detection.Area).ThenBy(x => x.Detection.X)
+                    : candidates.OrderBy(x => x.Detection.Area).ThenBy(x => x.Detection.X)
             };
 
-            var detections = ordered
-                .Take(maxCount)
-                .Select((detection, index) => detection with { Index = index })
-                .ToArray();
+            var selected = ordered.Take(maxCount).ToArray();
+            var detections = selected.Select((item, index) => item.Detection with { Index = index }).ToArray();
             // 截断必须可见：maxCount 默认 20，超过 20 个斑点时下游只能看到前 20 个。
             var inputCount = candidates.Count;
             var truncated = inputCount > detections.Length;
@@ -132,24 +131,12 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
             var overlays = new List<VisionOverlay>();
             for (var i = 0; i < detections.Length; i++)
             {
-                var detection = detections[i];
-                overlays.Add(new VisionOverlay(
-                    $"blob-{i}",
-                    VisionOverlayType.Rectangle,
-                    Label: $"#{i + 1} A={detection.Area:0}",
-                    X: detection.X,
-                    Y: detection.Y,
-                    Width: detection.Width,
-                    Height: detection.Height,
-                    Stroke: "#faad14",
-                    StrokeWidth: 1.5));
-                if (largestOnly && best is not null && detection.Index == best.Value.Index)
+                overlays.Add(new VisionOverlay($"blob-{i}", VisionOverlayType.Region,
+                    Fill: "rgba(82, 196, 26, 0.45)", Runs: selected[i].Region.Runs));
+                if (largestOnly && best is not null && detections[i].Index == best.Value.Index)
                 {
-                    overlays.Add(new VisionOverlay("blob-largest-circle", VisionOverlayType.Circle,
-                        X: detection.Circle.X, Y: detection.Circle.Y, Radius: detection.Circle.Radius,
-                        Stroke: "#52c41a", StrokeWidth: 2));
                     overlays.Add(new VisionOverlay("blob-largest-center", VisionOverlayType.Point,
-                        X: detection.Circle.X, Y: detection.Circle.Y, Stroke: "#ff4d4f", StrokeWidth: 2));
+                        X: detections[i].Circle.X, Y: detections[i].Circle.Y, Stroke: "#ff4d4f", StrokeWidth: 2));
                 }
             }
 

@@ -5,6 +5,7 @@
 // 后端新增字段不会红；后端删除/改名字段而手写还在用会红——这正是镜像漂移最贵的形态。
 import type { components } from './api-types';
 import type {
+  VisionRegionRun,
   ParameterDescriptor,
   VisionToolCapabilities,
   NodeFrameRule,
@@ -52,6 +53,8 @@ import type {
 type Assert<T extends true> = T;
 type KeysOf<T> = keyof T;
 
+type B_VisionRegionRun = components['schemas']['VisionRegionRun'];
+export type K_VisionRegionRun = Assert<KeysOf<VisionRegionRun> extends KeysOf<B_VisionRegionRun> ? true : false>;
 type B_ParameterDescriptor = components['schemas']['ParameterDescriptor'];
 export type K_ParameterDescriptor = Assert<KeysOf<ParameterDescriptor> extends KeysOf<B_ParameterDescriptor> ? true : false>;
 type B_VisionToolCapabilities = components['schemas']['VisionToolCapabilities'];

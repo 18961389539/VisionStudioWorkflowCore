@@ -56,10 +56,12 @@ internal sealed record StructuredParallelIr(
     StructuredSequenceIr Branch1,
     StructuredSequenceIr Branch2,
     string JoinNodeId,
-    int Depth) : StructuredIrItem
+    int Depth,
+    bool Implicit = false,
+    bool VirtualJoin = false) : StructuredIrItem
 {
     public override IReadOnlyList<string> NodeIds =>
-        [Node.Id, .. Branch1.NodeIds, .. Branch2.NodeIds];
+        Implicit ? [.. Branch1.NodeIds, .. Branch2.NodeIds] : [Node.Id, .. Branch1.NodeIds, .. Branch2.NodeIds];
 }
 
 internal sealed record StructuredForEachIr(
@@ -131,6 +133,7 @@ internal sealed class StructuredWorkflowIrBuilder
     /// <summary>已配对的 If/Parallel Join：其块被处理后由外层序列直接消费，不再视为“意外 Join”。</summary>
     private readonly HashSet<string> _pairedJoins = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _pairedLoopEnds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _virtualJoins = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _visualOrder = [];
     private readonly List<StructuredControlRegion> _regions = [];
     private readonly Dictionary<string, IReadOnlyList<string>> _tryBodies = new(StringComparer.OrdinalIgnoreCase);
@@ -434,11 +437,54 @@ internal sealed class StructuredWorkflowIrBuilder
 
             items.Add(new StructuredNodeIr(node));
             var next = _graph.Outgoing(node.Id);
+            if (next.Count == 2)
+            {
+                var hasJoin = _graph.TryFindNearestCommonJoin(
+                    next.Select(x => x.TargetNodeId).ToArray(),
+                    excludedBoundaryJoinId: stopJoinId,
+                    ownerId: node.Id,
+                    out var joinId);
+                var virtualJoin = !hasJoin && stopJoinId is null && stopLoopEndId is null;
+                if (!hasJoin && !virtualJoin)
+                    throw new InvalidOperationException($"Structured control '{node.Id}' has no distinct common Join{(stopJoinId is null ? string.Empty : $" before parent Join '{stopJoinId}'")}.");
+                joinId ??= ImplicitJoinId(node.Id);
+                if (!virtualJoin)
+                {
+                    var join = _graph.Node(joinId);
+                    if (!FlowSemantics.IsJoin(join.Type))
+                        throw new InvalidOperationException($"Implicit parallel from '{node.Id}' requires a flow.join convergence node; found '{join.Type}' at '{joinId}'.");
+                    EnsureNonEmptyBranch(node.Id, "branch1", next[0].TargetNodeId, joinId);
+                    EnsureNonEmptyBranch(node.Id, "branch2", next[1].TargetNodeId, joinId);
+                }
+                if (virtualJoin) _virtualJoins.Add(joinId);
+
+                var branch1 = BuildSequence(next[0].TargetNodeId, joinId, $"{node.Id}.branch1", depth + 1,
+                    enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
+                var branch2 = BuildSequence(next[1].TargetNodeId, joinId, $"{node.Id}.branch2", depth + 1,
+                    enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
+                ValidateNoCrossBranchData(node.Id, branch1.NodeIds, branch2.NodeIds);
+
+                items.Add(new StructuredParallelIr(node, branch1, branch2, joinId, depth, Implicit: true, VirtualJoin: virtualJoin));
+                _regions.Add(new StructuredControlRegion(
+                    node.Id,
+                    "Parallel",
+                    joinId,
+                    depth,
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["branch1"] = branch1.NodeIds,
+                        ["branch2"] = branch2.NodeIds
+                    }));
+                if (!virtualJoin) _pairedJoins.Add(joinId);
+                else return new StructuredSequenceIr(items);
+                currentId = joinId;
+                continue;
+            }
             if (next.Count > 1)
                 throw new InvalidOperationException($"Node '{node.Id}' has {next.Count} control outputs. Use If or Parallel for branching.");
             if (next.Count == 0)
             {
-                if (stopJoinId is not null)
+                if (stopJoinId is not null && !_virtualJoins.Contains(stopJoinId))
                     throw new InvalidOperationException($"Structured branch '{ownerId}' terminated at '{node.Id}' before Join '{stopJoinId}'.");
                 return new StructuredSequenceIr(items);
             }
@@ -530,6 +576,7 @@ internal sealed class StructuredWorkflowIrBuilder
             && edge.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsMergeNode(NodeDefinition node) => FlowSemantics.IsJoinOrMerge(node.Type);
+    private static string ImplicitJoinId(string ownerId) => $"{ownerId}.__implicit_join";
 
     private static void EnsureNonEmptyBranch(string nodeId, string branchName, string targetId, string joinId)
     {
@@ -572,6 +619,18 @@ internal sealed class StructuredControlGraph
         string? excludedBoundaryJoinId,
         string ownerId)
     {
+        if (TryFindNearestCommonJoin(branchStarts, excludedBoundaryJoinId, ownerId, out var joinId))
+            return joinId!;
+        var boundary = excludedBoundaryJoinId is null ? string.Empty : $" before parent Join '{excludedBoundaryJoinId}'";
+        throw new InvalidOperationException($"Structured control '{ownerId}' has no distinct common Join{boundary}.");
+    }
+
+    public bool TryFindNearestCommonJoin(
+        IReadOnlyList<string> branchStarts,
+        string? excludedBoundaryJoinId,
+        string ownerId,
+        out string? joinId)
+    {
         if (branchStarts.Count < 2)
             throw new InvalidOperationException($"Structured control '{ownerId}' requires at least two branches.");
 
@@ -594,15 +653,16 @@ internal sealed class StructuredControlGraph
 
         if (common.Length == 0)
         {
-            var boundary = excludedBoundaryJoinId is null ? string.Empty : $" before parent Join '{excludedBoundaryJoinId}'";
-            throw new InvalidOperationException($"Structured control '{ownerId}' has no distinct common Join{boundary}.");
+            joinId = null;
+            return false;
         }
 
         if (common.Length > 1 && common[0].Max == common[1].Max && common[0].Sum == common[1].Sum)
             throw new InvalidOperationException(
                 $"Structured control '{ownerId}' has ambiguous paired Joins '{common[0].Id}' and '{common[1].Id}'.");
 
-        return common[0].Id;
+        joinId = common[0].Id;
+        return true;
     }
 
     private Dictionary<string, int> JoinDistances(string startId, string? excludedBoundaryJoinId)

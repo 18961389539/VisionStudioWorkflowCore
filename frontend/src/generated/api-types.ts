@@ -17254,6 +17254,7 @@ export interface components {
              */
             strokeWidth: number | string;
             fill?: null | string;
+            runs?: null | components["schemas"]["VisionRegionRun"][];
         };
         VisionOverlayPoint: {
             /** Format: double */
@@ -17262,12 +17263,20 @@ export interface components {
             y: number | string;
         };
         /** @enum {unknown} */
-        VisionOverlayType: "Point" | "Line" | "Circle" | "Rectangle" | "Polygon" | "Contour" | "Text" | "Polyline";
+        VisionOverlayType: "Point" | "Line" | "Circle" | "Rectangle" | "Polygon" | "Contour" | "Text" | "Polyline" | "Region";
         /**
          * @default InProcess
          * @enum {unknown}
          */
         VisionPluginIsolationMode: "InProcess" | "WorkerProcess";
+        VisionRegionRun: {
+            /** Format: int32 */
+            row: number | string;
+            /** Format: int32 */
+            startColumn: number | string;
+            /** Format: int32 */
+            endColumn: number | string;
+        };
         VisionRobotTarget2D: {
             /** Format: double */
             x: number | string;

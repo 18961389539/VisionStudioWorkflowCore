@@ -50,6 +50,43 @@ describe('consistent node validation', () => {
     expect(configurationIssues(catalog, { minArea: 0.5 })).toEqual([]);
   });
 
+  it('accepts terminal direct control fanout without a Join', () => {
+    const upstream = asNode(source);
+    const first = { ...asNode(source), id: 'first' };
+    const second = { ...asNode(source), id: 'second' };
+    const edges: Edge[] = [
+      { id: 'one', source: source.type, sourceHandle: 'next', target: first.id, targetHandle: 'exec', data: { kind: 'control' } },
+      { id: 'two', source: source.type, sourceHandle: 'next', target: second.id, targetHandle: 'exec', data: { kind: 'control' } }
+    ];
+    first.data.inputs = [{ name: 'exec', dataType: 'Control' }];
+    second.data.inputs = [{ name: 'exec', dataType: 'Control' }];
+
+    expect(validateWorkflow([upstream, first, second], [source], edges))
+      .not.toContainEqual(expect.objectContaining({ id: `control-fanout-${source.type}-next` }));
+  });
+
+  it('accepts direct two-branch control fanout with a common Join', () => {
+    const upstream = asNode(source);
+    const first = { ...asNode(source), id: 'first' };
+    const second = { ...asNode(source), id: 'second' };
+    const join: Node = { id: 'join', position: { x: 0, y: 0 }, data: {
+      typeKey: 'flow.join',
+      inputs: [{ name: 'branch1', dataType: 'Control' }, { name: 'branch2', dataType: 'Control' }],
+      outputs: [{ name: 'next', dataType: 'Control' }]
+    } };
+    first.data.inputs = [{ name: 'exec', dataType: 'Control' }];
+    second.data.inputs = [{ name: 'exec', dataType: 'Control' }];
+    const edges: Edge[] = [
+      { id: 'one', source: source.type, sourceHandle: 'next', target: first.id, targetHandle: 'exec', data: { kind: 'control' } },
+      { id: 'two', source: source.type, sourceHandle: 'next', target: second.id, targetHandle: 'exec', data: { kind: 'control' } },
+      { id: 'join-one', source: first.id, sourceHandle: 'next', target: join.id, targetHandle: 'branch1', data: { kind: 'control' } },
+      { id: 'join-two', source: second.id, sourceHandle: 'next', target: join.id, targetHandle: 'branch2', data: { kind: 'control' } }
+    ];
+
+    expect(validateWorkflow([upstream, first, second, join], [source], edges))
+      .not.toContainEqual(expect.objectContaining({ id: `control-fanout-${source.type}-next` }));
+  });
+
   it.each([
     ['Control', 'Image', 'control'], ['Image', 'Control', 'data'],
     ['String', 'Image', 'data'], ['Image', 'Image', 'control']
