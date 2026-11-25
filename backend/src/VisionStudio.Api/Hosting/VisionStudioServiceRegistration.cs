@@ -499,6 +499,8 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ShapeModelAssetGc>();
         services.AddSingleton<ShapeModelAssetPackageService>();
         services.AddSingleton<VisionStudio.Abstractions.IModelAssetSource, ShapeModelAssetSource>();
+        services.AddSingleton<CalibrationWizardSolvers>();
+        services.AddSingleton<CalibrationWizardAssetStores>();
         services.AddSingleton<CalibrationWizardService>();
         services.AddSingleton<CalibrationAssetStore>(sp => new CalibrationAssetStore(
             sp.GetRequiredService<SqliteMetadataDatabase>(),

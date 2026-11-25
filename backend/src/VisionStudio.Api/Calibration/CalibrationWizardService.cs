@@ -1,6 +1,7 @@
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Api.Infrastructure;
@@ -10,165 +11,9 @@ using VisionStudio.Engine.Nodes;
 
 namespace VisionStudio.Api;
 
-public sealed record CalibrationWizardCreateRequest(
-    string Pattern = "chessboard",
-    int Columns = 7,
-    int Rows = 6,
-    double SpacingMm = 10,
-    double MinBlurVariance = 40,
-    double MinCoverage = 0.25,
-    double MaxGridError = 2,
-    double SaddleThreshold = 10,
-    int? ImageWidth = null,
-    int? ImageHeight = null);
-
-public sealed record CalibrationWizardAddViewRequest(
-    string? ViewJson = null,
-    string? CalibrationDataJson = null,
-    string? Label = null,
-    bool? Enable = null,
-    double? BlurVariance = null);
-
-public sealed record CalibrationWizardSetEnabledRequest(bool Enabled);
-
-public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0, double MaxPoseViewRms = 0, string CameraModel = "pinhole", double TelecentricMagnification = 0.2, double TelecentricPixelSizeUm = 3.45);
-
-public sealed record CalibrationWizardPreviewRequest(string CameraId, bool AddIfAccepted = false, string? Label = null);
-
-public sealed record CalibrationWizardImportRequest(string DocumentJson);
-public sealed record CreateCameraIntrinsicAssetFromSessionRequest(string SessionId, string Id, string Name, string? Description = null, string? Note = null);
-public sealed record SaveCameraIntrinsicVersionFromSessionRequest(string SessionId, string? Note = null);
-
-public sealed record CalibrationWizardDisableOutliersRequest(int[]? ViewIndexes = null, bool UseSolveOutlier = true);
-
-public sealed record CalibrationHandEyeSolveRequest(
-    string SamplesJson,
-    string Mode = "eyeInHand",
-    double MaxTranslationError = 0,
-    double MaxAngleErrorDeg = 0,
-    string SourceFrame = "Camera",
-    string TargetFrame = "",
-    string Unit = "mm",
-    string SourceUnit = "mm",
-    double AngularWeight = 50,
-    double VisionScale = 1,
-    string RobustLoss = "none");
-
-public sealed record HandEyeWizardSessionDocument(
-    string FormatVersion,
-    string SessionId,
-    string Name,
-    string UpdatedAt,
-    string SamplesJson,
-    string Mode,
-    double AngularWeight,
-    double VisionScale,
-    string RobustLoss,
-    double MaxTranslationError,
-    double MaxAngleErrorDeg,
-    string SourceFrame,
-    string TargetFrame,
-    string Unit,
-    string SourceUnit,
-    string? LastSolveSummaryJson)
-{
-    public const string CurrentVersion = "handeye-wizard-v1";
-}
-
-public sealed record HandEyeWizardSaveRequest(
-    string? SessionId,
-    string Name,
-    string SamplesJson,
-    string Mode = "eyeInHand",
-    double AngularWeight = 50,
-    double VisionScale = 1,
-    string RobustLoss = "none",
-    double MaxTranslationError = 0,
-    double MaxAngleErrorDeg = 0,
-    string SourceFrame = "Camera",
-    string TargetFrame = "",
-    string Unit = "mm",
-    string SourceUnit = "mm",
-    string? LastSolveSummaryJson = null);
-
-public sealed record CreateHandEyeAssetFromSessionRequest(string SessionId, string Id, string Name, string? Description = null, string? Note = null);
-public sealed record SaveHandEyeVersionFromSessionRequest(string SessionId, string? Note = null);
-
-public sealed record CalibrationHandEye3DSolveRequest(
-    string SamplesJson,
-    string Mode = "eyeInHand",
-    string Method = "DANIILIDIS",
-    double MaxTranslationError = 0,
-    double MaxRotationErrorDeg = 0,
-    double RotationWeight = 50,
-    string SourceFrame = "Camera",
-    string TargetFrame = "",
-    string Unit = "mm",
-    string OutlierRejection = "none",
-    string CrossCheckMethod = "TSAI",
-    double MinTranslationSpan = 0);
-
-public sealed record HandEye3DWizardSessionDocument(
-    string FormatVersion,
-    string SessionId,
-    string Name,
-    string UpdatedAt,
-    string SamplesJson,
-    string Mode,
-    string Method,
-    double RotationWeight,
-    string OutlierRejection,
-    string CrossCheckMethod,
-    double MaxTranslationError,
-    double MaxRotationErrorDeg,
-    double MinTranslationSpan,
-    string SourceFrame,
-    string TargetFrame,
-    string Unit,
-    string? LastSolveSummaryJson)
-{
-    public const string CurrentVersion = "handeye3d-wizard-v1";
-}
-
-public sealed record HandEye3DWizardSaveRequest(
-    string? SessionId,
-    string Name,
-    string SamplesJson,
-    string Mode = "eyeInHand",
-    string Method = "DANIILIDIS",
-    double RotationWeight = 50,
-    string OutlierRejection = "none",
-    string CrossCheckMethod = "TSAI",
-    double MaxTranslationError = 0,
-    double MaxRotationErrorDeg = 0,
-    double MinTranslationSpan = 0,
-    string SourceFrame = "Camera",
-    string TargetFrame = "",
-    string Unit = "mm",
-    string? LastSolveSummaryJson = null);
-
-public sealed record CreateHandEye3DAssetFromSessionRequest(string SessionId, string Id, string Name, string? Description = null, string? Note = null);
-public sealed record SaveHandEye3DVersionFromSessionRequest(string SessionId, string? Note = null);
-
-/// <summary>
-/// HTTP-facing guided calibration wizards: intrinsics session store (memory + disk),
-/// board detect from upload/camera preview, solve, export/import, and planar hand-eye.
-/// </summary>
-public sealed record CalibrationDualCameraSolveRequest(
-    string PairsJson,
-    string InputMode = "poses",
-    string Method = "average",
-    double MaxTranslationError = 0,
-    double MaxRotationErrorDeg = 0,
-    double RotationWeight = 50,
-    string SourceFrame = "CameraA",
-    string TargetFrame = "CameraB",
-    string Unit = "mm",
-    int ImageWidth = 0,
-    int ImageHeight = 0);
 public sealed partial class CalibrationWizardService
 {
-    private readonly CalibrationIntrinsicsWizard.SessionStore _store = new();
+    private readonly IntrinsicsWizardSessionRepository _intrinsicsSessions;
     private readonly CalibrationDetectBoardNode _detectBoard;
     private readonly CameraIntrinsicCalibrationNode _intrinsics;
     private readonly PlanarHandEyeCalibrationNode _handEye;
@@ -180,7 +25,6 @@ public sealed partial class CalibrationWizardService
     private readonly HandEye3DCalibrationAssetStore? _handEye3DAssets;
     private readonly WizardSessionStore<HandEyeWizardSessionDocument> _handEyeSessions;
     private readonly WizardSessionStore<HandEye3DWizardSessionDocument> _handEye3DSessions;
-    private readonly string _persistRoot;
     private static readonly JsonSerializerOptions PersistJson = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -188,38 +32,32 @@ public sealed partial class CalibrationWizardService
         Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
     };
 
+    [ActivatorUtilitiesConstructor]
     public CalibrationWizardService(
-        CalibrationDetectBoardNode detectBoard,
-        CameraIntrinsicCalibrationNode intrinsics,
-        PlanarHandEyeCalibrationNode handEye,
-        HandEye3DCalibrationNode handEye3D,
-        DualCameraExtrinsicsNode dualCamera,
+        CalibrationWizardSolvers solvers,
         CameraManager cameras,
-        CameraIntrinsicAssetStore intrinsicAssets,
+        CalibrationWizardAssetStores stores,
         IWebHostEnvironment environment,
-        HandEyeCalibrationAssetStore? handEyeAssets = null,
-        HandEye3DCalibrationAssetStore? handEye3DAssets = null,
         ILogger<CalibrationWizardService>? logger = null,
         IConfiguration? configuration = null)
     {
-        _detectBoard = detectBoard;
-        _intrinsics = intrinsics;
-        _handEye = handEye;
-        _handEye3D = handEye3D;
-        _dualCamera = dualCamera;
+        _detectBoard = solvers.DetectBoard;
+        _intrinsics = solvers.Intrinsics;
+        _handEye = solvers.HandEye;
+        _handEye3D = solvers.HandEye3D;
+        _dualCamera = solvers.DualCamera;
         _cameras = cameras;
-        _intrinsicAssets = intrinsicAssets;
-        _handEyeAssets = handEyeAssets;
-        _handEye3DAssets = handEye3DAssets;
-        _persistRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "calibration-wizard");
-        Directory.CreateDirectory(_persistRoot);
-        TryHydrateFromDisk();
+        _intrinsicAssets = stores.Intrinsics;
+        _handEyeAssets = stores.HandEye;
+        _handEye3DAssets = stores.HandEye3D;
+        var persistRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "calibration-wizard");
+        _intrinsicsSessions = new IntrinsicsWizardSessionRepository(persistRoot, JsonOpts(), PersistJson, logger);
         _handEyeSessions = new WizardSessionStore<HandEyeWizardSessionDocument>(
-            Path.Combine(_persistRoot, "handeye"), "Hand-eye wizard", HandEyeWizardSessionDocument.CurrentVersion,
+            Path.Combine(persistRoot, "handeye"), "Hand-eye wizard", HandEyeWizardSessionDocument.CurrentVersion,
             document => document.SessionId, document => document.FormatVersion, document => document.UpdatedAt,
             (document, id) => document with { SessionId = id }, JsonOpts(), PersistJson, Warn(logger));
         _handEye3DSessions = new WizardSessionStore<HandEye3DWizardSessionDocument>(
-            Path.Combine(_persistRoot, "handeye3d"), "3D hand-eye wizard", HandEye3DWizardSessionDocument.CurrentVersion,
+            Path.Combine(persistRoot, "handeye3d"), "3D hand-eye wizard", HandEye3DWizardSessionDocument.CurrentVersion,
             document => document.SessionId, document => document.FormatVersion, document => document.UpdatedAt,
             (document, id) => document with { SessionId = id }, JsonOpts(), PersistJson, Warn(logger));
     }
@@ -232,36 +70,23 @@ public sealed partial class CalibrationWizardService
         var board = new CalibrationIntrinsicsWizard.BoardConfig(
             request.Pattern, request.Columns, request.Rows, request.SpacingMm,
             request.MinBlurVariance, request.MinCoverage, request.MaxGridError, request.SaddleThreshold);
-        var session = _store.Create(board);
-        CalibrationIntrinsicsWizard.SessionState state;
-        if (request.ImageWidth is int w && request.ImageHeight is int h)
-            state = session.SetImageSize(w, h);
-        else
-            state = session.Snapshot();
-        Persist(session);
+        var session = _intrinsicsSessions.Create(board);
+        var state = request.ImageWidth is int w && request.ImageHeight is int h
+            ? session.SetImageSize(w, h)
+            : session.Snapshot();
+        _intrinsicsSessions.Persist(session);
         return state;
     }
 
     public CalibrationIntrinsicsWizard.SessionState Get(string sessionId)
-    {
-        var session = ResolveSession(sessionId);
-        return session.Snapshot();
-    }
+        => _intrinsicsSessions.Resolve(sessionId).Snapshot();
 
     public bool Delete(string sessionId)
-    {
-        var removed = _store.Remove(sessionId);
-        var path = SessionPath(sessionId);
-        if (File.Exists(path))
-        {
-            try { File.Delete(path); } catch { /* best-effort */ }
-        }
-        return removed || File.Exists(path) == false;
-    }
+        => _intrinsicsSessions.Delete(sessionId);
 
     public CalibrationIntrinsicsWizard.SessionState AddViewJson(string sessionId, CalibrationWizardAddViewRequest request)
     {
-        var session = ResolveSession(sessionId);
+        var session = _intrinsicsSessions.Resolve(sessionId);
         if (!string.IsNullOrWhiteSpace(request.ViewJson))
         {
             CameraCalibrationView view;
@@ -278,7 +103,7 @@ public sealed partial class CalibrationWizardService
                 snap.Board.MinBlurVariance,
                 snap.Board.MinCoverage);
             var state = session.AddView(view, quality, request.Label, request.Enable);
-            Persist(session);
+            _intrinsicsSessions.Persist(session);
             return state;
         }
 
@@ -300,7 +125,7 @@ public sealed partial class CalibrationWizardService
                     boardCfg.MinBlurVariance, boardCfg.MinCoverage);
                 last = session.AddView(view, quality, request.Label is null ? $"import-{i}" : $"{request.Label}-{i}", request.Enable);
             }
-            Persist(session);
+            _intrinsicsSessions.Persist(session);
             return last!;
         }
 
@@ -313,7 +138,7 @@ public sealed partial class CalibrationWizardService
         if (imageBytes.Length is < 32 or > 40_000_000) throw new ApiValidationException("Image payload must be between 32 bytes and 40 MB.");
         using var decoded = Cv2.ImDecode(imageBytes, ImreadModes.Unchanged);
         if (decoded.Empty()) throw new ApiValidationException("Could not decode the uploaded image.");
-        var session = ResolveSession(sessionId);
+        var session = _intrinsicsSessions.Resolve(sessionId);
         session.SetImageSize(decoded.Width, decoded.Height);
 
         var detect = await DetectBoardAsync(session, decoded, ct);
@@ -321,7 +146,7 @@ public sealed partial class CalibrationWizardService
             throw new ApiValidationException($"Board not detected ({detect.Quality.Reason}). {detect.Quality.Guidance}");
 
         var state = session.AddView(detect.View, detect.Quality, label, enable);
-        Persist(session);
+        _intrinsicsSessions.Persist(session);
         return state;
     }
 
@@ -329,7 +154,7 @@ public sealed partial class CalibrationWizardService
     {
         if (string.IsNullOrWhiteSpace(request.CameraId))
             throw new ApiValidationException("cameraId is required.");
-        var session = ResolveSession(sessionId);
+        var session = _intrinsicsSessions.Resolve(sessionId);
         using var lease = await _cameras.AcquireAsync(
             request.CameraId.Trim(),
             CameraFrameMode.Latest,
@@ -375,7 +200,7 @@ public sealed partial class CalibrationWizardService
             && detect.Quality.Verdict != CalibrationViewQuality.Verdict.Fail)
         {
             added = session.AddView(detect.View, detect.Quality, request.Label ?? $"camera-{request.CameraId}", enable: true);
-            Persist(session);
+            _intrinsicsSessions.Persist(session);
         }
 
         var hints = PoseHints(session);
@@ -395,23 +220,23 @@ public sealed partial class CalibrationWizardService
 
     public CalibrationIntrinsicsWizard.SessionState SetEnabled(string sessionId, int index, bool enabled)
     {
-        var session = ResolveSession(sessionId);
+        var session = _intrinsicsSessions.Resolve(sessionId);
         var state = session.SetEnabled(index, enabled);
-        Persist(session);
+        _intrinsicsSessions.Persist(session);
         return state;
     }
 
     public CalibrationIntrinsicsWizard.SessionState RemoveView(string sessionId, int index)
     {
-        var session = ResolveSession(sessionId);
+        var session = _intrinsicsSessions.Resolve(sessionId);
         var state = session.RemoveView(index);
-        Persist(session);
+        _intrinsicsSessions.Persist(session);
         return state;
     }
 
     public CalibrationIntrinsicsWizard.SessionState DisableOutliers(string sessionId, CalibrationWizardDisableOutliersRequest request)
     {
-        var session = ResolveSession(sessionId);
+        var session = _intrinsicsSessions.Resolve(sessionId);
         var snap = session.Snapshot();
         var indexes = new HashSet<int>();
         if (request.ViewIndexes is { Length: > 0 })
@@ -461,16 +286,16 @@ public sealed partial class CalibrationWizardService
             if (snap.Views.Any(v => v.Index == idx))
                 last = session.SetEnabled(idx, false);
         }
-        Persist(session);
+        _intrinsicsSessions.Persist(session);
         return last ?? session.Snapshot();
     }
 
     public async Task<object> SolveAsync(string sessionId, CalibrationWizardSolveRequest request, CancellationToken ct)
     {
-        var session = ResolveSession(sessionId);
+        var session = _intrinsicsSessions.Resolve(sessionId);
         session.SetCameraModel(request.CameraModel);
         session.SetTelecentricParameters(request.TelecentricMagnification, request.TelecentricPixelSizeUm);
-        Persist(session);
+        _intrinsicsSessions.Persist(session);
         var calibRequest = session.BuildRequest();
         var parameters = new Dictionary<string, JsonElement>
         {
@@ -506,7 +331,7 @@ public sealed partial class CalibrationWizardService
                 ["telecentricPixelSizeUm"] = session.Snapshot().TelecentricPixelSizeUm
             };
             var state = session.StoreSolveResult(model, summary);
-            Persist(session);
+            _intrinsicsSessions.Persist(session);
             return new { session = state, result = summary, hints = PoseHints(session) };
         }
         catch (InvalidOperationException ex)
@@ -517,7 +342,7 @@ public sealed partial class CalibrationWizardService
 
     public object Export(string sessionId)
     {
-        var session = ResolveSession(sessionId);
+        var session = _intrinsicsSessions.Resolve(sessionId);
         var state = session.Snapshot();
         var document = session.ExportDocument();
         return new
@@ -542,14 +367,14 @@ public sealed partial class CalibrationWizardService
 
     public async Task<CameraIntrinsicAssetDescriptor> CreateIntrinsicAssetAsync(CreateCameraIntrinsicAssetFromSessionRequest request, CancellationToken ct)
     {
-        var solved = RequireSolvedModel(ResolveSession(request.SessionId));
+        var solved = RequireSolvedModel(_intrinsicsSessions.Resolve(request.SessionId));
         return await _intrinsicAssets.CreateAsync(new CreateCameraIntrinsicAssetRequest(
             request.Id, request.Name, request.Description, solved.Model, solved.DocumentJson, solved.SummaryJson, request.Note), ct);
     }
 
     public async Task<CameraIntrinsicVersionSnapshot> AddIntrinsicVersionAsync(string id, SaveCameraIntrinsicVersionFromSessionRequest request, CancellationToken ct)
     {
-        var solved = RequireSolvedModel(ResolveSession(request.SessionId));
+        var solved = RequireSolvedModel(_intrinsicsSessions.Resolve(request.SessionId));
         return await _intrinsicAssets.AddVersionAsync(id, new SaveCameraIntrinsicVersionRequest(
             solved.Model, solved.DocumentJson, solved.SummaryJson, request.Note), ct);
     }
@@ -577,12 +402,12 @@ public sealed partial class CalibrationWizardService
         {
             throw new ApiValidationException($"Invalid wizard documentJson: {ex.Message}", ex);
         }
-        var session = _store.CreateFromDocument(document);
-        Persist(session);
+        var session = _intrinsicsSessions.CreateFromDocument(document);
+        _intrinsicsSessions.Persist(session);
         return session.Snapshot();
     }
 
-    public object Hints(string sessionId) => new { hints = PoseHints(ResolveSession(sessionId)) };
+    public object Hints(string sessionId) => new { hints = PoseHints(_intrinsicsSessions.Resolve(sessionId)) };
 
     private async Task<(bool Found, CameraCalibrationView? View, CalibrationViewQuality.Report Quality)> DetectBoardAsync(
         CalibrationIntrinsicsWizard.Session session, Mat image, CancellationToken ct)
@@ -630,79 +455,6 @@ public sealed partial class CalibrationWizardService
             return [new CalibrationPoseHints.Hint("need-size", "Capture or set image size before pose coverage hints are available.", "setup")];
         var views = snap.Views.Select(v => ((IReadOnlyList<IReadOnlyList<double>>)v.View.ImagePoints, v.Enabled)).ToList();
         return CalibrationPoseHints.Suggest(views, w, h);
-    }
-
-    private CalibrationIntrinsicsWizard.Session ResolveSession(string sessionId)
-    {
-        if (_store.TryGet(sessionId, out var live) && live is not null)
-            return live;
-        var path = SessionPath(sessionId);
-        if (!File.Exists(path))
-            throw new KeyNotFoundException($"Calibration wizard session '{sessionId}' was not found or has expired.");
-        try
-        {
-            var json = File.ReadAllText(path);
-            var document = JsonSerializer.Deserialize<CalibrationIntrinsicsWizard.SessionDocument>(json, JsonOpts())
-                ?? throw new JsonException("empty");
-            // Force the on-disk session id.
-            document = document with { SessionId = sessionId };
-            var restored = _store.CreateFromDocument(document);
-            return restored;
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or IOException)
-        {
-            throw new KeyNotFoundException($"Calibration wizard session '{sessionId}' could not be restored from disk.", ex);
-        }
-    }
-
-    private void Persist(CalibrationIntrinsicsWizard.Session session)
-    {
-        try
-        {
-            var document = session.ExportDocument();
-            var path = SessionPath(session.SessionId);
-            var tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(document, PersistJson));
-            File.Copy(tmp, path, overwrite: true);
-            File.Delete(tmp);
-        }
-        catch
-        {
-            // Persistence is best-effort; in-memory session remains authoritative for this process.
-        }
-    }
-
-    private void TryHydrateFromDisk()
-    {
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(_persistRoot, "*.json"))
-            {
-                try
-                {
-                    var json = File.ReadAllText(file);
-                    var document = JsonSerializer.Deserialize<CalibrationIntrinsicsWizard.SessionDocument>(json, JsonOpts());
-                    if (document is null) continue;
-                    if (_store.TryGet(document.SessionId, out _)) continue;
-                    _store.CreateFromDocument(document);
-                }
-                catch
-                {
-                    // skip corrupt files
-                }
-            }
-        }
-        catch
-        {
-            // ignore hydrate failures
-        }
-    }
-
-    private string SessionPath(string sessionId)
-    {
-        var safe = string.Concat((sessionId ?? "").Where(c => char.IsLetterOrDigit(c) || c is '-' or '_'));
-        if (string.IsNullOrWhiteSpace(safe)) throw new ApiValidationException("Invalid session id.");
-        return Path.Combine(_persistRoot, safe + ".json");
     }
 
     private static JsonSerializerOptions JsonOpts() => new()

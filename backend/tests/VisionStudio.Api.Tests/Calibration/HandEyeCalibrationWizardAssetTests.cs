@@ -103,9 +103,12 @@ public sealed class HandEyeCalibrationWizardAssetTests
     }
 
     private static CalibrationWizardService CreateWizard(TempWebHostEnvironment env, SqliteMetadataDatabase db, HandEyeCalibrationAssetStore? handEyeAssets = null)
-        => new(new CalibrationDetectBoardNode(), new CameraIntrinsicCalibrationNode(), new PlanarHandEyeCalibrationNode(),
-            new HandEye3DCalibrationNode(), new DualCameraExtrinsicsNode(), new CameraManager(),
-            new CameraIntrinsicAssetStore(db), env, handEyeAssets);
+        => new(
+            new CalibrationWizardSolvers(new CalibrationDetectBoardNode(), new CameraIntrinsicCalibrationNode(), new PlanarHandEyeCalibrationNode(),
+                new HandEye3DCalibrationNode(), new DualCameraExtrinsicsNode()),
+            new CameraManager(),
+            new CalibrationWizardAssetStores(new CameraIntrinsicAssetStore(db), HandEye: handEyeAssets),
+            env);
 
     private static RuntimeDependencyManifestService CreateDependencies(TempWebHostEnvironment env, SqliteMetadataDatabase db, VisionNodeRegistry registry, HandEyeCalibrationAssetStore assets, PlanarHandEyeCalibrationNode solver)
     {
