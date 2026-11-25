@@ -15,16 +15,19 @@ public sealed class ConfiguredReplayInputResolver : IReplayInputResolver
     public const string ConfigurationKey = "VisionStudio:ReplayInputRoots";
 
     private readonly string[] _normalizedRoots;
+    private readonly string _normalizedMediaRoot;
     private readonly StringComparison _comparison = OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
 
     public ConfiguredReplayInputResolver(IConfiguration configuration, IWebHostEnvironment environment)
     {
+        var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration);
+        var mediaRoot = VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configuration["MediaLibrary:RootPath"], configuration);
         var roots = new List<string>
         {
-            VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration),
-            VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configuration["MediaLibrary:RootPath"], configuration)
+            dataRoot,
+            mediaRoot
         };
         var configured = configuration[ConfigurationKey];
         if (!string.IsNullOrWhiteSpace(configured))
@@ -37,6 +40,7 @@ public sealed class ConfiguredReplayInputResolver : IReplayInputResolver
             }
         }
 
+        _normalizedMediaRoot = NormalizeRoot(Path.GetFullPath(mediaRoot));
         _normalizedRoots = roots
             .Select(Path.GetFullPath)
             .Distinct(_comparison == StringComparison.OrdinalIgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
@@ -50,6 +54,31 @@ public sealed class ConfiguredReplayInputResolver : IReplayInputResolver
     public string? Resolve(string requestedPath)
     {
         if (string.IsNullOrWhiteSpace(requestedPath)) return null;
+
+        if (requestedPath.StartsWith("media://", StringComparison.OrdinalIgnoreCase))
+        {
+            var relativePath = requestedPath["media://".Length..];
+            if (string.IsNullOrWhiteSpace(relativePath) || relativePath.Contains('?') || relativePath.Contains('#'))
+                return null;
+
+            relativePath = relativePath
+                .Replace('/', Path.DirectorySeparatorChar)
+                .Replace('\\', Path.DirectorySeparatorChar);
+            if (Path.IsPathRooted(relativePath))
+                return null;
+
+            try
+            {
+                var mediaPath = Path.GetFullPath(Path.Combine(Path.TrimEndingDirectorySeparator(_normalizedMediaRoot), relativePath));
+                if (!NormalizeRoot(mediaPath).StartsWith(_normalizedMediaRoot, _comparison))
+                    return null;
+                requestedPath = mediaPath;
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return null;
+            }
+        }
 
         string full;
         try

@@ -9,7 +9,9 @@ public static class ProductionEndpoints
     public static IEndpointRouteBuilder MapProductionEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/production/status", (ProductionRuntimeService production) => Results.Ok(production.Status))
-            .Produces<ProductionRuntimeStatus>();
+            .Produces<ProductionRuntimeStatus>()
+            .RequireAuthorization(SecurityPolicies.StationRead)
+            .WithServiceUsageAudit("production.status.read", "production");
 
         app.MapGet("/api/production/config", async (ProductionRuntimeService production, HttpContext http, CancellationToken ct) =>
         {
@@ -21,11 +23,15 @@ public static class ProductionEndpoints
 
         app.MapGet("/api/production/ptp-guard", (ProductionRuntimeService production) =>
             Results.Ok(production.Status.PtpGuard))
-            .Produces<ProductionPtpGuardSnapshot>();
+            .Produces<ProductionPtpGuardSnapshot>()
+            .RequireAuthorization(SecurityPolicies.StationRead)
+            .WithServiceUsageAudit("production.status.read", "production");
 
         app.MapGet("/api/production/synchronization-guard", (ProductionRuntimeService production) =>
             Results.Ok(production.Status.SynchronizationGuard))
-            .Produces<ProductionSynchronizationGuardSnapshot>();
+            .Produces<ProductionSynchronizationGuardSnapshot>()
+            .RequireAuthorization(SecurityPolicies.StationRead)
+            .WithServiceUsageAudit("production.status.read", "production");
 
         app.MapPut("/api/production/config", async (ProductionRuntimeConfig request, [FromHeader(Name = "If-Match")] string? expectedRevision,
             ProductionRuntimeService production, HttpContext http, CancellationToken ct) =>
@@ -115,10 +121,15 @@ public static class ProductionEndpoints
             var page = await alarms.ListAsync(activeOnly ?? false, skip ?? 0, take ?? AlarmStore.DefaultPageSize, ct, pendingOnly ?? false, source);
             http.Response.Headers["X-Total-Count"] = page.Total.ToString(System.Globalization.CultureInfo.InvariantCulture);
             return Results.Ok(page.Items);
-        }).Produces<IReadOnlyList<AlarmRecord>>();
+        }).Produces<IReadOnlyList<AlarmRecord>>()
+            .RequireAuthorization(SecurityPolicies.StationRead)
+            .WithServiceUsageAudit("alarm.read", "alarm");
 
         app.MapGet("/api/alarms/summary", async (string? stationId, AlarmStore alarms, CancellationToken ct) =>
-            Results.Ok(await alarms.GetSummaryAsync(ct, AlarmSourceForStation(stationId)))).Produces<AlarmSummary>();
+            Results.Ok(await alarms.GetSummaryAsync(ct, AlarmSourceForStation(stationId))))
+            .Produces<AlarmSummary>()
+            .RequireAuthorization(SecurityPolicies.StationRead)
+            .WithServiceUsageAudit("alarm.read", "alarm");
 
         app.MapPost("/api/alarms/{id}/ack", async (string id, AlarmStore alarms, CancellationToken ct) =>
             Results.Ok(await alarms.AcknowledgeAsync(id, ct))).Produces<AlarmRecord>().RequireOperator("alarm.ack", "alarm");
@@ -127,12 +138,16 @@ public static class ProductionEndpoints
 
         app.MapGet("/api/production/runtimes", (ProductionRuntimeService production) =>
             Results.Ok(production.ListStatuses()))
-            .Produces<IReadOnlyList<ProductionStationRuntimeStatus>>();
+            .Produces<IReadOnlyList<ProductionStationRuntimeStatus>>()
+            .RequireAuthorization(SecurityPolicies.StationRead)
+            .WithServiceUsageAudit("production.status.read", "production");
 
         app.MapGet("/api/production/runtimes/{stationId}/status", (string stationId, ProductionRuntimeService production) =>
             Results.Ok(production.GetStatus(stationId)))
             .Produces<ProductionStationRuntimeStatus>()
-            .ProducesProblem(StatusCodes.Status400BadRequest);
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .RequireAuthorization(SecurityPolicies.StationRead)
+            .WithServiceUsageAudit("production.status.read", "production");
 
         app.MapGet("/api/production/runtimes/{stationId}/config", async (string stationId, ProductionRuntimeService production, HttpContext http, CancellationToken ct) =>
         {
@@ -153,13 +168,21 @@ public static class ProductionEndpoints
         }).Produces<ProductionRuntimeConfig>().ProducesProblem(StatusCodes.Status428PreconditionRequired).ProducesProblem(StatusCodes.Status409Conflict)
             .RequireEngineer("production.config.update", "production");
 
-        app.MapPost("/api/production/runtimes/{stationId}/start", async (string stationId, ProductionStartRequest request, ProductionRuntimeService production, CancellationToken ct) =>
-            Results.Ok(await production.StartAsync(stationId, request.JobId, ct)))
-            .Produces<ProductionStationRuntimeStatus>().RequireOperator("production.start", "production");
+        app.MapPost("/api/production/runtimes/{stationId}/start", async (string stationId, ProductionStartRequest request, HttpContext http, ProductionRuntimeService production, CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, stationId);
+            return Results.Ok(await production.StartAsync(stationId, request.JobId, ct));
+        })
+            .Produces<ProductionStationRuntimeStatus>()
+            .RequireAuthorization(SecurityPolicies.StationControl).WithAudit("production.start", "production");
 
-        app.MapPost("/api/production/runtimes/{stationId}/stop", async (string stationId, ProductionRuntimeService production, CancellationToken ct) =>
-            Results.Ok(await production.StopAsync(stationId, ct)))
-            .Produces<ProductionStationRuntimeStatus>().RequireOperator("production.stop", "production");
+        app.MapPost("/api/production/runtimes/{stationId}/stop", async (string stationId, HttpContext http, ProductionRuntimeService production, CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, stationId);
+            return Results.Ok(await production.StopAsync(stationId, ct));
+        })
+            .Produces<ProductionStationRuntimeStatus>()
+            .RequireAuthorization(SecurityPolicies.StationControl).WithAudit("production.stop", "production");
 
         app.MapPost("/api/production/runtimes/{stationId}/recover", async (string stationId, ProductionRuntimeService production, CancellationToken ct) =>
             Results.Ok(await production.RecoverAsync(stationId, ct)))
@@ -168,24 +191,27 @@ public static class ProductionEndpoints
         app.MapPost("/api/production/runtimes/{stationId}/trigger", (string stationId,
             [FromHeader(Name = "Idempotency-Key")] string? eventId, HttpContext http, ProductionRuntimeService production) =>
         {
+            AuditContext.SetTarget(http, stationId);
             var accepted = production.Trigger(stationId, eventId);
             if (accepted is not null) http.Response.Headers["X-Production-Trigger-Id"] = accepted.Event.EventId;
             return Results.Ok(production.GetStatus(stationId));
         })
             .Produces<ProductionStationRuntimeStatus>().ProducesProblem(StatusCodes.Status409Conflict)
-            .RequireOperator("production.start", "production");
+            .RequireAuthorization(SecurityPolicies.StationControl).WithAudit("production.trigger", "production");
 
         app.MapGet("/api/production/runtimes/{stationId}/triggers", (string stationId, ProductionRuntimeService production) =>
             Results.Ok(production.ListTriggers(stationId)))
             .Produces<IReadOnlyList<ProductionTriggerEvent>>()
-            .RequireAuthorization(SecurityPolicies.Operator);
+            .RequireAuthorization(SecurityPolicies.StationRead)
+            .WithServiceUsageAudit("production.status.read", "production");
 
         app.MapGet("/api/production/runtimes/{stationId}/latest-result", (string stationId, ProductionRuntimeService production) =>
         {
             var result = production.GetLatestResult(stationId);
             return result is null ? Results.NoContent() : Results.Ok(result);
         }).Produces<ProductionStationResultSnapshot>().Produces(StatusCodes.Status204NoContent)
-            .RequireAuthorization(SecurityPolicies.Operator);
+            .RequireAuthorization(SecurityPolicies.ResultsRead)
+            .WithServiceUsageAudit("trace.read", "trace");
 
         app.MapDelete("/api/production/runtimes/{stationId}", async (string stationId, ProductionRuntimeService production, CancellationToken ct) =>
         {
@@ -196,11 +222,13 @@ public static class ProductionEndpoints
 
         app.MapPost("/api/production/runtimes/start-all", async (ProductionRuntimeService production, CancellationToken ct) =>
             Results.Ok(await production.StartAllAsync(ct)))
-            .Produces<IReadOnlyList<ProductionStationRuntimeStatus>>().RequireOperator("production.start", "production");
+            .Produces<IReadOnlyList<ProductionStationRuntimeStatus>>()
+            .RequireAuthorization(SecurityPolicies.StationControl).WithAudit("production.start", "production");
 
         app.MapPost("/api/production/runtimes/stop-all", async (ProductionRuntimeService production, CancellationToken ct) =>
             Results.Ok(await production.StopAllAsync(ct)))
-            .Produces<IReadOnlyList<ProductionStationRuntimeStatus>>().RequireOperator("production.stop", "production");
+            .Produces<IReadOnlyList<ProductionStationRuntimeStatus>>()
+            .RequireAuthorization(SecurityPolicies.StationControl).WithAudit("production.stop", "production");
 
         app.MapGet("/api/production/runtimes/{stationId}/device-actions/pending", (string stationId, ProductionRuntimeService production) =>
         {

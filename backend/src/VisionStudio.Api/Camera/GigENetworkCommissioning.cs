@@ -463,7 +463,8 @@ public sealed class GigENetworkDiagnosticsService(
                     var stats = nic.GetIPStatistics();
                     received = stats.BytesReceived; sent = stats.BytesSent;
                     inErrors = stats.IncomingPacketsWithErrors; inDiscards = stats.IncomingPacketsDiscarded;
-                    outErrors = stats.OutgoingPacketsWithErrors; outDiscards = stats.OutgoingPacketsDiscarded;
+                    outErrors = stats.OutgoingPacketsWithErrors;
+                    outDiscards = OperatingSystem.IsMacOS() ? null : stats.OutgoingPacketsDiscarded;
                 }
                 catch { /* IP 统计不可用：计数留空，不影响接口枚举 */ }
                 var snapshot = new GigEHostNetworkInterface(nic.Id, nic.Name, nic.Description, nic.OperationalStatus.ToString(), nic.NetworkInterfaceType.ToString(),

@@ -88,9 +88,51 @@ public sealed class ProductionWorkstationTests
 
         Assert.Equal(HttpStatusCode.Conflict, (await controller.PostAsJsonAsync("/api/production/start", new { jobId = (string?)null })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await controller.PostAsync("/api/production/stop", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await controller.PostAsync("/api/production/runtimes/start-all", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await controller.PostAsync("/api/production/runtimes/stop-all", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await controller.PostAsJsonAsync("/api/production/runtimes/line-1/start", new { jobId = (string?)null })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await controller.PostAsync("/api/production/runtimes/line-1/stop", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await controller.PostAsync("/api/production/runtimes/line-1/trigger", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await controller.PostAsync("/api/production/runtimes/line-1/recover", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await controller.GetAsync("/api/production/status")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await controller.GetAsync("/api/production/config")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await controller.GetAsync("/api/production/stations/local")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await controller.GetAsync("/api/production/runtimes/line-1/status")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await controller.GetAsync("/api/alarms/summary")).StatusCode);
+    }
+
+    [Fact]
+    public async Task StationReadAndResultsReadTokensReachParallelStatusAlarmsAndLatestResult()
+    {
+        using var factory = new SecureVisionStudioApiFactory();
+        using var admin = factory.CreateFreshClient();
+        await SignInAdminAsync(admin);
+
+        var readRes = await admin.PostAsJsonAsync("/api/security/service-tokens", new { name = "mes-status", scopes = new[] { "stations:read" } });
+        readRes.EnsureSuccessStatusCode();
+        var readSecret = (await readRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
+        using var reader = factory.CreateFreshClient();
+        reader.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", readSecret);
+
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync("/api/production/status")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync("/api/alarms")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync("/api/alarms/summary")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync("/api/production/runtimes")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync("/api/production/runtimes/default/status")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync("/api/production/runtimes/default/triggers")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.GetAsync("/api/production/runtimes/default/latest-result")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.GetAsync("/api/production/runtimes/default/config")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsync("/api/production/runtimes/default/stop", null)).StatusCode);
+
+        var resultsRes = await admin.PostAsJsonAsync("/api/security/service-tokens", new { name = "mes-results", scopes = new[] { "results:read" } });
+        resultsRes.EnsureSuccessStatusCode();
+        var resultsSecret = (await resultsRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
+        using var resultsClient = factory.CreateFreshClient();
+        resultsClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", resultsSecret);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await resultsClient.GetAsync("/api/production/runtimes/default/latest-result")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await resultsClient.GetAsync("/api/production/runtimes/default/status")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await resultsClient.PostAsync("/api/production/runtimes/default/stop", null)).StatusCode);
     }
 
     [Fact]

@@ -16,7 +16,7 @@ public sealed class VisionStudioAuthenticationHandler(
     IOptions<SecurityOptions> securityOptions)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
-    public const string Scheme = "VisionStudioBearer";
+    public new const string Scheme = "VisionStudioBearer";
     private readonly SecurityOptions _security = securityOptions.Value;
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()

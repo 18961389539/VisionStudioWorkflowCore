@@ -169,6 +169,27 @@ public sealed class WorkflowStore
         return workflow;
     }
 
+    public async Task<bool> DeleteAsync(string id, CancellationToken cancellationToken)
+    {
+        var safeId = ValidateId(id);
+        var path = Path.Combine(_root, safeId + ".json");
+        var legacyRevisionPath = Path.Combine(_root, safeId + ".revision.json");
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!File.Exists(path)) return false;
+            File.Delete(path);
+            _summaryCache.TryRemove(path, out _);
+            if (File.Exists(legacyRevisionPath))
+            {
+                try { File.Delete(legacyRevisionPath); } catch { /* 清理历史遗留文件失败不阻断主删除 */ }
+            }
+            return true;
+        }
+        finally { _gate.Release(); }
+    }
+
     /// <summary>
     /// A document written by a newer host must not be edited here: the editor would drop the parts it
     /// does not understand and saving would destroy them. Failing closed with a 409 lets the operator

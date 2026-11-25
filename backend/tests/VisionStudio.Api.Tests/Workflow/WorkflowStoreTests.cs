@@ -326,6 +326,21 @@ public sealed class WorkflowStoreTests : IDisposable
         await Assert.ThrowsAsync<ApiConflictException>(() => _store.LoadWithRevisionAsync("future", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Delete_RemovesWorkflowAndSummaryCache_AndRejectsInvalidId()
+    {
+        var workflow = new WorkflowDefinition("to-delete", "待删除流程", [], []);
+        await _store.SaveAsync(workflow.Id, workflow, CancellationToken.None);
+        Assert.Single(await _store.ListAsync(CancellationToken.None));
+
+        Assert.True(await _store.DeleteAsync("to-delete", CancellationToken.None));
+        Assert.False(await _store.DeleteAsync("to-delete", CancellationToken.None));
+        Assert.Empty(await _store.ListAsync(CancellationToken.None));
+        Assert.Null(await _store.LoadAsync("to-delete", CancellationToken.None));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.DeleteAsync("bad.id", CancellationToken.None));
+    }
+
     private sealed class FakeEnv(string root) : IWebHostEnvironment
     {
         public string ApplicationName { get; set; } = "test";

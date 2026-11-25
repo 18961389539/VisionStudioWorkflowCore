@@ -66,6 +66,10 @@ public static class RuntimeOnlyPolicy
         if (value.Equals("/api/production/start", StringComparison.OrdinalIgnoreCase)) return true;
         if (value.Equals("/api/production/stop", StringComparison.OrdinalIgnoreCase)) return true;
         if (value.Equals("/api/production/recover", StringComparison.OrdinalIgnoreCase)) return true;
+        if (value.Equals("/api/production/stations/control", StringComparison.OrdinalIgnoreCase)) return true;
+        if (value.Equals("/api/production/runtimes/start-all", StringComparison.OrdinalIgnoreCase)) return true;
+        if (value.Equals("/api/production/runtimes/stop-all", StringComparison.OrdinalIgnoreCase)) return true;
+        if (IsRuntimeStationActionPath(value)) return true;
         if (value.Equals("/api/production/recipe-deliveries", StringComparison.OrdinalIgnoreCase)) return true;
         if (value.StartsWith("/api/production/recipe-deliveries/", StringComparison.OrdinalIgnoreCase) &&
             value.EndsWith("/publish", StringComparison.OrdinalIgnoreCase)) return true;
@@ -77,5 +81,20 @@ public static class RuntimeOnlyPolicy
             value.EndsWith("/release", StringComparison.OrdinalIgnoreCase)) return true;
         return value.StartsWith("/api/alarms/", StringComparison.OrdinalIgnoreCase) &&
                value.EndsWith("/ack", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRuntimeStationActionPath(string value)
+    {
+        const string prefix = "/api/production/runtimes/";
+        if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+        var remainder = value[prefix.Length..];
+        var slash = remainder.IndexOf('/');
+        if (slash <= 0) return false;
+        var action = remainder[slash..];
+        return action.Equals("/start", StringComparison.OrdinalIgnoreCase)
+            || action.Equals("/stop", StringComparison.OrdinalIgnoreCase)
+            || action.Equals("/recover", StringComparison.OrdinalIgnoreCase)
+            || action.Equals("/trigger", StringComparison.OrdinalIgnoreCase)
+            || action.Equals("/device-actions/resolve", StringComparison.OrdinalIgnoreCase);
     }
 }

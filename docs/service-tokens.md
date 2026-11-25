@@ -21,10 +21,10 @@ vst_<43 字符 base64url>        例：vst_9mQ...（共 47 字符）
 
 | scope | 允许的接口 | 等价人类角色 |
 |---|---|---|
-| `results:read` | `GET /api/traces`、`/api/traces/page`、`/api/traces/stats`、`/api/traces/{runId}` | Operator 及以上 |
-| `stations:read` | `GET /api/production/stations/local` | Operator 及以上 |
+| `results:read` | `GET /api/traces`、`/api/traces/page`、`/api/traces/stats`、`/api/traces/{runId}`、`/api/production/runtimes/{stationId}/latest-result` | Operator 及以上 |
+| `stations:read` | `GET /api/production/stations/local`、`/api/production/status`、`/api/production/ptp-guard`、`/api/production/synchronization-guard`、`/api/production/runtimes`、`/api/production/runtimes/{stationId}/status`、`/api/production/runtimes/{stationId}/triggers`、`/api/alarms`、`/api/alarms/summary` | Operator 及以上 |
 | `stations:deliver` | `POST /api/production/recipe-deliveries` | 使用工位独立接收令牌 |
-| `stations:control` | `POST /api/production/start`、`POST /api/production/stop` | Operator 及以上 |
+| `stations:control` | `POST /api/production/start`、`POST /api/production/stop`、`/api/production/runtimes/{stationId}/start|stop|trigger`、`/api/production/runtimes/start-all|stop-all` | Operator 及以上 |
 | `runs:run` | `POST /api/run`（触发一次临时流程运行） | Engineer 及以上 |
 
 规则：

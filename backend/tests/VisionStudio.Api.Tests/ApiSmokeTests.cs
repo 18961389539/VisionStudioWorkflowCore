@@ -299,6 +299,30 @@ public sealed class RuntimeOnlyHostTests
 
         var allowed = await client.GetAsync("/api/production/status");
         Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+
+        var blockedRuntimeConfig = await client.PutAsJsonAsync("/api/production/runtimes/line-1/config", new
+        {
+            jobId = "x", autoStart = false, cycleDelayMs = 25, maxCycleMs = 15000,
+            maxConsecutiveFailures = 3, autoRecover = true, recoveryDelayMs = 1000, stopTimeoutMs = 5000
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, blockedRuntimeConfig.StatusCode);
+
+        var blockedRuntimeDelete = await client.DeleteAsync("/api/production/runtimes/line-1");
+        Assert.Equal(HttpStatusCode.Forbidden, blockedRuntimeDelete.StatusCode);
+
+        // 多工位与本机并行产线启停/触发/恢复属于运行期生产操作，RuntimeOnly 模式应放行（不得返回 403 runtime_only）。
+        var allowedStationControl = await client.PostAsJsonAsync("/api/production/stations/control", new
+        {
+            stationIds = Array.Empty<string>(),
+            action = "Start"
+        });
+        Assert.NotEqual(HttpStatusCode.Forbidden, allowedStationControl.StatusCode);
+
+        var allowedRuntimeStart = await client.PostAsJsonAsync("/api/production/runtimes/line-1/start", new { jobId = "missing-job" });
+        Assert.NotEqual(HttpStatusCode.Forbidden, allowedRuntimeStart.StatusCode);
+
+        var allowedStartAll = await client.PostAsync("/api/production/runtimes/start-all", content: null);
+        Assert.Equal(HttpStatusCode.OK, allowedStartAll.StatusCode);
     }
 }
 

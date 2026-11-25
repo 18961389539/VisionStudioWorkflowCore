@@ -80,6 +80,18 @@ public static class WorkflowStoreEndpoints
             return Results.Ok(found.Workflow);
         }).Produces<WorkflowDefinition>();
 
+        app.MapDelete("/api/workflows/{id}", async (string id, WorkflowStore store, CancellationToken ct) =>
+        {
+            try
+            {
+                return await store.DeleteAsync(id, ct) ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireEngineer("workflow.delete", "workflow");
+
         return app;
     }
 

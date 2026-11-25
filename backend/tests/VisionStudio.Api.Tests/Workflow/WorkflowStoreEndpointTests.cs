@@ -129,5 +129,33 @@ public sealed class WorkflowStoreEndpointTests
             healed.Headers.GetValues("X-Workflow-Revision").Single());
     }
 
+    [Fact]
+    public async Task Delete_RemovesSavedWorkflow_AndReturnsNotFoundOrBadRequest()
+    {
+        using var factory = new StorageVisionStudioApiFactory();
+        using var client = factory.CreateClient();
+
+        var created = await client.PutAsJsonAsync("/api/workflows/delete-me?expectedRevision=", new
+        {
+            id = "delete-me",
+            name = "Delete Me",
+            nodes = Array.Empty<object>(),
+            edges = Array.Empty<object>()
+        });
+        Assert.Equal(HttpStatusCode.NoContent, created.StatusCode);
+
+        var deleted = await client.DeleteAsync("/api/workflows/delete-me");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+
+        var after = await client.GetAsync("/api/workflows/delete-me");
+        Assert.Equal(HttpStatusCode.NotFound, after.StatusCode);
+
+        var missing = await client.DeleteAsync("/api/workflows/delete-me");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+
+        var invalid = await client.DeleteAsync("/api/workflows/bad.id");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
     private sealed record WorkflowPayloadShape(string Id, string Name);
 }

@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.SignalR;
 using VisionStudio.Api.Contracts;
+using VisionStudio.Api.Diagnostics;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
 using VisionStudio.Engine;
@@ -74,6 +76,7 @@ public static class WorkflowExecutionEndpoints
             RuntimeDependencyManifestService dependencies,
             WorkflowModuleExpander modules,
             VisionNodeRegistry nodes,
+            IHubContext<DiagnosticsHub> diagnosticsHub,
             CancellationToken ct) =>
         {
             var context = new RunTraceContext("AdHoc");
@@ -96,7 +99,11 @@ public static class WorkflowExecutionEndpoints
             else
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, workflow, context);
             // 交互式运行：捕获逐节点图像以支持检查中间结果（生产/后台运行保持关闭）
-            var result = await runner.RunAsync(workflow, new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true), runId, ct);
+            var runOptions = new VisionRunOptions(
+                DebugRunMode.Full,
+                CaptureNodeImages: true,
+                ProgressObserver: evt => _ = BroadcastNodeProgressAsync(diagnosticsHub, evt));
+            var result = await runner.RunAsync(workflow, runOptions, runId, ct);
             await recorder.FinalizeAsync(RedactTrainingModelAssets(result), workflow, context);
             // C01/F02：成功 + 追溯证据已提交 + **设备动作确认完成** 三者齐全才解除意图。
             // 仅"流程返回成功"不够——异步机器人命令（SendTarget/未等待到位）只是"已受理"。
@@ -120,10 +127,15 @@ public static class WorkflowExecutionEndpoints
             RuntimeDependencyManifestService dependencies,
             WorkflowModuleExpander modules,
             VisionNodeRegistry nodes,
+            IHubContext<DiagnosticsHub> diagnosticsHub,
             CancellationToken ct) =>
         {
             // 交互式调试：捕获逐节点图像以支持按节点检查中间结果
-            var options = (request.Options ?? new VisionRunOptions()) with { CaptureNodeImages = true };
+            var options = (request.Options ?? new VisionRunOptions()) with
+            {
+                CaptureNodeImages = true,
+                ProgressObserver = evt => _ = BroadcastNodeProgressAsync(diagnosticsHub, evt)
+            };
             var context = new RunTraceContext("Debug", DebugMode: options.Mode.ToString());
             var runId = RunTraceRecorder.NewRunId();
             using var lease = await production.AcquireRunLeaseAsync(runId, request.Workflow, $"Cannot debug-run workflow '{request.Workflow.Id}'", ct);
@@ -243,6 +255,18 @@ public static class WorkflowExecutionEndpoints
         }).RequireAuthorization(SecurityPolicies.Engineer);
 
         return app;
+    }
+
+    private static async Task BroadcastNodeProgressAsync(IHubContext<DiagnosticsHub> hub, NodeRunProgressEvent evt)
+    {
+        try
+        {
+            await hub.Clients.All.SendAsync("runNodeProgress", evt, CancellationToken.None);
+        }
+        catch
+        {
+            // SignalR 连接异常不应影响工作流主执行
+        }
     }
 
     private static WorkflowRunResult RedactTrainingModelAssets(WorkflowRunResult result) => result with

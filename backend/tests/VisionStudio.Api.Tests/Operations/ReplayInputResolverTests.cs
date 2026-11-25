@@ -22,10 +22,12 @@ public sealed class ReplayInputResolverTests
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 
-    private static ConfiguredReplayInputResolver Resolver(string contentRoot, string? extraRoots = null)
+    private static ConfiguredReplayInputResolver Resolver(string contentRoot, string? extraRoots = null, string? dataRoot = null, string? mediaRoot = null)
     {
         var settings = new Dictionary<string, string?>();
         if (extraRoots is not null) settings[ConfiguredReplayInputResolver.ConfigurationKey] = extraRoots;
+        if (dataRoot is not null) settings[VisionStudioDataRoot.ConfigurationKey] = dataRoot;
+        if (mediaRoot is not null) settings["MediaLibrary:RootPath"] = mediaRoot;
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         return new ConfiguredReplayInputResolver(configuration, new StubEnvironment(contentRoot));
     }
@@ -72,6 +74,29 @@ public sealed class ReplayInputResolverTests
         var resolver = Resolver(root);
 
         Assert.Null(resolver.Resolve(Path.Combine(root, "data", "..", "..", "escape.png")));
+    }
+
+    [Fact]
+    public void MediaUri_MapsInsideMediaRootAndRejectsTraversal()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "visionstudio-media-uri", Guid.NewGuid().ToString("N"));
+        var resolver = Resolver(root);
+        var mediaRoot = Path.TrimEndingDirectorySeparator(resolver.AllowedRoots[1]);
+        var expected = Path.GetFullPath(Path.Combine(mediaRoot, "collection", "frame.png"));
+
+        Assert.Equal(expected, resolver.Resolve("media://collection/frame.png"));
+        Assert.Null(resolver.Resolve("media://../escape.png"));
+    }
+
+    [Fact]
+    public void MediaUri_UsesConfiguredMediaRootWhenItDuplicatesAnotherAllowedRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "visionstudio-media-root", Guid.NewGuid().ToString("N"));
+        var resolver = Resolver(root, dataRoot: root, mediaRoot: root);
+
+        Assert.Single(resolver.AllowedRoots);
+        Assert.Equal(Path.GetFullPath(Path.Combine(root, "collection", "frame.png")),
+            resolver.Resolve("media://collection/frame.png"));
     }
 
     [Fact]
