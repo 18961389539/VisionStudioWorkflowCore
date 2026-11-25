@@ -142,4 +142,32 @@ internal static class PreprocessImageHelpers
         if (clamped % 2 == 1) return clamped;
         return clamped + 1 <= max ? clamped + 1 : clamped - 1;
     }
+
+    public static Mat GaussianWithBorder(Mat source, int kernel, double sigmaX, double sigmaY, BorderTypes border, bool useDefault)
+    {
+        var pad = kernel / 2;
+        if (pad == 0 || useDefault)
+        {
+            var result = new Mat();
+            try { JLVisionOperators.GaussianBlur(source, result, new Size(kernel, kernel), sigmaX, sigmaY); return result; }
+            catch { result.Dispose(); throw; }
+        }
+        using var padded = new Mat();
+        Cv2.CopyMakeBorder(source, padded, pad, pad, pad, pad, border, Scalar.All(0));
+        using var full = new Mat();
+        JLVisionOperators.GaussianBlur(padded, full, new Size(kernel, kernel), sigmaX, sigmaY);
+        using var crop = new Mat(full, new Rect(pad, pad, source.Width, source.Height));
+        return crop.Clone();
+    }
+
+    public static Mat MedianWithBorder(Mat source, int kernel, BorderTypes border)
+    {
+        var pad = kernel / 2;
+        using var padded = new Mat();
+        Cv2.CopyMakeBorder(source, padded, pad, pad, pad, pad, border, Scalar.All(0));
+        using var full = new Mat();
+        JLVisionOperators.MedianBlur(padded, full, kernel);
+        using var crop = new Mat(full, new Rect(pad, pad, source.Width, source.Height));
+        return crop.Clone();
+    }
 }

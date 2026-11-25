@@ -32,24 +32,21 @@ public static class AuditContext
     internal static string? GetTarget(HttpContext context) => context.Items.TryGetValue(TargetKey, out var value) ? value?.ToString() : null;
 }
 
-public sealed class AuditEventStore(IVisionStudioDbFactory dbFactory)
+public sealed partial class AuditEventStore
 {
     private long _persistFailures;
-    private DateTimeOffset? _lastPersistFailureAt;
-    private string? _lastPersistFailure;
-
-    public AuditEventStore(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
+    private sealed record PersistFailure(DateTimeOffset At, string Message);
+    private PersistFailure? _lastPersistFailure;
 
     /// <summary>审计持久化失败计数（单例计数器）：数据库忙/磁盘故障时记录写入失败；同时会写错误日志并记录最近一次失败详情。</summary>
     public long PersistFailures => Interlocked.Read(ref _persistFailures);
-    public DateTimeOffset? LastPersistFailureAt => _lastPersistFailureAt;
-    public string? LastPersistFailure => _lastPersistFailure;
+    public DateTimeOffset? LastPersistFailureAt => Volatile.Read(ref _lastPersistFailure)?.At;
+    public string? LastPersistFailure => Volatile.Read(ref _lastPersistFailure)?.Message;
 
-    internal void RecordPersistFailure(Exception ex)
+    private void RecordPersistFailure(Exception ex, int count = 1)
     {
-        Interlocked.Increment(ref _persistFailures);
-        _lastPersistFailureAt = DateTimeOffset.UtcNow;
-        _lastPersistFailure = ex.Message;
+        Interlocked.Add(ref _persistFailures, count);
+        Volatile.Write(ref _lastPersistFailure, new PersistFailure(DateTimeOffset.UtcNow, ex.Message));
     }
 
     public async Task RecordAsync(HttpContext context, AuditActionMetadata meta, int statusCode, CancellationToken ct = default)
@@ -73,37 +70,45 @@ public sealed class AuditEventStore(IVisionStudioDbFactory dbFactory)
             NormalizeNullable(RequestCorrelation.Get(context)),
             NormalizeNullable(context.Connection.RemoteIpAddress?.ToString()));
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        // 链式追加必须独占写事务：并发审计同时读"最后一行 hash"会把链分叉成两条同 seq 的链。
-        await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        await EnqueueAsync(entry, ct);
+    }
+
+    private async Task PersistBatchAsync(IReadOnlyList<PendingAudit> batch, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        // 每批只读一次链尾；事务仍防御其它进程/独立 Store 实例的并发追加。
+        await using var transaction = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
         var head = await db.AuditEvents
             .OrderByDescending(x => x.Seq)
             .Select(x => new { x.Seq, x.Hash })
             .FirstOrDefaultAsync(ct);
         var nextSeq = head is null ? 1 : head.Seq + 1;
-        entry = entry with { Seq = nextSeq };
         var previous = head?.Hash ?? AuditChain.GenesisHash;
-        var hash = AuditChain.ComputeHash(previous, entry);
-
-        db.AuditEvents.Add(new AuditEventEntity
+        foreach (var item in batch)
         {
-            Seq = entry.Seq,
-            At = now,
-            UserId = entry.UserId,
-            Username = entry.Username,
-            Role = entry.Role,
-            Action = entry.Action,
-            Resource = entry.Resource,
-            Method = entry.Method,
-            Path = entry.Path,
-            StatusCode = entry.StatusCode,
-            Success = entry.Success,
-            Target = entry.Target,
-            CorrelationId = entry.CorrelationId,
-            ClientIp = entry.ClientIp,
-            PrevHash = previous,
-            Hash = hash
-        });
+            var entry = item.Entry with { Seq = nextSeq++ };
+            var hash = AuditChain.ComputeHash(previous, entry);
+            db.AuditEvents.Add(new AuditEventEntity
+            {
+                Seq = entry.Seq,
+                At = DateTimeOffset.Parse(entry.At, CultureInfo.InvariantCulture),
+                UserId = entry.UserId,
+                Username = entry.Username,
+                Role = entry.Role,
+                Action = entry.Action,
+                Resource = entry.Resource,
+                Method = entry.Method,
+                Path = entry.Path,
+                StatusCode = entry.StatusCode,
+                Success = entry.Success,
+                Target = entry.Target,
+                CorrelationId = entry.CorrelationId,
+                ClientIp = entry.ClientIp,
+                PrevHash = previous,
+                Hash = hash
+            });
+            previous = hash;
+        }
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
@@ -114,7 +119,7 @@ public sealed class AuditEventStore(IVisionStudioDbFactory dbFactory)
     /// </summary>
     public async Task<AuditChainVerification> VerifyChainAsync(CancellationToken ct = default)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         long checkedCount = 0;
         long? firstInvalidSeq = null;
         string? firstInvalidReason = null;
@@ -172,7 +177,7 @@ public sealed class AuditEventStore(IVisionStudioDbFactory dbFactory)
 
     public async Task<IReadOnlyList<AuditEventDto>> ListAsync(int offset, int limit, string? username, string? action, CancellationToken ct = default)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         IQueryable<AuditEventEntity> query = db.AuditEvents;
         if (!string.IsNullOrWhiteSpace(username))
         {
@@ -227,7 +232,6 @@ public sealed class AuditMiddleware(RequestDelegate next)
                 {
                     // 审计持久化失败不得替换主请求结果，但必须留下可观测信号：
                     // 结构化错误日志 + 单例失败计数（经 /api/health 的 audit 字段暴露，审计链降级可见）。
-                    store.RecordPersistFailure(ex);
                     logger.LogError(ex,
                         "Audit event persistence failed (audit trail degraded). Action={Action} Resource={Resource} {Method} {Path} CorrelationId={CorrelationId}",
                         effective.Action, effective.Resource, context.Request.Method, context.Request.Path, RequestCorrelation.Get(context));

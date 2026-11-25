@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { Button, Drawer, Form, Input, message, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
 import { responseErrorMessage } from '../apiErrors';
 import type { PrepareWorkflowChange, PreparedWorkflowChange } from '../useWorkflowChanges';
@@ -68,7 +68,11 @@ export default function WorkflowModulePanel(props: Props) {
     } finally { clearTimeout(timeout); }
   };
 
-  useEffect(() => { if (props.open) { refresh(); if (props.selectedNodeId) setSelectedNodes([props.selectedNodeId]); } }, [props.open]);
+  const initializeOnOpen = useEffectEvent(() => {
+    void refresh();
+    if (props.selectedNodeId) setSelectedNodes([props.selectedNodeId]);
+  });
+  useEffect(() => { if (props.open) initializeOnOpen(); }, [props.open]);
 
   // R12：选中模块后按需拉取详情（完整版本集合、端口与哈希）；摘要先渲染（仅最新版本），
   // 详情到达后无缝替换——列表接口因此不必为每个模块反序列化全部历史版本。

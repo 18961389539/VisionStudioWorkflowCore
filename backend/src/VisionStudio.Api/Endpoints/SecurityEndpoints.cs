@@ -47,7 +47,7 @@ public static class SecurityEndpoints
         {
             var token = http.Request.Cookies[options.Value.CookieName] ?? Bearer(http.Request.Headers.Authorization.ToString());
             if (token is not null) await store.LogoutAsync(token, ct);
-            http.Response.Cookies.Delete(options.Value.CookieName, new CookieOptions { Path = "/" });
+            http.Response.Cookies.Delete(options.Value.CookieName, SessionCookieOptions(http));
             return Results.Ok(new LogoutResponse(true));
         }).WithAudit("auth.logout", "session").Produces<LogoutResponse>();
 
@@ -129,7 +129,10 @@ public static class SecurityEndpoints
     }
 
     private static void AppendSessionCookie(HttpContext http, SecurityOptions options, string token, DateTimeOffset expires)
-        => http.Response.Cookies.Append(options.CookieName, token, new CookieOptions
+        => http.Response.Cookies.Append(options.CookieName, token, SessionCookieOptions(http, expires));
+
+    private static CookieOptions SessionCookieOptions(HttpContext http, DateTimeOffset? expires = null)
+        => new()
         {
             HttpOnly = true,
             Secure = http.Request.IsHttps,
@@ -137,7 +140,7 @@ public static class SecurityEndpoints
             IsEssential = true,
             Path = "/",
             Expires = expires
-        });
+        };
 
     private static string? Bearer(string header) => header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..].Trim() : null;
 }

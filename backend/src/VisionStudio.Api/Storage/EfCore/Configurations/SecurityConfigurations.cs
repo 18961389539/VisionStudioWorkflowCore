@@ -8,7 +8,8 @@ internal sealed class SecurityUserConfiguration : IEntityTypeConfiguration<Secur
 {
     public void Configure(EntityTypeBuilder<SecurityUserEntity> b)
     {
-        b.ToTable("security_users");
+        b.ToTable("security_users", table => table.HasCheckConstraint(
+            "ck_security_users_role", "role IN ('Operator','Engineer','Administrator')"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.Username).HasColumnName("username");

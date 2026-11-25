@@ -87,7 +87,11 @@ public static class SystemEndpoints
                 {
                     persistFailures = audits.PersistFailures,
                     lastFailureAt = audits.LastPersistFailureAt,
-                    lastFailure = audits.LastPersistFailure
+                    lastFailure = audits.LastPersistFailure,
+                    pendingEvents = audits.PendingCount,
+                    committedBatches = audits.CommittedBatches,
+                    persistedEvents = audits.PersistedEvents,
+                    shutdownFailures = audits.ShutdownFailures
                 },
                 // F10：日志可靠性计数——满队列丢弃、写入/刷盘失败、关闭排空超时不再静默（现场排障可见）。
                 logging = new
@@ -186,6 +190,7 @@ public static class SystemEndpoints
     {
         var reasons = new List<string>();
         if (audits.PersistFailures > 0) reasons.Add("audit persistence failures");
+        if (audits.ShutdownFailures > 0) reasons.Add("audit queue shutdown failures");
         if (logs.DroppedEntries > 0) reasons.Add("log entries dropped");
         if (logs.WriteFailures > 0) reasons.Add("log write failures");
         if (logs.FlushFailures > 0) reasons.Add("log flush failures");

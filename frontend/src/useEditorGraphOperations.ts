@@ -3,7 +3,7 @@
  *
  * 逐行搬运自 App 的 Editor 组件；只把闭包依赖改成显式参数，行为与执行顺序不变。
  */
-import { useCallback, useRef, type Dispatch, type MouseEvent as ReactMouseEvent, type SetStateAction, type TouchEvent as ReactTouchEvent } from 'react';
+import { useCallback, useLayoutEffect, useRef, type Dispatch, type MouseEvent as ReactMouseEvent, type SetStateAction, type TouchEvent as ReactTouchEvent } from 'react';
 import { addEdge, reconnectEdge, type Connection, type Edge, type FitViewOptions, type Node, type OnConnectEnd, type OnEdgesChange, type OnNodesChange, type OnReconnect } from '@xyflow/react';
 import { message } from 'antd';
 import { catalogNodeData, makeDefaultParameters } from './catalog';
@@ -51,13 +51,17 @@ export type EditorGraphOptions = {
 
 export function useEditorGraphOperations(options: EditorGraphOptions) {
   const {
-    nodes, selectedId, selectedNode, selectedNodeIds, catalog,
+    nodes, selectedId, selectedNode, catalog,
     setNodes, setEdges, setSelectedId, setRecentNodeTypes, setConnectionPicker, setNodeContextMenu,
     messageApi, pushHistory, onNodesChange, onEdgesChange, getZoom,
     screenToFlowPosition, setCenter
   } = options;
   const refsRef = useRef(options);
   refsRef.current = options;
+  const committedSelection = useRef({ nodes, selectedNodeIds: options.selectedNodeIds });
+  useLayoutEffect(() => {
+    committedSelection.current = { nodes, selectedNodeIds: options.selectedNodeIds };
+  }, [nodes, options.selectedNodeIds]);
   const reconnectingEdgeIdRef = useRef<string | undefined>(undefined);
 
   const onConnect = useCallback((connection: Connection) => {
@@ -355,9 +359,9 @@ export function useEditorGraphOperations(options: EditorGraphOptions) {
     setCenter(position.x + width / 2, position.y + height / 2, { zoom: 1.05, duration: 300 });
   }, [setCenter, setNodes, setSelectedId]);
   const alignSelection = useCallback((mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom') => {
-    const ids = new Set(selectedNodeIds);
+    const ids = new Set(committedSelection.current.selectedNodeIds);
     if (ids.size < 2) return;
-    const targets = refsRef.current.nodesRef.current.filter((node) => ids.has(node.id));
+    const targets = committedSelection.current.nodes.filter((node) => ids.has(node.id));
     if (targets.length < 2) return;
     const sizeOf = (node: Node) => ({ width: node.measured?.width ?? 200, height: node.measured?.height ?? 120 });
     const left = Math.min(...targets.map((node) => node.position.x));
@@ -377,7 +381,7 @@ export function useEditorGraphOperations(options: EditorGraphOptions) {
       else if (mode === 'bottom') position.y = bottom - height;
       return { ...node, position };
     }));
-  }, [pushHistory, selectedNodeIds, setNodes]);
+  }, [pushHistory, setNodes]);
   const toggleBreakpoint = () => {
     if (!selectedId) return messageApi.warning('先选择一个节点');
     setNodes((current) => current.map((node) =>
@@ -415,7 +419,8 @@ export function useEditorGraphOperations(options: EditorGraphOptions) {
     setSelectedId(note.id);
   }, [pushHistory, setNodes, setSelectedId]);
   const createGroup = useCallback(() => {
-    const result = createCanvasGroup(refsRef.current.nodesRef.current, selectedNodeIds);
+    const { nodes: committedNodes, selectedNodeIds } = committedSelection.current;
+    const result = createCanvasGroup(committedNodes, selectedNodeIds);
     if (!result.groupId) {
       messageApi.warning('先选择至少一个未分组的流程节点');
       return;
@@ -423,7 +428,7 @@ export function useEditorGraphOperations(options: EditorGraphOptions) {
     pushHistory('创建画布分组');
     setNodes(result.nodes);
     setSelectedId(result.groupId);
-  }, [messageApi, pushHistory, selectedNodeIds, setNodes, setSelectedId]);
+  }, [messageApi, pushHistory, setNodes, setSelectedId]);
   const copySelection = useCallback(() => {
     const { nodesRef, edgesRef, selectedRef, clipboardRef, pasteIndexRef } = refsRef.current;
     const ids = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));

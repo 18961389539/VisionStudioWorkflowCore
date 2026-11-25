@@ -118,6 +118,13 @@ if ($runBackend) {
     & $python "$root/scripts/static-audit.py"
     Assert-LastExitCode 'static audit'
 
+    Push-Location $root
+    try {
+        & $python -m unittest discover -s scripts/tests
+        Assert-LastExitCode 'static audit regression tests'
+    }
+    finally { Pop-Location }
+
     & $python "$root/scripts/check-metric-floor.py"
     Assert-LastExitCode 'metric floor'
 

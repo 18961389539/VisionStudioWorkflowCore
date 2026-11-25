@@ -182,8 +182,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
     for token in ["PluginToolRuntimeDependency", "SchemaVersion < 5", "PackageManifestHash", "PluginFingerprint", "sdkApiVersion = x.SdkApiVersion"]:
         if token not in dependency_source:
             ctx.fail(f"V0.53 plugin production provenance token missing: {token}")
-    if not ctx.doc_has("MIGRATION_V052_TO_V053.md", "schema v15"):
-        ctx.fail("V0.53 migration does not explicitly preserve SQLite schema v15")
     ctx.ok("V0.53 manifest-based SDK 2.0 + PerNode lifetime + safe runtime discovery + tool-version provenance present")
 
     plugin_package_source = ctx.read_safe("backend/src/VisionStudio.Api/Plugin/PluginPackageManagement.cs")
@@ -207,8 +205,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
         ctx.fail("V0.54 plugin package service/configuration is not registered")
     if "PrepareRuntimePluginRoot" not in host_bootstrap:
         ctx.fail("V0.54 pending plugin version is not applied before runtime PluginManager loading")
-    if not ctx.doc_has("MIGRATION_V053_TO_V054.md", "schema v15"):
-        ctx.fail("V0.54 migration does not explicitly preserve SQLite schema v15")
     ctx.ok("V0.54 signed .vspkg preflight + trusted publisher + version repository + pending-restart rollback present")
 
     worker_contracts = ctx.read_safe("backend/src/VisionStudio.Abstractions/PluginWorkerContracts.cs")
@@ -241,8 +237,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
         ctx.fail("V0.55 worker project missing from solution")
     if "AddSingleton<PluginWorkerSupervisor>()" not in host_registration or "Configure<PluginWorkerOptions>" not in host_registration:
         ctx.fail("V0.55 worker supervisor/configuration is not registered")
-    if not ctx.doc_has("MIGRATION_V054_TO_V055.md", "schema v15"):
-        ctx.fail("V0.55 migration does not explicitly preserve SQLite schema v15")
     ctx.ok("V0.55 out-of-process plugin worker + timeout/crash/memory isolation + runtime provenance present")
 
     worker_store = ctx.read_safe("backend/src/VisionStudio.Engine/PluginWorkerSharedMemoryStore.cs")
@@ -275,8 +269,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
         ctx.fail("V0.56 default pool/shared-memory thresholds drifted")
     if plugin_manifest.get("workerPoolSize") != 2 or plugin_manifest.get("workerSharedMemoryThresholdBytes") != 262144:
         ctx.fail("V0.56 sample worker plugin does not demonstrate pool/shared-memory configuration")
-    if not ctx.doc_has("MIGRATION_V055_TO_V056.md", "schema v15"):
-        ctx.fail("V0.56 migration does not explicitly preserve SQLite schema v15")
     ctx.ok("V0.56 pooled worker execution + file-backed shared-memory image transport + schema-v7 worker runtime provenance present")
 
     system_endpoints = ctx.read_safe("backend/src/VisionStudio.Api/Endpoints/SystemEndpoints.cs")
@@ -358,10 +350,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
             ctx.fail(f"V0.57 PluginWorkers profiling configuration missing: {key}")
     if worker_settings.get("PerformanceWindowSize") != 512 or worker_settings.get("PerformanceMinimumSamples") != 30:
         ctx.fail("V0.57 performance-window defaults drifted")
-    if not ctx.doc_has("MIGRATION_V056_TO_V057.md", "schema v15"):
-        ctx.fail("V0.57 migration does not explicitly preserve SQLite schema v15")
-    if not ctx.doc_has("MIGRATION_V056_TO_V057.md", "**v2 to v3**"):
-        ctx.fail("V0.57 migration does not document worker protocol v3")
     ctx.ok("V0.57 stage-level worker performance profiler + advisory 1/2/4 pool recommendation present")
 
     benchmark_source = ctx.read_safe("backend/src/VisionStudio.Api/Plugin/PluginPerformanceBenchmark.cs")
@@ -379,16 +367,11 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
     for token in ["plugin_benchmark_runs", "plugin_benchmark_pool_results", "V0.58 plugin performance benchmark history", current_schema_token]:
         if token not in schema_migration_source:
             ctx.fail(f"V0.58 benchmark schema token missing: {token}")
-    if not ctx.doc_has("MIGRATION_V057_TO_V058.md", "schema v16"):
-        ctx.fail("V0.58 migration does not document SQLite schema v16")
-    if not ctx.doc_has("PLUGIN_PERFORMANCE_BENCHMARK.md", "temporary benchmark"):
-        ctx.fail("V0.58 benchmark documentation does not describe temporary benchmark pools")
     ctx.ok("V0.58 repeatable Dataset benchmark + temporary 1/2/4 pools + persisted regression gate present")
 
     benchmark_ci = ctx.read_safe("backend/src/VisionStudio.Api/Plugin/PluginBenchmarkCi.cs")
     benchmark_cli = ctx.read_safe("backend/src/VisionStudio.Benchmark.Cli/Program.cs")
     benchmark_ci_tests = ctx.read_safe("backend/tests/VisionStudio.Api.Tests/Plugin/PluginBenchmarkCiTests.cs")
-    benchmark_ci_doc = (ctx.root / "PLUGIN_BENCHMARK_CI.md").read_text(encoding="utf-8") if ctx.doc_present("PLUGIN_BENCHMARK_CI.md") else ""
     for token in ["PluginBenchmarkBaselineSnapshot", "BaselineSnapshot", "portableBaseline", "BaselinePluginVersion", "BaselinePluginAssemblySha256"]:
         if token not in benchmark_source:
             ctx.fail(f"V0.59 portable baseline token missing: {token}")
@@ -406,11 +389,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
     for rel in ["scripts/plugin-benchmark-gate.ps1", "scripts/plugin-benchmark-gate.sh", ".github/workflows/plugin-performance-gate.yml"]:
         if not (ctx.root / rel).exists():
             ctx.fail(f"V0.59 CI wrapper missing: {rel}")
-    for token in ["Portable CI specification", "Headless runner", "Exit codes", "JUnit", "same-pool comparison"]:
-        if benchmark_ci_doc and token.lower() not in benchmark_ci_doc.lower():
-            ctx.fail(f"V0.59 CI documentation token missing: {token}")
-    if not ctx.doc_has("MIGRATION_V058_TO_V059.md", "schema v16"):
-        ctx.fail("V0.59 migration does not explicitly preserve SQLite schema v16")
     ctx.ok("V0.59 portable baseline CI spec + headless benchmark runner + deterministic regression exit codes present")
 
     observability_source = ctx.read_safe("backend/src/VisionStudio.Api/Production/RunObservability.cs")
@@ -436,8 +414,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
     for token in ["V060Trace_PersistsExactNodeTimeline_InSchemaV17", "V060Observability_UsesPriorSameWorkflowRuns_ForLatencyBaseline"]:
         if token not in observability_tests:
             ctx.fail(f"V0.60 observability regression test missing: {token}")
-    if not ctx.doc_has("MIGRATION_V059_TO_V060.md", "schema v17"):
-        ctx.fail("V0.60 migration does not document SQLite schema v17")
     ctx.ok("V0.60 exact run timeline + historical node-latency observability present")
 
     trace_analysis_source = ctx.read_safe("backend/src/VisionStudio.Api/Trace/TraceAnalysis.cs")
@@ -454,9 +430,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
     for token in ["V061Compare_AutoSelectsNearestPriorOkRun_AndReportsNodeDiff", "V061FailureSignature_ClustersSameExecutionError_WhenVolatileNumbersDiffer"]:
         if token not in trace_analysis_tests:
             ctx.fail(f"V0.61 trace analysis regression test missing: {token}")
-    if not ctx.doc_has("MIGRATION_V060_TO_V061.md", "schema v17"):
-        ctx.fail("V0.61 migration does not explicitly preserve SQLite schema v17")
-    ctx.doc_present("TRACE_ANALYSIS.md")
     ctx.ok("V0.61 nearest-OK trace comparison + deterministic recurring failure signatures present")
 
     investigation_source = ctx.read_safe("backend/src/VisionStudio.Api/Operations/InvestigationCases.cs")
@@ -477,8 +450,6 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
             ctx.fail(f"V0.62 investigation regression test missing: {token}")
     if "InvestigationCaseService" not in host_registration or "MapInvestigationEndpoints" not in ctx.read_safe("backend/src/VisionStudio.Api/Endpoints/EndpointMapping.cs"):
         ctx.fail("V0.62 investigation DI/endpoint mapping missing")
-    ctx.doc_present("INVESTIGATION_CASES.md")
-    ctx.doc_present("MIGRATION_V061_TO_V062.md")
     ctx.ok("V0.62 deduplicated investigation lifecycle + linked trace evidence + signature trend dashboard present")
 
     for token in ["InvestigationVerificationEvidence", "EvaluateVerificationAsync", "GetLatestPassedVerificationEvidenceAsync", "BaselineSignatureHits", "CandidateSignatureHits", "fresh Passed dataset regression gate"]:
@@ -492,6 +463,4 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
     for token in ["V063Verified_RequiresFreshPassedDatasetRegressionGate", "EvaluateVerificationAsync", 'Assert.Equal("Passed", gate.GateStatus)']:
         if token not in investigation_tests:
             ctx.fail(f"V0.63 verification regression test missing: {token}")
-    ctx.doc_present("CASE_VERIFICATION_GATE.md")
-    ctx.doc_present("MIGRATION_V062_TO_V063.md")
     ctx.ok("V0.63 resolved-case A/B dataset regression gate + signature disappearance evidence present")

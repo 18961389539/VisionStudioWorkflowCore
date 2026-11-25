@@ -20,7 +20,7 @@ public sealed class AuditChainTests
     public async Task ConsecutiveEvents_FormAValidChain()
     {
         using var env = new TempWebHostEnvironment();
-        var store = new AuditEventStore(new SqliteMetadataDatabase(env));
+        await using var store = new AuditEventStore(new SqliteMetadataDatabase(env));
         await RecordAsync(store, "first");
         await RecordAsync(store, "second");
         await RecordAsync(store, "third");
@@ -40,7 +40,7 @@ public sealed class AuditChainTests
     {
         using var env = new TempWebHostEnvironment();
         var database = new SqliteMetadataDatabase(env);
-        var store = new AuditEventStore(database);
+        await using var store = new AuditEventStore(database);
         await RecordAsync(store, "first");
         await RecordAsync(store, "second");
         await RecordAsync(store, "third");
@@ -64,7 +64,7 @@ public sealed class AuditChainTests
     {
         using var env = new TempWebHostEnvironment();
         var database = new SqliteMetadataDatabase(env);
-        var store = new AuditEventStore(database);
+        await using var store = new AuditEventStore(database);
         await RecordAsync(store, "first");
         await RecordAsync(store, "second");
         await RecordAsync(store, "third");

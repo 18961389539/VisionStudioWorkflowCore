@@ -31,6 +31,7 @@ export default defineConfig({
             // react 优先匹配，避免被依赖它的 antd 组吃掉。
             { name: 'vendor-react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 40 },
             { name: 'vendor-antd', test: /node_modules[\\/](antd|@ant-design|@rc-component|rc-[^\\/]+)[\\/]/, priority: 30 },
+            { name: 'vendor-codemirror', test: /node_modules[\\/](@codemirror|@lezer|codemirror|crelt|style-mod|w3c-keyname|@uiw[\\/](react-codemirror|codemirror-extensions-basic-setup))[\\/]/, priority: 30 },
             { name: 'vendor-konva', test: /node_modules[\\/](konva|react-konva)[\\/]/, priority: 30 },
             { name: 'vendor-xyflow', test: /node_modules[\\/]@xyflow[\\/]/, priority: 30 },
             { name: 'vendor-signalr', test: /node_modules[\\/]@microsoft[\\/]signalr[\\/]/, priority: 30 }

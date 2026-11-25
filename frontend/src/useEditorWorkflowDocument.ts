@@ -2,7 +2,7 @@
  * 编辑器文档动作（巨型组件拆分，2026-11-13）：应用示例、整篇恢复、插入/升级模块。
  * 逐行搬运自 App 的 Editor 组件；代次、修订基线与撤销时间线的处理保持不变。
  */
-import { useCallback, type Dispatch, type SetStateAction } from 'react';
+import { type Dispatch, type SetStateAction } from 'react';
 import type { Edge, FitViewOptions, Node } from '@xyflow/react';
 import { message } from 'antd';
 import { demos, type DemoKey } from './demos';
@@ -11,7 +11,6 @@ import { isWorkflowDocument } from './workflowDocument';
 import { migrateNodeType } from './legacyNodes';
 import { catalogNodeData } from './catalog';
 import { withSwitchPorts } from './switchPorts';
-import { restoreCanvasAnnotations } from './canvasAnnotations';
 import type { GraphHistory } from './history';
 import type { DocumentBaseline } from './documentSync';
 import type { NodeCatalogItem, WorkflowModuleVersion, WorkflowPayload } from './types';
@@ -36,6 +35,7 @@ export type EditorWorkflowDocumentOptions = {
   setDemoKey: (value: DemoKey) => void;
   setLastSavedAt: (value: Date | undefined) => void;
   setHighlightedEdgeId: (value: string | undefined) => void;
+  restoreAnnotations: (workflowId: string, nodes: Node[]) => Node[];
   pushHistory: (label: string, coalesceKey?: string) => void;
   resetInspection: () => void;
   clearResult: () => void;
@@ -48,7 +48,7 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
   const {
     catalog, nodesRef, selectedRef, selectedId, documentGenerationRef, workflowRevisionRef, markCleanOnNextChange, history,
     setNodes, setEdges, setSelectedId, setHistoryVersion, setDesignerWorkflowId, setDesignerWorkflowName,
-    setDemoKey, setLastSavedAt, setHighlightedEdgeId, pushHistory, resetInspection, clearResult,
+    setDemoKey, setLastSavedAt, setHighlightedEdgeId, restoreAnnotations, pushHistory, resetInspection, clearResult,
     fitView, screenToFlowPosition, messageApi
   } = options;
   const applyDemo = (key: DemoKey) => {
@@ -56,7 +56,7 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
     documentGenerationRef.current += 1;
     workflowRevisionRef.current = undefined;
     const rawGraph = demos[key]();
-    const graph = { ...rawGraph, nodes: restoreCanvasAnnotations(`demo-${key}`, hydrateNodesFromCatalog(rawGraph.nodes, catalog)) };
+    const graph = { ...rawGraph, nodes: restoreAnnotations(`demo-${key}`, hydrateNodesFromCatalog(rawGraph.nodes, catalog)) };
     setDemoKey(key);
     setDesignerWorkflowId(`demo-${key}`);
     // 文档名不携带版本号（避免与品牌 V{APP_VERSION} 同屏互相矛盾），并复用分组里的中文用途名
@@ -90,7 +90,7 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
     resetInspection();
     setHighlightedEdgeId(undefined);
   };
-  const restoreWorkflow = useCallback((workflow: WorkflowPayload, options?: { markClean?: boolean; preserveDocument?: boolean; editLabel?: string }) => {
+  const restoreWorkflow = (workflow: WorkflowPayload, options?: { markClean?: boolean; preserveDocument?: boolean; editLabel?: string }) => {
     // A03/A04：整块替换文档即新代次——在途旧响应作废；并发基线失效。
     // 调用方如需绑定"本次实际加载"的修订基线，必须在 restore 之后重新设置（load 即如此）。
     if (!isWorkflowDocument(workflow)) throw new Error('工作流文档结构无效');
@@ -135,7 +135,7 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
       setDesignerWorkflowId(workflow.id);
       setDesignerWorkflowName(workflow.name);
     }
-    const canvasNodes = restoreCanvasAnnotations(workflow.id, restoredNodes);
+    const canvasNodes = restoreAnnotations(workflow.id, restoredNodes);
     setNodes(canvasNodes);
     setEdges(restoredEdges);
     setSelectedId(options?.preserveDocument && canvasNodes.some((node) => node.id === selectedRef.current) ? selectedRef.current : canvasNodes[0]?.id ?? '');
@@ -148,7 +148,7 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
     resetInspection();
     setHighlightedEdgeId(undefined);
     if (!options?.preserveDocument) setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
-  }, [catalog, fitView, history, pushHistory, resetInspection, setEdges, setNodes]);
+  };
   const insertModule = (version: WorkflowModuleVersion) => {
     const position = screenToFlowPosition({ x: window.innerWidth * 0.48, y: window.innerHeight * 0.38 });
     const parameters: Record<string, unknown> = {

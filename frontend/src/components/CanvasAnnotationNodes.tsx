@@ -1,10 +1,11 @@
 import { NodeResizer, type NodeProps } from '@xyflow/react';
+import { memo } from 'react';
 import { CANVAS_GROUP_COLORS } from '../canvasAnnotations';
-import { useEditorGraph } from '../editorContexts';
+import { useEditorAnnotationAction } from '../editorContexts';
 import { useI18n } from '../i18n/provider';
 
-export function CanvasGroupNode({ id, data, selected }: NodeProps) {
-  const { updateCanvasAnnotation } = useEditorGraph();
+export const CanvasGroupNode = memo(function CanvasGroupNode({ id, data, selected }: NodeProps) {
+  const updateCanvasAnnotation = useEditorAnnotationAction();
   const { lang } = useI18n();
   const savedTitle = typeof data.title === 'string' ? data.title : '';
   const title = !savedTitle || savedTitle === '流程分组' ? lang === 'en' ? 'Workflow group' : '流程分组' : savedTitle;
@@ -27,10 +28,10 @@ export function CanvasGroupNode({ id, data, selected }: NodeProps) {
       <div className="canvas-group-caption">{lang === 'en' ? 'Local canvas group · excluded from execution' : '本机画布分组 · 不参与运行'}</div>
     </div>
   );
-}
+});
 
-export function CanvasNoteNode({ id, data }: NodeProps) {
-  const { updateCanvasAnnotation } = useEditorGraph();
+export const CanvasNoteNode = memo(function CanvasNoteNode({ id, data }: NodeProps) {
+  const updateCanvasAnnotation = useEditorAnnotationAction();
   const { lang } = useI18n();
   const content = typeof data.content === 'string' ? data.content : '';
   return (
@@ -42,4 +43,4 @@ export function CanvasNoteNode({ id, data }: NodeProps) {
       <small>{lang === 'en' ? 'Local canvas note; excluded from execution' : '本机画布说明，不参与运行'}</small>
     </div>
   );
-}
+});

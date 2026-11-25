@@ -236,21 +236,7 @@ internal static class GaussianBlurFilter
         };
         cancellationToken.ThrowIfCancellationRequested();
         var roi = node.GetRoi();
-        var pad = kernel / 2;
-        Mat blurred;
-        if (pad == 0 || borderName == "default")
-        {
-            blurred = new Mat();
-            JLVisionOperators.GaussianBlur(source, blurred, new Size(kernel, kernel), sigmaX, sigmaY);
-        }
-        else
-        {
-            using var padded = new Mat();
-            Cv2.CopyMakeBorder(source, padded, pad, pad, pad, pad, border, Scalar.All(0));
-            using var full = new Mat();
-            JLVisionOperators.GaussianBlur(padded, full, new Size(kernel, kernel), sigmaX, sigmaY);
-            blurred = new Mat(full, new Rect(pad, pad, source.Width, source.Height)).Clone();
-        }
+        var blurred = PreprocessImageHelpers.GaussianWithBorder(source, kernel, sigmaX, sigmaY, border, borderName == "default");
         var output = PreprocessImageHelpers.ApplyRoiMask(blurred, roi, cancellationToken);
         JLVisionOperators.MinMax(output, out double minIntensity, out double maxIntensity);
         var meanIntensity = JLVisionOperators.Mean(output);
@@ -309,13 +295,8 @@ internal static class MedianBlurFilter
         };
         var roi = node.GetRoi();
         cancellationToken.ThrowIfCancellationRequested();
-        // OpenCV medianBlur has no borderMode; pad then crop so borderType is a real aperture edge policy.
         var pad = kernel / 2;
-        using var padded = new Mat();
-        Cv2.CopyMakeBorder(source, padded, pad, pad, pad, pad, border, Scalar.All(0));
-        using var blurredFull = new Mat();
-        JLVisionOperators.MedianBlur(padded, blurredFull, kernel);
-        var cropped = new Mat(blurredFull, new Rect(pad, pad, source.Width, source.Height)).Clone();
+        var cropped = PreprocessImageHelpers.MedianWithBorder(source, kernel, border);
         var output = PreprocessImageHelpers.ApplyRoiMask(cropped, roi, cancellationToken);
 
         JLVisionOperators.MinMax(output, out double minIntensity, out double maxIntensity);

@@ -21,7 +21,7 @@
     "react/purity": "off",
     "react/immutability": "off",
     "react/preserve-manual-memoization": "off",
-    "react/exhaustive-deps": "off"
+    "react/exhaustive-deps": "error"
   },
   "ignorePatterns": [
     "dist",

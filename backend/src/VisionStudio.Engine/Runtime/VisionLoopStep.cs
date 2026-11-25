@@ -80,10 +80,7 @@ public sealed class VisionLoopStep : StepBodyAsync
                         {
                             var error = new InvalidOperationException(
                                 $"flow.while '{LoopNodeId}' condition source '{SourceNodeId}.{SourcePort}' did not execute in this iteration.");
-                            data.Error = $"{LoopNodeId}: {error.Message}";
-                            data.LastFaultedNodeId = LoopNodeId;
-                            data.FaultedNodeId ??= LoopNodeId;
-                            data.FaultedException ??= error;
+                            data.RecordFault(LoopNodeId, error);
                             var observation = data.BeginNodeObservation();
                             data.AddReport(new NodeRunReport(LoopNodeId, "flow.while", false, 0,
                                 new Dictionary<string, object?> { ["iteration"] = iterations }, error.Message,

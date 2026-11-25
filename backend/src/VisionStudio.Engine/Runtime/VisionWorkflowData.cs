@@ -4,12 +4,16 @@ using OpenCvSharp;
 
 namespace VisionStudio.Engine.Runtime;
 
+public sealed record VisionNodeFault(string NodeId, Exception Exception, string Error);
+
 /// <summary>
 /// Per-run in-memory state. Workflow Core owns scheduling; this object owns native vision data.
 /// persistState=false is required because OpenCV Mat must never cross a persistence boundary.
 /// </summary>
 public sealed class VisionWorkflowData : IDisposable
 {
+    private VisionNodeFault? _fault;
+    private string? _lastFaultedNodeId;
     private readonly object _resourceGate = new();
     private readonly object _debugGate = new();
     /// <summary>序列化节点图像捕获的预算检查与记账：并行分支会并发捕获，读-判-写必须原子。</summary>
@@ -287,15 +291,12 @@ public sealed class VisionWorkflowData : IDisposable
         lock (_tryAttemptGate) { _activeTryNodeId = null; _activeTryAttempt = 0; }
     }
 
-    public void ClearHandledTryError(string nodeId)
+    public void ClearHandledTryError(string nodeId, Exception exception)
     {
-        if (Error?.StartsWith($"{nodeId}: ", StringComparison.OrdinalIgnoreCase) == true)
-            Error = null;
-        if (FaultedNodeId?.Equals(nodeId, StringComparison.OrdinalIgnoreCase) == true)
-        {
-            FaultedException = null;
-            FaultedNodeId = null;
-        }
+        var fault = Fault;
+        if (fault is not null && fault.NodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase) &&
+            ReferenceEquals(fault.Exception, exception))
+            Interlocked.CompareExchange(ref _fault, null, fault);
     }
 
     public void MarkParallelBranches(string nodeId)
@@ -307,16 +308,23 @@ public sealed class VisionWorkflowData : IDisposable
     public IReadOnlyList<ControlFlowDecision> SnapshotControlFlowDecisions()
         => _controlFlowDecisions.Values.OrderBy(x => x.NodeId, StringComparer.OrdinalIgnoreCase).ToArray();
     public string? QualityDisposition { get; set; }
-    public string? Error { get; set; }
+    public string? Error => Fault?.Error;
 
     /// <summary>
-    /// R10/F08（2026-10-12 复核）：最近一次节点故障的**原始异常**与节点标识。WorkflowCore 会
-    /// 捕获节点异常并以 Suspended/Error 返回，运行器外层 catch 不会经过——结果返回路径据此向
-    /// 宿主观察者报告完整异常链（每次运行只记录首个故障，避免重复刷日志）。
+    /// 首个未处理故障的原子快照：错误文本、节点标识和原始异常始终属于同一次失败。
+    /// 并行分支后续失败仍各自留节点报告，但不能覆盖运行级归因。
     /// </summary>
-    public Exception? FaultedException { get; set; }
-    public string? FaultedNodeId { get; set; }
-    public string? LastFaultedNodeId { get; set; }
+    public VisionNodeFault? Fault => Volatile.Read(ref _fault);
+    public Exception? FaultedException => Fault?.Exception;
+    public string? FaultedNodeId => Fault?.NodeId;
+    public string? LastFaultedNodeId => Volatile.Read(ref _lastFaultedNodeId);
+
+    public void RecordFault(string nodeId, Exception exception)
+    {
+        var fault = new VisionNodeFault(nodeId, exception, $"{nodeId}: {exception.Message}");
+        Interlocked.CompareExchange(ref _fault, fault, null);
+        Volatile.Write(ref _lastFaultedNodeId, nodeId);
+    }
 
     /// <summary>Branch-scoped disposition tracker; Empty unless the workflow contains Parallel regions.</summary>
     public ParallelDispositionTracker ParallelDispositions { get; private set; } = ParallelDispositionTracker.Empty;
@@ -472,7 +480,11 @@ public sealed class VisionWorkflowData : IDisposable
         _executedNodes.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
 
     /// <summary>Clears a captured execution error without touching reports/outputs (used by interactive node runs).</summary>
-    public void ClearError() => Error = null;
+    public void ClearError()
+    {
+        Interlocked.Exchange(ref _fault, null);
+        Volatile.Write(ref _lastFaultedNodeId, null);
+    }
 
     /// <summary>When true, each node's image output is captured for interactive inspection.</summary>
     public bool CaptureNodeImages { get; private set; }
@@ -617,6 +629,15 @@ public sealed class VisionWorkflowData : IDisposable
 
     public void AddReport(NodeRunReport report)
     {
+        if (ParallelDispositions.TryGetBranchScope(report.NodeId, out var regionId, out var branchName))
+            report = report with
+            {
+                Summary = new Dictionary<string, object?>(report.Summary)
+                {
+                    [NodeSummaryKeys.ParallelRegionId] = regionId,
+                    [NodeSummaryKeys.ParallelBranch] = branchName
+                }
+            };
         _nodeReports.Enqueue(report);
         if (report.Success) _executedNodes[report.NodeId] = true;
         var completed = Interlocked.Increment(ref _completedNodeCount);

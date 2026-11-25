@@ -36,14 +36,11 @@ REQUIRED_ARTIFACTS = [
     "backend/src/VisionStudio.Abstractions/PluginContracts.cs",
     "backend/src/VisionStudio.Abstractions/ExecutionContracts.cs",
     "backend/tests/VisionStudio.Engine.Tests/PluginLifetimeTests.cs",
-    "PLUGIN_ARCHITECTURE.md",
     "backend/src/VisionStudio.Api/Hosting/VisionStudioServiceRegistration.cs",
     "backend/src/VisionStudio.Api/Hosting/BootstrapHostedServices.cs",
     "backend/src/VisionStudio.Api/Infrastructure/ApiExceptionHandler.cs",
     "backend/src/VisionStudio.Api/Infrastructure/RuntimeOnlyMiddleware.cs",
     "backend/src/VisionStudio.Api/Endpoints/EndpointMapping.cs",
-    "MIGRATION_V022_TO_V023.md",
-    "HOST_ARCHITECTURE.md",
     "backend/src/VisionStudio.Api/Security/SecurityModels.cs",
     "backend/src/VisionStudio.Api/Security/SecurityStore.cs",
     "backend/src/VisionStudio.Api/Security/VisionStudioAuthenticationHandler.cs",
@@ -51,16 +48,12 @@ REQUIRED_ARTIFACTS = [
     "backend/src/VisionStudio.Api/Endpoints/SecurityEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Operations/SecurityTests.cs",
     "frontend/src/security.tsx",
-    "SECURITY_ARCHITECTURE.md",
-    "MIGRATION_V023_TO_V024.md",
     "backend/src/VisionStudio.Api/RuntimeDependencies.cs",
     "backend/src/VisionStudio.Api/RuntimeDependencies.Capture.cs",
     "backend/src/VisionStudio.Api/RuntimeDependencies.Hardware.cs",
     "backend/src/VisionStudio.Api/RuntimeDependencies.Calibrations.cs",
     "backend/src/VisionStudio.Api/RuntimeDependencies.Validation.cs",
     "backend/tests/VisionStudio.Api.Tests/RuntimeDependencyManifestTests.cs",
-    "RUNTIME_DEPENDENCIES.md",
-    "MIGRATION_V024_TO_V025.md",
     "backend/src/VisionStudio.Engine/Diagnostics/AssetHealth.cs",
     "backend/src/VisionStudio.Api/Diagnostics/AssetHealthProviders.cs",
     "backend/src/VisionStudio.Api/Diagnostics/DiagnosticsCenterService.cs",
@@ -68,8 +61,6 @@ REQUIRED_ARTIFACTS = [
     "backend/src/VisionStudio.Api/Endpoints/DiagnosticsEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Operations/DiagnosticsTests.cs",
     "frontend/src/components/DiagnosticsPanel.tsx",
-    "DIAGNOSTICS_ARCHITECTURE.md",
-    "MIGRATION_V025_TO_V026.md",
     "backend/src/VisionStudio.Engine/CatalogSnapshot.cs",
     "backend/src/VisionStudio.CatalogExporter/VisionStudio.CatalogExporter.csproj",
     "backend/src/VisionStudio.CatalogExporter/Program.cs",
@@ -77,40 +68,28 @@ REQUIRED_ARTIFACTS = [
     "frontend/src/generated/catalog.generated.json",
     "scripts/generate-frontend-catalog.ps1",
     "scripts/generate-frontend-catalog.sh",
-    "CATALOG_ARCHITECTURE.md",
-    "MIGRATION_V026_TO_V027.md",
     "backend/src/VisionStudio.Api/SchemaMigrations.cs",
     "backend/src/VisionStudio.Api/Storage/StorageMaintenance.cs",
     "backend/src/VisionStudio.Api/Storage/StorageBackupService.cs",
     "backend/tests/VisionStudio.Api.Tests/Storage/StorageMaintenanceTests.cs",
     "frontend/src/components/StoragePanel.tsx",
-    "STORAGE_MAINTENANCE.md",
-    "MIGRATION_V027_TO_V028.md",
     "backend/src/VisionStudio.Engine/Runtime/StructuredWorkflowIr.cs",
     "backend/tests/VisionStudio.Engine.Tests/Runtime/RecursiveStructuredWorkflowTests.cs",
     "samples/nested-structured-workflow.json",
-    "STRUCTURED_WORKFLOW_IR.md",
-    "MIGRATION_V028_TO_V029.md",
     "backend/src/VisionStudio.Api/Media/MediaLibraryService.cs",
     "backend/src/VisionStudio.Api/Endpoints/MediaEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Assets/MediaLibraryTests.cs",
-    "MEDIA_LIBRARY.md",
-    "MIGRATION_V029_TO_V030.md",
     "backend/src/VisionStudio.Hardware.Abstractions/HardwareProvenance.cs",
     "backend/src/VisionStudio.Api/Provenance/HardwareProvenanceStore.cs",
     "backend/src/VisionStudio.Api/Provenance/HardwareProvenanceService.cs",
     "backend/src/VisionStudio.Api/Endpoints/HardwareProvenanceEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Camera/HardwareProvenanceTests.cs",
     "frontend/src/components/HardwareProvenancePanel.tsx",
-    "HARDWARE_PROVENANCE.md",
-    "MIGRATION_V030_TO_V031.md",
     "backend/src/VisionStudio.Api/Provenance/VendorProvenance.cs",
     "backend/src/VisionStudio.Api/Provenance/VendorProbeBase.cs",
     "backend/src/VisionStudio.Api/Provenance/BaslerPylonProvenanceProbe.cs",
     "backend/src/VisionStudio.Api/Provenance/HikrobotMvsProvenanceProbe.cs",
     "backend/src/VisionStudio.Api/Provenance/AbbRwsProvenanceProbe.cs",
-    "VENDOR_PROVENANCE.md",
-    "MIGRATION_V031_TO_V032.md",
     "backend/src/VisionStudio.Camera.Basler/VisionStudio.Camera.Basler.csproj",
     "backend/src/VisionStudio.Camera.Basler/BaslerSdkReflection.cs",
     "backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraAdapterProvider.cs",
@@ -121,8 +100,6 @@ REQUIRED_ARTIFACTS = [
     "backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs",
     "backend/src/VisionStudio.Api/Camera/CameraAdapterOptions.cs",
     "backend/tests/VisionStudio.Engine.Tests/Camera/CameraAcquisitionTests.cs",
-    "CAMERA_VENDOR_ADAPTERS.md",
-    "MIGRATION_V032_TO_V033.md",
     "backend/src/VisionStudio.Hardware.Abstractions/CameraFeatureProfiles.cs",
     "backend/src/VisionStudio.Camera.Basler/BaslerCameraFeatures.cs",
     "backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs",
@@ -130,10 +107,6 @@ REQUIRED_ARTIFACTS = [
     "backend/src/VisionStudio.Api/Endpoints/CameraFeatureProfileEndpoints.cs",
     "backend/tests/VisionStudio.Engine.Tests/Camera/CameraFeatureProfileTests.cs",
     "backend/tests/VisionStudio.Api.Tests/Camera/CameraFeatureProfileStoreTests.cs",
-    "CAMERA_COMMISSIONING.md",
-    "MIGRATION_V033_TO_V034.md",
-    "CAMERA_SYNCHRONIZATION.md",
-    "MIGRATION_V034_TO_V035.md",
     "backend/src/VisionStudio.Api/Camera/CameraSynchronizationContracts.cs",
     "backend/src/VisionStudio.Api/Camera/CameraSynchronizationStores.cs",
     "backend/src/VisionStudio.Api/Camera/CameraSynchronizationService.cs",
@@ -142,59 +115,36 @@ REQUIRED_ARTIFACTS = [
     "backend/src/VisionStudio.Api/Operations/OfflineReplay.cs",
     "backend/src/VisionStudio.Api/Endpoints/ReplayEndpoints.cs",
     "frontend/src/components/ReplayDebuggerPanel.tsx",
-    "OFFLINE_REPLAY_DEBUGGER.md",
-    "MIGRATION_V046_TO_V047.md",
     "backend/src/VisionStudio.Api/Operations/DatasetValidation.cs",
     "backend/src/VisionStudio.Api/Endpoints/DatasetValidationEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Operations/DatasetValidationTests.cs",
     "frontend/src/components/DatasetValidationPanel.tsx",
-    "DATASET_BATCH_VALIDATION.md",
-    "MIGRATION_V047_TO_V048.md",
     "backend/src/VisionStudio.Api/Workflow/ParameterTuning.cs",
     "backend/src/VisionStudio.Api/Endpoints/ParameterTuningEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Recipe/ParameterTuningTests.cs",
     "frontend/src/components/ParameterTuningPanel.tsx",
-    "PARAMETER_TUNING.md",
-    "MIGRATION_V048_TO_V049.md",
     "backend/src/VisionStudio.Api/Workflow/ProductRecipeStore.cs",
     "backend/src/VisionStudio.Api/Endpoints/ProductRecipeEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Recipe/ProductRecipeLifecycleTests.cs",
-    "PRODUCT_RECIPE_LIFECYCLE.md",
-    "MIGRATION_V049_TO_V050.md",
     "backend/src/VisionStudio.Api/Workflow/RecipeParameterization.cs",
     "backend/src/VisionStudio.Api/Endpoints/RecipeParameterEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Recipe/RecipeParameterBindingTests.cs",
-    "RECIPE_PARAMETER_BINDING.md",
-    "MIGRATION_V050_TO_V051.md",
     "backend/src/VisionStudio.Api/Workflow/WorkflowModules.cs",
     "backend/src/VisionStudio.Api/Endpoints/WorkflowModuleEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Workflow/WorkflowModuleTests.cs",
     "frontend/src/components/WorkflowModulePanel.tsx",
-    "REUSABLE_WORKFLOW_MODULES.md",
-    "MIGRATION_V051_TO_V052.md",
     "backend/src/VisionStudio.Api/Endpoints/PluginEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Plugin/PluginSdkV2Tests.cs",
     "backend/src/VisionStudio.Plugin.Sample/plugin.json",
-    "PLUGIN_SDK_2.md",
-    "MIGRATION_V052_TO_V053.md",
-    "PLUGIN_WORKER.md",
-    "MIGRATION_V054_TO_V055.md",
     "backend/src/VisionStudio.Engine/PluginWorkerSharedMemoryStore.cs",
-    "MIGRATION_V055_TO_V056.md",
     "backend/src/VisionStudio.Api/Plugin/PluginWorkerPerformance.cs",
-    "PLUGIN_WORKER_PROFILING.md",
-    "MIGRATION_V056_TO_V057.md",
     "backend/src/VisionStudio.Api/Plugin/PluginPerformanceBenchmark.cs",
     "backend/src/VisionStudio.Api/Endpoints/PluginBenchmarkEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Plugin/PluginPerformanceBenchmarkTests.cs",
-    "PLUGIN_PERFORMANCE_BENCHMARK.md",
-    "MIGRATION_V057_TO_V058.md",
     "backend/src/VisionStudio.Api/Plugin/PluginBenchmarkCi.cs",
     "backend/src/VisionStudio.Benchmark.Cli/VisionStudio.Benchmark.Cli.csproj",
     "backend/src/VisionStudio.Benchmark.Cli/Program.cs",
     "backend/tests/VisionStudio.Api.Tests/Plugin/PluginBenchmarkCiTests.cs",
-    "PLUGIN_BENCHMARK_CI.md",
-    "MIGRATION_V058_TO_V059.md",
     "scripts/plugin-benchmark-gate.ps1",
     "scripts/plugin-benchmark-gate.sh",
     ".github/workflows/plugin-performance-gate.yml",
@@ -202,18 +152,12 @@ REQUIRED_ARTIFACTS = [
     "backend/src/VisionStudio.Api/Endpoints/InvestigationEndpoints.cs",
     "backend/tests/VisionStudio.Api.Tests/Operations/InvestigationCaseTests.cs",
     "frontend/src/components/InvestigationPanel.tsx",
-    "INVESTIGATION_CASES.md",
-    "MIGRATION_V061_TO_V062.md",
-    "CASE_VERIFICATION_GATE.md",
-    "MIGRATION_V062_TO_V063.md",
 ]
 
 
 def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: dict) -> dict:
     for rel in REQUIRED_ARTIFACTS:
-        if rel.endswith(".md"):
-            ctx.doc_present(rel)
-        elif not (ctx.root / rel).exists():
+        if not (ctx.root / rel).is_file():
             ctx.fail(f"Missing required architecture artifact: {rel}")
 
     host_registration = catalog_ctx["host_registration"]
@@ -486,12 +430,10 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
             ctx.fail(f"V0.36 FrameSet regression test missing: {token}")
     if not any(n.get("type") == "camera.syncCapture" for n in frameset_sample.get("nodes", [])) or not any(n.get("type") == "frameset.image" for n in frameset_sample.get("nodes", [])):
         ctx.fail("V0.36 synchronized FrameSet sample does not exercise both built-in nodes")
-    for rel in ["FRAMESET_WORKFLOW.md", "MIGRATION_V035_TO_V036.md"]:
-        ctx.doc_present(rel)
     if (
         "frameSet: frameSetDemo" not in ctx.read_family("frontend/src/demos/*.ts")
         or "DEMO_GROUPS" not in ctx.read_safe("frontend/src/components/TemplateGalleryModal.tsx")
-        or "TemplateGalleryModal" not in ctx.read_safe("frontend/src/App.tsx")
+        or "TemplateGalleryModal" not in ctx.read_safe("frontend/src/EditorShell.tsx")
     ):
         ctx.fail("V0.36 frontend synchronized FrameSet demo is missing")
     ctx.ok("V0.36 first-class synchronized FrameSet workflow primitive + zero-copy extraction present")
@@ -507,7 +449,6 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
         ctx.fail("V0.40 schema migration v8 missing")
     if "CommissioningStore_PersistsProgressAndReportMetadata" not in sync_tests:
         ctx.fail("V0.40 commissioning store regression test missing")
-    ctx.doc_present("MIGRATION_V038_TO_V039.md")
     ctx.ok("V0.40 automatic synchronization commissioning test + persisted report workflow present")
 
     for token in ["ReportSchemaVersion", "HardwareFingerprint", "EvidenceHash", "WorstRuns", "GetReportHtmlAsync"]:
@@ -517,16 +458,11 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
         ctx.fail("V0.40 HTML report endpoint missing")
     if "exportSyncTestHtml" not in camera_ui:
         ctx.fail("V0.40 HTML report UI export missing")
-    ctx.doc_present("CAMERA_COMMISSIONING_REPORT.md")
-    ctx.doc_present("MIGRATION_V039_TO_V040.md")
     ctx.ok("V0.40 commissioning evidence report + HTML export present")
 
     for token in ["CameraSynchronizationCommissioningFrameEvidence", "DeltaFromFirstUs", "SvgPolyline", "SvgPtpOffsets", "Worst Samples & Timestamp Drill-down"]:
         if token not in commissioning_source:
             ctx.fail(f"V0.41 visual report token missing: {token}")
-    ctx.doc_present("MIGRATION_V040_TO_V041.md")
-    if not ctx.doc_has("CAMERA_COMMISSIONING_REPORT.md", "schema **v4**"):
-        ctx.fail("Commissioning report guide does not describe current schema v4")
     ctx.ok("V0.41 visual commissioning report + per-camera worst-run timestamp drill-down present")
 
     for token in ["PtpSnapshots", "CameraSynchronizationPtpDiagnostics", "ComputePtpDiagnostics", "OffsetSkewPearsonCorrelation", "CapturePtpSnapshotsAsync"]:
@@ -541,7 +477,6 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
             ctx.fail(f"V0.42 report v4 PTP trend token missing: {token}")
     if "PtpDiagnostics_ComputesReadyRateOffsetPercentileAndCorrelation" not in sync_tests:
         ctx.fail("V0.42 PTP diagnostics regression test missing")
-    ctx.doc_present("MIGRATION_V041_TO_V042.md")
     ctx.ok("V0.42 per-run PTP evidence + timing diagnostics + report v4 trend present")
 
     ptp_guard = ctx.read_safe("backend/src/VisionStudio.Api/Production/ProductionPtpDriftGuard.cs")
@@ -557,7 +492,6 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
     for token in ["ResolveRequirements_FindsScheduledSynchronizedCapture", "ResolveRequirements_MergesDuplicateGroupAndKeepsStrictestPolicy"]:
         if token not in ptp_guard_tests:
             ctx.fail(f"V0.43 PTP guard regression test missing: {token}")
-    ctx.doc_present("MIGRATION_V042_TO_V043.md")
     ctx.ok("V0.43 Production PTP start gate + sliding-window drift/master-clock guard present")
 
     sync_guard = ctx.read_safe("backend/src/VisionStudio.Api/Production/ProductionSynchronizationHealthGuard.cs")
@@ -577,7 +511,6 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
             ctx.fail(f"V0.44 synchronization guard regression test missing: {token}")
     if "synchronizationHealthGuardEnabled" not in ctx.read_safe("frontend/src/types.ts") + ctx.read_safe("frontend/src/productionConfig.ts"):
         ctx.fail("V0.44 frontend sync guard type surface missing")
-    ctx.doc_present("MIGRATION_V043_TO_V044.md")
     ctx.ok("V0.44 Production synchronization Action/frame/skew/sequence health guard + reconnect hysteresis present")
 
     basler_transport = ctx.read_safe("backend/src/VisionStudio.Camera.Basler/BaslerTransportTelemetry.cs")
@@ -620,7 +553,6 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
         ctx.fail("V0.45 vendor transport delta regression test missing")
     if "V044RuntimeConfig_UpgradesMissingNativeTransportGuardFieldsToV045Defaults" not in ctx.read_safe("backend/tests/VisionStudio.Api.Tests/Production/ProductionRuntimeTests.cs"):
         ctx.fail("V0.45 V0.44 runtime config compatibility regression test missing")
-    ctx.doc_present("MIGRATION_V044_TO_V045.md")
     ctx.ok("V0.45 Basler/Hikrobot vendor transport telemetry + persisted run evidence + native-first Production Guard present")
 
     gige_source = ctx.read_safe("backend/src/VisionStudio.Api/Camera/GigENetworkCommissioning.cs")
@@ -641,7 +573,6 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
             ctx.fail(f"V0.46 GigE regression test missing: {token}")
     if 'new(10, "V0.45 camera vendor transport telemetry evidence"' not in schema_migration_source:
         ctx.fail("V0.46 must retain the schema v10 transport migration")
-    ctx.doc_present("MIGRATION_V045_TO_V046.md")
     ctx.ok("V0.46 host NIC mapping + bandwidth/resend diagnostics + one-click GigE commissioning test present")
 
     return vendor_appsettings

@@ -44,7 +44,7 @@ function mount(override?: (base: Fetcher) => Fetcher) {
     { name: 'width', label: '宽度', type: 'number', defaultValue: 320, min: 64, max: 4096 },
   ] }];
   return { ...render(<ConfigProvider theme={{ token: { motion: false } }}><ParameterTuningPanel open onClose={vi.fn()} currentWorkflow={tuningWorkflow}
-    catalog={catalog} prepareWorkflowChange={() => ({ apply: async () => true, cancel() {}, isCurrent: () => true, isSameDocument: () => true })} onApplied={vi.fn()} /></ConfigProvider>), fetchMock };
+    catalog={catalog} prepareWorkflowChange={() => ({ apply: async () => true, cancel() {}, isCurrent: () => true, isSameDocument: () => true })} onApplied={vi.fn()} /></ConfigProvider>), fetchMock, catalog };
 }
 beforeEach(() => {
   vi.useFakeTimers();
@@ -54,6 +54,25 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('参数调优工作区', () => {
+  it('打开后外部工作流更新不会覆盖调优草稿，重新打开时使用最新快照', async () => {
+    const { rerender, catalog } = mount();
+    await flush();
+    await editWidth(640);
+    const nextWorkflow = { ...tuningWorkflow, nodes: [{ ...tuningWorkflow.nodes[0], parameters: { width: 900 } }] };
+    const panel = (open: boolean) => <ConfigProvider theme={{ token: { motion: false } }}>
+      <ParameterTuningPanel open={open} onClose={vi.fn()} currentWorkflow={nextWorkflow} catalog={catalog}
+        prepareWorkflowChange={() => ({ apply: async () => true, cancel() {}, isCurrent: () => true, isSameDocument: () => true })} onApplied={vi.fn()} />
+    </ConfigProvider>;
+    rerender(panel(true));
+    await flush();
+    expect(width()).toHaveValue('640');
+    rerender(panel(false));
+    await flush();
+    rerender(panel(true));
+    await flush();
+    expect(width()).toHaveValue('900');
+  });
+
   it('预览正文未结束也按期解除加载、显示原因，并允许手动重试', async () => {
     const body = deferred<unknown>(); let requests = 0;
     mount((base) => (url, init) => url === '/api/tuning/preview' && ++requests === 1

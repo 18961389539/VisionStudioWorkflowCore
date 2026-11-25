@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const testProductionBundle = process.env.VISIONSTUDIO_TEST_PRODUCTION_BUNDLE === '1';
+
 /**
  * 端到端测试：补 jsdom 覆盖不到的层次——真实布局引擎、Canvas、React Flow 的
  * 命中判定与事件链。真实后端冒烟还验证生产告警的 SignalR 推送、确认和刷新。
@@ -35,11 +37,10 @@ export default defineConfig({
     }
   ],
   webServer: {
-    // dev server 而非 preview：e2e 验证的是交互与布局，不验证产物压缩；
-    // 免去每次跑 e2e 都要先 build（沙箱下 build 需先清理 dist）。
-    command: 'npx vite --port 4173 --strictPort',
+    // 默认用 dev server；验证分包时显式启用 preview 并预先构建。
+    command: testProductionBundle ? 'npx vite preview --port 4173 --strictPort' : 'npx vite --port 4173 --strictPort',
     url: 'http://localhost:4173',
-    reuseExistingServer: !process.env.CI && !process.env.VISIONSTUDIO_E2E_API,
+    reuseExistingServer: !testProductionBundle && !process.env.CI && !process.env.VISIONSTUDIO_E2E_API,
     timeout: 120_000
   }
 });

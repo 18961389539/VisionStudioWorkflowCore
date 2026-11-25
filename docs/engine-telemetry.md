@@ -27,6 +27,28 @@ status/ready/productionReady），但它们回答的是"这一轮跑成没跑成
 失败与超时会把 span 状态置为 `ActivityStatusCode.Error`，`description` 用异常消息。
 异常本身没有被吞掉——`catch` 之后照原样重抛/记录，埋点不改变控制流。
 
+## 并行分支故障与执行记录
+
+`flow.parallel` 的融合分支共享运行数据，但运行级故障通过一个不可变快照原子发布：
+`NodeId`、原始 `Exception` 和 `Error` 属于同一次失败。首个成功发布的未处理故障胜出，
+后续失败不能覆盖错误文本或把节点 ID 与另一条异常拼接。这个“首个”由实际并发时序决定，
+不是固定优先 branch1；运行结果、错误码和异常观察者均读取同一快照。
+
+- 所有实际执行过的分支节点仍各自留下成功/失败报告，包括后续失败的原始错误文本与时间线。
+  `NodeRunReport.Summary` 新增 `parallelRegionId`、`parallelBranch`，表示最内层并行区域及分支；
+  隐式控制扇出、退化顺序执行也使用相同归属，普通顺序节点不增加这两个字段。
+- 不改变调度策略：分支内仍顺序执行；某分支失败后不再执行其剩余节点，但不主动取消兄弟分支。
+  并行段等待全部分支结束才向 Workflow Core 报错，失败时不执行后续 Join。
+  没执行的节点不会伪造成功记录，报告数组按完成入队顺序保存；开始顺序看 `ExecutionSequence`。
+- `flow.try` 只清除节点 ID **和原始异常实例**都匹配的已处理故障，不再依赖全局“最后失败节点”。
+  已处理的失败报告保留；交互调试清错同时清除故障归因，下一次失败可重新占据槽位。
+- 引擎扩展写入故障应调用 `VisionWorkflowData.RecordFault`，清除已处理故障须提供节点和异常；
+  原 `Error`、`FaultedException`、`FaultedNodeId`、`LastFaultedNodeId` 改为只读视图，
+  不允许继续分开赋值。需要成组读取时使用 `Fault` 快照。
+
+`ParallelDispositionTests` 使用同步屏障确保两条分支都已进入，并控制第二分支在首条失败记录发布后
+再完成/失败，验证错误归因不被覆盖、兄弟分支记录完整，以及失败分支尾部和 Join 不会执行。
+
 ## 为什么 span 建在 ValidateInputs 之后
 
 端口接错（类型不匹配、必填端口没连）在编译期或输入校验阶段就被拒绝，那属于**流程定义错误**，

@@ -5,8 +5,29 @@ using VisionStudio.Scripting;
 namespace VisionStudio.Engine.Tests;
 
 /// <summary>Script editor validation/completion: original-source lines and allowlisted API index.</summary>
+[Collection("Script assembly lifetime")]
 public sealed class ScriptEditorServiceTests
 {
+    [Fact]
+    public void Validate_DoesNotLoadExecutableScriptAssemblies()
+    {
+        var loaded = new List<string>();
+        AssemblyLoadEventHandler handler = (_, args) =>
+        {
+            var name = args.LoadedAssembly.GetName().Name!;
+            if (name.StartsWith("\u211B", StringComparison.Ordinal)) loaded.Add(name);
+        };
+        AppDomain.CurrentDomain.AssemblyLoad += handler;
+        try
+        {
+            for (var i = 0; i < 8; i++)
+                Assert.True(ScriptEditorService.Validate($"Output.Number = {i};").Valid);
+            Assert.False(ScriptEditorService.Validate("Output.Number = unknownPreviewValue;").Valid);
+        }
+        finally { AppDomain.CurrentDomain.AssemblyLoad -= handler; }
+        Assert.Empty(loaded);
+    }
+
     [Fact]
     public void Validate_AcceptsOutputScript()
     {
@@ -14,6 +35,9 @@ public sealed class ScriptEditorServiceTests
         Assert.True(result.Valid);
         Assert.DoesNotContain(result.Diagnostics, item => item.Severity == "Error");
     }
+
+    [CollectionDefinition("Script assembly lifetime", DisableParallelization = true)]
+    public sealed class ScriptAssemblyLifetimeCollection;
 
     [Fact]
     public void Validate_ReportsSyntaxAndForbiddenApiLines()

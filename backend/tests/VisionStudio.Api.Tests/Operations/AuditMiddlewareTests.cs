@@ -19,7 +19,7 @@ public sealed class AuditMiddlewareTests
     {
         using var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
-        var store = new AuditEventStore(db);
+        await using var store = new AuditEventStore(db);
         var middleware = new AuditMiddleware(_ => Task.CompletedTask);
         var maintenance = new StorageMaintenanceCoordinator();
         var context = new DefaultHttpContext();

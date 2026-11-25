@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using OpenCvSharp;
 using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
@@ -32,73 +31,15 @@ public sealed class WhiteBalanceNode : IVisionNodeExecutor
         var roi = context.TryGetValue("roi", out var roiValue) ? roiValue.Require<VisionRoi>("roi") : node.GetRoi();
         using var mask = roi?.BuildMask(sourceMat.Size(), cancellationToken);
 
-        Cv2.Split(sourceMat, out var channels);
-        double[] means = new double[3];
-        double[] gains = new double[3];
+        var manualGains = mode == "manual"
+            ? new[] { node.GetDouble("manualB", 1), node.GetDouble("manualG", 1), node.GetDouble("manualR", 1) }
+            : Array.Empty<double>();
+        var balanced = PreprocessEnhancementAlgorithms.WhiteBalance(sourceMat, mask, mode, percentile, preserve, manualGains, cancellationToken);
+        var means = balanced.Means;
+        var gains = balanced.Gains;
+        Mat? output = balanced.Image;
         try
         {
-            for (var i = 0; i < 3; i++) means[i] = PreprocessGapMath.MeanOf(channels[i], mask);
-            var meanAll = (means[0] + means[1] + means[2]) / 3;
-            if (meanAll <= 0)
-                throw new InvalidOperationException("image.whiteBalance requires a non-black image.");
-
-            if (mode == "manual")
-            {
-                gains[0] = node.GetDouble("manualB", 1);
-                gains[1] = node.GetDouble("manualG", 1);
-                gains[2] = node.GetDouble("manualR", 1);
-            }
-            else if (mode == "whitepatch")
-            {
-                var references = new double[3];
-                for (var i = 0; i < 3; i++)
-                {
-                    var histogram = PreprocessGapMath.Histogram(channels[i], mask);
-                    var total = histogram.Sum();
-                    references[i] = Math.Max(1, PreprocessGapMath.Percentile(histogram, total, percentile));
-                }
-                var reference = references.Max();
-                for (var i = 0; i < 3; i++) gains[i] = reference / references[i];
-            }
-            else
-            {
-                for (var i = 0; i < 3; i++) gains[i] = meanAll / Math.Max(1, means[i]);
-            }
-
-            for (var i = 0; i < 3; i++)
-            {
-                if (!double.IsFinite(gains[i]) || gains[i] <= 0)
-                    throw new InvalidOperationException($"image.whiteBalance computed an invalid gain for channel {i}.");
-                gains[i] = Math.Clamp(gains[i], .01, 20);
-            }
-
-            if (preserve)
-            {
-                var adjusted = (means[0] * gains[0] + means[1] * gains[1] + means[2] * gains[2]) / 3;
-                if (adjusted > 1e-9)
-                {
-                    var k = meanAll / adjusted;
-                    for (var i = 0; i < 3; i++) gains[i] = Math.Clamp(gains[i] * k, .01, 20);
-                }
-            }
-
-            for (var i = 0; i < 3; i++)
-            {
-                using var scaled = new Mat();
-                channels[i].ConvertTo(scaled, MatType.CV_8U, gains[i], 0);
-                scaled.CopyTo(channels[i]);
-            }
-            var merged = new Mat();
-            Cv2.Merge(channels, merged);
-            Mat? output = merged;
-            if (mask is not null)
-            {
-                var composited = PreprocessGapMath.Composite(merged, sourceMat, mask);
-                merged.Dispose();
-                output = composited;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
             var image = VisionImage.Own(output);
             output = null;
             return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
@@ -134,7 +75,7 @@ public sealed class WhiteBalanceNode : IVisionNodeExecutor
         }
         finally
         {
-            foreach (var channel in channels) channel.Dispose();
+            output?.Dispose();
         }
     }
 }
@@ -167,38 +108,8 @@ public sealed class QualityMetricsNode : IVisionNodeExecutor
         var roi = context.TryGetValue("roi", out var roiValue) ? roiValue.Require<VisionRoi>("roi") : node.GetRoi();
         using var mask = roi?.BuildMask(sourceMat.Size(), cancellationToken);
 
-        using var gray = sourceMat.Channels() == 3 ? new Mat() : sourceMat.Clone();
-        if (sourceMat.Channels() == 3) Cv2.CvtColor(sourceMat, gray, ColorConversionCodes.BGR2GRAY);
-
-        var effectiveMask = mask is not null && !mask.Empty() ? mask : null;
-        var pixelCount = PreprocessGapMath.MaskedCount(effectiveMask, (long)gray.Rows * gray.Cols);
-        if (pixelCount <= 0) throw new InvalidOperationException("image.qualityMetrics ROI selects no pixels.");
-
-        var brightness = PreprocessGapMath.MeanOf(gray, effectiveMask);
-        var histogram = PreprocessGapMath.Histogram(gray, effectiveMask);
-        var contrast = PreprocessGapMath.Percentile(histogram, pixelCount, 95) - PreprocessGapMath.Percentile(histogram, pixelCount, 5);
-        var entropy = PreprocessGapMath.Entropy(histogram, pixelCount);
-
-        using var gx = new Mat(); using var gy = new Mat();
-        Cv2.Sobel(gray, gx, MatType.CV_32F, 1, 0, 3);
-        Cv2.Sobel(gray, gy, MatType.CV_32F, 0, 1, 3);
-        using var gx2 = new Mat(); using var gy2 = new Mat(); using var energy = new Mat();
-        Cv2.Multiply(gx, gx, gx2); Cv2.Multiply(gy, gy, gy2); Cv2.Add(gx2, gy2, energy);
-        var sharpness = PreprocessGapMath.MeanOf(energy, effectiveMask);
-
-        // 噪声估计：Laplacian 高频残差的平均绝对值。对零均值高斯噪声 E|L| = ||k||₂·σ·sqrt(2/π)，
-        // 3×3 Laplacian 的 ||k||₂ = sqrt(20)，所以 σ ≈ mean|L| / 3.5676。
-        using var laplacian = new Mat();
-        Cv2.Laplacian(gray, laplacian, MatType.CV_32F, 3);
-        using var absolute = new Mat();
-        Cv2.Absdiff(laplacian, Scalar.All(0), absolute);
-        var meanAbs = PreprocessGapMath.MeanOf(absolute, effectiveMask);
-        var noiseSigma = meanAbs / (Math.Sqrt(2 / Math.PI) * Math.Sqrt(20));
-
-        var saturated = PreprocessGapMath.CountAtLeast(gray, effectiveMask, saturation);
-        var crushed = PreprocessGapMath.CountAtMost(gray, effectiveMask, dark);
-        var saturationRatio = saturated / (double)pixelCount;
-        var darkRatio = crushed / (double)pixelCount;
+        var metrics = PreprocessEnhancementAlgorithms.MeasureQuality(sourceMat, mask, saturation, dark);
+        var (brightness, contrast, sharpness, noiseSigma, saturationRatio, darkRatio, entropy, pixelCount) = metrics;
 
         cancellationToken.ThrowIfCancellationRequested();
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("brightness", brightness), ("contrast", contrast),
@@ -343,17 +254,10 @@ public sealed class ChannelMixNode : IVisionNodeExecutor
         var offset = node.GetDouble("offset", 0);
         if (!double.IsFinite(offset)) throw new InvalidOperationException("image.channelMix offset must be finite.");
 
-        Mat? mixed = null; Mat? output = null;
+        Mat? output = null;
         try
         {
-            var kernel = new float[used.Length];
-            for (var i = 0; i < used.Length; i++) kernel[i] = (float)used[i];
-            using var kernelMat = new Mat(1, used.Length, MatType.CV_32FC1);
-            Marshal.Copy(kernel, 0, kernelMat.Data, kernel.Length);
-            mixed = new Mat();
-            Cv2.Transform(sourceMat, mixed, kernelMat);
-            output = new Mat();
-            mixed.ConvertTo(output, MatType.CV_8U, 1, offset);
+            output = PreprocessEnhancementAlgorithms.MixChannels(sourceMat, used, offset);
             cancellationToken.ThrowIfCancellationRequested();
             var image = VisionImage.Own(output);
             output = null;
@@ -387,7 +291,6 @@ public sealed class ChannelMixNode : IVisionNodeExecutor
         }
         finally
         {
-            mixed?.Dispose();
             output?.Dispose();
         }
     }

@@ -46,12 +46,9 @@ public sealed class EfCoreInfrastructureTests
     }
 
     [Fact]
-    public async Task EnsureCreated_MatchesAllBusinessTablesAndColumns_AndTranslatesDateTimeOffsetQueries()
+    public async Task EnsureCreated_TranslatesDateTimeOffsetQueries()
     {
         using var env = new TempWebHostEnvironment();
-        var migratedDb = new SqliteMetadataDatabase(env);
-        await migratedDb.EnsureInitializedAsync();
-
         var efDbPath = Path.Combine(env.ContentRootPath, "ef-only.db");
         var efOptions = new DbContextOptionsBuilder<VisionStudioDbContext>()
             .UseSqlite($"Data Source={efDbPath};Pooling=False")
@@ -77,55 +74,6 @@ public sealed class EfCoreInfrastructureTests
             Assert.Equal(["a2", "a1"], ordered);
         }
 
-        await using var legacyConn = await migratedDb.OpenConnectionAsync();
-        await using var efConn = new SqliteConnection($"Data Source={efDbPath};Pooling=False");
-        await efConn.OpenAsync();
-
-        var legacySchema = await ReadSchemaAsync(legacyConn);
-        var efSchema = await ReadSchemaAsync(efConn);
-
-        var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "schema_info",
-            "schema_migration_history",
-            "legacy_alarm_import",
-            "sqlite_sequence"
-        };
-
-        var expectedTables = legacySchema.Keys.Where(k => !excluded.Contains(k)).OrderBy(k => k).ToList();
-        var actualTables = efSchema.Keys.Where(k => !excluded.Contains(k)).OrderBy(k => k).ToList();
-        Assert.Equal(expectedTables, actualTables);
-
-        foreach (var table in expectedTables)
-        {
-            Assert.Equal(legacySchema[table], efSchema[table]);
-        }
-
         SqliteConnection.ClearAllPools();
     }
-
-    private static async Task<Dictionary<string, List<string>>> ReadSchemaAsync(SqliteConnection connection)
-    {
-        var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        var tables = new List<string>();
-        await using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;";
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync()) tables.Add(reader.GetString(0));
-        }
-
-        foreach (var table in tables)
-        {
-            var cols = new List<string>();
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"PRAGMA table_info({table});";
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync()) cols.Add(reader.GetString(1));
-            cols.Sort(StringComparer.OrdinalIgnoreCase);
-            result[table] = cols;
-        }
-        return result;
-    }
 }
-

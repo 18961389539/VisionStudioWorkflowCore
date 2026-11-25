@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Engine.Nodes;
@@ -69,66 +70,14 @@ public sealed class HomographyRegistrationNode : IVisionNodeExecutor
                 sourcePoints.Count, timer));
         }
 
-        var source = sourcePoints.Select(point => new Point2f((float)point.X, (float)point.Y)).ToArray();
-        var target = targetPoints.Select(point => new Point2f((float)point.X, (float)point.Y)).ToArray();
-        using var sourceMat = Mat.FromArray(source);
-        using var targetMat = Mat.FromArray(target);
-        using var mask = new Mat();
-        using var homography = Cv2.FindHomography(
-            sourceMat, targetMat, method, threshold, mask, maxIterations, confidence);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (homography is null || homography.Empty() || homography.Rows != 3 || homography.Cols != 3)
+        var solution = MatchingGeometryAlgorithms.Homography(sourcePoints, targetPoints, method, threshold,
+            maxIterations, confidence, minInliers, cancellationToken, out var failureReason);
+        if (solution is null)
         {
             timer.Stop();
-            return ValueTask.FromResult(Missing(
-                "homography solver returned no model (degenerate or collinear correspondences)", sourcePoints.Count, timer));
+            return ValueTask.FromResult(Missing(failureReason, sourcePoints.Count, timer));
         }
-
-        var h = new double[9];
-        for (var row = 0; row < 3; row++)
-            for (var column = 0; column < 3; column++)
-                h[row * 3 + column] = homography.At<double>(row, column);
-        if (!double.IsFinite(h[8]) || Math.Abs(h[8]) < 1e-12)
-        {
-            timer.Stop();
-            return ValueTask.FromResult(Missing(
-                "homography is degenerate (h22 is zero), the correspondences map a line to infinity", sourcePoints.Count, timer));
-        }
-        // 归一到 h22 = 1，后面的分解与 diagnostics 才有可比性。
-        for (var index = 0; index < 9; index++) h[index] /= h[8];
-
-        mask.GetArray(out byte[] maskData);
-        var inlierCount = 0;
-        var maskAvailable = !mask.Empty() && maskData.Length >= sourcePoints.Count;
-        for (var index = 0; index < sourcePoints.Count; index++)
-            if (!maskAvailable || maskData[index] != 0) inlierCount++;
-        if (inlierCount < minInliers)
-        {
-            timer.Stop();
-            return ValueTask.FromResult(Missing(
-                $"only {inlierCount} inliers survived (minInliers={minInliers})", sourcePoints.Count, timer));
-        }
-
-        double sumSquares = 0;
-        var maxError = 0d;
-        for (var index = 0; index < sourcePoints.Count; index++)
-        {
-            var projected = Project(h, sourcePoints[index]);
-            var dx = projected.X - targetPoints[index].X;
-            var dy = projected.Y - targetPoints[index].Y;
-            var error = Math.Sqrt(dx * dx + dy * dy);
-            sumSquares += error * error;
-            if (error > maxError) maxError = error;
-        }
-        var rms = Math.Sqrt(sumSquares / sourcePoints.Count);
-
-        var (scaleX, scaleY, rotationDeg, skewDeg) = Decompose(h, sourcePoints);
-        var corners = new[]
-        {
-            Project(h, sourcePoints[0]),
-            Project(h, sourcePoints[sourcePoints.Count - 1])
-        };
+        var (h, inlierCount, rms, maxError, scaleX, scaleY, rotationDeg, skewDeg, corners) = solution;
 
         var transform = new VisionTransform2D(
             "source", "target", "px",
@@ -161,14 +110,9 @@ public sealed class HomographyRegistrationNode : IVisionNodeExecutor
         if (warpImage)
         {
             var sourceImage = context.RequireImage("image");
-            using var matrix = new Mat(3, 3, MatType.CV_64F);
-            for (var row = 0; row < 3; row++)
-                for (var column = 0; column < 3; column++)
-                    matrix.Set(row, column, h[row * 3 + column]);
             var width = outputWidth > 0 ? outputWidth : sourceImage.Width;
             var height = outputHeight > 0 ? outputHeight : sourceImage.Height;
-            var warped = new Mat();
-            Cv2.WarpPerspective(sourceImage.Mat, warped, matrix, new Size(width, height));
+            var warped = MatchingGeometryAlgorithms.Warp(sourceImage.Mat, h, width, height);
             outputs["warped"] = VisionValue.Image(VisionImage.Own(warped));
         }
 
@@ -199,44 +143,6 @@ public sealed class HomographyRegistrationNode : IVisionNodeExecutor
         if (!double.IsFinite(point.X) || !double.IsFinite(point.Y)
             || Math.Abs(point.X) > 100_000_000 || Math.Abs(point.Y) > 100_000_000)
             throw new InvalidOperationException($"match.homography {port} contains a non-finite or out-of-range coordinate.");
-    }
-
-    private static VisionPoint2D Project(double[] h, VisionPoint2D point)
-    {
-        var denominator = h[6] * point.X + h[7] * point.Y + h[8];
-        if (Math.Abs(denominator) < 1e-12)
-            throw new InvalidOperationException("match.homography maps a correspondence point to infinity.");
-        return new VisionPoint2D(
-            (h[0] * point.X + h[1] * point.Y + h[2]) / denominator,
-            (h[3] * point.X + h[4] * point.Y + h[5]) / denominator);
-    }
-
-    /// <summary>在点集质心处取雅可比，得到局部尺度/旋转/错切——透视变换没有全局的单一角度。</summary>
-    private static (double ScaleX, double ScaleY, double RotationDeg, double SkewDeg) Decompose(
-        double[] h, IReadOnlyList<VisionPoint2D> points)
-    {
-        double cx = 0, cy = 0;
-        foreach (var point in points) { cx += point.X; cy += point.Y; }
-        cx /= points.Count; cy /= points.Count;
-
-        var w = h[6] * cx + h[7] * cy + h[8];
-        if (Math.Abs(w) < 1e-12) return (0, 0, 0, 0);
-        var numeratorX = h[0] * cx + h[1] * cy + h[2];
-        var numeratorY = h[3] * cx + h[4] * cy + h[5];
-        var denominator2 = w * w;
-
-        var duDx = (h[0] * w - numeratorX * h[6]) / denominator2;
-        var dvDx = (h[3] * w - numeratorY * h[6]) / denominator2;
-        var duDy = (h[1] * w - numeratorX * h[7]) / denominator2;
-        var dvDy = (h[4] * w - numeratorY * h[7]) / denominator2;
-
-        var scaleX = Math.Sqrt(duDx * duDx + dvDx * dvDx);
-        var scaleY = Math.Sqrt(duDy * duDy + dvDy * dvDy);
-        var rotation = Math.Atan2(dvDx, duDx) * 180.0 / Math.PI;
-        var dot = duDx * duDy + dvDx * dvDy;
-        var cosine = scaleX > 1e-12 && scaleY > 1e-12 ? dot / (scaleX * scaleY) : 0;
-        var angle = Math.Acos(Math.Clamp(cosine, -1, 1)) * 180.0 / Math.PI;
-        return (scaleX, scaleY, rotation, 90.0 - angle);
     }
 
     private static NodeExecutorResult Missing(string reason, int pointCount, Stopwatch timer)
@@ -325,90 +231,21 @@ public sealed class PnpPoseNode : IVisionNodeExecutor
         if (!double.IsFinite(maxRms) || maxRms is < 0 or > 1000)
             throw new InvalidOperationException("match.pose3d maxReprojectionRms must be within 0..1000 (0 disables).");
 
-        using var cameraMat = new Mat(3, 3, MatType.CV_64F);
-        for (var row = 0; row < 3; row++)
-            for (var column = 0; column < 3; column++)
-                cameraMat.Set(row, column, camera[row * 3 + column]);
-        // 畸变矩阵要么是真正的空 Mat（无畸变），要么必须是 1xN 且 N∈{4,5,8,12,14}；1x1 会被 OpenCV 直接拒绝。
-        using var distortionMat = distortion.Length == 0
-            ? new Mat()
-            : new Mat(1, distortion.Length, MatType.CV_64F);
-        for (var index = 0; index < distortion.Length; index++)
-            distortionMat.Set(0, index, distortion[index]);
-
-        using var rvec = new Mat(3, 1, MatType.CV_64F, Scalar.All(0));
-        using var tvec = new Mat(3, 1, MatType.CV_64F, Scalar.All(0));
-        if (useGuess)
-        {
-            for (var index = 0; index < 3; index++)
-            {
-                rvec.Set(index, 0, guessRvec[index]);
-                tvec.Set(index, 0, guessTvec[index]);
-            }
-        }
-
         // ITERATIVE 内部先用 DLT 求初值，少于 6 点会抛出难懂的断言；提前给出可操作的提示。
         if (solverName == "iterative" && objects.Length < 6)
             throw new InvalidOperationException(
                 $"match.pose3d iterative solver needs at least 6 points (got {objects.Length}) because OpenCV seeds it with DLT; use solver=ippe for a planar target or solver=ap3p for exactly 4.");
 
-        try
-        {
-            using var objectMat = Mat.FromArray(objects);
-            using var imageMat = Mat.FromArray(imagePoints.Select(point => new Point2f((float)point.X, (float)point.Y)).ToArray());
-            Cv2.SolvePnP(objectMat, imageMat, cameraMat, distortionMat, rvec, tvec, useGuess, solver);
-        }
-        catch (OpenCVException exception)
-        {
-            throw new InvalidOperationException($"match.pose3d PnP failed: {exception.Message}", exception);
-        }
-
-        // SolvePnP 不回报状态：输出里出现 NaN/Inf 就是没解出来。
-        if (!IsFiniteVector(rvec) || !IsFiniteVector(tvec))
+        var solution = MatchingGeometryAlgorithms.Pose(objects, imagePoints, camera, distortion, solver, useGuess, guessRvec, guessTvec);
+        if (solution is null)
         {
             timer.Stop();
             return ValueTask.FromResult(Missing("PnP solver did not converge (degenerate or collinear object points)",
                 objects.Length, timer));
         }
-
-        using var rotationMat = new Mat();
-        using var jacobian = new Mat();
-        Cv2.Rodrigues(rvec, rotationMat, jacobian);
-        var rvecValues = new[] { rvec.At<double>(0, 0), rvec.At<double>(1, 0), rvec.At<double>(2, 0) };
-        var rotationMatrix = new double[3, 3];
-        for (var row = 0; row < 3; row++)
-            for (var column = 0; column < 3; column++)
-                rotationMatrix[row, column] = rotationMat.At<double>(row, column);
-        var matrix = new double[16];
-        for (var row = 0; row < 3; row++)
-        {
-            for (var column = 0; column < 3; column++)
-                matrix[row * 4 + column] = rotationMatrix[row, column];
-            matrix[row * 4 + 3] = tvec.At<double>(row, 0);
-        }
-        matrix[15] = 1;
-
-        // 重投影自检：给机器人之前必须知道这套位姿到底对不对得上图像。
-        var cameraArray = new double[3, 3];
-        for (var row = 0; row < 3; row++)
-            for (var column = 0; column < 3; column++)
-                cameraArray[row, column] = camera[row * 3 + column];
-        var tvecValues = new[] { tvec.At<double>(0, 0), tvec.At<double>(1, 0), tvec.At<double>(2, 0) };
-        Cv2.ProjectPoints(objects, rvecValues, tvecValues, cameraArray, distortion, out Point2f[] reprojected, out _, 0);
-        double sumSquares = 0;
-        var maxError = 0d;
-        for (var index = 0; index < objects.Length; index++)
-        {
-            var dx = reprojected[index].X - imagePoints[index].X;
-            var dy = reprojected[index].Y - imagePoints[index].Y;
-            var error = Math.Sqrt(dx * dx + dy * dy);
-            sumSquares += error * error;
-            if (error > maxError) maxError = error;
-        }
-        var rms = Math.Sqrt(sumSquares / objects.Length);
+        var (matrix, rvecValues, rx, ry, rz, rms, maxError) = solution;
         var withinGate = maxRms <= 0 || rms <= maxRms;
 
-        var (rx, ry, rz) = EulerZyx(rotationMatrix);
         var x = matrix[3];
         var y = matrix[7];
         var z = matrix[11];
@@ -432,9 +269,9 @@ public sealed class PnpPoseNode : IVisionNodeExecutor
                 ["rzDeg"] = VisionValue.Double(rz),
                 ["rvecJson"] = VisionValue.String(JsonSerializer.Serialize(new[]
                 {
-                    Math.Round(rvec.At<double>(0, 0), 8),
-                    Math.Round(rvec.At<double>(1, 0), 8),
-                    Math.Round(rvec.At<double>(2, 0), 8)
+                    Math.Round(rvecValues[0], 8),
+                    Math.Round(rvecValues[1], 8),
+                    Math.Round(rvecValues[2], 8)
                 })),
                 ["tvecJson"] = VisionValue.String(JsonSerializer.Serialize(new[]
                 {
@@ -506,36 +343,6 @@ public sealed class PnpPoseNode : IVisionNodeExecutor
             result[index] = new Point3f((float)row[0], (float)row[1], (float)row[2]);
         }
         return result;
-    }
-
-    /// <summary>ZYX 欧拉角（先绕 Z、再 Y、最后 X），与机器人常用 RPY 口径一致。</summary>
-    private static (double Rx, double Ry, double Rz) EulerZyx(double[,] rotation)
-    {
-        double R(int row, int column) => rotation[row, column];
-        var sy = Math.Sqrt(R(0, 0) * R(0, 0) + R(1, 0) * R(1, 0));
-        double rx, ry, rz;
-        if (sy > 1e-6)
-        {
-            rx = Math.Atan2(R(2, 1), R(2, 2));
-            ry = Math.Atan2(-R(2, 0), sy);
-            rz = Math.Atan2(R(1, 0), R(0, 0));
-        }
-        else
-        {
-            rx = Math.Atan2(-R(1, 2), R(1, 1));
-            ry = Math.Atan2(-R(2, 0), sy);
-            rz = 0;
-        }
-        const double toDegrees = 180.0 / Math.PI;
-        return (rx * toDegrees, ry * toDegrees, rz * toDegrees);
-    }
-
-    private static bool IsFiniteVector(Mat column)
-    {
-        var rows = column.Rows;
-        for (var row = 0; row < rows; row++)
-            if (!double.IsFinite(column.At<double>(row, 0))) return false;
-        return true;
     }
 
     private static NodeExecutorResult Missing(string reason, int pointCount, Stopwatch timer)

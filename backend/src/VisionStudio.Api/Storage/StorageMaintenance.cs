@@ -239,12 +239,12 @@ public sealed class StorageMaintenanceCoordinator
         }
     }
 
-    public IDisposable? TryEnterRequest()
+    public IDisposable? TryEnterRequest(bool allowRestartPending = false)
     {
         lock (_sync)
         {
-            // Q08：待重启门与维护/失败锁同为阻断语义（纵深防御——中间件已单独拦截）。
-            if (_maintenance || _failureLocked || _restartPending) return null;
+            // Only restore's audit may enter while restart is pending; exclusive maintenance always blocks.
+            if (_maintenance || _failureLocked || (_restartPending && !allowRestartPending)) return null;
             _activeRequests++;
             return new RequestLease(this);
         }

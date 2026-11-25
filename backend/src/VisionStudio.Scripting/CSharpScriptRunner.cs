@@ -26,8 +26,8 @@ internal static partial class CSharpScriptRunner
 {
     private const int MaxCachedScripts = 64;
     private static readonly object CacheGate = new();
-    private static readonly Dictionary<string, LinkedListNode<(string Hash, Lazy<Script<object>> Script)>> Cache = new(StringComparer.Ordinal);
-    private static readonly LinkedList<(string Hash, Lazy<Script<object>> Script)> CacheLru = new();
+    private static readonly Dictionary<string, LinkedListNode<(string Hash, Lazy<CompiledScript> Script)>> Cache = new(StringComparer.Ordinal);
+    private static readonly LinkedList<(string Hash, Lazy<CompiledScript> Script)> CacheLru = new();
     private static readonly Regex ForbiddenDirective = new(@"^\s*#(r|load|line)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
     private static readonly ScriptOptions Options = BuildOptions();
 
@@ -60,12 +60,8 @@ internal static partial class CSharpScriptRunner
         object? returnValue = null;
         try
         {
-            var state = await script.RunAsync(globals, cancellationToken: cancellationToken).ConfigureAwait(false);
-            returnValue = state.ReturnValue;
-        }
-        catch (CompilationErrorException ex)
-        {
-            throw new ScriptCompilationException(FormatDiagnostics(ex.Diagnostics));
+            cancellationToken.ThrowIfCancellationRequested();
+            returnValue = await script.RunAsync(globals).ConfigureAwait(false);
         }
         catch (ScriptUserException)
         {
@@ -137,7 +133,7 @@ internal static partial class CSharpScriptRunner
         try
         {
             var script = CSharpScript.Create<object>(source, Options, globalsType: typeof(ScriptGlobals));
-            foreach (var diagnostic in script.Compile(cancellationToken))
+            foreach (var diagnostic in script.GetCompilation().GetDiagnostics(cancellationToken))
                 AddDiagnostic(diagnostics, diagnostic);
         }
         catch (CompilationErrorException ex)
@@ -232,10 +228,10 @@ internal static partial class CSharpScriptRunner
             throw new ScriptUserException("E_IMAGE", $"The {role} has {(long)image.Rows * image.Cols:N0} pixels; the limit is {maxPixels:N0}.");
     }
 
-    private static Script<object> GetOrCompile(string source, string sourceHash, CancellationToken cancellationToken)
+    private static CompiledScript GetOrCompile(string source, string sourceHash, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        LinkedListNode<(string Hash, Lazy<Script<object>> Script)> entry;
+        LinkedListNode<(string Hash, Lazy<CompiledScript> Script)> entry;
         lock (CacheGate)
         {
             if (Cache.TryGetValue(sourceHash, out var existing))
@@ -251,10 +247,10 @@ internal static partial class CSharpScriptRunner
                     CacheLru.RemoveLast();
                     Cache.Remove(oldest.Value.Hash);
                 }
-                var lazy = new Lazy<Script<object>>(
+                var lazy = new Lazy<CompiledScript>(
                     () => CompileScript(source),
                     LazyThreadSafetyMode.ExecutionAndPublication);
-                entry = new LinkedListNode<(string Hash, Lazy<Script<object>> Script)>((sourceHash, lazy));
+                entry = new LinkedListNode<(string Hash, Lazy<CompiledScript> Script)>((sourceHash, lazy));
                 CacheLru.AddFirst(entry);
                 Cache[sourceHash] = entry;
             }
@@ -280,7 +276,7 @@ internal static partial class CSharpScriptRunner
         }
     }
 
-    private static Script<object> CompileScript(string source)
+    private static CompiledScript CompileScript(string source)
     {
         var parseOptions = CSharpParseOptions.Default
             .WithKind(SourceCodeKind.Script)
@@ -300,13 +296,18 @@ internal static partial class CSharpScriptRunner
         var tracked = new LineTrackingRewriter().Visit(tree.GetRoot(CancellationToken.None))!;
         var rewritten = new LoopGuardRewriter().Visit(tracked)!.ToFullString();
         var script = CSharpScript.Create<object>(rewritten, Options, globalsType: typeof(ScriptGlobals));
-        var diagnostics = script.Compile(CancellationToken.None)
+        var compilation = script.GetCompilation();
+        using var image = new MemoryStream();
+        var emitted = compilation.Emit(image);
+        var diagnostics = emitted.Diagnostics
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .ToArray();
         if (diagnostics.Length > 0)
             throw new ScriptCompilationException(FormatDiagnostics(diagnostics));
 
-        return script;
+        var entryPoint = compilation.GetEntryPoint(CancellationToken.None)
+            ?? throw new InvalidOperationException("Compiled script has no submission entry point.");
+        return new CompiledScript(image.ToArray(), entryPoint.ContainingType.MetadataName, entryPoint.MetadataName);
     }
 
     private static IReadOnlyList<string> FormatDiagnostics(IEnumerable<Diagnostic> diagnostics)

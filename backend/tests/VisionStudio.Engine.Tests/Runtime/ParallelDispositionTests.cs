@@ -14,6 +14,88 @@ namespace VisionStudio.Engine.Tests;
 public sealed class ParallelDispositionTests
 {
     [Fact]
+    public void ConcurrentFaults_PublishOneWholeSnapshot_AndKeepTheWinner()
+    {
+        using var data = new VisionWorkflowData();
+        var failures = Enumerable.Range(0, 64)
+            .ToDictionary(i => $"node-{i}", i => new InvalidOperationException($"failure-{i}"));
+        Parallel.ForEach(failures, failure => data.RecordFault(failure.Key, failure.Value));
+
+        var fault = Assert.IsType<VisionNodeFault>(data.Fault);
+        Assert.Same(failures[fault.NodeId], fault.Exception);
+        Assert.Equal($"{fault.NodeId}: {fault.Exception.Message}", fault.Error);
+        Assert.Equal(fault.Error, data.Error);
+        data.RecordFault("later", new ArgumentException("later failure"));
+        Assert.Same(fault, data.Fault);
+    }
+
+    [Fact]
+    public void HandledFault_ClearRequiresMatchingNodeAndException_AndDebugResetClearsAttribution()
+    {
+        using var data = new VisionWorkflowData();
+        var exception = new InvalidOperationException("body failure");
+        data.RecordFault("body", exception);
+        var first = data.Fault;
+        data.ClearHandledTryError("sibling", exception);
+        Assert.Same(first, data.Fault);
+        data.ClearHandledTryError("body", new InvalidOperationException(exception.Message));
+        Assert.Same(first, data.Fault);
+        data.ClearHandledTryError("body", exception);
+        Assert.Null(data.Fault);
+
+        var retryFailure = new ArgumentException("next attempt");
+        data.RecordFault("body", retryFailure);
+        data.ClearHandledTryError("body", exception);
+        Assert.Same(retryFailure, data.Fault?.Exception);
+        data.ClearError();
+        Assert.Null(data.Error);
+        Assert.Null(data.FaultedException);
+        Assert.Null(data.FaultedNodeId);
+        data.RecordFault("after-reset", exception);
+        Assert.Equal("after-reset", data.Fault?.NodeId);
+        Assert.Same(exception, data.Fault?.Exception);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task ParallelFault_KeepsFirstFailureCoherent_AndRecordsSiblingOutcome(bool failSecond, bool firstTimeout)
+    {
+        var executor = new CoordinatedFaultExecutor(failSecond, firstTimeout);
+        var observer = new FaultObserver();
+        await using var provider = BuildProvider(executor, observer);
+        var workflow = new WorkflowDefinition("parallel-fault", "Parallel Fault",
+            [Node("p", "flow.parallel"), Node("b1", executor.Type), Node("b2", executor.Type),
+             Node("after1", executor.Type), Node("after2", executor.Type), Node("j", "flow.join")],
+            [Control("c1", "p", "branch1", "b1"), Control("c2", "p", "branch2", "b2"),
+             Control("c3", "b1", "next", "after1"), Control("c4", "b2", "next", "after2"),
+             Control("c5", "after1", "next", "j", "branch1"), Control("c6", "after2", "next", "j", "branch2")]);
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(workflow,
+            new VisionRunOptions(TimeoutMs: 30000, ProgressObserver: progress =>
+            {
+                if (progress.NodeId == "b1" && progress.Success == false)
+                    executor.FirstReported.TrySetResult();
+            }));
+
+        Assert.False(result.Success);
+        Assert.Equal(firstTimeout ? VisionRunErrorCodes.NodeTimeout : VisionRunErrorCodes.NodeFailure, result.ErrorCode);
+        Assert.Equal($"b1: {executor.FirstFailure.Message}", result.Error);
+        var observed = Assert.Single(observer.Calls);
+        Assert.Equal("b1", observed.Context.NodeId);
+        Assert.Same(executor.FirstFailure, observed.Exception);
+        Assert.False(Report(result, "b1").Success);
+        Assert.Equal(!failSecond, Report(result, "b2").Success);
+        Assert.DoesNotContain(result.NodeReports, x => x.NodeId is "after1" or "j");
+        Assert.Equal(!failSecond, result.NodeReports.Any(x => x.NodeId == "after2"));
+        foreach (var report in result.NodeReports.Where(x => x.NodeId != "p"))
+        {
+            Assert.Equal("p", report.Summary["parallelRegionId"]);
+            Assert.Equal(report.NodeId == "b1" ? "branch1" : "branch2", report.Summary["parallelBranch"]);
+        }
+    }
+
+    [Fact]
     public async Task ParallelBranches_NgBranchWins_WhenItRunsFirst()
     {
         var result = await RunAsync(TwoBranchWorkflow("par-ng-first", pass1: false, pass2: true));
@@ -138,6 +220,7 @@ public sealed class ParallelDispositionTests
         Assert.True(result.Success, result.Error);
         Assert.Equal("NG", result.QualityDisposition);
         Assert.False(Report(result, "r1").Summary.ContainsKey("dispositionScope"));
+        Assert.False(Report(result, "r1").Summary.ContainsKey("parallelRegionId"));
     }
 
     [Fact]
@@ -205,6 +288,10 @@ public sealed class ParallelDispositionTests
         var second = Report(result, "s2");
         var overlapMs = Math.Min(first.EndOffsetMs, second.EndOffsetMs) - Math.Max(first.StartOffsetMs, second.StartOffsetMs);
         Assert.True(overlapMs > 100, $"implicit branches did not overlap: {overlapMs:F1}ms");
+        Assert.Equal("source", first.Summary["parallelRegionId"]);
+        Assert.Equal("source", second.Summary["parallelRegionId"]);
+        Assert.Equal("branch1", first.Summary["parallelBranch"]);
+        Assert.Equal("branch2", second.Summary["parallelBranch"]);
     }
 
     private static async Task<WorkflowRunResult> RunAsync(WorkflowDefinition workflow)
@@ -259,7 +346,7 @@ public sealed class ParallelDispositionTests
         ["delayMs"] = JsonSerializer.SerializeToElement(delayMs)
     };
 
-    private static ServiceProvider BuildProvider()
+    private static ServiceProvider BuildProvider(CoordinatedFaultExecutor? faultExecutor = null, FaultObserver? observer = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -272,6 +359,9 @@ public sealed class ParallelDispositionTests
         registry.Register(BuiltInNodeCatalog.Require("flow.join"), new JoinNode(), "builtin");
         registry.Register(GateExecutor.Catalog, new GateExecutor(), "test");
         registry.Register(SlowExecutor.Catalog, new SlowExecutor(), "test");
+        if (faultExecutor is not null)
+            registry.Register(CoordinatedFaultExecutor.Catalog, faultExecutor, "test");
+        if (observer is not null) services.AddSingleton<IVisionRunExceptionObserver>(observer);
         services.AddSingleton(registry);
         services.AddSingleton<VisionNodeDispatcher>();
         services.AddSingleton<VisionNodeRuntime>();
@@ -282,6 +372,41 @@ public sealed class ParallelDispositionTests
         services.AddSingleton<WorkflowPlanCache>();
         services.AddTransient<WorkflowCoreVisionRunner>();
         return services.BuildServiceProvider();
+    }
+
+    private sealed class FaultObserver : IVisionRunExceptionObserver
+    {
+        public List<(VisionRunExceptionContext Context, Exception Exception)> Calls { get; } = [];
+        public void OnRunException(VisionRunExceptionContext context, Exception exception) => Calls.Add((context, exception));
+    }
+
+    private sealed class CoordinatedFaultExecutor(bool failSecond, bool firstTimeout) : IVisionNodeExecutor
+    {
+        private readonly TaskCompletionSource _bothEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _entered;
+        public string Type => "test.parallel-fault";
+        public Exception FirstFailure { get; } = firstTimeout
+            ? new NodeTimeoutException("test.parallel-fault", 100, TimeSpan.FromMilliseconds(101))
+            : new InvalidOperationException("first branch failure", new IOException("root cause"));
+        public TaskCompletionSource FirstReported { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public static NodeCatalogItem Catalog { get; } = new(
+            "test.parallel-fault", "Parallel Fault", "Test",
+            [new PortDescriptor("exec", VisionDataType.Control)],
+            [new PortDescriptor("next", VisionDataType.Control)], [],
+            Capabilities: new VisionToolCapabilities(ExecutionMode: VisionExecutionMode.Pipeline));
+
+        public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+        {
+            if (node.Id is "b1" or "b2")
+            {
+                if (Interlocked.Increment(ref _entered) == 2) _bothEntered.TrySetResult();
+                await _bothEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                if (node.Id == "b1") throw FirstFailure;
+                await FirstReported.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                if (failSecond) throw new ArgumentException("second branch failure");
+            }
+            return new NodeExecutorResult(new Dictionary<string, VisionValue>(), new Dictionary<string, object?>());
+        }
     }
 
     private sealed class GateExecutor : IVisionNodeExecutor

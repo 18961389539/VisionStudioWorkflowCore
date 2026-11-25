@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import {
   Alert, Button, Card, Col, Divider, Input, InputNumber, Modal, Progress, Row, Select, Space, Statistic, Switch,
   Table, Tag, Typography, message
@@ -64,7 +64,12 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
   const chooseComparison = (kind: 'baseline' | 'candidate', runId: string) => setComparison((current) => ({
     ...(current.datasetId === datasetId ? current : {}), datasetId, [kind]: runId,
   }));
-  useEffect(() => { if (actions.submitted) chooseComparison('candidate', actions.submitted.runId); }, [actions.submitted?.runId]);
+  const submittedRunId = actions.submitted?.runId;
+  useEffect(() => {
+    if (submittedRunId) setComparison((current) => ({
+      ...(current.datasetId === datasetId ? current : {}), datasetId, candidate: submittedRunId,
+    }));
+  }, [datasetId, submittedRunId]);
 
   const selectedNode = workflow.nodes.find((x) => x.id === nodeId);
   const selectedCatalog = catalog.find((x) => x.type === selectedNode?.type);
@@ -91,8 +96,7 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
   const baseline = completedRuns.find((x) => x.runId === baselineRunId)?.summary;
   const candidate = completedRuns.find((x) => x.runId === candidateRunId)?.summary;
 
-  useEffect(() => {
-    if (!open) return;
+  const initializeOnOpen = useEffectEvent(() => {
     sourceChange.current?.cancel();
     sourceChange.current = prepareWorkflowChange('应用参数调优', 'edit');
     const fresh = clone(currentWorkflow);
@@ -102,6 +106,10 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
       const meta = catalog.find((x) => x.type === n.type); return Boolean(meta?.parameters.length || meta?.capabilities?.supportsRoi);
     })?.id ?? fresh.nodes[0]?.id);
     setRevision((value) => value + 1);
+  });
+  useEffect(() => {
+    if (!open) return;
+    initializeOnOpen();
     return () => { sourceChange.current?.cancel(); sourceChange.current = undefined; };
   }, [open]);
   const updateNode = (mutate: (parameters: ParamMap) => ParamMap) => {

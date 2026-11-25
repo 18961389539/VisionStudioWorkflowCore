@@ -60,6 +60,7 @@ app.UseExceptionHandler();
 app.UseRateLimiter();
 app.UseMiddleware<StorageMaintenanceMiddleware>();
 app.UseAuthentication();
+app.UseMiddleware<CookieCsrfMiddleware>();
 app.UseMiddleware<RuntimeOnlyMiddleware>();
 app.UseAuthorization();
 
@@ -75,6 +76,5 @@ app.MapHub<DiagnosticsHub>("/hubs/diagnostics").RequireAuthorization();
 // 设备监视推送（2026-11-12）：替代各面板的高频轮询，内容变化时才广播。
 app.MapHub<MonitorHub>("/hubs/monitor").RequireAuthorization();
 app.MapFallbackToFile("index.html").AllowAnonymous();
-
 app.Run();
 public partial class Program { }

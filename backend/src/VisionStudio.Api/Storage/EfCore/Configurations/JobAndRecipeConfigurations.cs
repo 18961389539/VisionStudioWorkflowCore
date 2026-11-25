@@ -239,7 +239,7 @@ internal sealed class RecipeDeliveryReceiptConfiguration : IEntityTypeConfigurat
         b.HasOne<JobVersionEntity>()
             .WithMany()
             .HasForeignKey(x => new { x.JobId, x.LocalVersion })
-            .OnDelete(DeleteBehavior.Restrict);
+            .OnDelete(DeleteBehavior.NoAction);
 
         b.HasIndex(x => new { x.StationId, x.JobId, x.SourceVersion, x.WorkflowHash, x.RequiresValidation }).IsUnique();
         b.HasIndex(x => new { x.JobId, x.LocalVersion }).IsUnique();
@@ -280,7 +280,7 @@ internal sealed class RecipeRolloutStationConfiguration : IEntityTypeConfigurati
         b.HasOne<RecipeRolloutBatchEntity>()
             .WithMany()
             .HasForeignKey(x => x.BatchId)
-            .OnDelete(DeleteBehavior.Restrict);
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }
 
@@ -296,6 +296,6 @@ internal sealed class RecipeRolloutLatestStationConfiguration : IEntityTypeConfi
         b.HasOne<RecipeRolloutStationEntity>()
             .WithOne()
             .HasForeignKey<RecipeRolloutLatestStationEntity>(x => new { x.BatchId, x.StationId })
-            .OnDelete(DeleteBehavior.Restrict);
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }

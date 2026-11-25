@@ -48,10 +48,13 @@ export function useTraceQuery(open: boolean, filter: TraceFilterState, page: Tra
   const [rangeDescription, setRangeDescription] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const { preset, customFrom, customTo, jobId, jobVersion, workflow, executionStatus, disposition, source, runIdPrefix, errorCode } = filter;
+  const { current: pageCurrent, pageSize } = page;
   // 调用方传入等值的新对象时，不应触发重复请求和状态更新循环。
-  const queryFilter = useMemo(() => ({ ...filter }), [
-    filter.preset, filter.customFrom, filter.customTo, filter.jobId, filter.jobVersion,
-    filter.workflow, filter.executionStatus, filter.disposition, filter.source, filter.runIdPrefix, filter.errorCode,
+  const queryFilter = useMemo(() => ({
+    preset, customFrom, customTo, jobId, jobVersion, workflow, executionStatus, disposition, source, runIdPrefix, errorCode,
+  }), [
+    preset, customFrom, customTo, jobId, jobVersion, workflow, executionStatus, disposition, source, runIdPrefix, errorCode,
   ]);
 
   useEffect(() => {
@@ -78,7 +81,7 @@ export function useTraceQuery(open: boolean, filter: TraceFilterState, page: Tra
     // 同次查询共用时钟，避免滚动时间窗漂移或跨午夜时列表与统计日期不同。
     const queryTime = new Date();
     const description = describeRange(filter, queryTime);
-    const offset = Math.max(0, page.current - 1) * page.pageSize;
+    const offset = Math.max(0, pageCurrent - 1) * pageSize;
     setLoading(true);
 
     async function load<T>(url: string, label: string, onSuccess: (value: T) => void, onError: (message: string) => void) {
@@ -94,7 +97,7 @@ export function useTraceQuery(open: boolean, filter: TraceFilterState, page: Tra
     }
 
     const listRequest = load<TracePage>(
-      traces.pageQuery(buildTraceParams(filter, offset, page.pageSize, queryTime).toString()),
+      traces.pageQuery(buildTraceParams(filter, offset, pageSize, queryTime).toString()),
       '查询',
       (value) => {
         setData(value);
@@ -120,7 +123,7 @@ export function useTraceQuery(open: boolean, filter: TraceFilterState, page: Tra
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [open, queryFilter, page.current, page.pageSize, reloadTick]);
+  }, [open, queryFilter, pageCurrent, pageSize, reloadTick]);
 
   const reload = useCallback(() => setReloadTick((tick) => tick + 1), []);
 

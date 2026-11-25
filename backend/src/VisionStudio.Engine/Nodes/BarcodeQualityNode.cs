@@ -1,5 +1,6 @@
 using OpenCvSharp;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Nodes;
 

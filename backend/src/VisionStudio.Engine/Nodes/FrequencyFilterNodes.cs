@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Engine.Nodes;
@@ -24,14 +25,6 @@ internal static class TextureFilterMath
     internal const int MaxKernelSize = 31;
     internal const double MaxKernelValue = 10_000;
 
-    /// <summary>把图像按其原位深重新落地；32F 结果走饱和截断，不绕回。</summary>
-    internal static Mat ToSourceDepth(Mat source32, MatType sourceType)
-    {
-        var result = new Mat();
-        source32.ConvertTo(result, sourceType);
-        return result;
-    }
-
     internal static void ValidateDepth(Mat source, string nodeType)
     {
         if (source.Empty())
@@ -44,13 +37,6 @@ internal static class TextureFilterMath
                 $"{nodeType} supports 1..4 channels; received {source.Channels()}.");
     }
 
-    /// <summary>频率方向按 180° 折叠：FFT 共轭对称，(θ) 与 (θ+180°) 是同一个纹理方向。</summary>
-    internal static double FoldDirectionDeg(double degrees)
-    {
-        var folded = degrees % 180.0;
-        if (folded < 0) folded += 180.0;
-        return folded;
-    }
 }
 
 /// <summary>
@@ -109,14 +95,8 @@ public sealed class CustomConvolutionNode : IVisionNodeExecutor
                 "image.convolve borderType must be reflect101, reflect, replicate or constant.")
         };
 
-        using var kernelMat = BuildKernelMat(kernel, normalize ? kernelSum : 1);
-        using var source32 = new Mat();
-        source.Mat.ConvertTo(source32, MatType.CV_32F);
-        using var filtered32 = new Mat();
-        Cv2.Filter2D(source32, filtered32, MatType.CV_32F, kernelMat, anchor, delta, border);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var image = VisionImage.Own(TextureFilterMath.ToSourceDepth(filtered32, source.Mat.Type()));
+        var image = VisionImage.Own(FrequencyFilterAlgorithms.Convolve(
+            source.Mat, kernel, normalize ? kernelSum : 1, anchor, delta, border, cancellationToken));
         timer.Stop();
 
         return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
@@ -193,27 +173,6 @@ public sealed class CustomConvolutionNode : IVisionNodeExecutor
         return parsed;
     }
 
-    private static Mat BuildKernelMat(double[][] kernel, double divisor)
-    {
-        var rows = kernel.Length;
-        var cols = kernel[0].Length;
-        var buffer = new float[rows * cols];
-        for (var row = 0; row < rows; row++)
-            for (var column = 0; column < cols; column++)
-                buffer[row * cols + column] = (float)(kernel[row][column] / divisor);
-
-        var mat = new Mat(rows, cols, MatType.CV_32FC1);
-        try
-        {
-            mat.SetArray(buffer);
-            return mat;
-        }
-        catch
-        {
-            mat.Dispose();
-            throw;
-        }
-    }
 }
 
 /// <summary>
@@ -223,11 +182,6 @@ public sealed class CustomConvolutionNode : IVisionNodeExecutor
 public sealed class FftFilterNode : IVisionNodeExecutor
 {
     public string Type => "image.fftFilter";
-
-    private sealed record Options(
-        string Filter, double WavelengthMinPx, double WavelengthMaxPx,
-        double DirectionDeg, double DirectionWidthDeg, double MaskBlurPx,
-        bool KeepDc, string OutputMode, int MaxPixels);
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(
         NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
@@ -241,87 +195,57 @@ public sealed class FftFilterNode : IVisionNodeExecutor
         TextureFilterMath.ValidateDepth(source.Mat, Type);
         var options = ReadOptions(node);
 
-        var rows = source.Mat.Rows;
-        var cols = source.Mat.Cols;
-        var paddedWidth = Cv2.GetOptimalDFTSize(cols);
-        var paddedHeight = Cv2.GetOptimalDFTSize(rows);
-        var paddedPixels = (long)paddedWidth * paddedHeight;
-        if (paddedPixels > options.MaxPixels)
-            throw new InvalidOperationException(
-                $"image.fftFilter would pad to {paddedWidth}x{paddedHeight} ({paddedPixels} px) above maxPixels={options.MaxPixels}; " +
-                "downscale upstream (image.resize) or raise maxPixels — FFT memory grows with the padded area.");
-
-        using var mask = BuildMask(paddedWidth, paddedHeight, options, out var passRatio);
-        if (passRatio <= 0)
-            throw new InvalidOperationException(
-                "image.fftFilter mask removes every frequency; widen the wavelength band or the direction window.");
-
+        var result = FrequencyFilterAlgorithms.Filter(source.Mat, options, cancellationToken);
+        var paddedWidth = result.PaddedWidth;
+        var paddedHeight = result.PaddedHeight;
+        var passRatio = result.PassRatio;
         var channels = source.Mat.Channels();
-        var split = Cv2.Split(source.Mat);
-        var filtered = new Mat[channels];
-        try
-        {
-            for (var index = 0; index < channels; index++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                filtered[index] = FilterChannel(split[index], mask, paddedWidth, paddedHeight,
-                    options, cancellationToken);
-            }
+        var image = VisionImage.Own(result.Image);
+        timer.Stop();
 
-            using var merged = new Mat();
-            Cv2.Merge(filtered, merged);
-            var image = VisionImage.Own(TextureFilterMath.ToSourceDepth(merged, source.Mat.Type()));
-            timer.Stop();
-
-            var filter = options.Filter;
-            return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
-            {
-                var diagnostics = CoordinateValidation.Diagnostics(
-                    Type,
-                    ("filter", filter), ("wavelengthMinPx", options.WavelengthMinPx),
-                    ("wavelengthMaxPx", options.WavelengthMaxPx), ("directionDeg", options.DirectionDeg),
-                    ("directionWidthDeg", options.DirectionWidthDeg), ("maskBlurPx", options.MaskBlurPx),
-                    ("keepDc", options.KeepDc), ("outputMode", options.OutputMode),
-                    ("paddedWidth", paddedWidth), ("paddedHeight", paddedHeight),
-                    ("maskPassRatio", passRatio), ("channels", channels),
-                    ("elapsedMs", timer.Elapsed.TotalMilliseconds));
-                return new NodeExecutorResult(
-                    new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["image"] = VisionValue.Image(image),
-                        ["width"] = VisionValue.Integer(image.Width),
-                        ["height"] = VisionValue.Integer(image.Height),
-                        ["channels"] = VisionValue.Integer(channels),
-                        ["maskPassRatio"] = VisionValue.Double(passRatio),
-                        ["paddedWidth"] = VisionValue.Integer(paddedWidth),
-                        ["paddedHeight"] = VisionValue.Integer(paddedHeight),
-                        ["diagnostics"] = VisionValue.String(diagnostics)
-                    },
-                    new Dictionary<string, object?>
-                    {
-                        ["filter"] = filter,
-                        ["wavelengthMinPx"] = options.WavelengthMinPx,
-                        ["wavelengthMaxPx"] = options.WavelengthMaxPx,
-                        ["directionDeg"] = options.DirectionDeg,
-                        ["directionWidthDeg"] = options.DirectionWidthDeg,
-                        ["maskPassRatio"] = passRatio,
-                        ["paddedWidth"] = paddedWidth,
-                        ["paddedHeight"] = paddedHeight,
-                        ["keepDc"] = options.KeepDc,
-                        ["outputMode"] = options.OutputMode,
-                        ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
-                        ["algorithmBackend"] = "opencv", ["diagnostics"] = diagnostics
-                    });
-            }, cancellationToken));
-        }
-        finally
+        var filter = options.Filter;
+        return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
         {
-            foreach (var mat in split) mat.Dispose();
-            foreach (var mat in filtered) mat?.Dispose();
-        }
+            var diagnostics = CoordinateValidation.Diagnostics(
+                Type,
+                ("filter", filter), ("wavelengthMinPx", options.WavelengthMinPx),
+                ("wavelengthMaxPx", options.WavelengthMaxPx), ("directionDeg", options.DirectionDeg),
+                ("directionWidthDeg", options.DirectionWidthDeg), ("maskBlurPx", options.MaskBlurPx),
+                ("keepDc", options.KeepDc), ("outputMode", options.OutputMode),
+                ("paddedWidth", paddedWidth), ("paddedHeight", paddedHeight),
+                ("maskPassRatio", passRatio), ("channels", channels),
+                ("elapsedMs", timer.Elapsed.TotalMilliseconds));
+            return new NodeExecutorResult(
+                new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["image"] = VisionValue.Image(image),
+                    ["width"] = VisionValue.Integer(image.Width),
+                    ["height"] = VisionValue.Integer(image.Height),
+                    ["channels"] = VisionValue.Integer(channels),
+                    ["maskPassRatio"] = VisionValue.Double(passRatio),
+                    ["paddedWidth"] = VisionValue.Integer(paddedWidth),
+                    ["paddedHeight"] = VisionValue.Integer(paddedHeight),
+                    ["diagnostics"] = VisionValue.String(diagnostics)
+                },
+                new Dictionary<string, object?>
+                {
+                    ["filter"] = filter,
+                    ["wavelengthMinPx"] = options.WavelengthMinPx,
+                    ["wavelengthMaxPx"] = options.WavelengthMaxPx,
+                    ["directionDeg"] = options.DirectionDeg,
+                    ["directionWidthDeg"] = options.DirectionWidthDeg,
+                    ["maskPassRatio"] = passRatio,
+                    ["paddedWidth"] = paddedWidth,
+                    ["paddedHeight"] = paddedHeight,
+                    ["keepDc"] = options.KeepDc,
+                    ["outputMode"] = options.OutputMode,
+                    ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
+                    ["algorithmBackend"] = "opencv", ["diagnostics"] = diagnostics
+                });
+        }, cancellationToken));
     }
 
-    private static Options ReadOptions(NodeDefinition node)
+    private static FrequencyFilterAlgorithms.Options ReadOptions(NodeDefinition node)
     {
         var filter = node.GetString("filter", "bandstop").Trim().ToLowerInvariant();
         if (filter is not ("lowpass" or "highpass" or "bandpass" or "bandstop"))
@@ -357,144 +281,7 @@ public sealed class FftFilterNode : IVisionNodeExecutor
         if (maxPixels is < 1000 or > 64_000_000)
             throw new InvalidOperationException("image.fftFilter maxPixels must be within 1000..64000000.");
 
-        return new Options(filter, wavelengthMinPx, wavelengthMaxPx, directionDeg, directionWidthDeg,
+        return new FrequencyFilterAlgorithms.Options(filter, wavelengthMinPx, wavelengthMaxPx, directionDeg, directionWidthDeg,
             maskBlurPx, node.GetBool("keepDc", true), outputMode, maxPixels);
-    }
-
-    /// <summary>
-    /// 在未搬移的频谱坐标里建增益掩码：DC 在 (0,0)，用"到最近角点的距离"处理环绕，
-    /// 因此不需要 fftShift 也不会在换行处出错。
-    /// </summary>
-    private static Mat BuildMask(int width, int height, Options options, out double passRatio)
-    {
-        var (fLow, fHigh) = Band(options);
-        var wedge = options.DirectionWidthDeg is > 0 and < 360;
-        var halfWidthRad = options.DirectionWidthDeg * Math.PI / 360.0;
-        var directionRad = TextureFilterMath.FoldDirectionDeg(options.DirectionDeg) * Math.PI / 180.0;
-        var keepOnly = options.Filter == "bandpass";
-
-        var buffer = new float[width * height];
-        long passed = 0;
-        for (var y = 0; y < height; y++)
-        {
-            var cy = y <= height / 2 ? y : y - height;
-            var fy = (double)cy / height;
-            for (var x = 0; x < width; x++)
-            {
-                var cx = x <= width / 2 ? x : x - width;
-                var fx = (double)cx / width;
-                var frequency = Math.Sqrt(fx * fx + fy * fy);
-                var inBand = frequency >= fLow && frequency <= fHigh;
-
-                bool keep = options.Filter switch
-                {
-                    "lowpass" => frequency <= fHigh,
-                    "highpass" => frequency >= fLow,
-                    "bandpass" => inBand,
-                    _ => !inBand
-                };
-
-                if (wedge)
-                {
-                    var angle = Math.Atan2(fy, fx);
-                    var delta = Math.Abs(NormalizeRadians(angle - directionRad));
-                    // 频点方向按 180° 折叠，所以只比较 [0, π/2] 内的夹角。
-                    delta = Math.Min(delta, Math.PI - delta);
-                    var inWedge = delta <= halfWidthRad;
-                    // 带通是"只保留"，方向窗口进一步收窄保留区；低通/高通/带阻是"只去掉"，方向窗口只收窄去掉区。
-                    keep = keepOnly ? keep && inWedge : !(!keep && inWedge);
-                }
-
-                buffer[y * width + x] = keep ? 1f : 0f;
-                if (keep) passed++;
-            }
-        }
-
-        passRatio = (double)passed / (width * height);
-        var mask = new Mat(height, width, MatType.CV_32FC1);
-        try
-        {
-            mask.SetArray(buffer);
-            if (options.MaskBlurPx > 0)
-            {
-                // 掩码在频域是周期性的，边界必须用 WRAP，否则 DC 附近会被当成图像边缘而失真。
-                Cv2.GaussianBlur(mask, mask, new Size(0, 0), options.MaskBlurPx, options.MaskBlurPx,
-                    BorderTypes.Wrap);
-            }
-            if (options.KeepDc) mask.Set(0, 0, 1f);
-            return mask;
-        }
-        catch
-        {
-            mask.Dispose();
-            throw;
-        }
-    }
-
-    private static (double Flow, double Fhigh) Band(Options options)
-    {
-        // 频率单位 = cycles/pixel；波长 λ 对应的频率是 1/λ，Nyquist 上限 0.5。
-        var fMinWavelength = Math.Min(0.5, 1.0 / options.WavelengthMinPx);
-        var fMaxWavelength = Math.Min(0.5, 1.0 / options.WavelengthMaxPx);
-        return options.Filter switch
-        {
-            "lowpass" => (0, fMinWavelength),
-            "highpass" => (fMaxWavelength, 0.5),
-            _ => (fMaxWavelength, fMinWavelength)
-        };
-    }
-
-    private static double NormalizeRadians(double radians)
-    {
-        var value = radians % (2 * Math.PI);
-        if (value <= -Math.PI) value += 2 * Math.PI;
-        if (value > Math.PI) value -= 2 * Math.PI;
-        return value;
-    }
-
-    private static Mat FilterChannel(Mat channel, Mat mask, int paddedWidth, int paddedHeight,
-        Options options, CancellationToken cancellationToken)
-    {
-        using var source32 = new Mat();
-        channel.ConvertTo(source32, MatType.CV_32F);
-        using var padded = new Mat();
-        Cv2.CopyMakeBorder(source32, padded, 0, paddedHeight - source32.Rows, 0, paddedWidth - source32.Cols,
-            BorderTypes.Reflect101, Scalar.All(0));
-        cancellationToken.ThrowIfCancellationRequested();
-
-        using var spectrum = new Mat();
-        Cv2.Dft(padded, spectrum, DftFlags.ComplexOutput);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var planes = Cv2.Split(spectrum);
-        try
-        {
-            Cv2.Multiply(planes[0], mask, planes[0]);
-            Cv2.Multiply(planes[1], mask, planes[1]);
-            using var merged = new Mat();
-            Cv2.Merge(planes, merged);
-            using var inverse = new Mat();
-            Cv2.Idft(merged, inverse, DftFlags.Scale | DftFlags.RealOutput);
-            using var cropped = new Mat(inverse, new Rect(0, 0, source32.Cols, source32.Rows));
-            if (options.OutputMode == "removed")
-            {
-                // 被滤掉的成分 = 输入 − 滤波结果，是零均值信号。8/16 位输出会把负半周直接截掉，
-                // 所以整型输入时把该通道均值加回去（浮点输出保持纯差值），口径写在目录描述里。
-                var removed = new Mat();
-                Cv2.Subtract(source32, cropped, removed);
-                if (channel.Depth() == MatType.CV_32F) return removed;
-                using (removed)
-                {
-                    var centered = new Mat();
-                    removed.ConvertTo(centered, MatType.CV_32F, 1.0, Cv2.Mean(channel).Val0);
-                    return centered;
-                }
-            }
-            return cropped.Clone();
-        }
-        finally
-        {
-            foreach (var plane in planes) plane.Dispose();
-        }
     }
 }

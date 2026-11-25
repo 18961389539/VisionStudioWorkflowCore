@@ -23,6 +23,35 @@ beforeEach(stubBrowserApis);
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('dataset validation panel', () => {
+  it('保留明细加载期间手动选择的来源追踪', async () => {
+    const detail = deferred<Response>();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/validation/datasets') return Promise.resolve(jsonResponse([tuningDataset('A').dataset]));
+      if (url === '/api/traces?take=500') return Promise.resolve(jsonResponse([
+        { runId: 'manual-trace', workflowName: 'Manual', hasReplayInput: true, nodeReports: [] },
+      ]));
+      if (url === '/api/media/items?take=500') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/validation/datasets/A') return detail.promise;
+      if (url === '/api/validation/datasets/A/runs') return Promise.resolve(jsonResponse([]));
+      return Promise.resolve(jsonResponse(tuningWorkflow));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<DatasetValidationPanel open onClose={() => undefined} />);
+    await flush();
+    const card = screen.getByText('候选工作流').closest('.ant-card') as HTMLElement;
+    fireEvent.mouseDown(within(card).getByRole('combobox'));
+    fireEvent.click(await screen.findByText('Manual · manual-t', { selector: '.ant-select-item-option-content' }));
+    await act(async () => {
+      const dataset = tuningDataset('A');
+      detail.resolve(jsonResponse({ ...dataset, items: [{ ...dataset.items[0], sourceRunId: 'default-trace' }] }));
+    });
+    await flush();
+    fireEvent.click(within(card).getByRole('button', { name: '加载追踪工作流' }));
+    await flush();
+    expect(fetchMock).toHaveBeenCalledWith('/api/traces/manual-trace/workflow', expect.anything());
+  });
+
   it('切换数据集后忽略迟到的旧明细响应', async () => {
     const detailA = deferred<Response>();
     let signal: AbortSignal | undefined;

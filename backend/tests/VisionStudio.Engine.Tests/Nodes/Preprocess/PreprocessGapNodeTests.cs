@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Nodes;
 
@@ -67,6 +68,17 @@ public sealed class PreprocessGapNodeTests
         using var roi = new Mat(mat, new Rect(fromX, 0, toX - fromX, mat.Height));
         Cv2.MeanStdDev(roi, out _, out var stddev);
         return stddev.Val0;
+    }
+
+    [Fact]
+    public void RoiComposite_FailureLeavesInputOwnedByCaller()
+    {
+        using var source = new Mat(8, 8, MatType.CV_8UC1, Scalar.All(10));
+        using var processed = new Mat(8, 8, MatType.CV_8UC1, Scalar.All(42));
+        using var invalidMask = new Mat(2, 2, MatType.CV_8UC1, Scalar.All(255));
+
+        Assert.Throws<OpenCVException>(() => PreprocessGapMath.Composite(processed, source, invalidMask));
+        Assert.Equal(42, processed.At<byte>(0, 0));
     }
 
     // ── CLAHE ───────────────────────────────────────────────────────
@@ -214,6 +226,25 @@ public sealed class PreprocessGapNodeTests
             await new WhiteBalanceNode().ExecuteAsync(
                 Ctx(new() { ["image"] = VisionValue.Image(VisionImage.Own(gray.Clone())) }),
                 Def("image.whiteBalance"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhiteBalance_ManualGains_OnlyModifyPixelsInsideRoi()
+    {
+        using var source = FlatBgr(100, 100, 100, 16);
+        using var input = VisionImage.Own(source.Clone());
+        var result = await new WhiteBalanceNode().ExecuteAsync(
+            Ctx(new()
+            {
+                ["image"] = VisionValue.Image(input),
+                ["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Rectangle, 2, 2, 6, 6))
+            }),
+            Def("image.whiteBalance", """{"mode":"manual","manualB":2,"manualG":1,"manualR":1,"preserveBrightness":false}"""),
+            CancellationToken.None);
+
+        using var output = result.Outputs["image"].Require<VisionImage>("image");
+        Assert.Equal(new Vec3b(200, 100, 100), output.Mat.At<Vec3b>(4, 4));
+        Assert.Equal(new Vec3b(100, 100, 100), output.Mat.At<Vec3b>(12, 12));
     }
 
     // ── 质量指标 ────────────────────────────────────────────────────

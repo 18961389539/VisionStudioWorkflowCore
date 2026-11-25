@@ -5,7 +5,7 @@
  * 结果是：键名靠字符串约定（拼错不会报错）、隐私模式下行为不一致、要加版本/迁移时无处下手。
  * 这里集中两件事：
  *  1. `STORAGE_KEYS` 是唯一的键名清单（含命名空间前缀），新增偏好必须在此登记；
- *  2. 读写统一吞掉 storage 不可用（隐私模式、配额满）异常，调用方不再关心。
+ *  2. 统一处理 storage 不可用（隐私模式、配额满）异常；写入返回成功标志，重要 UI 数据可提示失败。
  *
  * 注意：这里只承载"界面偏好"。业务数据（草稿）仍在 draft.ts 里，因为它有自己的过期与校验语义。
  */
@@ -42,9 +42,9 @@ export function readStored(key: StorageKey, fallback?: string): string | undefin
   }
 }
 
-/** 写字符串；storage 不可用（隐私模式/配额）时静默失败。 */
-export function writeStored(key: StorageKey, value: string): void {
-  try { window.localStorage.setItem(fullKey(key), value); } catch { /* 忽略存储失败 */ }
+/** 写字符串；返回是否成功，需提示数据丢失风险的调用方可检查结果。 */
+export function writeStored(key: StorageKey, value: string): boolean {
+  try { window.localStorage.setItem(fullKey(key), value); return true; } catch { return false; }
 }
 
 export function removeStored(key: StorageKey): void {
@@ -67,6 +67,6 @@ export function readStoredJson<T>(key: StorageKey, parse: (value: unknown) => T 
   }
 }
 
-export function writeStoredJson(key: StorageKey, value: unknown): void {
-  try { writeStored(key, JSON.stringify(value)); } catch { /* 忽略序列化失败 */ }
+export function writeStoredJson(key: StorageKey, value: unknown): boolean {
+  try { return writeStored(key, JSON.stringify(value)); } catch { return false; }
 }

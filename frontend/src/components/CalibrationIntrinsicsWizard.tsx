@@ -81,7 +81,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         const list = await response.json() as CameraListItem[];
         setCameras(list);
         setLoadError(undefined);
-        if (!cameraId && list[0]) setCameraId(list[0].id);
+        if (list[0]) setCameraId((current) => current || list[0].id);
       } catch (error) {
         setLoadError(error instanceof Error ? `读取相机列表失败：${error.message}` : '读取相机列表失败：网络请求未完成');
       }

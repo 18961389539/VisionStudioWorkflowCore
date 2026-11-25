@@ -26,6 +26,8 @@ public static class NodeSummaryKeys
     public const string BranchDisposition = "branchDisposition";
     public const string ParallelDisposition = "parallelDisposition";
     public const string BranchDispositions = "branchDispositions";
+    public const string ParallelRegionId = "parallelRegionId";
+    public const string ParallelBranch = "parallelBranch";
 }
 
 public sealed record NodeExecutorResult(

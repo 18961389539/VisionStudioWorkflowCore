@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using OpenCvSharp;
-using OpenCvSharp.XImgProc;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Algorithms;
@@ -40,21 +39,13 @@ public sealed class SuperpixelNode : IVisionNodeExecutor
         if (iterations is < 1 or > 20) throw new InvalidOperationException("feature.superpixel iterations must be within 1..20.");
         var enforce = node.GetBool("enforceConnectivity", true);
 
-        using var bgr = sourceMat.Channels() == 1 ? new Mat() : sourceMat.Clone();
-        if (sourceMat.Channels() == 1) Cv2.CvtColor(sourceMat, bgr, ColorConversionCodes.GRAY2BGR);
-        else if (sourceMat.Channels() == 4) Cv2.CvtColor(sourceMat, bgr, ColorConversionCodes.BGRA2BGR);
-
-        using var slic = SuperpixelSLIC.Create(bgr, SLICType.SLICO, regionSize, (float)ruler);
-        slic.Iterate(iterations);
-        if (enforce) slic.EnforceLabelConnectivity(regionSize);
-        using var labels = new Mat();
-        slic.GetLabels(labels);
+        var segmentation = SuperpixelAlgorithms.Segment(sourceMat, regionSize, ruler, iterations, enforce);
+        using var labels = segmentation.Labels;
+        using var boundary = segmentation.Boundary;
 
         var (components, pixelCount, labelCount) = BuildComponentsByLabel(labels, cancellationToken);
         var region = new VisionRegion(labels.Width, labels.Height, components);
 
-        using var boundary = new Mat();
-        slic.GetLabelContourMask(boundary, true);
         var boundaryImage = VisionImage.Own(boundary.Clone());
         var labelsImage = VisionImage.Own(labels.Clone());
         return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(labelsImage, () =>

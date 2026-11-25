@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using VisionStudio.Api.Storage.EfCore.Entities;
 
@@ -154,7 +155,8 @@ internal sealed class InvestigationCaseVerificationConfiguration : IEntityTypeCo
 {
     public void Configure(EntityTypeBuilder<InvestigationCaseVerificationEntity> b)
     {
-        b.ToTable("investigation_case_verifications");
+        b.ToTable("investigation_case_verifications", table => table.HasCheckConstraint(
+            "ck_investigation_case_verifications_gate_status", "gate_status IN ('Passed','Failed','Inconclusive')"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.CaseId).HasColumnName("case_id");
@@ -231,7 +233,9 @@ internal sealed class DurableCounterEventConfiguration : IEntityTypeConfiguratio
     {
         b.ToTable("durable_counter_events");
         b.HasKey(x => x.Seq);
-        b.Property(x => x.Seq).HasColumnName("seq").ValueGeneratedOnAdd();
+        // Preserve SQLite rowid generation without AUTOINCREMENT, as in the migration.
+        b.Property(x => x.Seq).HasColumnName("seq").ValueGeneratedOnAdd()
+            .Metadata.SetValueGenerationStrategy(SqliteValueGenerationStrategy.None);
         b.Property(x => x.WorkflowId).HasColumnName("workflow_id");
         b.Property(x => x.CounterId).HasColumnName("counter_id");
         b.Property(x => x.EventId).HasColumnName("event_id");

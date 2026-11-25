@@ -17,6 +17,13 @@ export const messages = {
   'common.operationFailed': { zh: '操作失败', en: 'Operation failed' },
 
   // ── App 顶部工具栏 / top bar ───────────────────────────────────────────────
+  'app.loadingView': { zh: '正在加载工作台…', en: 'Loading workspace…' },
+  'app.hostModeUnavailable': { zh: '无法确认宿主运行模式', en: 'Unable to determine host mode' },
+  'app.retryHostMode': { zh: '重试', en: 'Retry' },
+  'app.annotationSaveFailed': {
+    zh: '本地画布批注保存失败（浏览器存储已满或被禁用）；分组和便签不包含在后端流程中，关闭页面可能丢失。',
+    en: 'Local canvas annotations could not be saved (storage is full or disabled). Groups and notes are not included in backend workflows and may be lost when closing this page.'
+  },
   'app.catalogUnavailable': { zh: '节点目录不可用', en: 'Node catalog unavailable' },
   'app.catalogFallbackWarning': {
     zh: '后端 Catalog 不可用；保留当前 Catalog（首次启动时使用自动生成 fallback）',

@@ -55,13 +55,9 @@ ALLOWED_CV_NODE_EXCEPTIONS = {
     ("DualCameraExtrinsicsNode.cs", "DualCameraExtrinsicsNode", "SolvePnP"),
     ("DualCameraExtrinsicsNode.cs", "DualCameraExtrinsicsNode", "Rodrigues"),
     ("ManagedShapeMatch.cs", "ManagedShapeMatch", "Sobel"),
-    ("PreprocessNodes.cs", "GaussianBlurNode", "CopyMakeBorder"),
-    ("PreprocessNodes.cs", "MedianBlurNode", "CopyMakeBorder"),
     ("JLVisionNodeSupport.cs", "JLVisionNodeSupport", "Normalize"),
     ("JLVisionNodeSupport.cs", "JLVisionNodeSupport", "CvtColor"),
     ("InferenceNodes.cs", "OnnxOrientedDetectionNode", "PutText"),
-    ("ColorClassifyNode.cs", "ColorClassifyNode", "CvtColor"),
-    ("ColorClassifyNode.cs", "ColorClassifyNode", "Kmeans"),
     ("ImageDenoiseNode.cs", "ImageDenoiseNode", "FastNlMeansDenoising"),
     ("ImageDenoiseNode.cs", "ImageDenoiseNode", "FastNlMeansDenoisingColored"),
     ("ArucoMarkerNode.cs", "ArucoMarkerNode", "Aruco"),
@@ -385,13 +381,7 @@ def audit_executor_and_catalog_contracts(ctx: AuditContext) -> dict:
     }
 
 
-def audit_opencv_baseline(ctx: AuditContext, write_baseline: bool) -> bool:
-    opencv_baseline_path = ctx.root / "scripts" / "opencv-call-baseline.json"
-    opencv_baseline: set[tuple[str, str, str]] = set()
-    if opencv_baseline_path.exists():
-        opencv_baseline = {tuple(entry) for entry in json.loads(opencv_baseline_path.read_text(encoding="utf-8"))}
-    opencv_baseline_hits: set[tuple[str, str, str]] = set()
-
+def audit_opencv_node_calls(ctx: AuditContext) -> None:
     # 判定标准（2026-11-25）：扫描"节点执行器"，而不是"Nodes 目录下的每个文件"。
     # 起因：契约/图像/算法拆出引擎程序集后，算法实现细节与节点执行器被先后放进同一目录，
     # 按目录判定会让门禁覆盖范围随文件移动而改变——要么漏检（历史盲区），要么把既有实现
@@ -419,35 +409,13 @@ def audit_opencv_baseline(ctx: AuditContext, write_baseline: bool) -> bool:
                 and not synthetic_polygon_drawing
                 and exception not in ALLOWED_CV_NODE_EXCEPTIONS
             ):
-                if write_baseline or exception in opencv_baseline:
-                    opencv_baseline_hits.add(exception)
-                else:
-                    ctx.fail(
-                        f"OpenCV algorithm call remains in node: {source.name}: Cv2.{call} "
-                        "(not registered in scripts/opencv-call-baseline.json)"
-                    )
+                ctx.fail(f"OpenCV algorithm call remains in node: {source.name}: Cv2.{call}")
         if "OpenCvSharp.Dnn" in body:
             ctx.fail(f"OpenCV DNN dependency remains in node: {source.name}")
 
-    if write_baseline:
-        opencv_baseline_path.write_text(
-            json.dumps([list(entry) for entry in sorted(opencv_baseline_hits)], ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        print(f"OpenCV baseline written: {len(opencv_baseline_hits)} call site(s) -> {opencv_baseline_path}")
-        print("Other audit results were ignored because --write-opencv-baseline only refreshes the baseline.")
-        return True
-
-    stale_baseline = opencv_baseline - opencv_baseline_hits
-    if stale_baseline:
-        ctx.ok(
-            f"OpenCV baseline: {len(stale_baseline)} stale entr(y/ies) no longer present — "
-            "remove them from scripts/opencv-call-baseline.json"
-        )
-    ctx.ok(f"OpenCV baseline: {len(opencv_baseline_hits)} registered call site(s) still awaiting JLVision migration")
+    ctx.ok("OpenCV node direct-call guard: no non-exempt algorithm calls")
     algorithm_project = ctx.read_safe("backend/src/VisionStudio.Engine/VisionStudio.Engine.csproj")
     for package in ["JLVisionLib", "Microsoft.ML.OnnxRuntime"]:
         if f'Include="{package}"' not in algorithm_project:
             ctx.fail(f"Missing algorithm backend dependency: {package}")
-    ctx.ok("JLVision traditional algorithms + ONNX Runtime; explicit 3D hand-eye/preview exceptions, no OpenCV DNN fallback")
-    return False
+    ctx.ok("JLVision + ONNX Runtime dependencies present; OpenCV remains available inside the algorithm layer")

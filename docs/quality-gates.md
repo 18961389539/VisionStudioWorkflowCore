@@ -52,6 +52,9 @@ PowerShell 的 LF 规则不改变静态审计要求的编码契约：含非 ASCI
 | 检查 | 守什么 | 失败时该做什么 |
 |---|---|---|
 | `static-audit.py` | 结构性与契约性断言（入口 `scripts/static-audit.py` 协调 `scripts/audit/*.py` 各域模块）：安全中间件顺序、反向代理边界、生产模拟器边界、发布门禁、脚本编码契约、文档必备 token | 按报文补齐实现；若断言本身过期（实现搬到别处），改断言并写清为什么 |
+| `python -m unittest discover -s scripts/tests` | 静态审计守卫的回归测试，随 Backend 门禁运行 | 修复文档缺失、token 缺失及 OpenCV 节点调用等边界的检查逻辑 |
+| `static-audit.py` 文档契约 | 已保留的设计文档必须是文件，声明的必备 token 必须存在；已退役文档不再登记为空转检查 | 缺文件或 token 直接失败；文档有意迁移时同步更新断言 |
+| `static-audit.py` OpenCV 节点调用守卫 | 节点执行器文件中的非豁免 `Cv2.*` 算法直调为零，新增即失败；旧的 91 项存量基线及重写入口已退役 | 将完整算法移至算法层；仅保留现有图像 I/O、绘图、3D 及特定能力例外，不以扩大例外代替迁移 |
 | `check-metric-floor.py` | 节点目录条数与测试数量下限（`scripts/metric-floor.json`） | 覆盖率挡不住"删测试"——被删的往往是难覆盖的分支，删完覆盖率反而更高。数量下限是唯一能发现"测试悄悄消失"的信号 |
 | `check-size-budget.py` | 单文件行数预算（`scripts/size-budget.json`，默认 1200，目标 800；覆盖前后端源码及 `scripts/` / `frontend/scripts/` 治理脚本） | 拆文件，或**下调**预算记录值。2026-11-13 起后端第二梯队五条大文件已按语义拆分并登记显式预算，`backend/src` 无超过默认上限的文件 |
 | `test-publish-data-separation.ps1` / `test-data-migration.ps1` | 发布包与数据根分离；迁移是"暂存→校验→标记→原子切换" | 修实现，不要放宽断言：这两条对应的是现场数据丢失风险 |
@@ -68,13 +71,66 @@ PowerShell 的 LF 规则不改变静态审计要求的编码契约：含非 ASCI
 覆盖率棘轮的由来：原阈值 60 只能防"腰斩"，挡不住每次合并掉零点几个点的慢性退化。分支覆盖率单独
 设门槛，是因为行覆盖挡不住"行走了、分支只走一边"——`if (x) return;` 走一次就算整行覆盖。
 
+OpenCV 守卫递归扫描包含 `IVisionNodeExecutor` 或 `VisionToolBase` 的节点文件，允许清单中的调用
+及精确登记的例外；它约束的是**节点到算法层的边界**，不禁止算法层内部使用 OpenCV，
+也不表示所有算法都已迁移到 JLVision。涉及输出图像、数值、取消与原生内存所有权时须做行为回归。
+
+### 程序集依赖边界
+
+`Engine.Tests/Contracts/AssemblyBoundaryTests` 为 `backend/src` 下全部 16 个项目登记精确的
+`ProjectReference` / `PackageReference` 白名单，并检查项目清单与登记项一致，新增程序集不能漏测。
+覆盖基础契约、硬件契约、图像、算法、脚本、相机适配器、引擎、API、两个 Worker、示例插件、
+打包器、SQLite 快照工具、Benchmark 与 CatalogExporter；直接 DLL `Reference` 不得绕过项目边界。
+
+共享 `Directory.Build.props` 单独断言只引入 `PrivateAssets=all` 的编译器工具包，
+API 对两个 Worker 的引用必须保持 `ReferenceOutputAssembly=false`（构建依赖，不是程序集依赖）。
+这些测试核对项目声明，不把命名空间当程序集边界，也不声称覆盖运行时插件动态加载的完整依赖图。
+
+脚本编辑器及执行测试还检查：校验不加载提交程序集；超过 64 个缓存条目的不同脚本、并发同源码、
+运行失败和超时后，程序集及其加载上下文的弱引用最终均可回收。仅检查缓存条目数不足以证明卸载。
+
+### EF Core 与手写 SQL 的 Schema 对账
+
+后端的 `EfCoreSchemaParityTests` 在两个隔离的内存 SQLite 数据库中分别执行完整
+`SqliteSchemaMigrationRunner` 迁移链和 EF `EnsureCreated`，对账的是**实际落库结构**，
+不是实体属性名或 `CREATE TABLE` 文本快照。生产建库/升级仍只走手写迁移，不调用 `EnsureCreated`，
+不得为让测试变绿修改已发布迁移及其校验和。
+
+覆盖表和列的双向集合、声明类型、NOT NULL、默认值、复合主键顺序、列排序规则、
+自增/生成列、CHECK、外键列配对和更新/删除/延迟行为，以及索引的名称、唯一性、键列顺序、
+升降序、排序规则和部分索引谓词；视图、触发器和表选项也参与比较。
+CHECK 与谓词按 SQL token 规范化，只忽略格式和标识符引用，保留字符串内容与大小写。
+未建模的 DDL `ON CONFLICT` 策略直接报错，不能静默跳过。
+
+已登记的边界只有：
+
+- `schema_info`、`schema_migration_history`、`legacy_alarm_import` 为迁移管理表，不由 EF 映射；
+  测试断言它们在迁移库存在，EF 额外生成同名表仍会失败。`sqlite_sequence` 为 SQLite 内部表，
+  通过所属表的 AUTOINCREMENT 契约间接检查。
+- 38 个历史主键在 SQLite 元数据中未显式标为 NOT NULL，EF 主键则必须非空。测试以
+  **表/列 + SQL=0 / EF=1** 精确登记；新增差异或旧差异消失都要求审查，不能豁免所有主键。
+  其中 TEXT 主键的历史空值许可与 EF 严格性并不相同；INTEGER rowid 主键仍由数据库生成。
+- 8 个 EF 显式唯一索引与 SQL 内联 UNIQUE 约束按键列及唯一性、排序和 collation 对齐，
+  仅登记的 EF 索引名允许等价；其它显式索引名称照常检查。不改成 EF alternate key，
+  避免让用户名等原本可更新的字段变成不可修改的跟踪键。
+
+EF 外键索引约定已关闭，索引必须显式映射，与生产迁移一致。对账同时修复了 4 个遗漏的
+CHECK、3 处 `NO ACTION` 外键行为和 durable counter 的 rowid/AUTOINCREMENT 差异。
+另有故意改变列、索引、外键、CHECK 的回归用例，确保对账器能检出差异，而不只是当前两库恰好相等。
+
+定向运行：
+
+```powershell
+dotnet test backend/tests/VisionStudio.Api.Tests/VisionStudio.Api.Tests.csproj -c Release --filter "FullyQualifiedName~EfCoreSchemaParityTests|FullyQualifiedName~EfCoreInfrastructureTests"
+```
+
 ## 前端段
 
 | 检查 | 守什么 |
 |---|---|
 | `npm ci` | 锁文件与 package.json 一致（不允许"本地能装、CI 装不上"） |
 | `npm audit --audit-level=high`（2026-11-12） | 前端依赖已知漏洞（只拦 high/critical）。首次接入即发现 vite 8.3.2 与 undici 各带 high |
-| `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径。另运行 `check-hooks-deps.mjs`：`react/exhaustive-deps` 存量基线 14 处只许减（新代码新增即失败） |
+| `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径，`react/exhaustive-deps` 直接作为错误检查，不再使用存量基线 |
 | `npm run check:theme`（2026-11-13） | 主题令牌守卫：颜色只能出现在 `:root` / `[data-vs-theme='light']` 两个块里；语义 token 在深/浅主题下按 WCAG 校验对比度（文字 4.5:1、图形 3:1）。此前 62 行硬编码颜色在浅色主题下最低仅 2.2:1 |
 | `npm run test:coverage` | 单测 + 覆盖率阈值（写在 `vite.config.ts` 的 `test.coverage.thresholds`，棘轮同理）；其中 `apiUsage.test.ts` 另有静默失败棘轮：组件里禁止用 `if (!response.ok) return;` 把失败渲染成空数据，白名单仅保留附加信息路径与组件文档反例 |
 | `npm run build` | `tsc -b`（`strict: true`）+ 生产构建；类型不过不产出包 |
@@ -103,9 +159,9 @@ Vitest 5 的 `fsModuleCachePath` 也指到系统临时目录：默认 `node_modu
 
 React Compiler 系列规则（`set-state-in-effect` 82 处、`refs` 56 处，2026-11-12 首次启用时统计）暂未开启：
 这些是"重写渲染方式"级别的改造，一次性开启会让门禁长期变红而失去意义。
-`exhaustive-deps` 已先行接入（2026-11-13）：规则本体仍保持 `off`，由 `frontend/scripts/check-hooks-deps.mjs`
-用 `oxlint -D` 单独统计并与 `lint-hooks-baseline.json` 的存量基线（当前 14，由 65→63→60→14 下调）比较——新代码新增违规直接失败，
-修掉一处则要求同步下调基线。这样不必一次性改写 26 个存量组件里的内联 `refresh/load`。
+`exhaustive-deps` 的 14 处存量已清零，规则在 `.oxlintrc.json` 中设为 `error`，由
+`npm run lint` 直接执行；原独立检查脚本和基线已移除。依赖修复仍须保持请求时机和编辑草稿语义，
+不能仅用禁用规则或忽略依赖消除告警。
 
 `no-unused-vars` 对 `src/__tests__/**` 关闭：测试里 `const { result, rerender } = renderHook(...)`
 的解构本身就是对被调 API 的说明，逐个改名只会增加噪音。生产代码不受此豁免。

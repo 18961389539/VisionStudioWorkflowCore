@@ -210,8 +210,9 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  const userId = user?.id;
   useEffect(() => {
-    if (!status?.enabled || !user) return;
+    if (!status?.enabled || userId == null) return;
     const verify = () => { void apiFetch(auth.me).then(async r => {
       if (r.ok) setUser(await r.json());
       else if (r.status === 401) setUser(undefined);
@@ -219,7 +220,7 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
     const timer = window.setInterval(verify, 60_000);
     window.addEventListener('focus', verify);
     return () => { window.clearInterval(timer); window.removeEventListener('focus', verify); };
-  }, [status?.enabled, user?.id]);
+  }, [status?.enabled, userId]);
 
   const login = async (name = username, secret = password) => {
     setBusy(true); setError(undefined); setNotice(undefined);

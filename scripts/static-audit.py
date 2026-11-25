@@ -13,7 +13,7 @@ except Exception:
     pass
 
 from audit.camera_and_hardware import audit_camera_and_hardware
-from audit.catalog_contracts import audit_executor_and_catalog_contracts, audit_opencv_baseline
+from audit.catalog_contracts import audit_executor_and_catalog_contracts, audit_opencv_node_calls
 from audit.code_hygiene import audit_changelog_version, audit_empty_catch_baseline
 from audit.context import AuditContext, audit_json_and_xml
 from audit.host_and_security import audit_host_and_api_contracts
@@ -26,9 +26,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 def main() -> int:
     ctx = AuditContext(ROOT)
 
-    if "--write-opencv-baseline" in sys.argv:
-        audit_opencv_baseline(ctx, write_baseline=True)
-        return 0
+    unknown_args = [arg for arg in sys.argv[1:] if arg != "--write-empty-catch-baseline"]
+    if unknown_args:
+        print(f"Unknown option(s): {', '.join(unknown_args)}", file=sys.stderr)
+        return 2
     if "--write-empty-catch-baseline" in sys.argv:
         audit_empty_catch_baseline(ctx, write_baseline=True)
         return 0
@@ -39,7 +40,7 @@ def main() -> int:
     audit_storage_and_runtime(ctx, catalog_ctx, host_ctx)
     vendor_appsettings = audit_camera_and_hardware(ctx, catalog_ctx, host_ctx)
     audit_workflow_and_plugins(ctx, catalog_ctx, host_ctx, vendor_appsettings)
-    audit_opencv_baseline(ctx, write_baseline=False)
+    audit_opencv_node_calls(ctx)
     audit_changelog_version(ctx)
     audit_empty_catch_baseline(ctx, write_baseline=False)
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using OpenCvSharp;
+using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Nodes;
 
 namespace VisionStudio.Engine.Tests;
@@ -67,6 +68,30 @@ public sealed class BatchMatchingGeometryTests
         var mapped = transform.Apply(source[0]);
         Assert.InRange(mapped.X, 9.9, 10.1);
         Assert.InRange(mapped.Y, 4.9, 5.1);
+    }
+
+    [Fact]
+    public async Task Homography_WarpImage_UsesTheSolvedTransformAndRequestedSize()
+    {
+        var sourcePoints = new[]
+        {
+            new VisionPoint2D(0, 0), new VisionPoint2D(7, 0),
+            new VisionPoint2D(7, 7), new VisionPoint2D(0, 7)
+        };
+        var targetPoints = sourcePoints.Select(point => new VisionPoint2D(point.X + 2, point.Y + 1)).ToArray();
+        using var source = new Mat(8, 8, MatType.CV_8UC1, Scalar.All(0));
+        source.Set(3, 2, (byte)200);
+        using var input = VisionImage.Own(source.Clone());
+
+        var result = await new HomographyRegistrationNode().ExecuteAsync(
+            Ctx(new() { ["sourcePoints"] = Points(sourcePoints), ["targetPoints"] = Points(targetPoints), ["image"] = VisionValue.Image(input) }),
+            Def("match.homography", """{"method":"least-squares","warpImage":true,"outputWidth":12,"outputHeight":10}"""),
+            CancellationToken.None);
+        using var warped = result.Outputs["warped"].Require<VisionImage>("warped");
+        Assert.Equal(12, warped.Width);
+        Assert.Equal(10, warped.Height);
+        Assert.Equal((byte)200, warped.Mat.At<byte>(4, 4));
+        Assert.Equal((byte)0, warped.Mat.At<byte>(3, 2));
     }
 
     [Fact]
@@ -147,5 +172,37 @@ public sealed class BatchMatchingGeometryTests
             Def("match.pose3d", """{"objectPointsJson":"[[0,0,0],[10,0,0],[10,10,0]]","cameraMatrixJson":"[800,0,320,0,800,240,0,0,1]"}"""),
             CancellationToken.None);
         Assert.False((bool)tooFew.Outputs["found"].Value!);
+    }
+
+    [Fact]
+    public async Task Pose3D_RecoversPoseWithDistortionAndExtrinsicGuess()
+    {
+        var objects = new[]
+        {
+            new Point3f(0, 0, 0), new Point3f(100, 0, 0), new Point3f(100, 60, 0),
+            new Point3f(0, 60, 0), new Point3f(50, 30, 25), new Point3f(20, 10, -15)
+        };
+        double[] rotation = [0.45, -0.15, 0.08];
+        double[] translation = [12, -18, 520];
+        double[] distortion = [0.05, -0.02, 0.001, -0.002, 0.005];
+        var camera = new double[,] { { 800, 0, 320 }, { 0, 800, 240 }, { 0, 0, 1 } };
+        Cv2.ProjectPoints(objects, rotation, translation, camera, distortion, out var projected, out _, 0);
+
+        var result = await new PnpPoseNode().ExecuteAsync(
+            Ctx(new() { ["imagePoints"] = Points(projected.Select(point => new VisionPoint2D(point.X, point.Y))) }),
+            Def("match.pose3d", JsonSerializer.Serialize(new
+            {
+                objectPointsJson = JsonSerializer.Serialize(objects.Select(point => new[] { point.X, point.Y, point.Z })),
+                cameraMatrixJson = "[800,0,320,0,800,240,0,0,1]",
+                distortionJson = JsonSerializer.Serialize(distortion),
+                solver = "iterative",
+                useExtrinsicGuess = true,
+                guessRvecJson = "[0.4,-0.1,0.05]",
+                guessTvecJson = "[10,-20,500]"
+            })), CancellationToken.None);
+
+        Assert.True(result.Outputs["found"].Require<bool>("found"));
+        Assert.InRange(result.Outputs["z"].Require<double>("z"), 518, 522);
+        Assert.InRange(result.Outputs["reprojectionRms"].Require<double>("reprojectionRms"), 0, 0.05);
     }
 }

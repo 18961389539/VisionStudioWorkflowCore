@@ -71,15 +71,16 @@ public sealed class WorkflowCoreVisionRunner(
                 _ => true
             };
 
-            var workflowComplete = instance.Status == WorkflowStatus.Complete && data.Error is null;
+            var fault = data.Fault;
+            var workflowComplete = instance.Status == WorkflowStatus.Complete && fault is null;
             var success = workflowComplete && reachedTarget;
             // R10/F08（2026-10-12 复核）：普通节点故障被 WorkflowCore 捕获后经**结果返回路径**——
             // 在此向观察者报告原始异常（含 InnerException/堆栈）并关联准确的故障节点标识。
             // 两条路径互斥（节点异常不会再冒泡到外层 catch），每次运行至多报告一次（首个故障）。
-            if (data.FaultedException is { } faultedException)
+            if (fault is not null)
                 exceptionObserver?.OnRunException(
-                    new VisionRunExceptionContext(effectiveRunId, data.FaultedNodeId ?? data.HaltNodeId, workflow.Id, workflow.Name), faultedException);
-            var error = data.Error;
+                    new VisionRunExceptionContext(effectiveRunId, fault.NodeId, workflow.Id, workflow.Name), fault.Exception);
+            var error = fault?.Error;
             if (error is null && !reachedTarget)
                 error = $"Debug target '{options?.TargetNodeId}' was not reached on the executed control-flow path.";
             if (error is null && !workflowComplete)
@@ -124,11 +125,11 @@ public sealed class WorkflowCoreVisionRunner(
                 // Workflow Core may surface a step fault as a suspended instance instead of an exception,
                 // so the interrupted lifecycle states are re-derived here too: data.Error is set by the node
                 // runtime whenever a node faults, including cancellation-induced faults.
-                ErrorCode = data.Error is null
+                ErrorCode = fault is null
                     ? null
                     : cancellationToken.IsCancellationRequested ? VisionRunErrorCodes.Cancelled
                     : timeout.IsCancellationRequested ? VisionRunErrorCodes.Timeout
-                    : data.FaultedException is NodeTimeoutException ? VisionRunErrorCodes.NodeTimeout
+                    : fault.Exception is NodeTimeoutException ? VisionRunErrorCodes.NodeTimeout
                     : VisionRunErrorCodes.NodeFailure
             };
         }
@@ -187,10 +188,11 @@ public sealed class WorkflowCoreVisionRunner(
         catch (Exception ex)
         {
             total.Stop();
+            var fault = data.Fault;
             // R10：统一运行边界的原始异常记录点——结果只承载简洁诊断（data.Error ?? ex.Message），
             // 完整异常链（堆栈/InnerException）交给宿主观察者写入日志。
             exceptionObserver?.OnRunException(
-                new VisionRunExceptionContext(effectiveRunId, data.FaultedNodeId ?? data.HaltNodeId, workflow.Id, workflow.Name), ex);
+                new VisionRunExceptionContext(effectiveRunId, fault?.NodeId ?? data.HaltNodeId, workflow.Id, workflow.Name), fault?.Exception ?? ex);
             return new WorkflowRunResult(
                 effectiveRunId,
                 false,
@@ -201,7 +203,7 @@ public sealed class WorkflowCoreVisionRunner(
                 data.SnapshotReports(),
                 data.SnapshotOverlays(),
                 null,
-                data.Error ?? ex.Message,
+                fault?.Error ?? ex.Message,
                 "Error",
                 data.HaltNodeId,
                 data.HaltReason,
@@ -211,7 +213,9 @@ public sealed class WorkflowCoreVisionRunner(
                 NodeImages = data.SnapshotNodeImages(),
                 CaliperDiagnostics = data.SnapshotCaliperDiagnostics(),
                 CaliperEdgeDiagnostics = data.SnapshotCaliperEdgeDiagnostics(),
-                ErrorCode = data.Error is not null ? VisionRunErrorCodes.NodeFailure : VisionRunErrorCodes.RuntimeError
+                ErrorCode = fault is null ? VisionRunErrorCodes.RuntimeError
+                    : fault.Exception is NodeTimeoutException ? VisionRunErrorCodes.NodeTimeout
+                    : VisionRunErrorCodes.NodeFailure
             };
         }
         finally

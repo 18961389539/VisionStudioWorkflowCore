@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using OpenCvSharp;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Engine.Nodes;
@@ -135,7 +135,7 @@ public sealed class DefectFilterNode : IVisionNodeExecutor
 
             if (minContrast > 0 && image is not null)
             {
-                var contrast = LocalContrast(image.Mat, detection);
+                var contrast = DefectGeometryAlgorithms.LocalContrast(image.Mat, detection);
                 if (contrast < minContrast) { removed["contrast"]++; continue; }
             }
 
@@ -179,21 +179,6 @@ public sealed class DefectFilterNode : IVisionNodeExecutor
             }));
     }
 
-    private static double LocalContrast(Mat image, VisionDetection detection)
-    {
-        var x = (int)Math.Floor(detection.BoundingBox.X);
-        var y = (int)Math.Floor(detection.BoundingBox.Y);
-        var width = (int)Math.Ceiling(detection.BoundingBox.Width);
-        var height = (int)Math.Ceiling(detection.BoundingBox.Height);
-        x = Math.Clamp(x, 0, Math.Max(0, image.Cols - 1));
-        y = Math.Clamp(y, 0, Math.Max(0, image.Rows - 1));
-        width = Math.Clamp(width, 0, image.Cols - x);
-        height = Math.Clamp(height, 0, image.Rows - y);
-        if (width < 1 || height < 1) return 0;
-        using var roi = new Mat(image, new Rect(x, y, width, height));
-        Cv2.MinMaxLoc(roi, out var min, out var max, out _, out _);
-        return max - min;
-    }
 }
 
 /// <summary>
@@ -243,14 +228,7 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
             string source;
             if (useContours && contours![offset + index].Points.Count >= 3)
             {
-                var points = contours[offset + index].Points.Select(point => new Point2f((float)point.X, (float)point.Y)).ToArray();
-                var rect = Cv2.MinAreaRect(points);
-                var first = rect.Size.Width;
-                var second = rect.Size.Height;
-                length = Math.Max(first, second);
-                width = Math.Min(first, second);
-                // MinAreaRect 的 Angle 是"宽边与 x 轴"的夹角，长边方向要按哪个边更长换算。
-                angle = DefectAnalysisHelpers.FoldAngle(first >= second ? rect.Angle : rect.Angle + 90.0);
+                (length, width, angle) = DefectGeometryAlgorithms.MeasureContour(contours[offset + index].Points);
                 source = "contour";
             }
             else

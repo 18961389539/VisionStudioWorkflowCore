@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -9,6 +12,7 @@ using VisionStudio.Scripting;
 namespace VisionStudio.Engine.Tests;
 
 /// <summary>Built-in C# script node: outputs, image flow, budget and forbidden-API contracts.</summary>
+[Collection("Script assembly lifetime")]
 public sealed class CSharpScriptNodeTests
 {
     [Fact]
@@ -170,6 +174,42 @@ public sealed class CSharpScriptNodeTests
     [Fact]
     public async Task Script_ConcurrentSameSourceAndLruEvictionWorkReliably()
     {
+        var loaded = new ConcurrentQueue<(WeakReference Assembly, WeakReference Context, bool Collectible)>();
+        AssemblyLoadEventHandler handler = (_, args) =>
+        {
+            if (args.LoadedAssembly.GetName().Name!.StartsWith("\u211B", StringComparison.Ordinal))
+                loaded.Enqueue((new WeakReference(args.LoadedAssembly),
+                    new WeakReference(AssemblyLoadContext.GetLoadContext(args.LoadedAssembly)), args.LoadedAssembly.IsCollectible));
+        };
+        AppDomain.CurrentDomain.AssemblyLoad += handler;
+        try { await ExerciseScriptCacheAsync(); }
+        finally { AppDomain.CurrentDomain.AssemblyLoad -= handler; }
+        Assert.True(loaded.Count >= 66, $"Expected more loaded submissions than the 64-entry cache, observed {loaded.Count}.");
+        Assert.All(loaded, entry => Assert.True(entry.Collectible, "Script assembly loaded into a non-collectible context."));
+        for (var attempt = 0; attempt < 10 && loaded.Any(entry => entry.Assembly.IsAlive || entry.Context.IsAlive); attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+        Assert.All(loaded, entry => Assert.False(entry.Assembly.IsAlive, "Completed script assembly is still rooted."));
+        Assert.All(loaded, entry => Assert.False(entry.Context.IsAlive, "Completed script load context is still rooted."));
+    }
+
+    [Fact]
+    public async Task Script_CachedCompilationDoesNotShareStaticSubmissionState()
+    {
+        const string source = "class Counter { public static int Value; } Output.Number = ++Counter.Value;";
+        for (var i = 0; i < 3; i++)
+        {
+            var result = await Run(source);
+            Assert.Equal(1d, result.Outputs["number"].Require<double>("number"));
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task ExerciseScriptCacheAsync()
+    {
         var sharedSource = "Output.Number = 42;";
         var concurrentRuns = Enumerable.Range(0, 6).Select(_ => Run(sharedSource));
         var results = await Task.WhenAll(concurrentRuns);
@@ -185,6 +225,9 @@ public sealed class CSharpScriptNodeTests
         // Faulted compilation is never poisoned in the cache across retries.
         await Assert.ThrowsAnyAsync<Exception>(() => Run("Output.Number = undefinedSymbol;"));
         await Assert.ThrowsAnyAsync<Exception>(() => Run("Output.Number = undefinedSymbol;"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Run("var a = new int[1]; Output.Number = a[2];"));
+        await Assert.ThrowsAsync<ScriptUserException>(() => Run("Fail(\"E_TEST\", \"unload after failure\");"));
+        await Assert.ThrowsAsync<ScriptTimeoutException>(() => Run("while (true) { }", extra: """{"maxTicks":100}"""));
     }
 
     private static async Task<NodeExecutorResult> Run(

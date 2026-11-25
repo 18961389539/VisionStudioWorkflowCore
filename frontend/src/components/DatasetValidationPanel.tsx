@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Col, Input, Modal, Popconfirm, Progress, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { MediaItemDescriptor, RunTraceRecord, ValidationDatasetDetail, ValidationDatasetSummary, ValidationResultRecord, ValidationRunRecord, WorkflowPayload } from '../types';
 import { localizeStatus } from '../i18n';
@@ -44,6 +44,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow,
   const runRequest = useRef(0);
   const detailAbort = useRef<AbortController | null>(null);
   const runAbort = useRef<AbortController | null>(null);
+  const detailDatasetId = useRef<string | undefined>(undefined);
   const autoLinkedRunRef = useRef<string | undefined>(undefined);
 
   const replayableTraces = useMemo(() => traces.filter((x) => x.hasReplayInput && !x.nodeReports.some((r) => r.nodeType === 'camera.syncCapture')), [traces]);
@@ -51,7 +52,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow,
   const baseline = runs.find((x) => x.runId === baselineRunId)?.summary;
   const candidate = runs.find((x) => x.runId === candidateRunId)?.summary;
 
-  const loadDatasets = async () => {
+  const loadDatasets = useCallback(async () => {
     const response = await apiFetch(validation.datasets);
     if (!response.ok) {
       // 失败≠空集：此前直接 return，界面保持空表，现场会误判为"没有数据集"。
@@ -61,31 +62,34 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow,
     const data: ValidationDatasetSummary[] = await response.json();
     setDatasets(data);
     setLoadError(undefined);
-    if (!datasetId && data.length) setDatasetId(data[0].id);
-  };
-  const loadTraces = async () => {
+    if (data.length) setDatasetId((current) => current || data[0].id);
+  }, []);
+  const loadTraces = useCallback(async () => {
     const response = await apiFetch(apiUrl('traces?take=500'));
     if (!response.ok) {
       setLoadError(await responseErrorMessage(response, `读取追溯记录失败（HTTP ${response.status}）`));
       return;
     }
     setTraces(await response.json());
-  };
-  const loadMedia = async () => {
+  }, []);
+  const loadMedia = useCallback(async () => {
     const response = await apiFetch(apiUrl('media/items?take=500'));
     if (!response.ok) {
       setLoadError(await responseErrorMessage(response, `读取媒体库失败（HTTP ${response.status}）`));
       return;
     }
     setMediaItems(await response.json());
-  };
+  }, []);
   const retrySources = () => { setLoadError(undefined); void loadDatasets(); void loadTraces(); void loadMedia(); };
-  const loadDetail = async (id: string) => {
+  const loadDetail = useCallback(async (id: string) => {
     const request = ++detailRequest.current;
     detailAbort.current?.abort();
     const controller = new AbortController();
     detailAbort.current = controller;
-    if (detail?.dataset.id !== id) { setDetail(undefined); setRuns([]); }
+    if (detailDatasetId.current !== id) {
+      detailDatasetId.current = id;
+      setDetail(undefined); setRuns([]);
+    }
     try {
       const [datasetResponse, runResponse] = await Promise.all([
         apiFetch(validation.dataset(id), { signal: controller.signal }),
@@ -99,23 +103,21 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow,
         const data: ValidationDatasetDetail = await datasetResponse.json();
         if (request !== detailRequest.current || controller.signal.aborted) return;
         setDetail(data);
-        if (!workflowSourceRunId) {
-          const traceItem = data.items.find((x) => x.sourceKind === 'TRACE' && x.sourceRunId);
-          if (traceItem?.sourceRunId) setWorkflowSourceRunId(traceItem.sourceRunId);
-        }
+        const sourceRunId = data.items.find((x) => x.sourceKind === 'TRACE' && x.sourceRunId)?.sourceRunId;
+        if (sourceRunId) setWorkflowSourceRunId((current) => current || sourceRunId);
       }
       if (runResponse.ok) {
         const data: ValidationRunRecord[] = await runResponse.json();
         if (request !== detailRequest.current || controller.signal.aborted) return;
         setRuns(data);
-        if (!selectedRunId && data.length) setSelectedRunId(data[0].runId);
+        if (data.length) setSelectedRunId((current) => current || data[0].runId);
       }
     } catch (error) {
       if (controller.signal.aborted || request !== detailRequest.current) return;
       setLoadError(error instanceof Error ? `读取数据集明细失败：${error.message}` : '读取数据集明细失败：网络请求未完成');
     }
-  };
-  const loadRun = async (id: string) => {
+  }, []);
+  const loadRun = useCallback(async (id: string) => {
     const request = ++runRequest.current;
     runAbort.current?.abort();
     const controller = new AbortController();
@@ -134,9 +136,9 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow,
       if (controller.signal.aborted || request !== runRequest.current) return;
       setLoadError(error instanceof Error ? `读取验证运行详情失败：${error.message}` : '读取验证运行详情失败：网络请求未完成');
     }
-  };
+  }, []);
 
-  useEffect(() => { if (open) { void loadDatasets(); void loadTraces(); void loadMedia(); } }, [open]);
+  useEffect(() => { if (open) { void loadDatasets(); void loadTraces(); void loadMedia(); } }, [open, loadDatasets, loadTraces, loadMedia]);
   useEffect(() => {
     if (!open || !initialWorkflow) return;
     setWorkflowSourceRunId(undefined);
@@ -145,13 +147,13 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow,
     autoLinkedRunRef.current = undefined;
   }, [open, initialWorkflow]);
   useEffect(() => () => { detailAbort.current?.abort(); runAbort.current?.abort(); }, []);
-  useEffect(() => { if (open && datasetId) void loadDetail(datasetId); }, [open, datasetId]);
-  useEffect(() => { if (open && selectedRunId) void loadRun(selectedRunId); }, [open, selectedRunId]);
+  useEffect(() => { if (open && datasetId) void loadDetail(datasetId); }, [open, datasetId, loadDetail]);
+  useEffect(() => { if (open && selectedRunId) void loadRun(selectedRunId); }, [open, selectedRunId, loadRun]);
   useEffect(() => {
     if (!open || !runs.some((x) => x.status === 'Running') || !datasetId) return;
     const timer = window.setInterval(() => { void loadDetail(datasetId); if (selectedRunId) void loadRun(selectedRunId); }, 1000);
     return () => window.clearInterval(timer);
-  }, [open, datasetId, selectedRunId, runs]);
+  }, [open, datasetId, selectedRunId, runs, loadDetail, loadRun]);
   useEffect(() => {
     if (!open || !autoLinkRecipe || !autoLinkRunId || autoLinkedRunRef.current === autoLinkRunId) return;
     const run = runs.find((item) => item.runId === autoLinkRunId);

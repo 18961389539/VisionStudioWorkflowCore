@@ -6,9 +6,11 @@
   "totalMaxGzipKB": 1465,
   "budgets": {
     "vendor-antd.js": 312,
-    "index.js": 108,
+    "index.js": 24,
+    "EditorShell.js": 107,
     "NodeConfigurationDialog.js": 66,
-    "ScriptEditor.js": 197,
+    "ScriptEditor.js": 10,
+    "vendor-codemirror.js": 182,
     "catalog.generated.js": 175,
     "catalog.zh.js": 157,
     "vendor-konva.js": 100,
@@ -28,7 +30,6 @@
     "ModelPackagePanel.js": 3,
     "FrameTreePanel.js": 2,
     "AboutPanel.js": 2,
-    "catalog.js": 2,
     "vendor-xyflow.css": 3
   }
 }

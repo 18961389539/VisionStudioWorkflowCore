@@ -1,20 +1,10 @@
 /**
- * 编辑器状态容器（2026-11-25）：把原先平铺给 EditorCanvasArea 的 67 个 props 按域切成 4 个 Context。
- *
- * 为什么是 4 个而不是 1 个：一个 Context 里的任何字段变化都会重渲**所有**消费者。
- * 画布的节点数组（每次拖动都变）、选择态（点击即变）、布局（切预设才变）、运行结果
- * （一次运行才变）刷新频率差两个数量级，混在一起会让"切个运行结果"顺带重渲整块工具栏。
- * 拆开后，将来把工具栏/画布/预览拆成子组件时可以各自只订阅需要的域。
- *
- * 分组依据是「谁在什么时候变」：
+ * 编辑器状态按刷新频率分为四域：
  * - Graph     ：图数据与编辑动作（高频；拖动、连线、增删）
  * - Selection ：选中与定位（高频；点击、搜索）
  * - Layout    ：布局与外观（低频；预设、专注、紧凑、主题）
  * - Run       ：运行与工作流生命周期（低频；运行、草稿、结果）
- *
- * 注意：Provider 的 value 由调用方构造（App 每次渲染重建对象）。这与改造前的 props 传递
- * 语义等价——原先 `canvas` 对象也是每次渲染新建，浅比较同样失败。若要进一步降重渲，
- * 下一步是把画布内部拆成只订阅单域的纯展示子组件，而不是在这里 memo。
+ * 批注动作另有窄订阅，避免批注节点因其他节点拖拽而订阅整个 Graph。
  */
 import { createContext, useContext, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
 import type { Connection, Edge, FitViewOptions, IsValidConnection, Node, OnConnectEnd, OnEdgesChange, OnNodesChange, OnReconnect } from '@xyflow/react';
@@ -41,6 +31,7 @@ export type EditorGraphValue = {
   setDragging: (value: boolean) => void;
   pushHistory: (label: string, coalesceKey?: string) => void;
   history: GraphHistory;
+  historyVersion: number;
   undo: () => void;
   redo: () => void;
   addNode: (typeKey: string, position?: { x: number; y: number }, attachment?: NodeAttachment) => void;
@@ -62,7 +53,8 @@ export type EditorGraphValue = {
 };
 
 export type EditorSelectionValue = {
-  selectedNode: Node | undefined;
+  selectedNodeLabel: string | undefined;
+  selectedNodeConfigurable: boolean;
   selectedId: string;
   setSelectedId: (value: string) => void;
   selectedNodeIds: string[];
@@ -74,7 +66,7 @@ export type EditorSelectionValue = {
   setSearchQuery: (value: string) => void;
   searchOpen: boolean;
   setSearchOpen: (value: boolean) => void;
-  searchMatches: Node[];
+  searchMatches: { id: string; label: string }[];
   connectionPicker: ConnectionPicker | undefined;
   setConnectionPicker: (value: ConnectionPicker | undefined) => void;
   connectionPickerRef: RefObject<HTMLDivElement | null>;
@@ -131,6 +123,7 @@ const EditorGraphContext = createContext<EditorGraphValue | null>(null);
 const EditorSelectionContext = createContext<EditorSelectionValue | null>(null);
 const EditorLayoutContext = createContext<EditorLayoutValue | null>(null);
 const EditorRunContext = createContext<EditorRunValue | null>(null);
+const AnnotationActionContext = createContext<EditorGraphValue['updateCanvasAnnotation'] | null>(null);
 
 function useRequired<T>(value: T | null, hookName: string): T {
   if (value === null) {
@@ -151,6 +144,9 @@ export const useEditorLayout = (): EditorLayoutValue =>
 export const useEditorRun = (): EditorRunValue =>
   useRequired(useContext(EditorRunContext), 'useEditorRun');
 
+export const useEditorAnnotationAction = (): EditorGraphValue['updateCanvasAnnotation'] =>
+  useRequired(useContext(AnnotationActionContext), 'useEditorAnnotationAction');
+
 export function EditorProviders({ graph, selection, layout, run, children }: {
   graph: EditorGraphValue;
   selection: EditorSelectionValue;
@@ -162,7 +158,9 @@ export function EditorProviders({ graph, selection, layout, run, children }: {
     <EditorGraphContext.Provider value={graph}>
       <EditorSelectionContext.Provider value={selection}>
         <EditorLayoutContext.Provider value={layout}>
-          <EditorRunContext.Provider value={run}>{children}</EditorRunContext.Provider>
+          <EditorRunContext.Provider value={run}>
+            <AnnotationActionContext.Provider value={graph.updateCanvasAnnotation}>{children}</AnnotationActionContext.Provider>
+          </EditorRunContext.Provider>
         </EditorLayoutContext.Provider>
       </EditorSelectionContext.Provider>
     </EditorGraphContext.Provider>

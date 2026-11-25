@@ -355,8 +355,8 @@ def audit_storage_and_runtime(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
     ctx.ok("Camera frames are pooled and the pool is observable through /api/health")
 
     for doc in ("docs/golden-regression.md", "docs/diagnostic-bundle.md", "docs/login-lockout.md", "docs/engine-telemetry.md", "docs/frame-mat-pool.md"):
-        if not ctx.doc_present(doc):
-            ctx.fail(f"Missing design note for a 2026-11-12 capability: {doc}")
+        ctx.doc_present(doc)
+    ctx.doc_has("docs/login-lockout.md", "account_locked")
     if not (ctx.root / "frontend/e2e/recipe-publication.spec.ts").is_file():
         ctx.fail("Publication/rollback e2e spec is missing (maturity acknowledgement is only verified in jsdom)")
     ctx.ok("2026-11-12 capabilities keep their design notes and the publication e2e spec")

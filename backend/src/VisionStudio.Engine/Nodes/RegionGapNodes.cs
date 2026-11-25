@@ -353,28 +353,9 @@ public sealed class RegionFromContourNode : IVisionNodeExecutor
             height = Math.Max(1, (int)Math.Ceiling(maxY) + 1);
         }
 
-        var mask = new Mat(height, width, MatType.CV_8UC1, Scalar.All(0));
+        var mask = RegionRasterAlgorithms.FromContours(selected, width, height, expand, invert, cancellationToken);
         try
         {
-            foreach (var contour in selected)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var points = contour.Points.Select(p =>
-                {
-                    ToleranceGeometry.Finite(p.X, p.Y);
-                    return new Point((int)Math.Round(p.X), (int)Math.Round(p.Y));
-                }).ToArray();
-                if (points.Length < 3) continue;
-                Cv2.FillPoly(mask, [points], Scalar.All(255), LineTypes.Link8);
-            }
-            if (expand > 0)
-            {
-                using var kernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(2 * expand + 1, 2 * expand + 1));
-                Cv2.Dilate(mask, mask, kernel);
-            }
-            if (invert) Cv2.BitwiseNot(mask, mask);
-            cancellationToken.ThrowIfCancellationRequested();
-
             var region = RegionGapMath.RegionFromMask(mask, cancellationToken);
             var area = RegionGapMath.RegionArea(region);
             var image = VisionImage.Own(mask.Clone());

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ParameterTuningPreviewResult, ValidationDatasetItem, WorkflowPayload } from './types';
 import { responseErrorMessage } from './apiErrors';
 import { isTuningPreview } from './tuningContracts';
@@ -22,18 +22,18 @@ export function useTuningPreview(params: Params) {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [state, setState] = useState<{ key: string; preview?: ParameterTuningPreviewResult; busy?: boolean; error?: string; automatic?: boolean; fullWorkflow?: boolean }>();
   const [background, setBackground] = useState<{ key: string; url: string; width?: number; height?: number }>();
-  const invalidate = () => {
+  const invalidate = useCallback(() => {
     clearTimeout(timer.current); timer.current = undefined;
     operation.current?.controller.abort(); operation.current = undefined;
-  };
+  }, []);
   useEffect(() => {
     active.current = params.open;
     setState(undefined);
     if (!params.open) setBackground(undefined);
     return () => { active.current = false; invalidate(); };
-  }, [params.open, key]);
+  }, [params.open, key, invalidate]);
 
-  const run = async (fullWorkflow: boolean, automatic = false): Promise<boolean> => {
+  const run = useCallback(async (fullWorkflow: boolean, automatic = false): Promise<boolean> => {
     const context = latest.current;
     const sample = context.sample;
     if (!active.current || !context.ready || !sample?.replayReady || !context.nodeId) return false;
@@ -75,7 +75,7 @@ export function useTuningPreview(params: Params) {
         if (active.current && latest.current.key === context.key) setState((previous) => previous?.key === context.key ? { ...previous, busy: false } : previous);
       }
     }
-  };
+  }, [invalidate]);
 
   useEffect(() => {
     if (!params.open || !params.autoPreview || !params.ready || !sample?.replayReady || !params.nodeId) return;
@@ -87,7 +87,7 @@ export function useTuningPreview(params: Params) {
         if (active.current) setState((previous) => previous && { ...previous, busy: false });
       }
     };
-  }, [params.open, params.autoPreview, key]);
+  }, [params.open, params.autoPreview, params.ready, params.nodeId, sample?.replayReady, key, run]);
 
   const current = params.open && state?.key === key ? state : undefined;
   const preview = current?.preview;

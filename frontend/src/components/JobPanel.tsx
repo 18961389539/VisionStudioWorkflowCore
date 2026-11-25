@@ -147,6 +147,8 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
   const [messageApi, contextHolder] = message.useMessage();
 
   const selected = useMemo(() => jobs.find((x) => x.id === selectedId), [jobs, selectedId]);
+  const selectedJobId = selected?.id;
+  const selectedLatestVersion = selected?.latestVersion;
   const workflowImport = useWorkflowImport({ active: open, contextKey: selectedId, prepare: prepareWorkflowChange,
     error: (text) => { void messageApi.error(text); } });
   const busy = operationBusy || workflowImport.loading;
@@ -194,7 +196,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
 
   const parseValues = (text:string) => { const value=JSON.parse(text); if(!value || Array.isArray(value) || typeof value!=='object') throw new Error('参数必须是 JSON 对象。'); return value as Record<string,unknown>; };
   useEffect(() => {
-    if (!open || !selected) return;
+    if (!open || selectedJobId === undefined || selectedLatestVersion === undefined) return;
     let cancelled = false;
     const controller = new AbortController();
     setParameterLoading(true); setParameterError(undefined);
@@ -202,8 +204,8 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
     void (async () => {
       try {
         const requests = [
-          apiFetch(jobEndpoints.parameters(selected.id), { signal: controller.signal }),
-          apiFetch(apiUrl(`jobs/${encodeURIComponent(selected.id)}/versions/${selected.latestVersion}/parameterization`), { signal: controller.signal })
+          apiFetch(jobEndpoints.parameters(selectedJobId), { signal: controller.signal }),
+          apiFetch(apiUrl(`jobs/${encodeURIComponent(selectedJobId)}/versions/${selectedLatestVersion}/parameterization`), { signal: controller.signal })
         ];
         const responses = await Promise.all(requests);
         if (responses.some((response) => !response.ok)) throw new Error('参数草稿加载失败，请重试。');
@@ -212,18 +214,18 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
         setRecipeParams(JSON.stringify(recipe.values ?? {}, null, 2));
         setBindings(parameterization.parameterBindings ?? {});
         setBaseWorkflowId(parameterization.baseWorkflow?.id ?? parameterization.effectiveWorkflow?.id);
-        setBaseWorkflowRecipeId(selected.id);
-        setBaseWorkflowVersion(selected.latestVersion);
+        setBaseWorkflowRecipeId(selectedJobId);
+        setBaseWorkflowVersion(selectedLatestVersion);
       } catch (error) {
         if (!cancelled) setParameterError(error instanceof Error ? error.message : '参数加载失败');
       } finally { if (!cancelled) setParameterLoading(false); }
     })();
     return () => { cancelled = true; controller.abort(); };
-  }, [open, selected?.id, selected?.latestVersion, parameterAttempt]);
+  }, [open, selectedJobId, selectedLatestVersion, parameterAttempt]);
   useEffect(() => {
-    if (!selected) return;
+    if (selectedJobId === undefined) return;
     setCandidates([]); setCandidatesVersion(undefined); setDependency(undefined);
-  }, [selected?.id]);
+  }, [selectedJobId]);
   const saveRecipeParameters = () => selected && invoke(async()=>{ const response=await apiFetch(jobEndpoints.parameters(selected.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:parseValues(recipeParams)})}); const data=await response.json(); if(!response.ok) throw new Error(apiErrorMessage(data, '保存配方参数失败')); setRecipeParams(JSON.stringify(data.values,null,2)); messageApi.success('配方参数草稿已保存'); });
   const workflowMatchesSelectedRecipe = Boolean(selected
     && baseWorkflowRecipeId === selected.id

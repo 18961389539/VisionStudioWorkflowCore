@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace VisionStudio.Api.Storage.EfCore;
@@ -21,6 +22,8 @@ public partial class VisionStudioDbContext : DbContext
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
+        // The hand-written migrations own indexes; map them explicitly rather than adding EF-only indexes.
+        configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));
         configurationBuilder.Properties<DateTimeOffset>()
             .HaveConversion<UtcDateTimeOffsetConverter>();
     }

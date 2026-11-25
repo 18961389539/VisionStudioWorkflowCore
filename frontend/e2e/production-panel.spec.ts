@@ -108,6 +108,25 @@ async function stubRuntimeHost(page: Page, runtimeOnly = true): Promise<void> {
 }
 
 test.describe('生产操作台（真实浏览器）', () => {
+  for (const [url, runtimeOnly] of [
+    ['/', true],
+    ['/?view=operator', false],
+    ['/?view=operator&kiosk=1', false],
+    ['/?view=spc', true],
+  ] as const) {
+    test(`${url} 不加载编辑器模块、不请求编辑器目录且不写草稿`, async ({ page }) => {
+      await stubRuntimeHost(page, runtimeOnly);
+      const requested: string[] = [];
+      page.on('request', (request) => requested.push(new URL(request.url()).pathname));
+      await page.goto(url);
+      if (url.includes('spc')) await expect(page.locator('.spc-page')).toBeVisible();
+      else await expect(page.getByRole('region', { name: '操作员工作台', exact: true })).toBeVisible();
+      expect(requested.filter((path) => /EditorShell|useEditor|useRunController|appEditor|@xyflow/.test(path))).toEqual([]);
+      expect(requested.filter((path) => /^\/api\/(catalog|plugins)$/.test(path))).toEqual([]);
+      expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => /draft|canvas-annotations|node-compact/i.test(key)))).toEqual([]);
+    });
+  }
+
   test('从首屏进入待确认告警，确认后保留活动记录和分页历史', async ({ page }) => {
     await stubRuntimeHost(page);
     await page.goto('/');

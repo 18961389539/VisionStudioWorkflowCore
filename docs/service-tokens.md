@@ -56,6 +56,9 @@ curl -X POST https://host/api/security/service-tokens/{id}/revoke --cookie 'vs_s
 
 创建、轮换、吊销都进审计（`security.service-token.*`，target 为名称或 id）。
 `last_used_at` 在认证成功时按令牌每分钟最多写一次，用于识别长期未用的令牌。
+并发请求读到同一陈旧使用时间戳时，先在进程内串行化使用时间更新，再只读复查；
+已由其它请求更新的令牌不再发出无效 UPDATE 抢写锁。更新条件同时校验令牌哈希和未吊销状态，
+不会把旧密钥的使用时间写到刚轮换的新密钥上。身份、作用域、过期和吊销仍每次实时查库，不缓存认证结果。
 
 ## 使用方式
 
@@ -67,6 +70,8 @@ curl https://host/api/traces/page?limit=20 -H "Authorization: Bearer vst_..."
 - 过期（可选 `expiresInDays`，1–3650 天）、吊销后认证直接 401；无作用域 403。
 - 每次带 `results:read` 的读请求会写一条 `trace.read` 审计（`username=service:<名称>`、
   `role=Service`）。人类轮询同一接口不写，避免把审计表变成访问日志。
+  审计通过[单写者批量队列](audit-integrity.md#单写者批量队列)提交，满队列等待而不丢记录，
+  每个调用仍等待提交确认，不为提高吞吐取消审计或抽样。
 - 触发运行始终写 `workflow.run.adhoc` 审计，与人类 Engineer 同口径。
 - `stations:control` 令牌只允许启停该工位现有生产配置，不能读取配置、切换配方或调用恢复接口。
 
@@ -86,3 +91,4 @@ curl https://host/api/traces/page?limit=20 -H "Authorization: Bearer vst_..."
 - `runs:run` 能触发运行但不能读追溯；
 - 轮换使旧密钥 401、吊销使新密钥 401、已吊销不可轮换；
 - Operator 不能管理令牌；未知作用域 400。
+- 32 个并发请求读到同一陈旧使用时间时，只执行一次 `last_used_at` UPDATE。

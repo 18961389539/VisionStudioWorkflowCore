@@ -185,7 +185,12 @@ public static class VisionStudioServiceRegistration
             sp.GetRequiredService<IVisionStudioDbFactory>(),
             sp.GetRequiredService<IOptions<SecurityOptions>>()));
         services.AddSingleton<ServiceTokenStore>(sp => new ServiceTokenStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
-        services.AddSingleton<AuditEventStore>(sp => new AuditEventStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.Configure<AuditQueueOptions>(configuration.GetSection("Security:AuditQueue"));
+        services.AddSingleton<AuditEventStore>(sp => new AuditEventStore(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<IOptions<AuditQueueOptions>>().Value,
+            sp.GetRequiredService<ILogger<AuditEventStore>>(),
+            sp.GetRequiredService<StorageMaintenanceCoordinator>()));
         services.AddAuthentication(options =>
         {
             options.DefaultAuthenticateScheme = VisionStudioAuthenticationHandler.Scheme;
@@ -553,6 +558,7 @@ public static class VisionStudioServiceRegistration
             sp.GetRequiredService<ILogger<InterruptedRunRecovery>>()));
         services.AddHostedService<DataRootOwnership>();
         services.AddHostedService<StorageMigrationHostedService>();
+        services.AddHostedService(sp => sp.GetRequiredService<AuditEventStore>());
         services.AddHostedService<InterruptedRunRecoveryHostedService>();
         services.AddHostedService<RuntimeBootstrapHostedService>();
         services.AddHostedService<VendorProvenanceBootstrapHostedService>();

@@ -159,12 +159,9 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
         catch (Exception ex)
         {
             sw.Stop();
-            data.Error = $"{node.Id}: {ex.Message}";
-            data.LastFaultedNodeId = node.Id;
             // R10/F08：保留原始异常供统一结束阶段向观察者报告——本异常会被 WorkflowCore 捕获
             // 并转为结果返回，运行器的 catch 边界不会经过，不能只依赖那里记录异常链。
-            data.FaultedException ??= ex;
-            data.FaultedNodeId ??= node.Id;
+            data.RecordFault(node.Id, ex);
             data.AddReport(new NodeRunReport(
                 node.Id,
                 node.Type,
@@ -206,10 +203,12 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
         {
             attempts = attempt;
             data.BeginTryAttempt(node.Id, attempt, body);
+            var attemptedNodeId = node.Id;
             try
             {
                 foreach (var bodyNodeId in body)
                 {
+                    attemptedNodeId = bodyNodeId;
                     cancellationToken.ThrowIfCancellationRequested();
                     var outcome = await ExecuteAsync(data, bodyNodeId, cancellationToken).ConfigureAwait(false);
                     if (outcome != VisionNodeRuntimeOutcome.Executed || data.Halted) break;
@@ -230,7 +229,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             {
                 lastError = ex;
                 hadHandledFailures = true;
-                data.ClearHandledTryError(data.LastFaultedNodeId ?? body.LastOrDefault() ?? node.Id);
+                data.ClearHandledTryError(attemptedNodeId, ex);
                 if (ex is OperationCanceledException || attempt > maxRetries) break;
                 if (retryDelayMs > 0)
                     await Task.Delay(retryDelayMs, cancellationToken).ConfigureAwait(false);

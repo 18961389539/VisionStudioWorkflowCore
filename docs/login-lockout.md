@@ -61,6 +61,26 @@ curl -X POST -H "Cookie: vs_session=..." http://localhost:5000/api/security/user
 `MaxFailedLoginAttempts = 0` 关闭整套机制（用于不支持锁定的联调环境）。这是显式开关，
 不是"调大上限"——调大上限仍然会锁，只是晚一点。
 
+## Cookie 会话的写请求来源校验
+
+`SameSite=Strict` 的 site 不区分端口，不能独自阻止同主机另一端口发起的写操作。
+认证后的 Cookie 请求除 GET、HEAD、OPTIONS、TRACE 外统一经过 `CookieCsrfMiddleware`，
+不依赖请求体或 Content-Type，因此登出、生产停止、账号解锁等空 POST 也受保护。
+
+- `Origin` 必须与请求的协议、主机及有效端口相同；缺失时检查 `Referer`。
+  `null`、非法或多值来源不会被当成“缺失”放行。
+- 携带 `Sec-Fetch-Site` 时只接受 `same-origin`，不信任 `same-site`。
+- 拒绝返回 403 ProblemDetails，错误码 `csrf_origin_rejected`，带关联 ID，且不执行端点副作用。
+- 显式 Bearer 认证不依赖环境 Cookie，保持原有行为；服务令牌仍优先于 Cookie。
+  不携带浏览器来源头的现有非浏览器 Cookie 调用保持兼容；自动化客户端建议使用 Bearer。
+- CORS 来源列表不作为 Cookie 写请求白名单。前端开发代理应保留 Host；
+  TLS 终止代理应按 `ReverseProxy` 可信边界配置转发协议及 Host，不能直接信任任意转发头。
+
+登录与登出共用 Cookie 属性：`Path=/`、`HttpOnly`、`SameSite=Strict`、`IsEssential`，
+`Secure` 取可信代理处理后的 HTTPS 状态；登出只改变 Cookie 值和过期时间，并撤销服务端会话。
+回归用例见 `CookieCsrfTests`，覆盖同主机跨端口、来源缺失/非法、Bearer、
+HTTP/HTTPS Cookie 属性以及可信代理后的外部端口。
+
 ## 迁移注意
 
 v28 用 `customApply` 而不是裸 `ALTER TABLE`：`security_users` 表的创建与版本迁移存在两条路径

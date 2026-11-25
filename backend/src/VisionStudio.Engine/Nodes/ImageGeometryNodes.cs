@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Engine.Nodes;
@@ -45,38 +46,6 @@ internal static class ImageGeometryMath
         if (source.Width > MaxAxis || source.Height > MaxAxis || source.Total() > MaxPixels)
             throw new InvalidOperationException(
                 $"{nodeType} image must be at most {MaxAxis} per axis and {MaxPixels} pixels.");
-    }
-
-    /// <summary>彩色转单通道灰度（保持源位深），单通道直接复制以便调用方统一拥有所有权。</summary>
-    internal static Mat ToGrayCopy(Mat source)
-    {
-        if (source.Channels() == 1) return source.Clone();
-        var gray = new Mat();
-        var code = source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY;
-        Cv2.CvtColor(source, gray, code);
-        return gray;
-    }
-
-    /// <summary>
-    /// 256 桶直方图近似百分位：60MP 图像上排序真值要几百毫秒。用于梯度幅值的 p99 数值指标
-    /// 以及 stretch 的分母；直方图误差为一个桶宽，对工程判定可接受。需要精确分位时用 measure.grayHistogram。
-    /// </summary>
-    internal static double HistogramPercentile(Mat single32, double fraction, double knownMin, double knownMax)
-    {
-        if (single32.Empty() || !(knownMax > knownMin)) return knownMax;
-        var range = new Rangef((float)knownMin, (float)knownMax);
-        using var hist = new Mat();
-        using var noMask = new Mat();
-        Cv2.CalcHist([single32], [0], noMask, hist, 1, [256], [range]);
-        var target = single32.Total() * fraction;
-        var accumulated = 0d;
-        for (var bin = 0; bin < 256; bin++)
-        {
-            accumulated += hist.At<float>(bin);
-            if (accumulated >= target)
-                return knownMin + (knownMax - knownMin) * (bin + 1) / 256d;
-        }
-        return knownMax;
     }
 
     /// <summary>两张输出图像的共同所有权：结果构造失败时一次释放，成功后交给各自的 VisionImage。</summary>
@@ -124,8 +93,7 @@ public sealed class ImageFlipNode : IVisionNodeExecutor
         var source = context.RequireImage("image");
         ImageGeometryMath.ValidateGeometryDepth(source.Mat, Type);
 
-        var flipped = new Mat();
-        Cv2.Flip(source.Mat, flipped, flip);
+        var flipped = ImageGeometryAlgorithms.Flip(source.Mat, flip);
         var image = VisionImage.Own(flipped);
         timer.Stop();
 
@@ -198,61 +166,12 @@ public sealed class ImageGradientNode : IVisionNodeExecutor
 
         var emitDirection = node.GetBool("emitDirection", true);
 
-        using var gray = ImageGeometryMath.ToGrayCopy(source.Mat);
-        using var gray32 = new Mat();
-        gray.ConvertTo(gray32, MatType.CV_32F, 1, 0);
-
-        using var dx = new Mat();
-        using var dy = new Mat();
-        if (op == "scharr")
-        {
-            Cv2.Scharr(gray32, dx, MatType.CV_32F, 1, 0);
-            Cv2.Scharr(gray32, dy, MatType.CV_32F, 0, 1);
-        }
-        else
-        {
-            Cv2.Sobel(gray32, dx, MatType.CV_32F, 1, 0, kernelSize);
-            Cv2.Sobel(gray32, dy, MatType.CV_32F, 0, 1, kernelSize);
-        }
-
-        using var magnitude32 = new Mat();
-        Cv2.Magnitude(dx, dy, magnitude32);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        Cv2.MinMaxLoc(magnitude32, out var minMagnitude, out var maxMagnitude, out _, out _);
-        var meanMagnitude = Cv2.Mean(magnitude32).Val0;
-        var p99Magnitude = ImageGeometryMath.HistogramPercentile(magnitude32, 0.99, minMagnitude, maxMagnitude);
-
-        // 幅值按源位深落地：8/16 位走饱和截断，负旁瓣不会被绕回成亮边。
-        // 这张图的所有权直接交给 VisionImage，因此不能用 using（否则 return 时把结果一起释放）。
-        var magnitudeOut = new Mat();
-        if (scaleMode == "stretch")
-        {
-            var divisor = p99Magnitude > 1e-9 ? p99Magnitude : 1d;
-            using var scaled = new Mat();
-            magnitude32.ConvertTo(scaled, MatType.CV_32F, 255d / divisor, 0);
-            scaled.ConvertTo(magnitudeOut, MatType.CV_8UC1);
-        }
-        else
-        {
-            magnitude32.ConvertTo(magnitudeOut, source.Mat.Depth() == MatType.CV_32F ? MatType.CV_32F : source.Mat.Depth());
-        }
-
-        Mat? directionOut = null;
-        if (emitDirection)
-        {
-            directionOut = new Mat();
-            Cv2.Phase(dx, dy, directionOut, angleInDegrees: true);
-            // OpenCV 给出 (-180,180]：负值整体平移 +360，得到 [0,360) 便于直方图与阈值使用。
-            using var negativeMask = new Mat();
-            Cv2.Compare(directionOut, Scalar.All(0), negativeMask, CmpTypes.LT);
-            using var shifted = new Mat();
-            Cv2.Add(directionOut, Scalar.All(360), shifted);
-            shifted.CopyTo(directionOut, negativeMask);
-        }
-
-        var image = VisionImage.Own(magnitudeOut);
-        var direction = directionOut is null ? null : VisionImage.Own(directionOut);
+        var gradient = ImageGeometryAlgorithms.Gradient(source.Mat, op, kernelSize, scaleMode, emitDirection, cancellationToken);
+        var meanMagnitude = gradient.Mean;
+        var maxMagnitude = gradient.Maximum;
+        var p99Magnitude = gradient.Percentile99;
+        var image = VisionImage.Own(gradient.Magnitude);
+        var direction = gradient.Direction is null ? null : VisionImage.Own(gradient.Direction);
         timer.Stop();
 
         return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(
@@ -337,21 +256,11 @@ public sealed class ImageDistanceTransformNode : IVisionNodeExecutor
         if (mode is not ("foreground" or "background"))
             throw new InvalidOperationException("image.distanceTransform mode must be foreground or background.");
 
-        using var mask = new Mat();
-        if (mode == "background") Cv2.BitwiseNot(source.Mat, mask);
-        else source.Mat.CopyTo(mask);
-
-        using var distance32 = new Mat();
-        // OpenCV 的 DIST_MASK_3=3 / DIST_MASK_5=5 / DIST_MASK_PRECISE=7，与参数取值一一对应。
-        var maskCode = (DistanceTransformMasks)maskSize;
-        Cv2.DistanceTransform(mask, distance32, metric, maskCode);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        Cv2.MinMaxLoc(distance32, out _, out var maxDistance, out _, out _);
-        var foregroundCount = Cv2.CountNonZero(mask);
-        var meanDistance = foregroundCount > 0 ? Cv2.Mean(distance32, mask).Val0 : 0d;
-
-        var image = VisionImage.Own(distance32.Clone());
+        var distance = ImageGeometryAlgorithms.DistanceTransform(source.Mat, mode, metric, maskSize, cancellationToken);
+        var maxDistance = distance.Maximum;
+        var foregroundCount = distance.ForegroundCount;
+        var meanDistance = distance.Mean;
+        var image = VisionImage.Own(distance.Image);
         timer.Stop();
 
         return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>

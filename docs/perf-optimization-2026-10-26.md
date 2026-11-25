@@ -134,3 +134,32 @@ warm =   8 ms   （命中缓存，只 stat 文件）
 代价是每次列表都要读全文，等于把缓存收益吃掉，所以现在不做。
 
 **验证**：`VisionStudio.Api.Tests` **436 项全绿**（3m55s）。
+
+---
+
+## 编辑器四域订阅隔离
+
+拖动节点且右键菜单关闭时 Graph 会变化，但等值的选区、搜索结果、布局和运行状态不应因此改变引用。
+四域按字段稳定 value，选区和搜索只保留画布所需投影；批注节点单独订阅编辑动作。
+可变的历史对象另带版本，避免撤销和重做按钮漏刷新；运行回调以及对齐、分组动作读取最后一次已提交的状态。
+
+测试中连续模拟 120 次仅位置变化：Graph 消费者更新 120 次，Selection、Layout、Run
+和批注动作消费者均无额外渲染；实际编辑工具栏对等值搜索结果也无额外渲染。
+这不是帧耗时基准，也不意味着整个画布不重渲染：画布仍订阅 Graph，真正隔离的是工具栏、
+草稿提示等 memo 子树以及批注节点。测试另覆盖中止的并发渲染、最新回调和历史变化；
+Chromium 覆盖搜索定位、分组、撤销、拖拽、草稿恢复和语言切换。
+
+构建体积门禁仍未通过：本轮新增的编辑器分包为 110/107 KiB；总量 1477/1465 KiB
+以及 JobPanel 12/11 KiB、DatasetValidationPanel 6/5 KiB 也超限，其中后三项在本轮前已超限。
+未放宽体积预算。
+
+## CodeMirror 供应商分包
+
+CodeMirror、Lezer、UIW 编辑器封装及其专属依赖单独进入 `vendor-codemirror`；
+脚本节点配置仍按需加载，生产构建的浏览器回归验证打开前未请求该分包、打开后可编辑。
+gzip -9 预算按实测登记 `vendor-codemirror` 182 KiB，并将 `ScriptEditor` 从 197 收紧至 10 KiB。
+分包主要改善缓存粒度，不承诺减少总下载量：当前产物总量为 1478/1465 KiB，原有门禁超限仍在。
+`@types/react` 和 `@types/react-dom` 均固定为锁文件中的 19.3.0。
+
+验证生产分包时，先运行 `npm run build`，再设置 `VISIONSTUDIO_TEST_PRODUCTION_BUNDLE=1`
+运行 `npx playwright test editor.spec.ts --grep "脚本编辑器按需加载并可编辑" --project chromium`。

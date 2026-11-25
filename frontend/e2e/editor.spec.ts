@@ -17,6 +17,77 @@ async function stubApi(page: Page): Promise<void> {
 }
 
 test.describe('编辑器画布（真实浏览器）', () => {
+  test('拖拽批注期间不写批注存储，松手后合并保存最终位置', async ({ page }) => {
+    await stubApi(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('visionstudio.onboarding-done', '1');
+      localStorage.setItem('visionstudio.canvas-annotations', JSON.stringify({
+        'demo-linear': [{ id: 'drag-note', type: 'canvasNote', position: { x: 200, y: 350 }, content: 'drag test' }]
+      }));
+    });
+    await page.goto('/');
+    const heading = page.locator('[data-id="drag-note"] .canvas-note-heading');
+    await expect(heading).toBeVisible();
+    const writes = await page.evaluateHandle(() => {
+      const keys: string[] = [];
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (this === localStorage) keys.push(key);
+        return original.call(this, key, value);
+      };
+      return keys;
+    });
+    const box = await heading.boundingBox();
+    if (!box) throw new Error('Note heading has no layout');
+    await page.mouse.move(box.x + 20, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 100, box.y + box.height / 2 + 30, { steps: 20 });
+    // A held drag must not flush even when it pauses longer than the debounce window.
+    await page.waitForTimeout(700);
+    expect(await writes.evaluate((keys) => keys.filter((key) => key === 'visionstudio.canvas-annotations'))).toEqual([]);
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => {
+      const stored = JSON.parse(localStorage.getItem('visionstudio.canvas-annotations') ?? '{}');
+      return stored['demo-linear']?.find((node: { id: string }) => node.id === 'drag-note')?.position.x;
+    })).toBeGreaterThan(200);
+    expect(await writes.evaluate((keys) => keys.filter((key) => key === 'visionstudio.canvas-annotations'))).toHaveLength(1);
+  });
+
+  for (const targetId of ['demo-linear', 'draft-target']) {
+    test(`草稿身份在批注恢复前确定（${targetId}）`, async ({ page }) => {
+      await stubApi(page);
+      await page.addInitScript((id) => {
+        localStorage.setItem('visionstudio.onboarding-done', '1');
+        localStorage.setItem('visionstudio.canvas-annotations', JSON.stringify({
+          [id]: [{ id: 'correct-note', type: 'canvasNote', position: { x: 200, y: 350 }, content: 'correct owner' }],
+          'payload-old': [{ id: 'wrong-note', type: 'canvasNote', position: { x: 450, y: 350 }, content: 'wrong owner' }]
+        }));
+        localStorage.setItem('visionstudio.draft.workflow', JSON.stringify({
+          version: 1, savedAt: new Date().toISOString(), workflowId: id, workflowName: 'Recovered draft', demoKey: 'linear',
+          payload: { id: 'payload-old', name: 'Old payload name', edges: [], nodes: [
+            { id: 'restored-node', type: 'image.threshold', position: { x: 150, y: 100 }, parameters: {} }
+          ] }
+        }));
+      }, targetId);
+      await page.goto('/');
+      await page.getByRole('button', { name: '恢复草稿', exact: true }).click();
+      const guard = page.getByRole('dialog', { name: '存在未保存的修改' });
+      await expect(guard.or(page.locator('[data-id="restored-node"]'))).toBeVisible();
+      if (await guard.isVisible()) await guard.getByRole('button', { name: '丢弃修改', exact: true }).click();
+      await expect(page.locator('[data-id="restored-node"]')).toBeVisible();
+      await expect(page.locator('[data-id="correct-note"]')).toBeVisible();
+      await expect(page.locator('[data-id="wrong-note"]')).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => {
+        const draft = JSON.parse(localStorage.getItem('visionstudio.draft.workflow') ?? '{}');
+        return { workflowId: draft.workflowId, id: draft.payload?.id, name: draft.payload?.name };
+      })).toEqual({ workflowId: targetId, id: targetId, name: 'Recovered draft' });
+      expect(await page.evaluate((id) => {
+        const stored = JSON.parse(localStorage.getItem('visionstudio.canvas-annotations') ?? '{}');
+        return [stored[id].map((node: { id: string }) => node.id), stored['payload-old'].map((node: { id: string }) => node.id)];
+      }, targetId)).toEqual([['correct-note'], ['wrong-note']]);
+    });
+  }
+
   test('首屏渲染画布与初始流程，且无未捕获异常', async ({ page }) => {
     const pageErrors: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -30,6 +101,62 @@ test.describe('编辑器画布（真实浏览器）', () => {
     expect(await page.locator('.react-flow__node').count()).toBeGreaterThan(1);
 
     expect(pageErrors).toEqual([]);
+  });
+
+  test('画布搜索定位后可分组并撤销', async ({ page }) => {
+    await stubApi(page);
+    await page.addInitScript(() => localStorage.setItem('visionstudio.onboarding-done', '1'));
+    await page.goto('/');
+    const node = page.locator('.react-flow__node').first();
+    await expect(node).toBeVisible();
+    const id = await node.getAttribute('data-id');
+    if (!id) throw new Error('Node has no id');
+    const toolbar = page.getByRole('toolbar', { name: '画布编辑工具' });
+    await toolbar.getByRole('combobox').fill(id);
+    const option = page.getByRole('option').filter({ hasText: id });
+    await expect(option).toBeVisible();
+    await option.click();
+    await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
+    await toolbar.getByRole('button', { name: '分组', exact: true }).click();
+    await expect(page.locator('.canvas-group-node')).toHaveCount(1);
+    const undo = toolbar.getByRole('button', { name: '撤销', exact: true });
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect(page.locator('.canvas-group-node')).toHaveCount(0);
+  });
+
+  test('脚本编辑器按需加载并可编辑', async ({ page }) => {
+    const codeMirrorRequests: string[] = [];
+    page.on('request', (request) => {
+      if (/\/vendor-codemirror-[\w-]+\.js(?:\?|$)/.test(request.url())) codeMirrorRequests.push(request.url());
+    });
+    await stubApi(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('visionstudio.onboarding-done', '1');
+      localStorage.setItem('visionstudio.draft.workflow', JSON.stringify({
+        version: 1, savedAt: new Date().toISOString(), workflowId: 'demo-linear', workflowName: 'Script test', demoKey: 'linear',
+        payload: { id: 'demo-linear', name: 'Script test', edges: [], nodes: [
+          { id: 'script-node', type: 'script.csharp', position: { x: 150, y: 100 }, parameters: { source: 'Output.Number = 2;' } }
+        ] }
+      }));
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: '恢复草稿', exact: true }).click();
+    const guard = page.getByRole('dialog', { name: '存在未保存的修改' });
+    await expect(guard.or(page.locator('[data-id="script-node"]'))).toBeVisible();
+    if (await guard.isVisible()) await guard.getByRole('button', { name: '丢弃修改', exact: true }).click();
+    const scriptNode = page.locator('[data-id="script-node"]');
+    await expect(scriptNode).toBeVisible();
+    expect(codeMirrorRequests).toEqual([]);
+    await scriptNode.dblclick();
+    const editor = page.locator('.script-editor .cm-content');
+    await expect(editor).toBeVisible();
+    await expect(editor).toContainText('Output.Number = 2;');
+    await editor.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type(' // updated');
+    await expect(editor).toContainText('// updated');
+    if (process.env.VISIONSTUDIO_TEST_PRODUCTION_BUNDLE === '1') expect(codeMirrorRequests).toHaveLength(1);
   });
 
   test('分组颜色跟随主题切换并兼容已有本机数据', async ({ page }) => {

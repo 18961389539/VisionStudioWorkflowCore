@@ -111,17 +111,22 @@ function toStoredAnnotation(node: Node): StoredAnnotation | undefined {
   };
 }
 
-export function saveCanvasAnnotations(workflowId: string, nodes: Node[]): void {
+function storedAnnotations(nodes: Node[]): StoredAnnotation[] {
+  return nodes.map(toStoredAnnotation).filter((node): node is StoredAnnotation => node !== undefined);
+}
+
+export function saveCanvasAnnotations(workflowId: string, nodes: Node[]): boolean {
   const all = readStoredJson(STORAGE_KEYS.canvasAnnotations, parseAnnotations, {});
-  const annotations = nodes.map(toStoredAnnotation).filter((node): node is StoredAnnotation => node !== undefined);
+  const annotations = storedAnnotations(nodes);
+  if (JSON.stringify(all[workflowId] ?? []) === JSON.stringify(annotations)) return true;
   if (annotations.length) all[workflowId] = annotations;
   else delete all[workflowId];
-  writeStoredJson(STORAGE_KEYS.canvasAnnotations, all);
+  return writeStoredJson(STORAGE_KEYS.canvasAnnotations, all);
 }
 
 /** Canvas-only annotations are hydrated from local UI storage and never enter WorkflowPayload. */
-export function restoreCanvasAnnotations(workflowId: string, workflowNodes: Node[]): Node[] {
-  const annotations = annotationsForWorkflow(workflowId);
+export function restoreCanvasAnnotations(workflowId: string, workflowNodes: Node[], liveNodes?: Node[]): Node[] {
+  const annotations = liveNodes ? storedAnnotations(liveNodes) : annotationsForWorkflow(workflowId);
   if (!annotations.length) return workflowNodes;
   const groups = annotations.filter((item) => item.type === CANVAS_GROUP_NODE_TYPE);
   const annotationIds = new Set(annotations.map((item) => item.id));

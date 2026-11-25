@@ -1,6 +1,6 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, within } from '@testing-library/react';
 import { message } from 'antd';
-import { useRef, useState } from 'react';
+import { startTransition, Suspense, useRef, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import type { NodeCatalogItem, PortDescriptor } from '../types';
@@ -19,7 +19,7 @@ function node(id: string, inputs: PortDescriptor[], outputs: PortDescriptor[]): 
   };
 }
 
-function useGraph(initialNodes: Node[], initialEdges: Edge[], catalog: NodeCatalogItem[] = []) {
+function useGraph(initialNodes: Node[], initialEdges: Edge[], catalog: NodeCatalogItem[] = [], selectedNodeIds: string[] = []) {
   const [nodes, setNodes] = useState(initialNodes);
   const [edges, setEdges] = useState(initialEdges);
   const [selectedId, setSelectedId] = useState('');
@@ -28,12 +28,13 @@ function useGraph(initialNodes: Node[], initialEdges: Edge[], catalog: NodeCatal
   nodesRef.current = nodes;
   edgesRef.current = edges;
   const [messageApi] = message.useMessage();
+  const pushHistory = useRef(vi.fn()).current;
   const graph = useEditorGraphOperations({
     nodes, nodesRef, edgesRef, selectedRef: { current: selectedId }, selectedId,
-    selectedNode: nodes.find((item) => item.id === selectedId), selectedNodeIds: [], catalog,
+    selectedNode: nodes.find((item) => item.id === selectedId), selectedNodeIds, catalog,
     setNodes, setEdges, setSelectedId, setRecentNodeTypes: vi.fn(),
     setConnectionPicker: vi.fn(), setNodeContextMenu: vi.fn(), messageApi,
-    pushHistory: vi.fn(), onNodesChange: vi.fn(), onEdgesChange: vi.fn(),
+    pushHistory, onNodesChange: vi.fn(), onEdgesChange: vi.fn(),
     flowAreaRef: { current: null }, getZoom: () => 1,
     screenToFlowPosition: (position) => position, setCenter: vi.fn(),
     clipboardRef: { current: null }, pasteIndexRef: { current: 0 }
@@ -42,6 +43,58 @@ function useGraph(initialNodes: Node[], initialEdges: Edge[], catalog: NodeCatal
 }
 
 describe('graph editing operations', () => {
+  it('keeps alignment and grouping actions stable while using the latest selection', () => {
+    const first = { ...node('first', [], []), position: { x: 10, y: 0 } };
+    const second = { ...node('second', [], []), position: { x: 100, y: 30 } };
+    const third = { ...node('third', [], []), position: { x: 300, y: 60 } };
+    const hook = renderHook(({ selected }) => useGraph([first, second, third], [], [], selected),
+      { initialProps: { selected: ['first', 'second'] } });
+    const { alignSelection, createGroup } = hook.result.current.graph;
+    hook.rerender({ selected: ['second', 'third'] });
+    expect(hook.result.current.graph.alignSelection).toBe(alignSelection);
+    expect(hook.result.current.graph.createGroup).toBe(createGroup);
+    act(() => alignSelection('left'));
+    expect(hook.result.current.nodes.map((item) => item.position.x)).toEqual([10, 100, 100]);
+    act(() => createGroup());
+    const group = hook.result.current.nodes.find((item) => item.type === 'canvasGroup');
+    expect(group?.data.memberIds).toEqual(['second', 'third']);
+  });
+
+  it.each(['align', 'group'] as const)('uses the committed selection for %s while a new selection is suspended', async (action) => {
+    let release!: () => void;
+    let ready = false;
+    const pending = new Promise<void>((resolve) => { release = () => { ready = true; resolve(); }; });
+    const initial = [
+      { ...node('first', [], []), position: { x: 10, y: 0 } },
+      { ...node('second', [], []), position: { x: 100, y: 0 } },
+      { ...node('third', [], []), position: { x: 300, y: 0 } },
+    ];
+    function Block({ selected }: { selected: string[] }) {
+      if (selected[0] === 'second' && !ready) throw pending;
+      return null;
+    }
+    function Harness() {
+      const [selected, setSelected] = useState(['first', 'second']);
+      const { nodes, graph } = useGraph(initial, [], [], selected);
+      const group = nodes.find((item) => item.type === 'canvasGroup');
+      return <>
+        <button onClick={() => startTransition(() => setSelected(['second', 'third']))}>select</button>
+        <button onClick={() => action === 'align' ? graph.alignSelection('left') : graph.createGroup()}>apply</button>
+        <span data-testid="result">{action === 'align'
+          ? nodes.filter((item) => item.type === 'vision').map((item) => item.position.x).join(',')
+          : ((group?.data.memberIds as string[] | undefined) ?? []).join(',')}</span>
+        <Block selected={selected} />
+      </>;
+    }
+    const view = render(<Suspense fallback={<div>loading</div>}><Harness /></Suspense>);
+    const rendered = within(view.container);
+    fireEvent.click(rendered.getByRole('button', { name: 'select' }));
+    fireEvent.click(rendered.getByRole('button', { name: 'apply' }));
+    expect(rendered.getByTestId('result').textContent).toBe(action === 'align' ? '10,10,300' : 'first,second');
+    await act(async () => { release(); await pending; });
+    view.unmount();
+  });
+
   it('reconnects a data edge after excluding its old edge from input validation', () => {
     const sourceA = node('source-a', [], [imagePort]);
     const sourceB = node('source-b', [], [imagePort]);

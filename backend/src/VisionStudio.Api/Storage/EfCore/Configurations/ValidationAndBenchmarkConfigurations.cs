@@ -25,7 +25,11 @@ internal sealed class ValidationDatasetItemConfiguration : IEntityTypeConfigurat
 {
     public void Configure(EntityTypeBuilder<ValidationDatasetItemEntity> b)
     {
-        b.ToTable("validation_dataset_items");
+        b.ToTable("validation_dataset_items", table =>
+        {
+            table.HasCheckConstraint("ck_validation_dataset_items_source_kind", "source_kind IN ('TRACE','MEDIA')");
+            table.HasCheckConstraint("ck_validation_dataset_items_expected_disposition", "expected_disposition IN ('OK','NG')");
+        });
         b.HasKey(x => new { x.DatasetId, x.ItemId });
         b.Property(x => x.DatasetId).HasColumnName("dataset_id");
         b.Property(x => x.ItemId).HasColumnName("item_id");

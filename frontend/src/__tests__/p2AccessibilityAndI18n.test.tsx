@@ -57,7 +57,8 @@ vi.mock('../editorContexts', () => ({
     nodeLabels: {},
   }),
   useEditorSelection: () => ({
-    selectedNode: undefined,
+    selectedNodeLabel: undefined,
+    selectedNodeConfigurable: false,
     selectedId: '',
     setSelectedId: vi.fn(),
     selectedNodeIds: [],
@@ -69,7 +70,7 @@ vi.mock('../editorContexts', () => ({
     setSearchQuery: vi.fn(),
     searchOpen: true,
     setSearchOpen: vi.fn(),
-    searchMatches: searchMatchesMock,
+    searchMatches: searchMatchesMock.map((node) => ({ id: node.id, label: node.data.label })),
     connectionPicker: undefined,
     setConnectionPicker: vi.fn(),
     connectionPickerRef: { current: null },

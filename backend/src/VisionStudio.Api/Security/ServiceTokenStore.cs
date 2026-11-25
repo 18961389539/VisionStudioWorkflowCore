@@ -22,10 +22,11 @@ public sealed record ServiceTokenPrincipal(string Id, string Name, IReadOnlyList
 /// - 按作用域授权，认证角色固定为 Service，走不到任何人类角色策略；
 /// - 可轮换（同 id/名称/作用域，换新密钥）与吊销；last_used_at 每令牌每分钟最多写一次。
 /// </summary>
-public sealed class ServiceTokenStore(IVisionStudioDbFactory dbFactory)
+public sealed class ServiceTokenStore(IVisionStudioDbFactory dbFactory) : IDisposable
 {
     public const string TokenPrefix = "vst_";
     private static readonly TimeSpan UsageWriteInterval = TimeSpan.FromMinutes(1);
+    private readonly SemaphoreSlim _usageWriteGate = new(1, 1);
 
     public ServiceTokenStore(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
 
@@ -124,12 +125,21 @@ public sealed class ServiceTokenStore(IVisionStudioDbFactory dbFactory)
         var stale = now - UsageWriteInterval;
         if (entity.LastUsedAt is null || entity.LastUsedAt < stale)
         {
-            await db.SecurityServiceTokens
-                .Where(x => x.Id == entity.Id && (x.LastUsedAt == null || x.LastUsedAt < stale))
-                .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastUsedAt, now), ct);
+            await _usageWriteGate.WaitAsync(ct);
+            try
+            {
+                // Concurrent readers may all have seen the same stale timestamp. Recheck without a write lock.
+                var unused = db.SecurityServiceTokens.Where(x => x.Id == entity.Id && x.TokenHash == hash &&
+                    x.RevokedAt == null && (x.LastUsedAt == null || x.LastUsedAt < stale));
+                if (await unused.AnyAsync(ct))
+                    await unused.ExecuteUpdateAsync(s => s.SetProperty(x => x.LastUsedAt, now), ct);
+            }
+            finally { _usageWriteGate.Release(); }
         }
         return new ServiceTokenPrincipal(entity.Id, entity.Name, SplitScopes(entity.Scopes), entity.ExpiresAt);
     }
+
+    public void Dispose() => _usageWriteGate.Dispose();
 
     private static ServiceTokenDto ToDto(SecurityServiceTokenEntity e) => new(
         e.Id,

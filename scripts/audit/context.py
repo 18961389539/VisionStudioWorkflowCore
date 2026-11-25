@@ -83,17 +83,20 @@ class AuditContext:
         return "\n".join(p.read_text(encoding="utf-8") for p in matches)
 
     def doc_present(self, rel: str) -> bool:
-        if (self.root / rel).exists():
+        if (self.root / rel).is_file():
             return True
         if rel not in self._missing_docs:
             self._missing_docs.add(rel)
-            self.ok(f"documentation absent (check skipped): {rel}")
+            self.fail(f"Required documentation missing: {rel}")
         return False
 
     def doc_has(self, rel: str, token: str) -> bool:
         if not self.doc_present(rel):
-            return True
-        return token.lower() in (self.root / rel).read_text(encoding="utf-8").lower()
+            return False
+        if token.lower() not in (self.root / rel).read_text(encoding="utf-8").lower():
+            self.fail(f"Required documentation token missing in {rel}: {token}")
+            return False
+        return True
 
 
 def audit_json_and_xml(ctx: AuditContext) -> None:

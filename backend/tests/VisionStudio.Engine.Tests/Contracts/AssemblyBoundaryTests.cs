@@ -10,12 +10,81 @@ namespace VisionStudio.Engine.Tests;
 /// 契约迁到 <c>VisionStudio.Hardware.Abstractions</c> 后，适配器依赖集应只剩
 /// Abstractions + OpenCvSharp + 厂商 SDK。
 ///
-/// 这些测试读 csproj 而不是加载程序集：csproj 是依赖的唯一声明处，断言因此稳定、
+/// 这些测试读 csproj 与共享构建声明而不是加载程序集：覆盖全部源项目及共享编译工具依赖，
 /// 不依赖构建顺序，也不会被"某台机器上恰好没还原某个包"影响。
 /// 一旦有人给契约程序集加回引擎引用（哪怕是通过"顺手加个辅助方法"），这里会先失败。
 /// </summary>
 public sealed class AssemblyBoundaryTests
 {
+    public static TheoryData<string, string[], string[]> DependencyBoundaries => new()
+    {
+        { "VisionStudio.Abstractions", [], [] },
+        { "VisionStudio.Hardware.Abstractions", ["VisionStudio.Abstractions"], ["OpenCvSharp5.Windows"] },
+        { "VisionStudio.Imaging", ["VisionStudio.Abstractions"], ["OpenCvSharp5.Windows"] },
+        { "VisionStudio.Algorithms", ["VisionStudio.Abstractions", "VisionStudio.Imaging"],
+            ["OpenCvSharp5.Windows", "JLVisionLib", "Microsoft.ML.OnnxRuntime", "TesseractOCR"] },
+        { "VisionStudio.Scripting", [], ["Microsoft.CodeAnalysis.CSharp.Scripting", "OpenCvSharp5.Windows"] },
+        { "VisionStudio.Camera.Basler", ["VisionStudio.Hardware.Abstractions"], [] },
+        { "VisionStudio.Camera.Hikrobot", ["VisionStudio.Hardware.Abstractions"], [] },
+        { "VisionStudio.Engine",
+            ["VisionStudio.Abstractions", "VisionStudio.Hardware.Abstractions", "VisionStudio.Imaging",
+             "VisionStudio.Algorithms", "VisionStudio.Scripting"],
+            ["OpenCvSharp5.Windows", "JLVisionLib", "Microsoft.ML.OnnxRuntime", "System.Numerics.Tensors",
+             "WorkflowCore", "WorkflowCore.DSL", "NModbus", "S7netplus",
+             "Microsoft.Extensions.DependencyInjection.Abstractions", "Microsoft.Extensions.Logging.Abstractions",
+             "System.IO.Ports", "ZXing.Net", "TesseractOCR"] },
+        { "VisionStudio.Api",
+            ["VisionStudio.Engine", "VisionStudio.Camera.Basler", "VisionStudio.Camera.Hikrobot",
+             "VisionStudio.Plugin.Worker", "VisionStudio.Script.Worker"],
+            ["McMaster.NETCore.Plugins", "Microsoft.AspNetCore.OpenApi", "Microsoft.Data.Sqlite",
+             "Microsoft.EntityFrameworkCore.Sqlite", "Microsoft.Extensions.Hosting.WindowsServices"] },
+        { "VisionStudio.Plugin.Sample", ["VisionStudio.Abstractions"], [] },
+        { "VisionStudio.Plugin.Packager", [], [] },
+        { "VisionStudio.Plugin.Worker", ["VisionStudio.Engine"], ["McMaster.NETCore.Plugins"] },
+        { "VisionStudio.Script.Worker", ["VisionStudio.Engine", "VisionStudio.Scripting"], [] },
+        { "VisionStudio.SqliteSnapshot", [], ["Microsoft.Data.Sqlite"] },
+        { "VisionStudio.Benchmark.Cli", ["VisionStudio.Engine"], [] },
+        { "VisionStudio.CatalogExporter", ["VisionStudio.Engine"], [] }
+    };
+
+    [Theory]
+    [MemberData(nameof(DependencyBoundaries))]
+    public void SourceAssembly_OnlyDeclaresApprovedDependencies(string projectName, string[] projects, string[] packages)
+    {
+        Assert.Equal(projects.Order(StringComparer.Ordinal), ReadProjectReferences(projectName).Order(StringComparer.Ordinal));
+        Assert.Equal(packages.Order(StringComparer.Ordinal), ReadPackageReferences(projectName).Order(StringComparer.Ordinal));
+        Assert.Empty(LoadProject(projectName).Descendants("Reference"));
+    }
+
+    [Fact]
+    public void EverySourceProject_HasAnExplicitBoundary()
+    {
+        var sourceRoot = Path.Combine(RepositoryRoot(), "backend", "src");
+        var projects = Directory.EnumerateFiles(sourceRoot, "*.csproj", SearchOption.AllDirectories)
+            .Select(Path.GetFileNameWithoutExtension).Order(StringComparer.Ordinal);
+        Assert.Equal(DependencyBoundaries.Select(row => (string)row[0]).Order(StringComparer.Ordinal), projects);
+    }
+
+    [Fact]
+    public void SharedBuildDependencies_ArePrivateCompilerToolingOnly()
+    {
+        var properties = XDocument.Load(Path.Combine(RepositoryRoot(), "backend", "Directory.Build.props"));
+        var package = Assert.Single(properties.Descendants("PackageReference"));
+        Assert.Equal("Microsoft.Net.Compilers.Toolset", (string?)package.Attribute("Include"));
+        Assert.Equal("all", (string?)package.Attribute("PrivateAssets"));
+        Assert.Empty(properties.Descendants("ProjectReference"));
+        Assert.Empty(properties.Descendants("Reference"));
+    }
+
+    [Fact]
+    public void ApiWorkerReferences_AreBuildDependencies_NotAssemblyReferences()
+    {
+        var workers = LoadProject("VisionStudio.Api").Descendants("ProjectReference")
+            .Where(reference => ((string?)reference.Attribute("Include"))?.Contains(".Worker", StringComparison.Ordinal) == true);
+        Assert.Equal(2, workers.Count());
+        Assert.All(workers, worker => Assert.Equal("false", (string?)worker.Attribute("ReferenceOutputAssembly")));
+    }
+
     /// <summary>硬件契约程序集允许的项目依赖白名单——新增依赖必须显式更新这里并说明理由。</summary>
     private static readonly string[] AllowedHardwareContractProjectDependencies = ["VisionStudio.Abstractions"];
 
@@ -106,7 +175,7 @@ public sealed class AssemblyBoundaryTests
     private static string[] ReadProjectReferences(string projectName)
         => ReadItemIncludes(projectName, "ProjectReference")
             // ProjectReference 的 Include 是相对路径，取项目名（去目录与 .csproj 后缀）。
-            .Select(value => Path.GetFileNameWithoutExtension(value!))
+            .Select(value => Path.GetFileNameWithoutExtension(value.Replace('\\', '/')))
             .ToArray();
 
     private static string[] ReadPackageReferences(string projectName)

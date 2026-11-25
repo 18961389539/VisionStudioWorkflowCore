@@ -4,8 +4,13 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using VisionStudio.Api;
+using VisionStudio.Api.Security;
+using VisionStudio.Api.Storage.EfCore;
 
 namespace VisionStudio.Api.Tests;
 
@@ -15,6 +20,23 @@ namespace VisionStudio.Api.Tests;
 /// </summary>
 public sealed class ServiceTokenTests
 {
+    [Fact]
+    public async Task ConcurrentStaleTokenReads_IssueOnlyOneUsageUpdate()
+    {
+        using var env = new TempWebHostEnvironment();
+        var database = new SqliteMetadataDatabase(env);
+        var probe = new UsageWriteProbe();
+        using var store = new ServiceTokenStore(new UsageProbeFactory(database, probe));
+        var created = await store.CreateAsync(new CreateServiceTokenRequest("burst-reader", ["results:read"], null), "admin");
+        probe.SynchronizeReaders(32);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var principals = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => store.ResolveAsync(created.Token, timeout.Token)));
+        Assert.All(principals, principal => Assert.Equal(created.Details.Id, principal?.Id));
+        Assert.Equal(1, probe.Updates);
+        Assert.NotNull(await store.ResolveAsync(created.Token));
+        Assert.Equal(1, probe.Updates);
+    }
+
     [Fact]
     public async Task ServiceToken_IsStoredHashed_AndPlaintextIsReturnedOnlyOnce()
     {
@@ -174,5 +196,50 @@ public sealed class ServiceTokenTests
         }
         var login = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "AdminPass!234" });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+    }
+
+    private sealed class UsageWriteProbe : DbCommandInterceptor
+    {
+        private int _remaining;
+        private int _updates;
+        private TaskCompletionSource _readers = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Updates => Volatile.Read(ref _updates);
+        public void SynchronizeReaders(int count) => _remaining = count;
+
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (Volatile.Read(ref _remaining) > 0 && command.CommandText.StartsWith("SELECT", StringComparison.Ordinal) &&
+                command.CommandText.Contains("\"prefix\"", StringComparison.Ordinal))
+            {
+                if (Interlocked.Decrement(ref _remaining) == 0) _readers.TrySetResult();
+                await _readers.Task.WaitAsync(cancellationToken);
+            }
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.StartsWith("UPDATE \"security_service_tokens\"", StringComparison.Ordinal))
+                Interlocked.Increment(ref _updates);
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class UsageProbeFactory(SqliteMetadataDatabase database, UsageWriteProbe probe) : IVisionStudioDbFactory
+    {
+        public SqliteMetadataDatabase Database => database;
+        public async Task<VisionStudioDbContext> CreateDbContextAsync(CancellationToken ct = default, bool strongDurability = false)
+        {
+            var connection = await database.OpenConnectionAsync(ct, strongDurability);
+            return new VisionStudioDbContext(new DbContextOptionsBuilder<VisionStudioDbContext>()
+                .UseSqlite(connection, contextOwnsConnection: true)
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+                .AddInterceptors(probe).Options);
+        }
+        public VisionStudioDbContext CreateDbContext() => new VisionStudioDbFactory(database).CreateDbContext();
+        public Task<ImmediateDbTransaction> BeginImmediateTransactionAsync(VisionStudioDbContext db, CancellationToken ct = default) =>
+            db.BeginImmediateTransactionAsync(ct);
     }
 }

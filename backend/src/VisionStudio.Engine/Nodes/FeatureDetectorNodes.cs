@@ -75,49 +75,11 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
         var roi = node.GetRoi();
         using var analysis = FeatureDetectorHelpers.Prepare(source, roi, Type);
 
-        var points = new List<VisionPoint2D>();
-        using var mask = new Mat();
-        if (method == "fast")
-        {
-            foreach (var keyPoint in Cv2.FAST(analysis, fastThreshold, true))
-                points.Add(new VisionPoint2D(keyPoint.Pt.X, keyPoint.Pt.Y));
-        }
-        else
-        {
-            var corners = Cv2.GoodFeaturesToTrack(
-                analysis, maxCorners, qualityLevel, minDistance, mask, blockSize,
-                useHarrisDetector: method == "harris", k: harrisK) ?? [];
-            foreach (var corner in corners) points.Add(new VisionPoint2D(corner.X, corner.Y));
-        }
-
-        if (subpixel && points.Count > 0)
-        {
-            // cornerSubPix 把角点从像素栅格拉到亚像素；计量场景要的就是这一步。
-            var refined = points.Select(point => new Point2f((float)point.X, (float)point.Y)).ToArray();
-            Cv2.CornerSubPix(analysis, refined, new Size(5, 5), new Size(-1, -1),
-                new TermCriteria(CriteriaTypes.Eps | CriteriaTypes.MaxIter, 30, 0.01));
-            points = refined.Select(point => new VisionPoint2D(point.X, point.Y)).ToList();
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        using var response = new Mat();
-        Cv2.CornerMinEigenVal(analysis, response, blockSize);
-        var ranked = points
-            .Select(point => (Point: point, Response: SampleResponse(response, point)))
-            .OrderByDescending(entry => entry.Response)
-            .ToArray();
-        // FAST has no maxCorners/minDistance of its own: enforce the same suppression contract
-        // as the other detectors, in response order, so downstream geometry sees a stable point set.
-        var selected = new List<(VisionPoint2D Point, double Response)>();
-        foreach (var candidate in ranked)
-        {
-            if (method == "fast" && selected.Any(entry => Distance(entry.Point, candidate.Point) < minDistance)) continue;
-            selected.Add(candidate);
-            if (selected.Count >= maxCorners) break;
-        }
-        var ordered = selected.Select(entry => entry.Point).ToArray();
-        var meanResponse = selected.Count > 0 ? selected.Average(entry => entry.Response) : 0d;
-        var peak = selected.Count > 0 ? selected.Max(entry => entry.Response) : 0d;
+        var detected = FeatureDetectionAlgorithms.Corners(analysis, method, fastThreshold, maxCorners, qualityLevel,
+            minDistance, blockSize, harrisK, subpixel, cancellationToken);
+        var ordered = detected.Points;
+        var meanResponse = detected.MeanResponse;
+        var peak = detected.PeakResponse;
 
         var overlays = new List<VisionOverlay>();
         for (var index = 0; index < Math.Min(ordered.Length, 400); index++)
@@ -160,16 +122,6 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
             }, overlays));
     }
 
-    private static double Distance(VisionPoint2D a, VisionPoint2D b)
-        => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
-
-    private static double SampleResponse(Mat response, VisionPoint2D point)
-    {
-        var x = (int)Math.Round(point.X);
-        var y = (int)Math.Round(point.Y);
-        if (x < 0 || y < 0 || x >= response.Cols || y >= response.Rows) return 0;
-        return response.At<float>(y, x);
-    }
 }
 
 /// <summary>
@@ -179,8 +131,6 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
 public sealed class FeatureEllipseNode : IVisionNodeExecutor
 {
     public string Type => "feature.ellipse";
-
-    private const int CoverageBins = 72;
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(
         NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
@@ -226,87 +176,11 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
         var source = context.RequireImage("image");
         var roi = node.GetRoi();
         using var analysis = FeatureDetectorHelpers.Prepare(source, roi, Type);
-        // 细线边缘（1 px 描边、刻线）在裸 Canny 上会碎成几十段：先做 3x3 平滑再求梯度。
-        using var smoothed = new Mat();
-        Cv2.GaussianBlur(analysis, smoothed, new Size(3, 3), 0);
-        using var edges = new Mat();
-        Cv2.Canny(smoothed, edges, cannyLow, cannyHigh);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        Cv2.FindContours(edges, out Point[][] contours, out _, RetrievalModes.List, ContourApproximationModes.ApproxNone);
-        var candidates = new List<EllipseCandidate>();
-        foreach (var contour in contours)
-        {
-            if (contour.Length < minPoints) continue;
-            RotatedRect fit;
-            try
-            {
-                using var mat = Mat.FromArray(contour);
-                fit = Cv2.FitEllipse((InputArray)mat);
-            }
-            catch (OpenCVException) { continue; }
-
-            var halfWidth = fit.Size.Width / 2.0;
-            var halfHeight = fit.Size.Height / 2.0;
-            if (halfWidth <= 0.5 || halfHeight <= 0.5) continue;
-            var semiMajor = Math.Max(halfWidth, halfHeight);
-            var semiMinor = Math.Min(halfWidth, halfHeight);
-            var area = Math.PI * semiMajor * semiMinor;
-            if (area < minArea || area > maxArea) continue;
-            var aspect = semiMinor / semiMajor;
-            if (aspect < minAspect || aspect > maxAspect) continue;
-
-            // OpenCV 的 RotatedRect.Angle 是"宽边与 x 轴"的夹角；主轴角度要按长短边换算。
-            var majorAngle = halfWidth >= halfHeight ? fit.Angle : fit.Angle + 90.0;
-            majorAngle = NormalizeDeg(majorAngle);
-
-            var radians = majorAngle * Math.PI / 180.0;
-            var cos = Math.Cos(radians);
-            var sin = Math.Sin(radians);
-            var residuals = new double[contour.Length];
-            var bins = new bool[CoverageBins];
-            var sumSquared = 0d;
-            for (var index = 0; index < contour.Length; index++)
-            {
-                var dx = contour[index].X - fit.Center.X;
-                var dy = contour[index].Y - fit.Center.Y;
-                var localX = dx * cos + dy * sin;
-                var localY = -dx * sin + dy * cos;
-                var normalized = Math.Sqrt((localX / semiMajor) * (localX / semiMajor) + (localY / semiMinor) * (localY / semiMinor));
-                var radius = Math.Sqrt(localX * localX + localY * localY);
-                residuals[index] = (normalized - 1.0) * radius;
-                sumSquared += residuals[index] * residuals[index];
-                var parametric = Math.Atan2(localY / semiMinor, localX / semiMajor);
-                var bin = (int)Math.Floor((parametric + Math.PI) / (2 * Math.PI) * CoverageBins) % CoverageBins;
-                bins[bin] = true;
-            }
-            var rms = Math.Sqrt(sumSquared / contour.Length);
-            if (maxRms > 0 && rms > maxRms) continue;
-            var coverage = bins.Count(occupied => occupied) * 360.0 / CoverageBins;
-            if (coverage < minCoverage) continue;
-
-            candidates.Add(new EllipseCandidate(
-                fit.Center.X, fit.Center.Y, semiMajor, semiMinor, majorAngle,
-                rms, coverage, contour.Length, area,
-                Math.Clamp(1.0 - rms / Math.Max(1e-6, semiMajor), 0, 1) * (coverage / 360.0)));
-        }
-
-        // 同一处边缘的内、外两条轮廓会各拟合出一个椭圆：按中心与半轴近似度去重，保留支持点多的。
-        var deduped = new List<EllipseCandidate>();
-        foreach (var candidate in candidates.OrderByDescending(item => item.SupportPoints))
-        {
-            var tolerance = Math.Max(2.0, 0.1 * candidate.SemiMinor);
-            var duplicate = deduped.Any(existing =>
-                Math.Abs(existing.CenterX - candidate.CenterX) <= tolerance &&
-                Math.Abs(existing.CenterY - candidate.CenterY) <= tolerance &&
-                Math.Abs(existing.SemiMajor - candidate.SemiMajor) <= 0.2 * candidate.SemiMajor &&
-                Math.Abs(existing.SemiMinor - candidate.SemiMinor) <= 0.2 * candidate.SemiMinor);
-            if (!duplicate) deduped.Add(candidate);
-        }
-
-        var ordered = deduped.Take(maxEllipses).ToArray();
+        var detected = FeatureDetectionAlgorithms.Ellipses(analysis, cannyLow, cannyHigh, minPoints, minArea, maxArea,
+            minAspect, maxAspect, minCoverage, maxRms, maxEllipses, cancellationToken);
+        var ordered = detected.Ordered;
         // 截断必须可见：maxEllipses 默认 10，去重后多于 10 个时下游只能看到前 10 个。
-        var inputCount = deduped.Count;
+        var inputCount = detected.InputCount;
         var truncated = inputCount > ordered.Length;
 
         var overlays = new List<VisionOverlay>();
@@ -324,7 +198,7 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("count", ordered.Length), ("inputCount", inputCount), ("truncated", truncated),
-            ("contours", contours.Length), ("candidates", candidates.Count),
+            ("contours", detected.ContourCount), ("candidates", detected.CandidateCount),
             ("minArea", minArea), ("minCoverageDeg", minCoverage), ("maxRmsError", maxRms),
             ("roi", roi?.Type.ToString() ?? "FullImage"),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
@@ -372,7 +246,7 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
         return ValueTask.FromResult(new NodeExecutorResult(outputs,
             new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
-                ["count"] = ordered.Length, ["contours"] = contours.Length, ["candidates"] = candidates.Count,
+                ["count"] = ordered.Length, ["contours"] = detected.ContourCount, ["candidates"] = detected.CandidateCount,
                 ["minArea"] = minArea, ["minCoverageDeg"] = minCoverage, ["maxRmsError"] = maxRms,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage",
                 ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
@@ -380,16 +254,6 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
             }, overlays));
     }
 
-    private static double NormalizeDeg(double degrees)
-    {
-        var value = degrees % 180.0;
-        if (value < 0) value += 180.0;
-        return value;
-    }
-
-    private sealed record EllipseCandidate(
-        double CenterX, double CenterY, double SemiMajor, double SemiMinor, double AngleDeg,
-        double Rms, double Coverage, int SupportPoints, double Area, double Confidence);
 }
 
 /// <summary>
@@ -575,72 +439,20 @@ public sealed class FeatureGaborBankNode : IVisionNodeExecutor
             throw new InvalidOperationException(
                 "feature.gaborBank wavelength must not exceed half the image; lower it or crop the ROI.");
 
-        var sigma = sigmaRatio * wavelength;
-        var kernelSize = (int)Math.Round(6 * sigma) | 1;
-        if (kernelSize < 3) kernelSize = 3;
-
-        using var gray32 = new Mat();
-        analysis.ConvertTo(gray32, MatType.CV_32F);
-        using var accumulated = new Mat(analysis.Rows, analysis.Cols, MatType.CV_32FC1, Scalar.All(0));
-        using var best = new Mat(analysis.Rows, analysis.Cols, MatType.CV_32FC1, Scalar.All(0));
-        using var bestDirection = new Mat(analysis.Rows, analysis.Cols, MatType.CV_32FC1, Scalar.All(0));
-        var perOrientation = new double[orientations];
+        var bank = FeatureDetectionAlgorithms.GaborBank(
+            analysis, wavelength, orientations, sigmaRatio, gamma, energyMode, emitDirectionMap, cancellationToken);
+        var sigma = bank.Sigma;
+        var kernelSize = bank.KernelSize;
+        var perOrientation = bank.Energies;
+        var meanEnergy = bank.Mean;
+        var maxEnergy = bank.Maximum;
+        var dominantDegrees = bank.DominantDegrees;
+        var anisotropy = bank.Anisotropy;
         var degreesStep = 180.0 / orientations;
-
-        for (var index = 0; index < orientations; index++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var degrees = degreesStep * index;
-            using var kernel = Cv2.GetGaborKernel(
-                new Size(kernelSize, kernelSize), sigma, degrees * Math.PI / 180.0, wavelength, gamma, 0, MatType.CV_32F);
-            using var response = new Mat();
-            Cv2.Filter2D(gray32, response, MatType.CV_32F, kernel);
-            using var squared = new Mat();
-            Cv2.Multiply(response, response, squared);
-            perOrientation[index] = Cv2.Mean(squared).Val0;
-
-            if (energyMode == "sum")
-            {
-                Cv2.Add(accumulated, squared, accumulated);
-            }
-            else
-            {
-                // max 模式同时记录该像素最强响应来自哪个方向，用于方向图。
-                using var improved = new Mat();
-                Cv2.Compare(squared, best, improved, CmpTypes.GT);
-                squared.CopyTo(best, improved);
-                bestDirection.SetTo(Scalar.All((float)degrees), improved);
-            }
-        }
-
-        using var combined = energyMode == "sum" ? accumulated.Clone() : best.Clone();
-        Cv2.MinMaxLoc(combined, out var minEnergy, out var maxEnergy, out _, out _);
-        var normalized = new Mat();
-        if (maxEnergy > 1e-9)
-        {
-            combined.ConvertTo(normalized, MatType.CV_8UC1, 255.0 / maxEnergy, 0);
-        }
-        else
-        {
-            combined.ConvertTo(normalized, MatType.CV_8UC1);
-        }
-
-        var total = perOrientation.Sum();
-        var dominantDegrees = 0d;
-        if (total > 1e-12)
-        {
-            var bestIndex = 0;
-            for (var index = 1; index < orientations; index++)
-                if (perOrientation[index] > perOrientation[bestIndex]) bestIndex = index;
-            dominantDegrees = degreesStep * bestIndex;
-        }
-        var minimumOrientation = perOrientation.Length > 0 ? Math.Max(perOrientation.Min(), 1e-12) : 1e-12;
-        var maximumOrientation = perOrientation.Length > 0 ? perOrientation.Max() : 0;
-        var anisotropy = minimumOrientation > 0 ? maximumOrientation / minimumOrientation : 0;
 
         var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
         {
-            ["image"] = VisionValue.Image(VisionImage.Own(normalized)),
+            ["image"] = VisionValue.Image(VisionImage.Own(bank.Image)),
             ["energy"] = VisionValue.String(JsonSerializer.Serialize(perOrientation.Select((value, index) => new
             {
                 angleDeg = Math.Round(degreesStep * index, 2),
@@ -648,43 +460,22 @@ public sealed class FeatureGaborBankNode : IVisionNodeExecutor
             }))),
             ["dominantDirectionDeg"] = VisionValue.Double(dominantDegrees),
             ["anisotropy"] = VisionValue.Double(anisotropy),
-            ["meanEnergy"] = VisionValue.Double(Cv2.Mean(combined).Val0),
+            ["meanEnergy"] = VisionValue.Double(meanEnergy),
             ["maxEnergy"] = VisionValue.Double(maxEnergy),
             ["count"] = VisionValue.Integer(orientations),
             ["found"] = VisionValue.Boolean(maxEnergy > 1e-9),
             ["diagnostics"] = VisionValue.String(string.Empty)
         };
 
-        if (emitDirectionMap)
-        {
-            var directionMap = new Mat();
-            try
-            {
-                if (energyMode == "sum")
-                {
-                    // sum 模式下没有天然的方向图，用单一波长的最大响应方向近似不了，明确输出空图。
-                    directionMap.Create(analysis.Rows, analysis.Cols, MatType.CV_8UC1);
-                    directionMap.SetTo(Scalar.All(0));
-                }
-                else
-                {
-                    bestDirection.ConvertTo(directionMap, MatType.CV_8UC1, 255.0 / 180.0, 0);
-                }
-                outputs["directionMap"] = VisionValue.Image(VisionImage.Own(directionMap));
-            }
-            catch
-            {
-                directionMap.Dispose();
-                throw;
-            }
-        }
+        if (bank.Direction is not null)
+            outputs["directionMap"] = VisionValue.Image(VisionImage.Own(bank.Direction));
 
         timer.Stop();
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("wavelength", wavelength), ("orientations", orientations), ("sigma", sigma),
             ("kernelSize", kernelSize), ("gamma", gamma), ("energyMode", energyMode),
             ("dominantDirectionDeg", dominantDegrees), ("anisotropy", anisotropy),
-            ("meanEnergy", Cv2.Mean(combined).Val0), ("maxEnergy", maxEnergy),
+            ("meanEnergy", meanEnergy), ("maxEnergy", maxEnergy),
             ("roi", roi?.Type.ToString() ?? "FullImage"),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
         outputs["diagnostics"] = VisionValue.String(diagnostics);
@@ -695,7 +486,7 @@ public sealed class FeatureGaborBankNode : IVisionNodeExecutor
                 ["wavelength"] = wavelength, ["orientations"] = orientations, ["sigma"] = sigma,
                 ["kernelSize"] = kernelSize, ["gamma"] = gamma, ["energyMode"] = energyMode,
                 ["dominantDirectionDeg"] = dominantDegrees, ["anisotropy"] = Math.Round(anisotropy, 4),
-                ["meanEnergy"] = Cv2.Mean(combined).Val0, ["maxEnergy"] = maxEnergy,
+                ["meanEnergy"] = meanEnergy, ["maxEnergy"] = maxEnergy,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage",
                 ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                 ["algorithmBackend"] = "opencv", ["diagnostics"] = diagnostics

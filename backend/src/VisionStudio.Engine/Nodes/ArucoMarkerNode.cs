@@ -84,7 +84,7 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
         }
 
         var poseAvailable = poses.Count > 0;
-        Mat? overlay = BuildOverlay(gray, corners, ids);
+        Mat? overlay = MarkerOverlayAlgorithms.Aruco(gray, corners, ids);
         try
         {
             var image = VisionImage.Own(overlay!);
@@ -340,27 +340,4 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
         return sum;
     }
 
-    private static Mat BuildOverlay(Mat gray, Point2f[][] corners, int[] ids)
-    {
-        var overlay = new Mat();
-        try
-        {
-            JLVisionOperators.CvtColor(gray, overlay, ColorConversionCodes.GRAY2BGR);
-            for (var index = 0; index < ids.Length; index++)
-            {
-                var points = corners[index]
-                    .Select(point => new Point((int)Math.Round(point.X), (int)Math.Round(point.Y)))
-                    .ToArray();
-                Cv2.Polylines(overlay, new[] { points }, true, Scalar.LimeGreen, 2);
-                var labelPoint = new Point(points.Min(point => point.X), Math.Max(0, points.Min(point => point.Y) - 6));
-                Cv2.PutText(overlay, $"ID {ids[index]}", labelPoint, HersheyFonts.HersheySimplex, 0.6, Scalar.LimeGreen, 2);
-            }
-            return overlay;
-        }
-        catch
-        {
-            overlay.Dispose();
-            throw;
-        }
-    }
 }

@@ -56,6 +56,7 @@ if [[ "$RUN_BACKEND" -eq 1 ]]; then
   mkdir -p "$BACKEND_COVERAGE"
 
   python3 "$ROOT/scripts/static-audit.py"
+  (cd "$ROOT" && python3 -m unittest discover -s scripts/tests)
   python3 "$ROOT/scripts/check-metric-floor.py"
   python3 "$ROOT/scripts/check-size-budget.py"
 
