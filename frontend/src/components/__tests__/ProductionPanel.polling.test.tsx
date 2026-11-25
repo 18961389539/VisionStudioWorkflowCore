@@ -154,4 +154,29 @@ describe('ProductionPanel polling (R04)', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /停.*止/ })[1]!);
     await waitFor(() => expect(urls.some(url => url.startsWith('POST /api/production/runtimes/station-b/stop'))).toBe(true));
   });
+
+  it('renders headerActions inside the embedded runtime header and hides them in kiosk mode', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/production/status')) return Promise.resolve(okResponse(statusBody));
+      if (url.includes('/api/production/config')) return Promise.resolve(okResponse(defaultProductionConfig));
+      if (url.endsWith('/api/alarms/summary')) return Promise.resolve(okResponse(emptyAlarmSummary));
+      return Promise.resolve(okResponse([]));
+    }));
+
+    const { rerender } = render(
+      <ProductionPanel open onClose={() => undefined} embedded headerActions={<button type="button">诊断入口</button>} />
+    );
+    await flush();
+    const header = document.querySelector('.runtime-only-header');
+    expect(header).toBeTruthy();
+    expect(header?.textContent).toContain('VisionStudio · 生产运行');
+    expect(screen.getByRole('button', { name: '诊断入口' })).toBeTruthy();
+
+    rerender(
+      <ProductionPanel open onClose={() => undefined} embedded kiosk headerActions={<button type="button">诊断入口</button>} />
+    );
+    expect(document.querySelector('.runtime-only-header')).toBeNull();
+    expect(screen.queryByRole('button', { name: '诊断入口' })).toBeNull();
+  });
 });

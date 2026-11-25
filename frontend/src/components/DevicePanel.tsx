@@ -127,11 +127,20 @@ export default function DevicePanel({ open, onClose }: Props) {
     }
   };
 
+  const monitorCapturedAt = monitorSnapshot?.capturedAt;
+  const selectedIdSnapshot = selected?.id;
+  const selectedUpdatedAt = selected?.updatedAt;
+  const effectContextRef = useRef({ refresh, selected, selectedTagId, settingsForm, writeForm });
+  effectContextRef.current = { refresh, selected, selectedTagId, settingsForm, writeForm };
+
   useEffect(() => {
     if (!open) return;
+    const generationRef = refreshGeneration;
+    const abortRef = refreshAbort;
+    const inFlightRef = refreshInFlight;
     openedAtRef.current = Date.now();
     lastPollRef.current = Date.now();
-    refresh();
+    void effectContextRef.current.refresh();
     // 2026-11-12：轮询由 500 ms 降为 10 s 兜底（变化改由服务端推送触发），但**陈旧判定不能
     // 跟着放慢**——否则数据烂了 10 s 才提示，面板大部分时间在骗人。所以这里把两件事拆开：
     // 每 500 ms 只做一次时间戳比较（决定"多久没刷新算旧"），真正发请求要等满 10 s 兜底窗口。
@@ -140,34 +149,37 @@ export default function DevicePanel({ open, onClose }: Props) {
       if (freshnessAnchor != null && Date.now() - freshnessAnchor > DEVICE_STALE_TTL_MS) setStale(true);
       if (Date.now() - lastPollRef.current >= DEVICE_POLL_FALLBACK_MS) {
         lastPollRef.current = Date.now();
-        void refresh(true);
+        void effectContextRef.current.refresh(true);
       }
     }, DEVICE_STALE_CHECK_MS);
     return () => {
       window.clearInterval(timer);
-      refreshGeneration.current++;
-      refreshAbort.current?.abort();
-      refreshAbort.current = null;
-      refreshInFlight.current = false;
+      generationRef.current++;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      inFlightRef.current = false;
     };
   }, [open]);
 
   // 设备状态变化（连上/掉线/故障）由服务端推送通知，面板立即拉详情。
   useEffect(() => {
-    if (monitorSnapshot) void refresh(true);
-  }, [monitorSnapshot?.capturedAt]);
+    if (monitorCapturedAt !== undefined) void effectContextRef.current.refresh(true);
+  }, [monitorCapturedAt]);
 
   useEffect(() => {
-    if (!selected) return;
-    settingsForm.setFieldsValue(selected.settings);
-    const firstWritable = selected.tags.find((x) => x.writable);
-    if (!selected.tags.some((x) => x.id === selectedTagId)) setSelectedTagId(firstWritable?.id ?? selected.tags[0]?.id ?? '');
-  }, [selected?.id]);
+    const current = effectContextRef.current.selected;
+    if (!current) return;
+    effectContextRef.current.settingsForm.setFieldsValue(current.settings);
+    const firstWritable = current.tags.find((x) => x.writable);
+    if (!current.tags.some((x) => x.id === effectContextRef.current.selectedTagId)) {
+      setSelectedTagId(firstWritable?.id ?? current.tags[0]?.id ?? '');
+    }
+  }, [selectedIdSnapshot]);
 
   useEffect(() => {
-    const sample = selected?.values[selectedTagId];
-    writeForm.setFieldsValue({ tagId: selectedTagId, value: sample?.value == null ? '' : String(sample.value) });
-  }, [selectedTagId, selected?.updatedAt]);
+    const sample = effectContextRef.current.selected?.values[selectedTagId];
+    effectContextRef.current.writeForm.setFieldsValue({ tagId: selectedTagId, value: sample?.value == null ? '' : String(sample.value) });
+  }, [selectedTagId, selectedUpdatedAt]);
 
   const command = async (action: 'connect' | 'disconnect') => {
     if (!selected) return;
@@ -289,7 +301,7 @@ export default function DevicePanel({ open, onClose }: Props) {
       };
 
   return (
-    <Modal open={open} onCancel={onClose} footer={null} width={1360} title="设备运行时 · NModbus / Siemens S7 / 标签 / 诊断" destroyOnHidden>
+    <Modal open={open} onCancel={onClose} footer={null} width="min(1360px, calc(100vw - 32px))" title="设备运行时 · NModbus / Siemens S7 / 标签 / 诊断" destroyOnHidden>
       {contextHolder}
       <Space style={{ marginBottom: 10 }} wrap>
         <Button onClick={() => refresh()}>刷新</Button>
@@ -388,7 +400,7 @@ export default function DevicePanel({ open, onClose }: Props) {
         </section>
       </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未注册设备。先在左侧填写端点与协议，注册后会出现在这里。" />}
 
-      <Modal open={registerOpen} onCancel={() => setRegisterOpen(false)} footer={null} width={900} title="注册真实 PLC 驱动" destroyOnHidden>
+      <Modal open={registerOpen} onCancel={() => setRegisterOpen(false)} footer={null} width="min(900px, calc(100vw - 32px))" title="注册真实 PLC 驱动" destroyOnHidden>
         <Form form={registerForm} layout="vertical" onFinish={registerDevice}>
           <div className="robot-settings-grid">
             <Form.Item label="驱动" name="kind" rules={[{ required: true }]}><Select options={[{ value: 'modbus', label: 'NModbus · Modbus TCP' }, { value: 's7', label: 'S7.Net Plus · Siemens S7' }]} /></Form.Item>

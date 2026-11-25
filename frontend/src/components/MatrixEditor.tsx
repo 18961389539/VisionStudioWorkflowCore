@@ -49,7 +49,7 @@ export default function MatrixEditor({ value, label, disabled, onChange }: Props
     </> : <>
       <Input.TextArea aria-label={`${label} JSON`} disabled={disabled} value={value} spellCheck={false}
         autoSize={{ minRows: 3, maxRows: 10 }} status={matrix ? undefined : 'error'} onChange={e => onChange(e.target.value)} />
-      <div style={{ fontSize: 12, marginTop: 4, color: matrix ? undefined : '#ff4d4f' }}>
+      <div style={{ fontSize: 12, marginTop: 4, color: matrix ? undefined : 'var(--vs-text-danger)' }}>
         {matrix ? '超过 20 行或 20 列时使用 JSON 编辑。' : '需要非空、等宽且仅含有限数字的二维数组，例如 [[1,0],[0,1]]。'}
       </div>
     </>}

@@ -363,12 +363,12 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
     return (
       <div>
         <Typography.Text type="secondary">闭合散点（求解后各样本的 Robot∘X∘Vision 应聚于一点；散布即残差）</Typography.Text>
-        <svg width={width} height={height} style={{ display: 'block', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 4 }} role="img" aria-label="闭合散点图">
+        <svg width={width} height={height} style={{ display: 'block', background: 'var(--vs-bg-deep)', border: '1px solid var(--vs-border-panel)', borderRadius: 4 }} role="img" aria-label="闭合散点图">
           {closures.map((p, i) => (
-            <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={3} fill={Number(result?.worstSampleIndex) === i ? '#ff4d4f' : '#1677ff'} />
+            <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={3} fill={Number(result?.worstSampleIndex) === i ? 'var(--vs-text-danger)' : 'var(--vs-text-brand)'} />
           ))}
-          <line x1={sx(meanX) - 6} y1={sy(meanY)} x2={sx(meanX) + 6} y2={sy(meanY)} stroke="#52c41a" strokeWidth={1.5} />
-          <line x1={sx(meanX)} y1={sy(meanY) - 6} x2={sx(meanX)} y2={sy(meanY) + 6} stroke="#52c41a" strokeWidth={1.5} />
+          <line x1={sx(meanX) - 6} y1={sy(meanY)} x2={sx(meanX) + 6} y2={sy(meanY)} stroke="var(--vs-status-success)" strokeWidth={1.5} />
+          <line x1={sx(meanX)} y1={sy(meanY) - 6} x2={sx(meanX)} y2={sy(meanY) + 6} stroke="var(--vs-status-success)" strokeWidth={1.5} />
         </svg>
         <Typography.Text type="secondary">最大散布 {spread.toFixed(4)} {unit} · 均值 ({meanX.toFixed(3)}, {meanY.toFixed(3)})</Typography.Text>
       </div>
@@ -385,26 +385,26 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
         description="录入机器人位姿 + 视觉位姿对，求解后查看逐样本残差与闭合散点，可剔除最差样本后重算；支持会话持久化、CSV/JSON 导入导出、版本化资产保存，并导出到 calibration.handEye2D。仅平面手眼，非 3D。" />
 
       {step === 0 && (
-        <Space direction="vertical" size="middle">
+        <Space orientation="vertical" size="middle">
           <Space wrap>
             <Select style={{ width: 180 }} value={mode} onChange={setMode} options={[
               { value: 'eyeInHand', label: '眼在手上 eyeInHand' },
               { value: 'eyeToHand', label: '眼在手外 eyeToHand' }
             ]} />
-            <Input addonBefore="sourceFrame" value={sourceFrame} onChange={(e) => setSourceFrame(e.target.value)} style={{ width: 200 }} />
-            <Input addonBefore="targetFrame" placeholder="默认 RobotTool/Base" value={targetFrame} onChange={(e) => setTargetFrame(e.target.value)} style={{ width: 240 }} />
-            <Input addonBefore="unit" value={unit} onChange={(e) => setUnit(e.target.value)} style={{ width: 140 }} />
-            <Input addonBefore="sourceUnit" value={sourceUnit} onChange={(e) => setSourceUnit(e.target.value)} style={{ width: 160 }} />
+            <Space.Compact style={{ width: 200 }}><Space.Addon>sourceFrame</Space.Addon><Input value={sourceFrame} onChange={(e) => setSourceFrame(e.target.value)} /></Space.Compact>
+            <Space.Compact style={{ width: 240 }}><Space.Addon>targetFrame</Space.Addon><Input placeholder="默认 RobotTool/Base" value={targetFrame} onChange={(e) => setTargetFrame(e.target.value)} /></Space.Compact>
+            <Space.Compact style={{ width: 140 }}><Space.Addon>unit</Space.Addon><Input value={unit} onChange={(e) => setUnit(e.target.value)} /></Space.Compact>
+            <Space.Compact style={{ width: 160 }}><Space.Addon>sourceUnit</Space.Addon><Input value={sourceUnit} onChange={(e) => setSourceUnit(e.target.value)} /></Space.Compact>
           </Space>
           <Space wrap>
-            <InputNumber addonBefore="visionScale" min={1e-6} max={1e6} step={0.001} value={visionScale} onChange={(v) => setVisionScale(Number(v ?? 1))} style={{ width: 200 }} />
-            <InputNumber addonBefore="angularWeight" min={0.001} max={1e6} value={angularWeight} onChange={(v) => setAngularWeight(Number(v ?? 50))} style={{ width: 220 }} />
+            <Space.Compact style={{ width: 200 }}><Space.Addon>visionScale</Space.Addon><InputNumber min={1e-6} max={1e6} step={0.001} value={visionScale} onChange={(v) => setVisionScale(Number(v ?? 1))} /></Space.Compact>
+            <Space.Compact style={{ width: 220 }}><Space.Addon>angularWeight</Space.Addon><InputNumber min={0.001} max={1e6} value={angularWeight} onChange={(v) => setAngularWeight(Number(v ?? 50))} /></Space.Compact>
             <Select style={{ width: 220 }} value={robustLoss} onChange={setRobustLoss} options={[
               { value: 'none', label: '鲁棒加权：无（最小二乘）' },
               { value: 'tukey', label: '鲁棒加权：Tukey（剔除坏样本）' }
             ]} />
-            <InputNumber addonBefore="maxTrans" min={0} value={maxTranslationError} onChange={(v) => setMaxTranslationError(Number(v ?? 0))} />
-            <InputNumber addonBefore="maxAngle°" min={0} value={maxAngleErrorDeg} onChange={(v) => setMaxAngleErrorDeg(Number(v ?? 0))} />
+            <Space.Compact><Space.Addon>maxTrans</Space.Addon><InputNumber min={0} value={maxTranslationError} onChange={(v) => setMaxTranslationError(Number(v ?? 0))} /></Space.Compact>
+            <Space.Compact><Space.Addon>maxAngle°</Space.Addon><InputNumber min={0} value={maxAngleErrorDeg} onChange={(v) => setMaxAngleErrorDeg(Number(v ?? 0))} /></Space.Compact>
           </Space>
           {sourceUnit !== unit && visionScale === 1 && (
             <Alert type="warning" showIcon title="单位不一致" description={`sourceUnit=${sourceUnit} 与 unit=${unit} 不同且 visionScale=1：视觉坐标将按原值参与求解。请设置 visionScale（目标单位/视觉单位，如 mm/px）或预先换算样本。`} />
@@ -414,17 +414,17 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
       )}
 
       {step === 1 && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <Alert type={precheck.ok ? 'success' : 'warning'} showIcon
             title={`样本预检：机器人角度覆盖 ${precheck.robotCoverage.toFixed(1)}° · 视觉角度覆盖 ${precheck.visionCoverage.toFixed(1)}° · 机器人跨度 ${precheck.robotSpan.toFixed(3)} · 视觉跨度 ${precheck.visionSpan.toFixed(3)}`}
             description={precheck.ok ? '满足求解条件（≥4 对互异位姿，角度覆盖 ≥8°，平移跨度 ≥0.001）。' : precheck.issues.join('；')} />
           <Space wrap>
-            <InputNumber addonBefore="Rx" value={draft.robotX} onChange={(v) => setDraft((d) => ({ ...d, robotX: Number(v ?? 0) }))} />
-            <InputNumber addonBefore="Ry" value={draft.robotY} onChange={(v) => setDraft((d) => ({ ...d, robotY: Number(v ?? 0) }))} />
-            <InputNumber addonBefore="Rθ°" value={draft.robotThetaDeg} onChange={(v) => setDraft((d) => ({ ...d, robotThetaDeg: Number(v ?? 0) }))} />
-            <InputNumber addonBefore="Vx" value={draft.visionX} onChange={(v) => setDraft((d) => ({ ...d, visionX: Number(v ?? 0) }))} />
-            <InputNumber addonBefore="Vy" value={draft.visionY} onChange={(v) => setDraft((d) => ({ ...d, visionY: Number(v ?? 0) }))} />
-            <InputNumber addonBefore="Vθ°" value={draft.visionThetaDeg} onChange={(v) => setDraft((d) => ({ ...d, visionThetaDeg: Number(v ?? 0) }))} />
+            <Space.Compact><Space.Addon>Rx</Space.Addon><InputNumber value={draft.robotX} onChange={(v) => setDraft((d) => ({ ...d, robotX: Number(v ?? 0) }))} /></Space.Compact>
+            <Space.Compact><Space.Addon>Ry</Space.Addon><InputNumber value={draft.robotY} onChange={(v) => setDraft((d) => ({ ...d, robotY: Number(v ?? 0) }))} /></Space.Compact>
+            <Space.Compact><Space.Addon>Rθ°</Space.Addon><InputNumber value={draft.robotThetaDeg} onChange={(v) => setDraft((d) => ({ ...d, robotThetaDeg: Number(v ?? 0) }))} /></Space.Compact>
+            <Space.Compact><Space.Addon>Vx</Space.Addon><InputNumber value={draft.visionX} onChange={(v) => setDraft((d) => ({ ...d, visionX: Number(v ?? 0) }))} /></Space.Compact>
+            <Space.Compact><Space.Addon>Vy</Space.Addon><InputNumber value={draft.visionY} onChange={(v) => setDraft((d) => ({ ...d, visionY: Number(v ?? 0) }))} /></Space.Compact>
+            <Space.Compact><Space.Addon>Vθ°</Space.Addon><InputNumber value={draft.visionThetaDeg} onChange={(v) => setDraft((d) => ({ ...d, visionThetaDeg: Number(v ?? 0) }))} /></Space.Compact>
             <Button onClick={addSample}>添加位姿对</Button>
           </Space>
           <Table size="small" pagination={false} rowKey="key" dataSource={samples}
@@ -435,7 +435,7 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
               { title: '', width: 72, render: (_: unknown, r: SampleRow) => <Button size="small" danger onClick={() => removeSample(r.key)}>删除</Button> }
             ]} />
           <Space wrap>
-            <Input addonBefore="会话名" placeholder="保存会话用" value={sessionName} onChange={(e) => setSessionName(e.target.value)} style={{ width: 260 }} />
+            <Space.Compact style={{ width: 260 }}><Space.Addon>会话名</Space.Addon><Input placeholder="保存会话用" value={sessionName} onChange={(e) => setSessionName(e.target.value)} /></Space.Compact>
             <Button loading={busy} onClick={() => void handleSaveSession()}>保存会话</Button>
             <Button onClick={() => fileInputRef.current?.click()}>导入 CSV/JSON</Button>
             <input ref={fileInputRef} type="file" accept=".json,.csv" style={{ display: 'none' }}
@@ -467,7 +467,7 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
       )}
 
       {step === 2 && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           {result && (
             <Alert type="success" showIcon
               title={`平移 RMS ${Number(result.translationRms ?? 0).toFixed(4)} · 角度 RMS ${Number(result.angleRmsDeg ?? 0).toFixed(3)}° · ${result.converged ? '已收敛' : '未收敛（迭代上限）'}（${String(result.iterations ?? '-')} 次）`}
@@ -503,8 +503,8 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
             <Button onClick={() => setStep(1)}>返回录入</Button>
           </Space>
           <Space wrap>
-            <Input addonBefore="资产ID" placeholder="如 handeye-cell1" value={assetId} onChange={(e) => setAssetId(e.target.value)} style={{ width: 240 }} />
-            <Input addonBefore="资产名" placeholder="资产名称" value={assetName} onChange={(e) => setAssetName(e.target.value)} style={{ width: 240 }} />
+            <Space.Compact style={{ width: 240 }}><Space.Addon>资产ID</Space.Addon><Input placeholder="如 handeye-cell1" value={assetId} onChange={(e) => setAssetId(e.target.value)} /></Space.Compact>
+            <Space.Compact style={{ width: 240 }}><Space.Addon>资产名</Space.Addon><Input placeholder="资产名称" value={assetName} onChange={(e) => setAssetName(e.target.value)} /></Space.Compact>
             <Button loading={busy} onClick={() => void saveAsset()}>保存为版本化资产</Button>
             {pinnedAssetId && <Tag color="blue">已锁定 {pinnedAssetId} V{pinnedVersion}</Tag>}
           </Space>
@@ -539,7 +539,7 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
       )}
 
       {step === 3 && (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Alert type="info" showIcon title="参数已导出"
             description={pinnedAssetId ? `附带资产锁定 ${pinnedAssetId} V${pinnedVersion}：发布/产线校验会复核求解结果与该版本一致。可在手眼节点中再次运行验证。` : '可在手眼节点中再次运行验证。下方为当前 samplesJson。'} />
           <Input.TextArea rows={10} value={samplesJson} readOnly />

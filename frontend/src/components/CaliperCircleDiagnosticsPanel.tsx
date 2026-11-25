@@ -3,7 +3,7 @@ import { Alert, Button, InputNumber, Tag } from 'antd';
 import { caliperSpokeStatus, type CaliperDiagnosticManifest, type CaliperSpokeProfile } from '../caliperCircleDiagnostics';
 
 const number = (value: number | null | undefined, digits = 2) => value == null ? '—' : Number(value.toFixed(digits)).toString();
-const pointColor = (status: string) => status === 'used' ? '#52c41a' : '#faad14';
+const pointColor = (status: string) => status === 'used' ? 'var(--vs-status-success)' : 'var(--vs-warn-text)';
 const circleFailureReasons: Record<string, string> = {
   'insufficient-valid-calipers': '有效卡尺数量不足', 'fitted-radius-outside-tolerance': '拟合半径超出容差',
   'fit-error-exceeds-tolerance': '拟合误差超出容差', 'all-spokes-exceed-max-radius-deviation': '所有候选均超过半径偏差',
@@ -43,7 +43,7 @@ function ProfileCharts({ manifest, profile }: { manifest: CaliperDiagnosticManif
   };
   const markers = <>
     {manifest.nominalRadius >= firstRadius && manifest.nominalRadius <= lastRadius && <line
-      x1={x(manifest.nominalRadius)} x2={x(manifest.nominalRadius)} y1={top} y2={bottom} stroke="#8093ad" strokeDasharray="2 3" />}
+      x1={x(manifest.nominalRadius)} x2={x(manifest.nominalRadius)} y1={top} y2={bottom} stroke="var(--vs-text-4)" strokeDasharray="2 3" />}
     {profile.edgeRadius != null && <line x1={x(profile.edgeRadius)} x2={x(profile.edgeRadius)} y1={top} y2={bottom}
       stroke={pointColor(selected.status)} strokeWidth={1.5} strokeDasharray="4 2" />}
     {hoverIndex !== undefined && <line x1={x(firstRadius + hoverIndex * profile.spacing)} x2={x(firstRadius + hoverIndex * profile.spacing)}
@@ -69,7 +69,7 @@ function ProfileCharts({ manifest, profile }: { manifest: CaliperDiagnosticManif
         {invalidBands}{axes}{markers}
         {[0, 128, 255].map(value => <g key={value}><line x1={left} x2={right} y1={grayY(value)} y2={grayY(value)} stroke="currentColor" opacity={.08} />
           <text x={left - 5} y={grayY(value) + 3} textAnchor="end">{value}</text></g>)}
-        <path d={path(profile.profile, 0, grayY)} fill="none" stroke="#36a9ff" strokeWidth={1.5} />
+        <path d={path(profile.profile, 0, grayY)} fill="none" stroke="var(--vs-text-brand)" strokeWidth={1.5} />
       </svg>
     </div>
     <div className="caliper-diagnostic-chart">
@@ -80,14 +80,14 @@ function ProfileCharts({ manifest, profile }: { manifest: CaliperDiagnosticManif
         <line x1={left} x2={right} y1={responseY(0)} y2={responseY(0)} stroke="currentColor" opacity={.2} />
         {(manifest.minContrast > 0 ? [-1, 1] : [1]).map(sign => <g key={sign}>
           <line x1={left} x2={right} y1={responseY(sign * manifest.minContrast)} y2={responseY(sign * manifest.minContrast)}
-            stroke="#fa8c16" strokeDasharray="4 3" opacity={manifest.polarity === (sign === 1 ? 'falling' : 'rising') ? .2 : .8} />
+            stroke="var(--vs-warn-text)" strokeDasharray="4 3" opacity={manifest.polarity === (sign === 1 ? 'falling' : 'rising') ? .2 : .8} />
           <text x={left - 5} y={responseY(sign * manifest.minContrast) + (sign === 1 ? -4 : 11)} textAnchor="end">{manifest.minContrast === 0 ? '' : sign === 1 ? '+' : '−'}{number(manifest.minContrast, 1)}</text>
         </g>)}
-        <path d={path(differences, .5, responseY)} fill="none" stroke="#8093ad" strokeWidth={1.2} opacity={.7} />
+        <path d={path(differences, .5, responseY)} fill="none" stroke="var(--vs-text-4)" strokeWidth={1.2} opacity={.7} />
         {profile.candidates.map((candidate, index) => {
           const radius = firstRadius + candidate.position;
           const chosen = profile.edgeRadius != null && Math.abs(radius - profile.edgeRadius) < 1e-6;
-          const color = chosen ? pointColor(selected.status) : '#a78bfa';
+          const color = chosen ? pointColor(selected.status) : 'var(--vs-status-paused)';
           return <g key={index}>
             <line x1={x(radius)} x2={x(radius)} y1={responseY(0)} y2={responseY(candidate.amplitude)} stroke={color} />
             <circle cx={x(radius)} cy={responseY(candidate.amplitude)} r={chosen ? 3.5 : 2.5} fill={color}>

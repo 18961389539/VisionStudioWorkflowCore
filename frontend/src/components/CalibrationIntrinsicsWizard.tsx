@@ -477,18 +477,18 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       )}
 
       {step === 0 && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <Space wrap>
             <Select value={pattern} onChange={setPattern} style={{ width: 160 }} options={[
               { value: 'chessboard', label: '棋盘格' }, { value: 'circles', label: '对称圆点阵' }
             ]} />
-            <InputNumber addonBefore="列" min={2} max={30} value={columns} onChange={(v) => setColumns(Number(v ?? 7))} />
-            <InputNumber addonBefore="行" min={2} max={30} value={rows} onChange={(v) => setRows(Number(v ?? 6))} />
-            <InputNumber addonBefore="间距 mm" min={0.001} max={10000} step={0.1} value={spacingMm} onChange={(v) => setSpacingMm(Number(v ?? 10))} />
-            <InputNumber addonBefore="最小清晰度" min={0} value={minBlurVariance} onChange={(v) => setMinBlurVariance(Number(v ?? 0))} />
-            <InputNumber addonBefore="最小覆盖" min={0} max={1} step={0.01} value={minCoverage} onChange={(v) => setMinCoverage(Number(v ?? 0))} />
-            <InputNumber addonBefore="宽" min={16} value={imageWidth ?? undefined} onChange={(v) => setImageWidth(v == null ? null : Number(v))} placeholder="可选" />
-            <InputNumber addonBefore="高" min={16} value={imageHeight ?? undefined} onChange={(v) => setImageHeight(v == null ? null : Number(v))} placeholder="可选" />
+            <Space.Compact><Space.Addon>列</Space.Addon><InputNumber min={2} max={30} value={columns} onChange={(v) => setColumns(Number(v ?? 7))} /></Space.Compact>
+            <Space.Compact><Space.Addon>行</Space.Addon><InputNumber min={2} max={30} value={rows} onChange={(v) => setRows(Number(v ?? 6))} /></Space.Compact>
+            <Space.Compact><Space.Addon>间距 mm</Space.Addon><InputNumber min={0.001} max={10000} step={0.1} value={spacingMm} onChange={(v) => setSpacingMm(Number(v ?? 10))} /></Space.Compact>
+            <Space.Compact><Space.Addon>最小清晰度</Space.Addon><InputNumber min={0} value={minBlurVariance} onChange={(v) => setMinBlurVariance(Number(v ?? 0))} /></Space.Compact>
+            <Space.Compact><Space.Addon>最小覆盖</Space.Addon><InputNumber min={0} max={1} step={0.01} value={minCoverage} onChange={(v) => setMinCoverage(Number(v ?? 0))} /></Space.Compact>
+            <Space.Compact><Space.Addon>宽</Space.Addon><InputNumber min={16} value={imageWidth ?? undefined} onChange={(v) => setImageWidth(v == null ? null : Number(v))} placeholder="可选" /></Space.Compact>
+            <Space.Compact><Space.Addon>高</Space.Addon><InputNumber min={16} value={imageHeight ?? undefined} onChange={(v) => setImageHeight(v == null ? null : Number(v))} placeholder="可选" /></Space.Compact>
           </Space>
           <Button type="primary" loading={busy} onClick={createSession}>创建向导会话</Button>
           <Input.TextArea rows={4} value={documentJson} onChange={(e) => setDocumentJson(e.target.value)}
@@ -498,7 +498,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       )}
 
       {step === 1 && session && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <Typography.Text code>session {session.sessionId}</Typography.Text>
           <Space wrap>
             <Select
@@ -514,7 +514,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
           {previewUrl && (
             <div>
               <Typography.Text type="secondary">{previewQuality}</Typography.Text>
-              <div><img src={previewUrl} alt="board preview" style={{ maxWidth: '100%', maxHeight: 320, border: '1px solid #ddd' }} /></div>
+              <div><img src={previewUrl} alt="board preview" style={{ maxWidth: '100%', maxHeight: 320, border: '1px solid var(--vs-border-panel)' }} /></div>
             </div>
           )}
           <Upload.Dragger multiple accept="image/*" disabled={busy} beforeUpload={() => false}
@@ -534,7 +534,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       )}
 
       {step === 2 && session && (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Table size="small" rowKey="index" pagination={false} dataSource={session.views} scroll={{ y: 320 }}
             columns={[
               { title: '#', dataIndex: 'index', width: 48 },
@@ -559,7 +559,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       )}
 
       {step === 3 && session && (
-        <Space direction="vertical" size="middle">
+        <Space orientation="vertical" size="middle">
           <Space>
             <Select value={cameraModel} onChange={changeCameraModel} style={{ width: 220 }} options={[
               { value: 'pinhole', label: '针孔（JLVision 多项式）' },
@@ -567,12 +567,12 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
               { value: 'telecentric', label: '物方远心（JLVision 多项式）' }
             ]} />
             {cameraModel === 'telecentric' && <>
-              <InputNumber addonBefore="镜头倍率" min={0.001} max={10} step={0.01} value={telecentricMagnification} onChange={(value) => changeTelecentricParameters(Number(value ?? 0.2), telecentricPixelSizeUm)} />
-              <InputNumber addonBefore="像元尺寸 μm" min={0.1} max={100} step={0.01} value={telecentricPixelSizeUm} onChange={(value) => changeTelecentricParameters(telecentricMagnification, Number(value ?? 3.45))} />
+              <Space.Compact><Space.Addon>镜头倍率</Space.Addon><InputNumber min={0.001} max={10} step={0.01} value={telecentricMagnification} onChange={(value) => changeTelecentricParameters(Number(value ?? 0.2), telecentricPixelSizeUm)} /></Space.Compact>
+              <Space.Compact><Space.Addon>像元尺寸 μm</Space.Addon><InputNumber min={0.1} max={100} step={0.01} value={telecentricPixelSizeUm} onChange={(value) => changeTelecentricParameters(telecentricMagnification, Number(value ?? 3.45))} /></Space.Compact>
             </>}
-            <InputNumber addonBefore="单视图 RMS 上限" min={0} max={100} step={0.1} value={maxViewRms} onChange={(v) => setMaxViewRms(Number(v ?? 0))} />
-            <InputNumber addonBefore="拟合模型单视图 RMS 上限" min={0} max={100} step={0.1} value={maxPoseViewRms} disabled={cameraModel === 'telecentric'} onChange={(v) => setMaxPoseViewRms(Number(v ?? 0))} />
-            <InputNumber addonBefore="模型 RMS 上限" min={0} max={1000} step={0.1} value={maxRms} onChange={(v) => setMaxRms(Number(v ?? 0))} />
+            <Space.Compact><Space.Addon>单视图 RMS 上限</Space.Addon><InputNumber min={0} max={100} step={0.1} value={maxViewRms} onChange={(v) => setMaxViewRms(Number(v ?? 0))} /></Space.Compact>
+            <Space.Compact><Space.Addon>拟合模型单视图 RMS 上限</Space.Addon><InputNumber min={0} max={100} step={0.1} value={maxPoseViewRms} disabled={cameraModel === 'telecentric'} onChange={(v) => setMaxPoseViewRms(Number(v ?? 0))} /></Space.Compact>
+            <Space.Compact><Space.Addon>模型 RMS 上限</Space.Addon><InputNumber min={0} max={1000} step={0.1} value={maxRms} onChange={(v) => setMaxRms(Number(v ?? 0))} /></Space.Compact>
             <Button type="primary" loading={busy} disabled={enabledCount < 3} onClick={calibrate}>运行内参标定</Button>
           </Space>
           <Typography.Text type="secondary">0 = 关闭门控。针孔与远心单视图门限采用平面预检；鱼眼采用拟合模型逐视图重投影。远心倍率和像元尺寸初值应来自数据表；远心投影不提供针孔位姿 RMS。</Typography.Text>
@@ -580,7 +580,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       )}
 
       {step === 4 && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           {solveSummary && (
             <Alert type="success" showIcon title={`RMS ${Number(solveSummary.rms ?? 0).toFixed(4)} px · 启用视图 ${String(solveSummary.enabledViews ?? enabledCount)}`}
               description={`最差视图索引 ${String(solveSummary.worstViewIndex ?? '无')} · 离群: ${String((solveSummary.nodeSummary as Record<string, unknown> | undefined)?.outlierViewIndex ?? '无')}`} />
@@ -596,8 +596,8 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
               ]} />
           )}
           <Space wrap>
-            <Input value={intrinsicAssetId} onChange={(event) => setIntrinsicAssetId(event.target.value)} addonBefore="资产 ID" style={{ width: 300 }} />
-            <Input value={intrinsicAssetName} onChange={(event) => setIntrinsicAssetName(event.target.value)} addonBefore="名称" style={{ width: 330 }} />
+            <Space.Compact style={{ width: 300 }}><Space.Addon>资产 ID</Space.Addon><Input value={intrinsicAssetId} onChange={(event) => setIntrinsicAssetId(event.target.value)} /></Space.Compact>
+            <Space.Compact style={{ width: 330 }}><Space.Addon>名称</Space.Addon><Input value={intrinsicAssetName} onChange={(event) => setIntrinsicAssetName(event.target.value)} /></Space.Compact>
             <Button type="primary" loading={busy} disabled={!session?.model} onClick={() => void saveIntrinsicAsset()}>
               {intrinsicAssets.some((asset) => asset.id === intrinsicAssetId.trim()) ? '保存新版本' : '创建版本资产'}
             </Button>
@@ -606,7 +606,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
           </Space>
           {selectedNodeType === 'image.undistort' && cameraModel === 'fisheye' && (
             <Space>
-              <InputNumber addonBefore="鱼眼视场平衡" min={0} max={1} step={0.01} value={fisheyeBalance} onChange={(value) => setFisheyeBalance(Number(value ?? 0))} />
+              <Space.Compact><Space.Addon>鱼眼视场平衡</Space.Addon><InputNumber min={0} max={1} step={0.01} value={fisheyeBalance} onChange={(value) => setFisheyeBalance(Number(value ?? 0))} /></Space.Compact>
               <Typography.Text type="secondary">0 收紧校正视场，1 保留更多视场并允许边缘留黑。</Typography.Text>
             </Space>
           )}

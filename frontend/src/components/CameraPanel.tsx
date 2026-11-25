@@ -1,28 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from 'antd';
+import { Alert, Button, Drawer, Form, Space, Table, Tabs, Tag, message } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import type { CameraAdapterDescriptor, CameraCommissioningProfile, CameraCommissioningSnapshot, CameraDescriptor, CameraDiscoveredDevice, CameraFeatureDescriptor, CameraFeatureProfileRecord, CameraSettings, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
+import type { CameraAdapterDescriptor, CameraDescriptor, CameraDiscoveredDevice, CameraSettings, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { responseErrorMessage } from '../apiErrors';
 import { apiFetch, cachedGet, invalidateCache, RequestToken } from '../apiClient';
-import { apiUrl, cameras as cameraEndpoints, cameraSync, cameraFeatureProfiles, media } from '../endpoints';
+import { apiUrl, cameras as cameraEndpoints, cameraSync, media } from '../endpoints';
 import { useMonitorSnapshot } from '../useMonitorStream';
 import CameraAcquisitionTab from './CameraAcquisitionTab';
 import CameraDiagnosticsTab from './CameraDiagnosticsTab';
 import CameraMediaTab from './CameraMediaTab';
+import CameraParametersTab from './CameraParametersTab';
 import CameraRegistrationTab from './CameraRegistrationTab';
 import CameraSyncTab from './CameraSyncTab';
+import { useCameraCommissioning } from './useCameraCommissioning';
 import { acquisitionColor, stateColor, type SyncGroupFormValues } from './cameraPanelShared';
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
 const CAMERA_POLL_TIMEOUT_MS = 5000;
 
-type Props = { open: boolean; onClose: () => void };
+type Props = { open: boolean; onClose: () => void; initialTab?: 'acquisition' | 'media' };
 
-// 2026-11-13：五个标签页已抽成独立组件（采集/同步/诊断/设备注册/媒体库），
-// 表单值类型、媒体展示常量与状态色统一放在 cameraPanelShared.ts，避免两处口径漂移。
-// 「参数」页仍内联：它把 selected + commissioningForm + 功能浏览器三者的状态绑在一起，
-// 抽出去要传 20+ 个回调，反而更难读。
+// 各标签页已拆成独立组件，共享类型与状态色放在 cameraPanelShared.ts。
 
 async function responseError(response: Response, fallback: string) {
   try {
@@ -31,7 +30,7 @@ async function responseError(response: Response, fallback: string) {
   } catch { return fallback; }
 }
 
-export default function CameraPanel({ open, onClose }: Props) {
+export default function CameraPanel({ open, onClose, initialTab = 'acquisition' }: Props) {
   const monitorSnapshot = useMonitorSnapshot(open);
   const [cameras, setCameras] = useState<CameraDescriptor[]>([]);
   const [adapters, setAdapters] = useState<CameraAdapterDescriptor[]>([]);
@@ -39,6 +38,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const [discoverDriver, setDiscoverDriver] = useState('basler-pylon');
   const [selectedDiscovered, setSelectedDiscovered] = useState<CameraDiscoveredDevice>();
   const [selectedId, setSelectedId] = useState('virtual-1');
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [previewTick, setPreviewTick] = useState(0);
   const [busy, setBusy] = useState<string>();
   const [mediaStatus, setMediaStatus] = useState<MediaLibraryStatus>();
@@ -57,15 +57,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const [form] = Form.useForm();
   const [vendorForm] = Form.useForm();
   const [settingsForm] = Form.useForm<CameraSettings>();
-  const [commissioningForm] = Form.useForm<CameraCommissioningProfile>();
   const editedTriggerMode = Form.useWatch("triggerMode", settingsForm);
-  const [commissioning, setCommissioning] = useState<CameraCommissioningSnapshot>();
-  const [features, setFeatures] = useState<CameraFeatureDescriptor[]>([]);
-  const [featureEdits, setFeatureEdits] = useState<Record<string, string>>({});
-  const [featureProfiles, setFeatureProfiles] = useState<CameraFeatureProfileRecord[]>([]);
-  const [selectedFeatureProfile, setSelectedFeatureProfile] = useState<string>();
-  const [profileId, setProfileId] = useState('camera-profile-1');
-  const [profileName, setProfileName] = useState('Commissioned Camera Profile');
   const [syncGroups, setSyncGroups] = useState<CameraSynchronizationGroup[]>([]);
   const [selectedSyncId, setSelectedSyncId] = useState<string>();
   const [syncStatus, setSyncStatus] = useState<CameraSynchronizationGroupStatus>();
@@ -79,6 +71,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const [syncTestScheduled, setSyncTestScheduled] = useState(false);
   const [syncForm] = Form.useForm();
   const [messageApi, contextHolder] = message.useMessage();
+  useEffect(() => { setActiveTab(initialTab); }, [initialTab]);
 
   const selected = useMemo(() => cameras.find((camera) => camera.id === selectedId), [cameras, selectedId]);
 
@@ -111,6 +104,15 @@ export default function CameraPanel({ open, onClose }: Props) {
       refreshInFlight.current = false;
     }
   };
+
+  const {
+    commissioningForm, commissioning, features, featureEdits, setFeatureEdits,
+    featureProfiles, selectedFeatureProfile, setSelectedFeatureProfile,
+    profileId, setProfileId, profileName, setProfileName,
+    clearCommissioning, refreshCommissioning, refreshFeatureProfiles,
+    applyCommissioning, setFeature, captureFeatureProfile,
+    applySavedFeatureProfile, deleteFeatureProfile, exportFeatureProfile, importFeatureProfileFile
+  } = useCameraCommissioning({ selected, setBusy, refreshCameras: refresh, messageApi });
 
   const refreshAdapters = async (quiet = false) => {
     try {
@@ -342,31 +344,88 @@ export default function CameraPanel({ open, onClose }: Props) {
     }
   };
 
+  const monitorCapturedAt = monitorSnapshot?.capturedAt;
+  const selectedCameraId = selected?.id;
+  const selectedDriver = selected?.driver;
+  const selectedState = selected?.state;
+  const selectedExposureUs = selected?.settings.exposureUs;
+  const selectedGainDb = selected?.settings.gainDb;
+  const selectedTargetFps = selected?.settings.targetFps;
+  const selectedTriggerMode = selected?.settings.triggerMode;
+  const selectedOutputPixelFormat = selected?.settings.outputPixelFormat;
+  const selectedExternalTriggerSource = selected?.settings.externalTriggerSource;
+
+  const effectActionsRef = useRef({
+    refresh: () => undefined as unknown as Promise<void>,
+    refreshAdapters: () => undefined as unknown as Promise<void>,
+    refreshMedia: (_quiet?: boolean, _page?: number, _pageSize?: number) => undefined as unknown as Promise<void>,
+    refreshSyncGroups: () => undefined as unknown as Promise<void>,
+    refreshSyncStatus: (_quiet?: boolean) => undefined as unknown as Promise<void>,
+    refreshSyncRuns: (_quiet?: boolean) => undefined as unknown as Promise<void>,
+    refreshSyncStatistics: (_quiet?: boolean) => undefined as unknown as Promise<void>,
+    refreshSyncPtpDiagnostics: (_quiet?: boolean) => undefined as unknown as Promise<void>,
+    refreshGigEDiagnostics: (_quiet?: boolean) => undefined as unknown as Promise<void>,
+    refreshSyncTests: (_quiet?: boolean) => undefined as unknown as Promise<void>,
+    refreshFeatureProfiles: (_quiet?: boolean) => undefined as unknown as Promise<void>,
+    refreshCommissioning: (_quiet?: boolean) => undefined as unknown as Promise<void>,
+    clearCommissioning: () => undefined as void,
+    refreshQuiet: () => undefined as unknown as Promise<void>,
+    mediaPageSize,
+    syncGroups,
+    syncForm,
+    settingsForm,
+    selected
+  });
+
   useEffect(() => {
     if (!open) return;
-    refresh();
-    refreshAdapters();
-    refreshMedia();
-    refreshSyncGroups();
+    void effectActionsRef.current.refresh();
+    void effectActionsRef.current.refreshAdapters();
+    void effectActionsRef.current.refreshMedia();
+    void effectActionsRef.current.refreshSyncGroups();
     // 2026-11-12：1 s 轮询改为推送触发（服务端内容变化才广播），定时器只做断线兜底。
-    const timer = window.setInterval(() => refresh(true), 10_000);
+    const timer = window.setInterval(() => { void effectActionsRef.current.refreshQuiet(); }, 10_000);
     return () => window.clearInterval(timer);
   }, [open]);
 
   // 相机列表/状态变化时立即刷新；预览仍由本地 500 ms tick 驱动，不经过网络。
   useEffect(() => {
-    if (monitorSnapshot) void refresh(true);
-  }, [monitorSnapshot?.capturedAt]);
+    if (monitorCapturedAt !== undefined) void effectActionsRef.current.refreshQuiet();
+  }, [monitorCapturedAt]);
 
-  useEffect(() => { if (open) { setMediaPage(1); void refreshMedia(true, 1, mediaPageSize); } }, [mediaCollection, mediaLabel]);
-  useEffect(() => { if (open) { refreshSyncStatus(true); refreshSyncRuns(true); refreshSyncStatistics(true); refreshSyncPtpDiagnostics(true); refreshGigEDiagnostics(true); refreshSyncTests(true); } }, [open, selectedSyncId]);
-  useEffect(() => { if (!open || !selectedSyncId) return; const timer = window.setInterval(() => refreshSyncTests(true), 1000); return () => window.clearInterval(timer); }, [open, selectedSyncId]);
+  useEffect(() => {
+    if (!open) return;
+    setMediaPage(1);
+    void effectActionsRef.current.refreshMedia(true, 1, effectActionsRef.current.mediaPageSize);
+  }, [open, mediaCollection, mediaLabel]);
+  useEffect(() => {
+    if (!open) return;
+    void effectActionsRef.current.refreshSyncStatus(true);
+    void effectActionsRef.current.refreshSyncRuns(true);
+    void effectActionsRef.current.refreshSyncStatistics(true);
+    void effectActionsRef.current.refreshSyncPtpDiagnostics(true);
+    void effectActionsRef.current.refreshGigEDiagnostics(true);
+    void effectActionsRef.current.refreshSyncTests(true);
+  }, [open, selectedSyncId]);
+  useEffect(() => {
+    if (!open || !selectedSyncId) return;
+    const timer = window.setInterval(() => { void effectActionsRef.current.refreshSyncTests(true); }, 1000);
+    return () => window.clearInterval(timer);
+  }, [open, selectedSyncId]);
   useEffect(() => {
     const group = syncGroups.find((x) => x.id === selectedSyncId);
-    if (group) syncForm.setFieldsValue(group);
+    if (group) effectActionsRef.current.syncForm.setFieldsValue(group);
   }, [selectedSyncId, syncGroups]);
-  useEffect(() => { if (selected) settingsForm.setFieldsValue(selected.settings); }, [selected?.id, selected?.settings.exposureUs, selected?.settings.gainDb, selected?.settings.targetFps, selected?.settings.triggerMode, selected?.settings.outputPixelFormat, selected?.settings.externalTriggerSource]);
-  useEffect(() => { if (open && selected) { refreshFeatureProfiles(true); if (selected.state !== 'Closed') refreshCommissioning(true); else { setCommissioning(undefined); setFeatures([]); } } }, [open, selected?.id, selected?.driver, selected?.state]);
+  useEffect(() => {
+    const current = effectActionsRef.current.selected;
+    if (current) effectActionsRef.current.settingsForm.setFieldsValue(current.settings);
+  }, [selectedCameraId, selectedExposureUs, selectedGainDb, selectedTargetFps, selectedTriggerMode, selectedOutputPixelFormat, selectedExternalTriggerSource]);
+  useEffect(() => {
+    if (!open || !selectedCameraId) return;
+    void effectActionsRef.current.refreshFeatureProfiles(true);
+    if (selectedState !== 'Closed') void effectActionsRef.current.refreshCommissioning(true);
+    else effectActionsRef.current.clearCommissioning();
+  }, [open, selectedCameraId, selectedDriver, selectedState]);
   useEffect(() => {
     if (!open || !selectedId) return;
     const timer = window.setInterval(() => setPreviewTick((x) => x + 1), 500);
@@ -394,128 +453,26 @@ export default function CameraPanel({ open, onClose }: Props) {
     finally { setBusy(undefined); }
   };
 
-  const refreshCommissioning = async (quiet = false) => {
-    if (!selected || !['basler-pylon', 'hikrobot-mvs'].includes(selected.driver)) {
-      setCommissioning(undefined); setFeatures([]); return;
-    }
-    if (selected.state === 'Closed') {
-      setCommissioning(undefined); setFeatures([]); return;
-    }
-    try {
-      const [snapshotResponse, featuresResponse] = await Promise.all([
-        apiFetch(cameraEndpoints.commissioning(selected.id)),
-        apiFetch(cameraEndpoints.features(selected.id))
-      ]);
-      if (!snapshotResponse.ok) throw new Error(await responseError(snapshotResponse, 'Commissioning profile unavailable'));
-      if (!featuresResponse.ok) throw new Error(await responseError(featuresResponse, 'Feature browser unavailable'));
-      const snapshot: CameraCommissioningSnapshot = await snapshotResponse.json();
-      const featureList: CameraFeatureDescriptor[] = await featuresResponse.json();
-      setCommissioning(snapshot); setFeatures(featureList);
-      commissioningForm.setFieldsValue(snapshot.profile);
-      setFeatureEdits(Object.fromEntries(featureList.map((x) => [x.key, x.value ?? ''])));
-    } catch (error) {
-      if (!quiet) messageApi.error(error instanceof Error ? error.message : 'Commissioning API unavailable');
-    }
-  };
-
-  const refreshFeatureProfiles = async (quiet = false) => {
-    if (!selected || !['basler-pylon', 'hikrobot-mvs'].includes(selected.driver)) { setFeatureProfiles([]); return; }
-    try {
-      const response = await apiFetch(cameraFeatureProfiles.byDriver(selected.driver));
-      if (!response.ok) throw new Error(await responseError(response, 'Camera profiles unavailable'));
-      const data: CameraFeatureProfileRecord[] = await response.json();
-      setFeatureProfiles(data);
-      if (selectedFeatureProfile && !data.some((x) => x.id === selectedFeatureProfile)) setSelectedFeatureProfile(undefined);
-    } catch (error) { if (!quiet) messageApi.error(error instanceof Error ? error.message : 'Camera profiles unavailable'); }
-  };
-
-  const applyCommissioning = async (values: CameraCommissioningProfile) => {
-    if (!selected) return;
-    setBusy(`${selected.id}:commissioning`);
-    try {
-      const payload: CameraCommissioningProfile = { ...values, schemaVersion: 1, acquisition: selected.settings };
-      const response = await apiFetch(cameraEndpoints.commissioning(selected.id), {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error(await responseError(response, 'Apply commissioning profile failed'));
-      await refreshCommissioning(true); await refresh(true); messageApi.success('Commissioning profile applied');
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Apply commissioning profile failed'); }
-    finally { setBusy(undefined); }
-  };
-
-  const setFeature = async (feature: CameraFeatureDescriptor) => {
-    if (!selected) return;
-    setBusy(`feature:${feature.key}`);
-    try {
-      const response = await apiFetch(cameraEndpoints.feature(selected.id, feature.key), {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: featureEdits[feature.key] ?? '' })
-      });
-      if (!response.ok) throw new Error(await responseError(response, `Update ${feature.key} failed`));
-      await refreshCommissioning(true); messageApi.success(`${feature.key} updated`);
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : `Update ${feature.key} failed`); }
-    finally { setBusy(undefined); }
-  };
-
-  const captureFeatureProfile = async () => {
-    if (!selected || !profileId.trim() || !profileName.trim()) return;
-    setBusy('profile-capture');
-    try {
-      const response = await apiFetch(apiUrl('camera-feature-profiles/capture'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: profileId.trim(), name: profileName.trim(), cameraId: selected.id })
-      });
-      if (!response.ok) throw new Error(await responseError(response, 'Save feature profile failed'));
-      const saved: CameraFeatureProfileRecord = await response.json();
-      setSelectedFeatureProfile(saved.id); await refreshFeatureProfiles(true); messageApi.success(`Saved ${saved.name}`);
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Save feature profile failed'); }
-    finally { setBusy(undefined); }
-  };
-
-  const applySavedFeatureProfile = async () => {
-    if (!selected || !selectedFeatureProfile) return;
-    setBusy('profile-apply');
-    try {
-      const response = await apiFetch(cameraFeatureProfiles.apply(selectedFeatureProfile, selected.id), { method: 'POST' });
-      if (!response.ok) throw new Error(await responseError(response, 'Apply saved profile failed'));
-      await refreshCommissioning(true); await refresh(true); messageApi.success('Saved profile applied');
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Apply saved profile failed'); }
-    finally { setBusy(undefined); }
-  };
-
-  const deleteFeatureProfile = async () => {
-    if (!selectedFeatureProfile) return;
-    setBusy('profile-delete');
-    try {
-      const response = await apiFetch(cameraFeatureProfiles.byId(selectedFeatureProfile), { method: 'DELETE' });
-      if (!response.ok) throw new Error(await responseError(response, 'Delete profile failed'));
-      setSelectedFeatureProfile(undefined); await refreshFeatureProfiles(true); messageApi.success('Profile deleted');
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Delete profile failed'); }
-    finally { setBusy(undefined); }
-  };
-
-  const exportFeatureProfile = () => {
-    const record = featureProfiles.find((x) => x.id === selectedFeatureProfile); if (!record) return;
-    const blob = new Blob([JSON.stringify({ schema: 'visionstudio.camera-feature-profile', version: 1, ...record }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${record.id}.camera-profile.json`; anchor.click(); URL.revokeObjectURL(url);
-  };
-
-  const importFeatureProfileFile = async (file: File) => {
-    setBusy('profile-import');
-    try {
-      const parsed = JSON.parse(await file.text());
-      const body = {
-        id: parsed.id ?? file.name.replace(/\.camera-profile\.json$|\.json$/i, '').replace(/[^a-zA-Z0-9_.-]/g, '-'),
-        name: parsed.name ?? parsed.id ?? 'Imported Camera Profile',
-        driver: parsed.driver ?? selected?.driver,
-        sourceCameraId: parsed.sourceCameraId ?? null,
-        profile: parsed.profile ?? parsed
-      };
-      if (!body.driver) throw new Error('Imported profile does not declare a camera driver');
-      const response = await apiFetch(apiUrl('camera-feature-profiles/import'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!response.ok) throw new Error(await responseError(response, 'Import profile failed'));
-      const saved: CameraFeatureProfileRecord = await response.json(); setSelectedFeatureProfile(saved.id); await refreshFeatureProfiles(true); messageApi.success(`Imported ${saved.name}`);
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Import profile failed'); }
-    finally { setBusy(undefined); }
+  effectActionsRef.current = {
+    refresh: () => refresh(false),
+    refreshQuiet: () => refresh(true),
+    refreshAdapters: () => refreshAdapters(false),
+    refreshMedia,
+    refreshSyncGroups: () => refreshSyncGroups(false),
+    refreshSyncStatus,
+    refreshSyncRuns,
+    refreshSyncStatistics,
+    refreshSyncPtpDiagnostics,
+    refreshGigEDiagnostics,
+    refreshSyncTests,
+    refreshFeatureProfiles,
+    refreshCommissioning,
+    clearCommissioning,
+    mediaPageSize,
+    syncGroups,
+    syncForm,
+    settingsForm,
+    selected
   };
 
   const registerFile = async (values: { id: string; name?: string; source: string }) => {
@@ -573,7 +530,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   ];
 
   return (
-    <Modal open={open} onCancel={onClose} footer={null} width={1320} title="相机采集运行时与媒体库" destroyOnHidden>
+    <Drawer open={open} onClose={onClose} mask={false} size="min(1120px, 80vw)" title="相机采集运行时与媒体库" destroyOnHidden>
       {contextHolder}
       <div className="camera-runtime-grid">
         <section className="camera-device-list">
@@ -618,7 +575,8 @@ export default function CameraPanel({ open, onClose }: Props) {
             <Alert type="info" showIcon title="预览和工作流共用同一采集流" description="CameraAcquisitionWorker 只采集一次；网页预览和“采集图像”节点分别从有界 CameraFrameHub 获取独立帧租约。" />
           </div>
           <Tabs
-            defaultActiveKey="acquisition"
+            activeKey={activeTab}
+            onChange={setActiveTab}
             items={[
               { key: 'acquisition', label: '采集', children: <CameraAcquisitionTab
                 busy={busy}
@@ -627,63 +585,30 @@ export default function CameraPanel({ open, onClose }: Props) {
                 saveSettings={saveSettings}
                 editedTriggerMode={editedTriggerMode}
               /> },
-              { key: 'parameters', label: '参数', children: (<>
-          {/* ── 参数：厂商调试配置（触发 / 闪光灯 / 功能浏览器） ── */}
-          {selected && ['basler-pylon', 'hikrobot-mvs'].includes(selected.driver) ? <>
-            <Typography.Title level={5}>触发 / 闪光灯调试</Typography.Title>
-            <Alert type="info" showIcon style={{ marginBottom: 10 }} title="修改传输或 I/O 功能前，请先停止采集" description="调试配置会适配 Basler/Hikrobot GenICam/MVS 的常见功能。对于不支持的功能，系统会跳过并报告，不会猜测配置值。" />
-            {selected.state === 'Closed' ? <Alert type="warning" showIcon title="请先打开相机以读取调试功能" /> : commissioning && <>
-              <Space wrap style={{ marginBottom: 8 }}>
-                <Tag color="blue">配置 {commissioning.profileHash?.slice(0, 12) ?? '尚未采集'}</Tag>
-                <Tag color={commissioning.capabilities.gigENetworkTuning ? 'green' : 'default'}>GigE 调优</Tag>
-                <Tag color={commissioning.capabilities.strobeOutput ? 'green' : 'default'}>闪光灯输出</Tag>
-                <Tag color={commissioning.capabilities.ptp ? 'green' : 'default'}>PTP</Tag>
-                <Tag color={commissioning.capabilities.actionCommand ? 'green' : 'default'}>Action Command 就绪</Tag>
-                <Button size="small" onClick={() => refreshCommissioning()}>重新读取相机</Button>
-              </Space>
-              <Form form={commissioningForm} layout="vertical" onFinish={applyCommissioning} initialValues={{ schemaVersion: 1 }}>
-                <div className="camera-settings-grid">
-                  <Form.Item label="数据包大小（字节）" name="packetSizeBytes"><InputNumber min={576} max={16384} disabled={!commissioning.capabilities.gigENetworkTuning} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="包间延迟（时钟周期）" name="interPacketDelayTicks"><InputNumber min={0} disabled={!commissioning.capabilities.gigENetworkTuning} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="触发延迟（µs）" name="triggerDelayUs"><InputNumber min={0} disabled={!commissioning.capabilities.triggerDelay} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="触发输入线路" name="triggerInputLine"><Select allowClear disabled={!commissioning.capabilities.lineDebouncer} options={(commissioning.capabilities.inputLines ?? []).map((value) => ({ value, label: value }))} /></Form.Item>
-                  <Form.Item label="输入消抖（µs）" name="lineDebouncerUs"><InputNumber min={0} disabled={!commissioning.capabilities.lineDebouncer} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="输出线路" name="outputLine"><Select allowClear disabled={!commissioning.capabilities.strobeOutput} options={(commissioning.capabilities.outputLines ?? []).map((value) => ({ value, label: value }))} /></Form.Item>
-                  <Form.Item label="输出来源" name="outputSource"><Select allowClear disabled={!commissioning.capabilities.strobeOutput} options={(commissioning.capabilities.outputSources ?? []).map((value) => ({ value, label: value }))} /></Form.Item>
-                  <Form.Item label="反转输出" name="outputInverted" valuePropName="checked"><Switch disabled={!commissioning.capabilities.strobeOutput} /></Form.Item>
-                  <Form.Item label="启用闪光灯" name="strobeEnabled" valuePropName="checked"><Switch disabled={!commissioning.capabilities.strobeOutput} /></Form.Item>
-                  <Form.Item label="闪光灯延迟（µs）" name="strobeDelayUs"><InputNumber disabled={!commissioning.capabilities.strobeOutput} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="闪光灯持续时间（µs）" name="strobeDurationUs"><InputNumber min={0} disabled={!commissioning.capabilities.strobeOutput} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="闪光灯预延迟（µs）" name="strobePreDelayUs"><InputNumber min={0} disabled={!commissioning.capabilities.strobeOutput} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="PTP" name="ptpEnabled" valuePropName="checked"><Switch disabled={!commissioning.capabilities.ptp} /></Form.Item>
-                  <Form.Item label="Action 设备密钥" name="actionDeviceKey"><InputNumber min={0} disabled={!commissioning.capabilities.actionCommand} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="Action 组密钥" name="actionGroupKey"><InputNumber min={0} disabled={!commissioning.capabilities.actionCommand} style={{ width: '100%' }} /></Form.Item>
-                  <Form.Item label="Action 组掩码" name="actionGroupMask"><InputNumber min={0} disabled={!commissioning.capabilities.actionCommand} style={{ width: '100%' }} /></Form.Item>
-                </div>
-                <Button type="primary" htmlType="submit" disabled={selected.state !== 'Open'} loading={busy === `${selected.id}:commissioning`}>应用调试配置</Button>
-              </Form>
-
-              <Typography.Text strong>命名配置</Typography.Text>
-              <div className="media-create-row" style={{ marginTop: 8 }}><Input value={profileId} onChange={(e) => setProfileId(e.target.value)} placeholder="配置 ID" /><Input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="配置名称" /><Button loading={busy === 'profile-capture'} onClick={captureFeatureProfile}>保存当前配置</Button></div>
-              <Space wrap style={{ marginBottom: 10 }}>
-                <Select style={{ minWidth: 280 }} allowClear placeholder="选择已保存的功能配置" value={selectedFeatureProfile} onChange={setSelectedFeatureProfile} options={featureProfiles.map((x) => ({ value: x.id, label: `${x.name} · ${x.profileHash.slice(0, 8)}` }))} />
-                <Button disabled={!selectedFeatureProfile || selected.state !== 'Open'} loading={busy === 'profile-apply'} onClick={applySavedFeatureProfile}>应用已保存配置</Button>
-                <Button disabled={!selectedFeatureProfile} onClick={exportFeatureProfile}>导出 JSON</Button>
-                <Upload accept=".json" showUploadList={false} beforeUpload={(file) => { importFeatureProfileFile(file as File); return Upload.LIST_IGNORE; }}><Button loading={busy === 'profile-import'}>导入 JSON</Button></Upload>
-                <Popconfirm title="确定删除所选相机配置吗？" okText="删除" cancelText="取消" onConfirm={deleteFeatureProfile}><Button danger disabled={!selectedFeatureProfile} loading={busy === 'profile-delete'}>删除</Button></Popconfirm>
-              </Space>
-
-              <Typography.Text strong>功能浏览器</Typography.Text>
-              <Table<CameraFeatureDescriptor> size="small" rowKey="key" dataSource={features} pagination={{ pageSize: 8, size: 'small' }} columns={[
-                { title: '类别', dataIndex: 'category', width: 105 },
-                { title: '功能', dataIndex: 'displayName', width: 170, render: (_: unknown, row) => <><div>{row.displayName}</div><Typography.Text type="secondary" style={{ fontSize: 11 }}>{row.key}</Typography.Text></> },
-                { title: '值', render: (_: unknown, row) => row.options?.length ? <Select size="small" style={{ width: '100%' }} value={featureEdits[row.key]} onChange={(value) => setFeatureEdits((old) => ({ ...old, [row.key]: value }))} options={row.options.map((value) => ({ value, label: value }))} /> : <Input size="small" value={featureEdits[row.key] ?? ''} suffix={row.unit ?? undefined} onChange={(e) => setFeatureEdits((old) => ({ ...old, [row.key]: e.target.value }))} /> },
-                { title: '配置', width: 70, render: (_: unknown, row) => row.profileEligible ? <Tag color="green">可配置</Tag> : <Tag>只读</Tag> },
-                { title: '', width: 64, render: (_: unknown, row) => <Button size="small" disabled={!row.writable || !row.profileEligible || selected.state !== 'Open'} loading={busy === `feature:${row.key}`} onClick={() => setFeature(row)}>设置</Button> }
-              ]} />
-            </>}
-          </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={selected ? '该相机驱动无厂商调试配置（仅 Basler / Hikrobot 支持）' : '请在左侧选择一台相机'} />}
-              </>) },
+              { key: 'parameters', label: '参数', children: <CameraParametersTab
+                busy={busy}
+                selected={selected}
+                commissioning={commissioning}
+                commissioningForm={commissioningForm}
+                refreshCommissioning={refreshCommissioning}
+                applyCommissioning={applyCommissioning}
+                profileId={profileId}
+                setProfileId={setProfileId}
+                profileName={profileName}
+                setProfileName={setProfileName}
+                captureFeatureProfile={captureFeatureProfile}
+                selectedFeatureProfile={selectedFeatureProfile}
+                setSelectedFeatureProfile={setSelectedFeatureProfile}
+                featureProfiles={featureProfiles}
+                applySavedFeatureProfile={applySavedFeatureProfile}
+                exportFeatureProfile={exportFeatureProfile}
+                importFeatureProfileFile={importFeatureProfileFile}
+                deleteFeatureProfile={deleteFeatureProfile}
+                features={features}
+                featureEdits={featureEdits}
+                setFeatureEdits={setFeatureEdits}
+                setFeature={setFeature}
+              /> },
               { key: 'sync', label: '同步', children: <CameraSyncTab
                 busy={busy}
                 selectedSyncId={selectedSyncId}
@@ -777,6 +702,6 @@ export default function CameraPanel({ open, onClose }: Props) {
           />
         </section>
       </div>
-    </Modal>
+    </Drawer>
   );
 }

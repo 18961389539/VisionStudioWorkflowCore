@@ -11,6 +11,7 @@ import { isWorkflowDocument } from './workflowDocument';
 import { migrateNodeType } from './legacyNodes';
 import { catalogNodeData } from './catalog';
 import { withSwitchPorts } from './switchPorts';
+import { restoreCanvasAnnotations } from './canvasAnnotations';
 import type { GraphHistory } from './history';
 import type { DocumentBaseline } from './documentSync';
 import type { NodeCatalogItem, WorkflowModuleVersion, WorkflowPayload } from './types';
@@ -55,7 +56,7 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
     documentGenerationRef.current += 1;
     workflowRevisionRef.current = undefined;
     const rawGraph = demos[key]();
-    const graph = { ...rawGraph, nodes: hydrateNodesFromCatalog(rawGraph.nodes, catalog) };
+    const graph = { ...rawGraph, nodes: restoreCanvasAnnotations(`demo-${key}`, hydrateNodesFromCatalog(rawGraph.nodes, catalog)) };
     setDemoKey(key);
     setDesignerWorkflowId(`demo-${key}`);
     // 文档名不携带版本号（避免与品牌 V{APP_VERSION} 同屏互相矛盾），并复用分组里的中文用途名
@@ -71,6 +72,23 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
     resetInspection();
     setHighlightedEdgeId(undefined);
     setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
+  };
+  const createBlankWorkflow = () => {
+    documentGenerationRef.current += 1;
+    workflowRevisionRef.current = undefined;
+    const id = `workflow-${crypto.randomUUID().slice(0, 8)}`;
+    setDesignerWorkflowId(id);
+    setDesignerWorkflowName('未命名工作流');
+    setNodes([]);
+    setEdges([]);
+    setSelectedId('');
+    history.reset();
+    setHistoryVersion((version) => version + 1);
+    markCleanOnNextChange.current = true;
+    clearResult();
+    setLastSavedAt(undefined);
+    resetInspection();
+    setHighlightedEdgeId(undefined);
   };
   const restoreWorkflow = useCallback((workflow: WorkflowPayload, options?: { markClean?: boolean; preserveDocument?: boolean; editLabel?: string }) => {
     // A03/A04：整块替换文档即新代次——在途旧响应作废；并发基线失效。
@@ -117,9 +135,10 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
       setDesignerWorkflowId(workflow.id);
       setDesignerWorkflowName(workflow.name);
     }
-    setNodes(restoredNodes);
+    const canvasNodes = restoreCanvasAnnotations(workflow.id, restoredNodes);
+    setNodes(canvasNodes);
     setEdges(restoredEdges);
-    setSelectedId(options?.preserveDocument && restoredNodes.some((node) => node.id === selectedRef.current) ? selectedRef.current : restoredNodes[0]?.id ?? '');
+    setSelectedId(options?.preserveDocument && canvasNodes.some((node) => node.id === selectedRef.current) ? selectedRef.current : canvasNodes[0]?.id ?? '');
     // 文档替换重建撤销时间线；调优/模块提取是同一文档的可撤销编辑。
     if (!options?.preserveDocument) history.reset();
     setHistoryVersion((version) => version + 1);
@@ -164,5 +183,5 @@ export function useEditorWorkflowDocument(options: EditorWorkflowDocumentOptions
     }));
     messageApi.success(`已将选中的模块调用升级到 ${version.moduleId} V${version.version}`);
   };
-  return { applyDemo, restoreWorkflow, insertModule, upgradeSelectedModule };
+  return { applyDemo, createBlankWorkflow, restoreWorkflow, insertModule, upgradeSelectedModule };
 }

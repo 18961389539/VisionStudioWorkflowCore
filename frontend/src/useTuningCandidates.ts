@@ -30,10 +30,15 @@ export function useTuningCandidates(params: Params) {
   const [uncertain, setUncertain] = useState<Uncertain>();
   const stop = (action: Action) => { requests.current.get(action)?.abort(); requests.current.delete(action); };
   useEffect(() => {
+    const activeRequests = requests.current;
     active.current = params.open; submittedRef.current = undefined;
     uncertainRef.current = undefined; setUncertain(undefined);
     setSubmitted(undefined); setBusy(new Set()); setErrors({});
-    return () => { active.current = false; for (const controller of requests.current.values()) controller.abort(); requests.current.clear(); };
+    return () => {
+      active.current = false;
+      for (const controller of activeRequests.values()) controller.abort();
+      activeRequests.clear();
+    };
   }, [params.open, params.datasetId, params.scopeRevision]);
   useEffect(() => {
     stop('candidate');

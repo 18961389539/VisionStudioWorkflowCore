@@ -25,7 +25,7 @@ describe('快捷键帮助', () => {
 
   it('画布快捷键的核心项都在表里', () => {
     render(<ShortcutHelpModal open onClose={vi.fn()} />);
-    ['保存工作流', '撤销', '重做', '复制选中节点', '粘贴节点'].forEach((label) => {
+    ['保存工作流', '运行整个工作流', '适应画布', '全选画布节点', '撤销', '重做', '复制选中节点', '粘贴节点', '快速复制选中节点'].forEach((label) => {
       // “撤销”等词也会出现在别的描述里（如“可撤销”），这里只要求至少命中一处
       expect(screen.getAllByText(new RegExp(label)).length).toBeGreaterThan(0);
     });

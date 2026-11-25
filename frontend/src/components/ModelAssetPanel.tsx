@@ -155,8 +155,8 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
   return (
     <>
       {holder}
-      <Modal open={open} onCancel={onClose} footer={null} width={1000} title="模型资产">
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Modal open={open} onCancel={onClose} footer={null} width="min(1000px, calc(100vw - 32px))" title="模型资产">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <Space wrap>
             <Button size="small" onClick={() => void load()} loading={busy}>刷新</Button>
             <Button size="small" onClick={() => void previewGc()} loading={busy}>清理未引用版本</Button>
@@ -198,7 +198,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
             }}
             columns={[
               { title: '资产', dataIndex: 'name', render: (_: string, asset) => (
-                <Space direction="vertical" size={0}>
+                <Space orientation="vertical" size={0}>
                   <Typography.Text strong>{asset.name}</Typography.Text>
                   <Typography.Text type="secondary" code>{asset.id}</Typography.Text>
                 </Space>
@@ -226,7 +226,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
 
       <Modal open={Boolean(renaming)} onCancel={() => setRenaming(null)} title="重命名模型资产"
         onOk={() => void rename()} okText="保存" cancelText="取消" confirmLoading={busy}>
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Input value={renaming?.name ?? ''} maxLength={200} placeholder="资产名称"
             onChange={(event) => setRenaming((previous) => previous ? { ...previous, name: event.target.value } : previous)} />
           <Input.TextArea value={renaming?.description ?? ''} rows={3} placeholder="描述（可选）"
@@ -244,7 +244,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
                 { title: '节点', dataIndex: 'nodeId' }
               ]} />}
       </Modal>
-      <Modal open={templateOpen} onCancel={() => setTemplateOpen(false)} footer={null} width={900} title="模板图资产">
+      <Modal open={templateOpen} onCancel={() => setTemplateOpen(false)} footer={null} width="min(900px, calc(100vw - 32px))" title="模板图资产">
         <TemplateAssetTable />
       </Modal>
 
@@ -252,7 +252,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
         okText={`回收 ${gcPlan?.candidates?.length ?? 0} 个版本`} cancelText="取消"
         okButtonProps={{ danger: true, disabled: !(gcPlan?.candidates?.length) }}
         confirmLoading={busy} onOk={() => void applyGc()}>
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Alert type="warning" showIcon message="只回收确定没人使用的版本"
             description={`共 ${gcPlan?.totalVersions ?? 0} 个版本：${gcPlan?.protectedAsLatest ?? 0} 个是各资产最新版、${gcPlan?.protectedByReference ?? 0} 个被工作流或历史发布清单引用，全部保留。`} />
           {gcPlan?.candidates?.length

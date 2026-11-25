@@ -18,15 +18,15 @@ describe('single-caliper diagnostic presentation', () => {
     render(<CaliperCircleDiagnosticsPanel {...props()} />);
     const gray = screen.getByRole('img', { name: /所选卡尺灰度剖面/ });
     const response = screen.getByRole('img', { name: /相邻灰度差/ });
-    const grayPath = gray.querySelector('path[stroke="#36a9ff"]')!.getAttribute('d')!;
-    const gradientPath = response.querySelector('path[stroke="#8093ad"]')!.getAttribute('d')!;
+    const grayPath = gray.querySelector('path[stroke="var(--vs-text-brand)"]')!.getAttribute('d')!;
+    const gradientPath = response.querySelector('path[stroke="var(--vs-text-4)"]')!.getAttribute('d')!;
     expect((grayPath.match(/M/g) ?? []).length).toBe(2);
     expect((gradientPath.match(/M/g) ?? []).length).toBe(2);
     expect(gray.innerHTML + response.innerHTML).not.toMatch(/NaN|Infinity/);
-    const selectedRadius = gray.querySelector('line[stroke="#52c41a"]')!.getAttribute('x1');
+    const selectedRadius = gray.querySelector('line[stroke="var(--vs-status-success)"]')!.getAttribute('x1');
     expect(response.querySelector('circle')!.getAttribute('cx')).toBe(selectedRadius);
     expect(response.querySelector('circle title')!.textContent).toContain('选中边缘：半径 20 px，响应 64');
-    expect(response.querySelectorAll('line[stroke="#fa8c16"]')).toHaveLength(2);
+    expect(response.querySelectorAll('line[stroke="var(--vs-warn-text)"]')).toHaveLength(2);
   });
 
   it('supports index, previous/next and wrapping abnormal-spoke navigation without requesting execution', () => {

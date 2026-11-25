@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import WorkflowImagePreview from '../components/WorkflowImagePreview';
-import type { RunResult } from '../types';
+import type { NodeCatalogItem, RunResult } from '../types';
 
 // Keep canvas rendering outside this test; exercise real run-image resolution and selection.
 vi.mock('../components/ImageViewer', () => ({
@@ -96,6 +96,26 @@ describe('workflow image preview', () => {
     view.rerender(<WorkflowImagePreview {...base} result={undefined} />);
     expect(screen.getByTestId('image-url')).toHaveTextContent('empty');
     expect(screen.getByText('运行批次：尚未运行')).toBeVisible();
+  });
+
+  it('exposes common scalar parameters for inline adjustment in the preview dock', () => {
+    const catalog: NodeCatalogItem[] = [{
+      type: 'image.threshold', displayName: '阈值', category: '图像', description: '',
+      inputs: [], outputs: [],
+      parameters: [{ name: 'threshold', label: '阈值', type: 'number', defaultValue: 80, internal: false }],
+      declaresActions: false, declaresFrames: false, declaresTransformFrames: false,
+      declaresOutputFrames: false, declaresRoiImageBindings: false
+    }];
+    const onParameterChange = vi.fn();
+    const selectedNodes = nodes.map((node) => node.id === 'target'
+      ? { ...node, data: { ...node.data, typeKey: 'image.threshold', parameters: { threshold: 80 } } }
+      : node);
+    render(<WorkflowImagePreview {...base} nodes={selectedNodes} catalog={catalog} result={undefined}
+      onParameterChange={onParameterChange} />);
+
+    expect(screen.getByText('快速调参')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('spinbutton', { name: '阈值' }), { target: { value: '125' } });
+    expect(onParameterChange).toHaveBeenCalledWith('target', 'threshold', 125);
   });
 
   it('loads the exact connected upstream image port for node input preview', async () => {

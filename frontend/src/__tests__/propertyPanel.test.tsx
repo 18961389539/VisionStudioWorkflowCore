@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Node } from '@xyflow/react';
 import PropertyPanel from '../components/PropertyPanel';
 import type { NodeCatalogItem, VisionRoi } from '../types';
@@ -20,6 +20,56 @@ const catalog: NodeCatalogItem = {
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it('offers media-library samples for image.load and opens the media tab', async () => {
+  const mediaItems = [{
+    relativePath: 'line-a/ok.png', source: 'media://line-a/ok.png', collection: 'line-a',
+    label: 'OK', name: 'ok.png', extension: '.png', bytes: 42, modifiedAt: '2026-01-01T00:00:00Z'
+  }];
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(mediaItems), {
+    status: 200, headers: { 'Content-Type': 'application/json' }
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  const node: Node = { id: 'load', position: { x: 0, y: 0 }, data: { parameters: { path: '' } } };
+  const imageLoad: NodeCatalogItem = { ...catalog, type: 'image.load', parameters: [
+    { name: 'path', label: '图像路径', type: 'text', defaultValue: '' }
+  ] };
+  const onChange = vi.fn();
+  const onOpenResourcePanel = vi.fn();
+  render(<PropertyPanel node={node} catalogItem={imageLoad} onChange={onChange} onOpenResourcePanel={onOpenResourcePanel} />);
+  await act(async () => {});
+
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/media/items?take=200');
+  const input = screen.getByRole('combobox', { name: '图像路径' });
+  fireEvent.mouseDown(input);
+  fireEvent.click(await screen.findByText('ok.png · line-a · OK'));
+  expect(onChange).toHaveBeenCalledWith('path', 'media://line-a/ok.png');
+  fireEvent.click(screen.getByRole('button', { name: '打开媒体库' }));
+  expect(onOpenResourcePanel).toHaveBeenCalledWith('media');
+});
+
+it('shows hardware resource request failures and provides a retry action', async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Camera service unavailable' }), {
+      status: 503, headers: { 'Content-Type': 'application/json' }
+    }))
+    .mockResolvedValueOnce(new Response(JSON.stringify([]), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    }));
+  vi.stubGlobal('fetch', fetchMock);
+  const node: Node = { id: 'camera', position: { x: 0, y: 0 }, data: { parameters: { cameraId: '' } } };
+  const cameraCatalog: NodeCatalogItem = { ...catalog, type: 'camera.capture', parameters: [
+    { name: 'cameraId', label: '相机 ID', type: 'text', defaultValue: '' }
+  ] };
+  render(<PropertyPanel node={node} catalogItem={cameraCatalog} onChange={vi.fn()} />);
+  await act(async () => {});
+
+  expect(screen.getByRole('alert').textContent).toContain('Camera service unavailable');
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  await act(async () => {});
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
 
 it('displays omitted optional numeric parameters as empty instead of zero', () => {
   const node: Node = { id: 'resize', position: { x: 0, y: 0 }, data: { parameters: {} } };
@@ -287,5 +337,25 @@ describe('PropertyPanel script editor preview', () => {
 
     expect(await screen.findByRole('textbox', { name: '脚本代码' })).toBeTruthy();
     expect((screen.getByRole('button', { name: '运行预览' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('PropertyPanel reset undo', () => {
+  it('resets modified parameters in one click and offers an inline undo action', () => {
+    const paramCatalog: NodeCatalogItem = { ...catalog, type: 'image.threshold', parameters: [
+      { name: 'threshold', label: '阈值', type: 'number', defaultValue: 128 }
+    ] };
+    const onChange = vi.fn();
+    const view = render(<PropertyPanel node={{ id: 't1', position: { x: 0, y: 0 }, data: { parameters: { threshold: 200 } } }}
+      catalogItem={paramCatalog} onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /恢复出厂默认/ }));
+    expect(onChange).toHaveBeenCalledWith('threshold', 128);
+
+    view.rerender(<PropertyPanel node={{ id: 't1', position: { x: 0, y: 0 }, data: { parameters: { threshold: 128 } } }}
+      catalogItem={paramCatalog} onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '撤销重置' }));
+    expect(onChange).toHaveBeenLastCalledWith('threshold', 200);
   });
 });

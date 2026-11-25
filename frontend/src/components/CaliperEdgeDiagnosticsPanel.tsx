@@ -76,8 +76,8 @@ function ProfileCharts({ data, inspectionPosition, onInspect }: {
         height={bottom - top} fill="currentColor" opacity={.1} />;
     })}
     {data.edgePosition != null && <line x1={x(data.edgePosition)} x2={x(data.edgePosition)} y1={top} y2={bottom}
-      stroke="#52c41a" strokeWidth={1.5} strokeDasharray="4 2" />}
-    {inspectionPosition !== undefined && <line x1={x(inspectionPosition)} x2={x(inspectionPosition)} y1={top} y2={bottom} stroke="#ffd666" />}
+      stroke="var(--vs-status-success)" strokeWidth={1.5} strokeDasharray="4 2" />}
+    {inspectionPosition !== undefined && <line x1={x(inspectionPosition)} x2={x(inspectionPosition)} y1={top} y2={bottom} stroke="var(--vs-text-brand)" />}
   </>;
   const hoverIndex = inspectionPosition === undefined ? undefined : Math.max(0, Math.min(data.profile.length - 1, Math.round(inspectionPosition / data.spacing)));
   const hoverPoint = inspectionPosition === undefined ? undefined : caliperProfilePoint(data, inspectionPosition);
@@ -89,7 +89,7 @@ function ProfileCharts({ data, inspectionPosition, onInspect }: {
         {axes}{markers}
         {[0, 128, 255].map(value => <g key={value}><line x1={left} x2={right} y1={grayY(value)} y2={grayY(value)} stroke="currentColor" opacity={.08} />
           <text x={left - 5} y={grayY(value) + 3} textAnchor="end">{value}</text></g>)}
-        <path d={path(data.profile, 0, grayY)} fill="none" stroke="#36a9ff" strokeWidth={1.5} />
+        <path d={path(data.profile, 0, grayY)} fill="none" stroke="var(--vs-text-brand)" strokeWidth={1.5} />
       </svg>
     </div>
     <div className="caliper-diagnostic-chart"><strong>梯度与实际候选</strong>
@@ -98,17 +98,17 @@ function ProfileCharts({ data, inspectionPosition, onInspect }: {
         {axes}{markers}
         <line x1={left} x2={right} y1={responseY(0)} y2={responseY(0)} stroke="currentColor" opacity={.2} />
         {(data.minContrast > 0 ? [-1, 1] : [1]).map(sign => <g key={sign}>
-          <line x1={left} x2={right} y1={responseY(sign * data.minContrast)} y2={responseY(sign * data.minContrast)} stroke="#fa8c16" strokeDasharray="4 3"
+          <line x1={left} x2={right} y1={responseY(sign * data.minContrast)} y2={responseY(sign * data.minContrast)} stroke="var(--vs-warn-text)" strokeDasharray="4 3"
             opacity={data.polarity === (sign === 1 ? 'falling' : 'rising') ? .2 : .8} />
           <text x={left - 5} y={responseY(sign * data.minContrast) + (sign === 1 ? -4 : 11)} textAnchor="end">
             {data.minContrast === 0 ? '' : sign === 1 ? '+' : '−'}{number(data.minContrast, 1)}</text>
         </g>)}
-        <path d={path(differences, .5, responseY)} fill="none" stroke="#8093ad" strokeWidth={1.2} opacity={.7} />
+        <path d={path(differences, .5, responseY)} fill="none" stroke="var(--vs-text-4)" strokeWidth={1.2} opacity={.7} />
         {data.candidates.map((candidate, index) => <g key={index}>
           <line x1={x(candidate.position)} x2={x(candidate.position)} y1={responseY(0)} y2={responseY(candidate.amplitude)}
-            stroke={index === data.selectedCandidateIndex ? '#52c41a' : '#a78bfa'} />
+            stroke={index === data.selectedCandidateIndex ? 'var(--vs-status-success)' : 'var(--vs-status-paused)'} />
           <circle cx={x(candidate.position)} cy={responseY(candidate.amplitude)} r={index === data.selectedCandidateIndex ? 3.5 : 2.5}
-            fill={index === data.selectedCandidateIndex ? '#52c41a' : '#a78bfa'}>
+            fill={index === data.selectedCandidateIndex ? 'var(--vs-status-success)' : 'var(--vs-status-paused)'}>
             <title>候选 #{index + 1}：距起点 {number(data.startOffset + candidate.position, 3)} px，响应 {number(candidate.amplitude)}</title>
           </circle>
         </g>)}

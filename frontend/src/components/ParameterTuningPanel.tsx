@@ -124,7 +124,7 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
 
   // 非模态（2026-10-25）：调参天生要"边看画布边改"。撤掉遮罩后画布仍可平移/缩放/选中，
   // 但弹窗宽度保持原值——面板内部是像素下限栅格，压窄会直接破版。
-  return <Modal open={open} width={1680} mask={false} title="参数调优工作区" footer={null} onCancel={onClose} destroyOnHidden>
+  return <Modal open={open} width="min(1680px, calc(100vw - 32px))" mask={false} title="参数调优工作区" footer={null} onCancel={onClose} destroyOnHidden>
     {holder}
     <Alert type="info" showIcon style={{ marginBottom: 10 }} title="快速参数 / ROI 预览为临时运行，不会写入运行追踪历史。使用“验证数据集”可生成可持久保存的回归证据和 A/B 指标。" />
     {Object.entries(data.errors).map(([resource, text]) => <Alert key={resource} type="warning" showIcon style={{ marginBottom: 8 }}

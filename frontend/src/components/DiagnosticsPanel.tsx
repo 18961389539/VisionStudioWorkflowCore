@@ -4,7 +4,9 @@ import { Alert, Button, Modal, Segmented, Space, Statistic, Table, Tag, Typograp
 import type { AssetEventEnvelope, AssetHealthLevel, AssetHealthSnapshot, AssetKind, DiagnosticsSummary, NodeSpanRecord, NodeSpanSnapshot, RunCounterPersistenceStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
-import { apiUrl } from '../endpoints';
+import { responseErrorMessage } from '../apiErrors';
+import { apiUrl, diagnostics } from '../endpoints';
+import { useSecurityAccount } from '../security';
 
 type Props = { open: boolean; onClose: () => void };
 type Filter = 'All' | AssetKind;
@@ -37,6 +39,8 @@ function normalizeNodeSpans(raw: unknown): NodeSpanSnapshot | undefined {
 }
 
 export default function DiagnosticsPanel({ open, onClose }: Props) {
+  const { enabled: securityEnabled, user } = useSecurityAccount();
+  const canDownloadBundle = !securityEnabled || user?.role === 'Administrator';
   const [assets, setAssets] = useState<AssetHealthSnapshot[]>([]);
   const [events, setEvents] = useState<AssetEventEnvelope[]>([]);
   const [summary, setSummary] = useState<DiagnosticsSummary>();
@@ -44,6 +48,8 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
   const [spans, setSpans] = useState<NodeSpanSnapshot>();
   const [filter, setFilter] = useState<Filter>('All');
   const [live, setLive] = useState<'connecting' | 'connected' | 'reconnecting' | 'offline'>('offline');
+  const [bundleBusy, setBundleBusy] = useState(false);
+  const [bundleError, setBundleError] = useState<string>();
   const [error, setError] = useState<string>();
 
   const refresh = useCallback(async () => {
@@ -98,15 +104,42 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
   const filteredAssets = useMemo(() => assets.filter(x => filter === 'All' || x.kind === filter), [assets, filter]);
   const filteredEvents = useMemo(() => events.filter(x => filter === 'All' || x.kind === filter), [events, filter]);
 
-  return <Modal open={open} onCancel={onClose} footer={null} width={1280} title="诊断中心 · 资产健康 / 实时事件" destroyOnHidden>
+  const downloadBundle = async () => {
+    setBundleBusy(true);
+    setBundleError(undefined);
+    try {
+      const response = await apiFetch(diagnostics.bundle);
+      if (!response.ok) throw new Error(await responseErrorMessage(response, `诊断包导出失败（HTTP ${response.status}）`));
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition') ?? '';
+      const matched = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i);
+      const filename = matched?.[1] ?? `visionstudio-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (ex) {
+      setBundleError(ex instanceof Error ? ex.message : '诊断包导出失败');
+    } finally {
+      setBundleBusy(false);
+    }
+  };
+
+  return <Modal open={open} onCancel={onClose} footer={null} width="min(1280px, calc(100vw - 32px))" title="诊断中心 · 资产健康 / 实时事件" destroyOnHidden>
     <Space wrap className="diagnostics-toolbar">
       <Segmented<Filter> value={filter} onChange={setFilter} options={[{ label: '全部', value: 'All' }, { label: '相机', value: 'Camera' }, { label: '设备', value: 'Device' }, { label: '机器人', value: 'Robot' }]} />
       <Tag color={live === 'connected' ? 'green' : live === 'reconnecting' || live === 'connecting' ? 'orange' : 'red'}>
         实时连接 {live === 'connected' ? '已连接' : live === 'reconnecting' ? '正在重连' : live === 'connecting' ? '连接中' : '已断开'}
       </Tag>
       <Button onClick={() => void refresh()}>刷新状态</Button>
+      {canDownloadBundle && <Button type="primary" ghost loading={bundleBusy} onClick={() => void downloadBundle()}>下载诊断包</Button>}
       <Typography.Text type="secondary">仅当状态、健康度或错误发生变化时才会发送事件，不会在每次轮询时重复发送。</Typography.Text>
     </Space>
+    {bundleError && <Alert type="error" showIcon title="诊断包导出失败" description={bundleError} style={{ marginBottom: 12 }} />}
     {error && <Alert type="warning" showIcon title={error} style={{ marginBottom: 12 }} />}
     {summary?.staleProviders && summary.staleProviders.length > 0 && (
       <Alert

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Modal, Popconfirm, Space, Statistic, Switch, Table, Tag, Typography, message } from 'antd';
 import type { SchemaMigrationStatus, StorageBackupDescriptor, StorageCapacityStatus, StorageRestoreResult } from '../types';
 import { localizeStatus } from '../i18n';
@@ -44,7 +44,9 @@ export default function StoragePanel({ open, onClose }: Props) {
     else setError(await readProblem(backupResponse));
   };
 
-  useEffect(() => { if (open) void refresh(); }, [open]);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  useEffect(() => { if (open) void refreshRef.current(); }, [open]);
 
   const createBackup = async () => {
     setBusy('create');
@@ -102,15 +104,15 @@ export default function StoragePanel({ open, onClose }: Props) {
   };
 
   const levelColor = capacity?.level === 'Critical' ? 'red' : capacity?.level === 'Warning' ? 'orange' : 'green';
-  return <Modal open={open} onCancel={onClose} footer={null} width={1120} title="存储维护 · 架构 / 容量 / 备份 / 还原" destroyOnHidden>
+  return <Modal open={open} onCancel={onClose} footer={null} width="min(1120px, calc(100vw - 32px))" title="存储维护 · 架构 / 容量 / 备份 / 还原" destroyOnHidden>
     {contextHolder}
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       {restartNotice && (
         <Alert
           type="error"
           showIcon
           title="恢复已完成，等待服务重启"
-          description={<Space direction="vertical" size={4}>
+          description={<Space orientation="vertical" size={4}>
             <span>{restartNotice}</span>
             <span>重启后本页面应恢复正常；若仍需恢复，请先确认服务和数据根已重新加载。</span>
           </Space>}

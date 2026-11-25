@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Radio, Segmented, Select, Space, Table,
   Tabs, Tag, Typography
@@ -22,8 +22,11 @@ const RecipeDeliveryInbox = lazy(() => import('./ProductionRecipeRollouts').then
 
 export type { DeviceActionPendingState } from '../useProductionMonitor';
 
-type Props = { open: boolean; onClose: () => void; embedded?: boolean; runtimeOnly?: boolean; initialView?: 'operator' | 'stations';
+type Props = { open: boolean; onClose: () => void; embedded?: boolean; runtimeOnly?: boolean; initialView?: 'operator' | 'stations' | 'deliveries';
+  initialJobId?: string;
   stationId?: string;
+  /** 嵌入式生产页顶栏右侧操作区（账号徽标、诊断、管理按钮等），纳入文档流避免固定定位遮挡 */
+  headerActions?: ReactNode;
   /** 车间大屏形态：只渲染操作员工作台，隐藏标签栏与工程师入口（`?view=operator&kiosk=1`）。 */
   kiosk?: boolean };
 
@@ -77,7 +80,7 @@ function ProductionConfigConflict({ merge, disabled, onStale }: {
   } />;
 }
 
-export default function ProductionPanel({ open, onClose, embedded = false, runtimeOnly = false, initialView, kiosk = false, stationId }: Props) {
+export default function ProductionPanel({ open, onClose, embedded = false, runtimeOnly = false, initialView, initialJobId, kiosk = false, stationId, headerActions }: Props) {
   const [messageApi, contextHolder] = message.useMessage();
   const { enabled: securityEnabled, user } = useSecurityAccount();
   const canReconcile = !securityEnabled || user?.role === 'Administrator';
@@ -97,6 +100,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   const [resolveTarget, setResolveTarget] = useState<{ kind: 'production'; pending: DeviceActionPendingState } | { kind: 'manual'; runId: string; action: string }>({ kind: 'production', pending: {} });
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
   const resolveRequest = useRef<object | undefined>(undefined);
+  const initialJobAppliedRef = useRef<string | undefined>(undefined);
   const [resolveForm] = Form.useForm<{ evidence: string; identityEvidence: string; reason?: string }>();
   const stationScoped = Boolean(stationId && stationId.toLowerCase() !== 'default');
   const actionStationId = stationId ?? 'default';
@@ -176,6 +180,18 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
           : dirty ? '配置有未保存修改，请先保存配置再启动。'
             : !config.jobId ? '尚未选择生产作业：请在“生产配置”中选择已发布的配方版本。' : undefined;
 
+  useEffect(() => {
+    if (!open) {
+      initialJobAppliedRef.current = undefined;
+      return;
+    }
+    if (!initialJobId || !configReady || !statusFresh || locked
+      || !jobs.some((job) => job.id === initialJobId && job.publishedVersion != null)
+      || initialJobAppliedRef.current === initialJobId) return;
+    initialJobAppliedRef.current = initialJobId;
+    if (config?.jobId !== initialJobId) changeConfig({ jobId: initialJobId });
+  }, [open, initialJobId, configReady, statusFresh, locked, jobs, config?.jobId, changeConfig]);
+
   // 首屏：状态、作业版本、产量与节拍集中在一条横幅上（操作员远距离可读）
   const hero = (
     <div className="production-hero">
@@ -219,7 +235,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   );
 
   const monitorTab = (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Alert
         type={locked ? 'warning' : 'info'}
         showIcon
@@ -362,10 +378,14 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   );
 
   const configTab = (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+      {initialJobId && config.jobId === initialJobId && dirty && <Alert type="info" showIcon
+        title="已将刚发布的配方选为本机候选生产作业"
+        description="这是未保存的生产配置草稿；请核对后保存。不会自动启动生产。" />}
       <Space wrap>
-        <span>生产作业</span>
+        <label htmlFor="prod-cfg-job">生产作业</label>
         <Select
+          id="prod-cfg-job"
           style={{ width: 320 }} aria-label="生产作业"
           disabled={configLocked}
           value={config.jobId ?? undefined}
@@ -377,49 +397,131 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
         <Checkbox disabled={configLocked} checked={config.autoRecover} onChange={e => changeConfig({ autoRecover: e.target.checked })}>自动恢复</Checkbox>
       </Space>
       <Space wrap>
-        <span>周期延迟</span><InputNumber aria-label="周期延迟" disabled={configLocked} min={0} max={60000} value={config.cycleDelayMs} addonAfter="毫秒" onChange={v => changeConfig({ cycleDelayMs: Number(v ?? 0) })} />
-        <span>看门狗超时</span><InputNumber aria-label="看门狗超时" disabled={configLocked} min={100} max={600000} value={config.maxCycleMs} addonAfter="毫秒" onChange={v => changeConfig({ maxCycleMs: Number(v ?? 15000) })} />
-        <span>最大连续失败次数</span><InputNumber disabled={configLocked} min={1} max={1000} value={config.maxConsecutiveFailures} onChange={v => changeConfig({ maxConsecutiveFailures: Number(v ?? 3) })} />
-        <span>恢复延迟</span><InputNumber disabled={configLocked} min={0} max={600000} value={config.recoveryDelayMs} addonAfter="毫秒" onChange={v => changeConfig({ recoveryDelayMs: Number(v ?? 1000) })} />
-        <span>停止超时</span><InputNumber disabled={configLocked} min={100} max={maxStopTimeoutMs} value={config.stopTimeoutMs} addonAfter="毫秒" onChange={v => changeConfig({ stopTimeoutMs: Number(v ?? 5000) })} />
+        <label htmlFor="prod-cfg-cycle-delay">周期延迟</label><Space.Compact><InputNumber id="prod-cfg-cycle-delay" aria-label="周期延迟" disabled={configLocked} min={0} max={60000} value={config.cycleDelayMs} onChange={v => changeConfig({ cycleDelayMs: Number(v ?? 0) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
+        <label htmlFor="prod-cfg-max-cycle">看门狗超时</label><Space.Compact><InputNumber id="prod-cfg-max-cycle" aria-label="看门狗超时" disabled={configLocked} min={100} max={600000} value={config.maxCycleMs} onChange={v => changeConfig({ maxCycleMs: Number(v ?? 15000) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
+        <label htmlFor="prod-cfg-max-failures">最大连续失败次数</label><InputNumber id="prod-cfg-max-failures" disabled={configLocked} min={1} max={1000} value={config.maxConsecutiveFailures} onChange={v => changeConfig({ maxConsecutiveFailures: Number(v ?? 3) })} />
+        <label htmlFor="prod-cfg-recovery-delay">恢复延迟</label><Space.Compact><InputNumber id="prod-cfg-recovery-delay" disabled={configLocked} min={0} max={600000} value={config.recoveryDelayMs} onChange={v => changeConfig({ recoveryDelayMs: Number(v ?? 1000) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
+        <label htmlFor="prod-cfg-stop-timeout">停止超时</label><Space.Compact><InputNumber id="prod-cfg-stop-timeout" disabled={configLocked} min={100} max={maxStopTimeoutMs} value={config.stopTimeoutMs} onChange={v => changeConfig({ stopTimeoutMs: Number(v ?? 5000) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
       </Space>
       {saveRow}
     </Space>
   );
 
   const ptpTab = (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Checkbox disabled={configLocked} checked={config.ptpDriftGuardEnabled} onChange={e => changeConfig({ ptpDriftGuardEnabled: e.target.checked })}>启用 PTP 漂移保护</Checkbox>
       <Space wrap>
-        <span>统计窗口</span><InputNumber disabled={configLocked || !config.ptpDriftGuardEnabled} min={5} max={500} value={config.ptpGuardWindowRuns} addonAfter="次" onChange={v => changeConfig({ ptpGuardWindowRuns: Number(v ?? 20) })} />
-        <span>最少样本数</span><InputNumber disabled={configLocked || !config.ptpDriftGuardEnabled} min={1} max={config.ptpGuardWindowRuns} value={config.ptpGuardMinimumEvidenceRuns} addonAfter="次" onChange={v => changeConfig({ ptpGuardMinimumEvidenceRuns: Number(v ?? 5) })} />
-        <span>最低就绪率</span><InputNumber disabled={configLocked || !config.ptpDriftGuardEnabled} min={50} max={100} value={Math.round(config.ptpGuardMinimumReadyRate * 1000) / 10} addonAfter="%" onChange={v => changeConfig({ ptpGuardMinimumReadyRate: Number(v ?? 99) / 100 })} />
-        <span>检查周期</span><InputNumber disabled={configLocked || !config.ptpDriftGuardEnabled} min={1} max={10000} value={config.ptpGuardCheckEveryCycles} addonAfter="周期" onChange={v => changeConfig({ ptpGuardCheckEveryCycles: Number(v ?? 10) })} />
+        <label htmlFor="prod-ptp-window">统计窗口</label><Space.Compact><InputNumber id="prod-ptp-window" disabled={configLocked || !config.ptpDriftGuardEnabled} min={5} max={500} value={config.ptpGuardWindowRuns} onChange={v => changeConfig({ ptpGuardWindowRuns: Number(v ?? 20) })} /><Space.Addon>次</Space.Addon></Space.Compact>
+        <label htmlFor="prod-ptp-min-evidence">最少样本数</label><Space.Compact><InputNumber id="prod-ptp-min-evidence" disabled={configLocked || !config.ptpDriftGuardEnabled} min={1} max={config.ptpGuardWindowRuns} value={config.ptpGuardMinimumEvidenceRuns} onChange={v => changeConfig({ ptpGuardMinimumEvidenceRuns: Number(v ?? 5) })} /><Space.Addon>次</Space.Addon></Space.Compact>
+        <label htmlFor="prod-ptp-ready-rate">最低就绪率</label><Space.Compact><InputNumber id="prod-ptp-ready-rate" disabled={configLocked || !config.ptpDriftGuardEnabled} min={50} max={100} value={Math.round(config.ptpGuardMinimumReadyRate * 1000) / 10} onChange={v => changeConfig({ ptpGuardMinimumReadyRate: Number(v ?? 99) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+        <label htmlFor="prod-ptp-check-cycles">检查周期</label><Space.Compact><InputNumber id="prod-ptp-check-cycles" disabled={configLocked || !config.ptpDriftGuardEnabled} min={1} max={10000} value={config.ptpGuardCheckEveryCycles} onChange={v => changeConfig({ ptpGuardCheckEveryCycles: Number(v ?? 10) })} /><Space.Addon>周期</Space.Addon></Space.Compact>
         <Checkbox disabled={configLocked || !config.ptpDriftGuardEnabled} checked={config.ptpGuardFaultOnMasterClockChange} onChange={e => changeConfig({ ptpGuardFaultOnMasterClockChange: e.target.checked })}>主时钟变更时触发故障</Checkbox>
       </Space>
       {saveRow}
     </Space>
   );
 
+  const applySyncPreset = (preset: 'strict' | 'balanced' | 'relaxed') => {
+    if (preset === 'strict') {
+      changeConfig({
+        synchronizationHealthGuardEnabled: true,
+        synchronizationGuardWindowRuns: 30,
+        synchronizationGuardMinimumEvidenceRuns: 10,
+        synchronizationGuardCheckEveryCycles: 3,
+        synchronizationGuardMaximumFailureRate: 0.01,
+        synchronizationGuardMaximumFrameTimeoutRate: 0.01,
+        synchronizationGuardMaxConsecutiveFailures: 1,
+        synchronizationGuardMaxConsecutiveSkewViolations: 2,
+        synchronizationGuardMaximumNativeFrameLossRate: 0.001,
+        synchronizationGuardMaximumBufferUnderruns: 0,
+        synchronizationGuardMaximumResynchronizations: 0,
+        synchronizationGuardMaximumSequenceGapRate: 0.002,
+        synchronizationGuardUnhealthyChecksToFault: 1,
+        synchronizationGuardHealthyChecksToRecover: 5,
+        synchronizationGuardRecoveryTimeoutMs: 30000,
+      });
+      return;
+    }
+    if (preset === 'relaxed') {
+      changeConfig({
+        synchronizationHealthGuardEnabled: true,
+        synchronizationGuardWindowRuns: 10,
+        synchronizationGuardMinimumEvidenceRuns: 3,
+        synchronizationGuardCheckEveryCycles: 10,
+        synchronizationGuardMaximumFailureRate: 0.15,
+        synchronizationGuardMaximumFrameTimeoutRate: 0.15,
+        synchronizationGuardMaxConsecutiveFailures: 4,
+        synchronizationGuardMaxConsecutiveSkewViolations: 5,
+        synchronizationGuardMaximumNativeFrameLossRate: 0.02,
+        synchronizationGuardMaximumBufferUnderruns: 3,
+        synchronizationGuardMaximumResynchronizations: 2,
+        synchronizationGuardMaximumSequenceGapRate: 0.05,
+        synchronizationGuardUnhealthyChecksToFault: 3,
+        synchronizationGuardHealthyChecksToRecover: 2,
+        synchronizationGuardRecoveryTimeoutMs: 60000,
+      });
+      return;
+    }
+    changeConfig({
+      synchronizationHealthGuardEnabled: true,
+      synchronizationGuardWindowRuns: 20,
+      synchronizationGuardMinimumEvidenceRuns: 5,
+      synchronizationGuardCheckEveryCycles: 5,
+      synchronizationGuardMaximumFailureRate: 0.05,
+      synchronizationGuardMaximumFrameTimeoutRate: 0.05,
+      synchronizationGuardMaxConsecutiveFailures: 2,
+      synchronizationGuardMaxConsecutiveSkewViolations: 3,
+      synchronizationGuardMaximumNativeFrameLossRate: 0.005,
+      synchronizationGuardMaximumBufferUnderruns: 0,
+      synchronizationGuardMaximumResynchronizations: 0,
+      synchronizationGuardMaximumSequenceGapRate: 0.01,
+      synchronizationGuardUnhealthyChecksToFault: 2,
+      synchronizationGuardHealthyChecksToRecover: 3,
+      synchronizationGuardRecoveryTimeoutMs: 30000,
+    });
+  };
+
   const syncTab = (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Checkbox disabled={configLocked} checked={config.synchronizationHealthGuardEnabled} onChange={e => changeConfig({ synchronizationHealthGuardEnabled: e.target.checked })}>启用同步健康保护</Checkbox>
-      <Space wrap>
-        <span>统计窗口</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={5} max={500} value={config.synchronizationGuardWindowRuns} addonAfter="次" onChange={v => changeConfig({ synchronizationGuardWindowRuns: Number(v ?? 20) })} />
-        <span>最少样本数</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={config.synchronizationGuardWindowRuns} value={config.synchronizationGuardMinimumEvidenceRuns} addonAfter="次" onChange={v => changeConfig({ synchronizationGuardMinimumEvidenceRuns: Number(v ?? 5) })} />
-        <span>最大失败率</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFailureRate * 100} addonAfter="%" onChange={v => changeConfig({ synchronizationGuardMaximumFailureRate: Number(v ?? 5) / 100 })} />
-        <span>最大帧超时率</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFrameTimeoutRate * 100} addonAfter="%" onChange={v => changeConfig({ synchronizationGuardMaximumFrameTimeoutRate: Number(v ?? 5) / 100 })} />
-        <span>连续失败阈值</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveFailures} addonAfter="次" onChange={v => changeConfig({ synchronizationGuardMaxConsecutiveFailures: Number(v ?? 2) })} />
-        <span>连续偏差阈值</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveSkewViolations} addonAfter="次" onChange={v => changeConfig({ synchronizationGuardMaxConsecutiveSkewViolations: Number(v ?? 3) })} />
-        <span>原生帧丢失率</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.05} value={config.synchronizationGuardMaximumNativeFrameLossRate * 100} addonAfter="%" onChange={v => changeConfig({ synchronizationGuardMaximumNativeFrameLossRate: Number(v ?? 0.5) / 100 })} />
-        <span>最大缓冲区欠载</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumBufferUnderruns} onChange={v => changeConfig({ synchronizationGuardMaximumBufferUnderruns: Number(v ?? 0) })} />
-        <span>最大重新同步次数</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumResynchronizations} onChange={v => changeConfig({ synchronizationGuardMaximumResynchronizations: Number(v ?? 0) })} />
-        <span>序号间隔回退率</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.1} value={config.synchronizationGuardMaximumSequenceGapRate * 100} addonAfter="%" onChange={v => changeConfig({ synchronizationGuardMaximumSequenceGapRate: Number(v ?? 1) / 100 })} />
-        <span>检查周期</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={10000} value={config.synchronizationGuardCheckEveryCycles} addonAfter="周期" onChange={v => changeConfig({ synchronizationGuardCheckEveryCycles: Number(v ?? 5) })} />
-        <span>触发故障连续检查数</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardUnhealthyChecksToFault} addonAfter="次" onChange={v => changeConfig({ synchronizationGuardUnhealthyChecksToFault: Number(v ?? 2) })} />
-        <span>恢复连续检查数</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardHealthyChecksToRecover} addonAfter="次" onChange={v => changeConfig({ synchronizationGuardHealthyChecksToRecover: Number(v ?? 3) })} />
-        <span>恢复超时</span><InputNumber disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1000} max={600000} step={1000} value={config.synchronizationGuardRecoveryTimeoutMs} addonAfter="毫秒" onChange={v => changeConfig({ synchronizationGuardRecoveryTimeoutMs: Number(v ?? 30000) })} />
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+      <Space wrap align="center">
+        <Checkbox disabled={configLocked} checked={config.synchronizationHealthGuardEnabled} onChange={e => changeConfig({ synchronizationHealthGuardEnabled: e.target.checked })}>启用同步健康保护</Checkbox>
+        <Typography.Text type="secondary">预设：</Typography.Text>
+        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('strict')}>严苛产线</Button>
+        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('balanced')}>标准均衡</Button>
+        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('relaxed')}>宽松调试</Button>
       </Space>
+
+      <div>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>1. 采样窗口与检查频率</Typography.Text>
+        <Space wrap>
+          <label htmlFor="prod-sync-window">统计窗口</label><Space.Compact><InputNumber id="prod-sync-window" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={5} max={500} value={config.synchronizationGuardWindowRuns} onChange={v => changeConfig({ synchronizationGuardWindowRuns: Number(v ?? 20) })} /><Space.Addon>次</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-min-evidence">最少样本数</label><Space.Compact><InputNumber id="prod-sync-min-evidence" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={config.synchronizationGuardWindowRuns} value={config.synchronizationGuardMinimumEvidenceRuns} onChange={v => changeConfig({ synchronizationGuardMinimumEvidenceRuns: Number(v ?? 5) })} /><Space.Addon>次</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-check-cycles">检查周期</label><Space.Compact><InputNumber id="prod-sync-check-cycles" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={10000} value={config.synchronizationGuardCheckEveryCycles} onChange={v => changeConfig({ synchronizationGuardCheckEveryCycles: Number(v ?? 5) })} /><Space.Addon>周期</Space.Addon></Space.Compact>
+        </Space>
+      </div>
+
+      <div>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>2. 容错与帧丢失门限</Typography.Text>
+        <Space wrap>
+          <label htmlFor="prod-sync-max-fail">最大失败率</label><Space.Compact><InputNumber id="prod-sync-max-fail" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFailureRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumFailureRate: Number(v ?? 5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-max-timeout">最大帧超时率</label><Space.Compact><InputNumber id="prod-sync-max-timeout" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFrameTimeoutRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumFrameTimeoutRate: Number(v ?? 5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-consec-fail">连续失败阈值</label><Space.Compact><InputNumber id="prod-sync-consec-fail" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveFailures} onChange={v => changeConfig({ synchronizationGuardMaxConsecutiveFailures: Number(v ?? 2) })} /><Space.Addon>次</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-consec-skew">连续偏差阈值</label><Space.Compact><InputNumber id="prod-sync-consec-skew" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveSkewViolations} onChange={v => changeConfig({ synchronizationGuardMaxConsecutiveSkewViolations: Number(v ?? 3) })} /><Space.Addon>次</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-native-loss">原生帧丢失率</label><Space.Compact><InputNumber id="prod-sync-native-loss" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.05} value={config.synchronizationGuardMaximumNativeFrameLossRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumNativeFrameLossRate: Number(v ?? 0.5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-underruns">最大缓冲区欠载</label><InputNumber id="prod-sync-underruns" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumBufferUnderruns} onChange={v => changeConfig({ synchronizationGuardMaximumBufferUnderruns: Number(v ?? 0) })} />
+          <label htmlFor="prod-sync-resyncs">最大重新同步次数</label><InputNumber id="prod-sync-resyncs" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumResynchronizations} onChange={v => changeConfig({ synchronizationGuardMaximumResynchronizations: Number(v ?? 0) })} />
+          <label htmlFor="prod-sync-seq-gap">序号间隔回退率</label><Space.Compact><InputNumber id="prod-sync-seq-gap" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.1} value={config.synchronizationGuardMaximumSequenceGapRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumSequenceGapRate: Number(v ?? 1) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+        </Space>
+      </div>
+
+      <div>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>3. 故障判定与自动恢复</Typography.Text>
+        <Space wrap>
+          <label htmlFor="prod-sync-unhealthy-fault">触发故障连续检查数</label><Space.Compact><InputNumber id="prod-sync-unhealthy-fault" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardUnhealthyChecksToFault} onChange={v => changeConfig({ synchronizationGuardUnhealthyChecksToFault: Number(v ?? 2) })} /><Space.Addon>次</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-healthy-recover">恢复连续检查数</label><Space.Compact><InputNumber id="prod-sync-healthy-recover" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardHealthyChecksToRecover} onChange={v => changeConfig({ synchronizationGuardHealthyChecksToRecover: Number(v ?? 3) })} /><Space.Addon>次</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-recover-timeout">恢复超时</label><Space.Compact><InputNumber id="prod-sync-recover-timeout" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1000} max={600000} step={1000} value={config.synchronizationGuardRecoveryTimeoutMs} onChange={v => changeConfig({ synchronizationGuardRecoveryTimeoutMs: Number(v ?? 30000) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
+        </Space>
+      </div>
       {saveRow}
     </Space>
   );
@@ -444,7 +546,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
           showIcon
           title="存在待核对的设备动作：核对前所有设备动作入口都会被拒绝"
           description={
-            <Space direction="vertical" size={4}>
+            <Space orientation="vertical" size={4}>
               <span>原因：{pendingActions.reason ?? '上一周期的设备动作结果未确认'}{pendingActions.unreadable ? '（安全状态文件不可读，需人工处理）' : ''}</span>
               {pendingActions.runId && <span>运行：{pendingActions.runId}</span>}
               {(pendingActions.deviceIds?.length ?? 0) > 0 && <span>涉及设备：{(pendingActions.deviceIds ?? []).join('、')}</span>}
@@ -556,7 +658,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
 
   const operatorTab = open && <div className="operator-workspace-content">
     {pendingAlarmCount > 0 && <Suspense fallback={<span role="status">正在读取待确认告警…</span>}>
-      <OperatorAlarmQueue busy={busy} onAcknowledge={acknowledgeAlarm} stationId={stationScoped ? stationId : undefined} />
+      <OperatorAlarmQueue key={stationScoped ? stationId : 'default'} busy={busy} onAcknowledge={acknowledgeAlarm} stationId={stationScoped ? stationId : undefined} />
     </Suspense>}
     <OperatorDashboard key={`${stationId ?? 'default'}-${selectedJobId ?? ''}-${layoutRevision}`} jobId={selectedJobId} status={status} statusFresh={statusFresh}
       alarmSummary={alarmSummary} alarmFresh={!errors.alarmSummary && Boolean(alarmSummary)} kiosk={kiosk} lastUpdatedAt={lastUpdatedAt}
@@ -583,7 +685,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
     { key: 'monitor', label: '运行监控', children: monitorTab },
     { key: 'parallel', label: '本机并行', children: open && shownTab === 'parallel' &&
       <Suspense fallback={<span role="status">正在加载本机多工位…</span>}>
-        <LocalParallelRuntimes jobs={jobs} canConfigure={canConfigure} />
+        <LocalParallelRuntimes jobs={jobs} canConfigure={canConfigure} canReconcile={canReconcile} />
       </Suspense> },
     { key: 'alarms', label: `告警${activeAlarmCount ? `（${activeAlarmCount}）` : ''}`, children: alarmsTab },
     { key: 'stations', label: '多工位', children: open && shownTab === 'stations' &&
@@ -602,13 +704,13 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   ] : [];
 
   const body = kiosk ? (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       {contextHolder}
       {localDetails}
       {operatorTab}
     </Space>
   ) : (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       {contextHolder}
       {shownTab !== 'stations' && shownTab !== 'deliveries' && shownTab !== 'parallel' && localDetails}
       {canConfigure && <Segmented size="small" value={tabGroup}
@@ -627,8 +729,13 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   );
 
   if (embedded) return <div className={`runtime-only-page${kiosk ? ' is-kiosk' : ''}`}>
-    {!kiosk && <div className="runtime-only-title">VisionStudio · 生产运行</div>}
+    {!kiosk && (
+      <header className="runtime-only-header">
+        <div className="runtime-only-title">VisionStudio · 生产运行</div>
+        {headerActions && <div className="runtime-only-actions">{headerActions}</div>}
+      </header>
+    )}
     {body}
   </div>;
-  return <Modal open={open} onCancel={onClose} footer={null} title="生产运行" width={1120}>{body}</Modal>;
+  return <Modal open={open} onCancel={onClose} footer={null} title="生产运行" width="min(1120px, calc(100vw - 32px))">{body}</Modal>;
 }

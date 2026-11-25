@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NodeCatalogItem } from '../types';
+import type { Node } from '@xyflow/react';
 import CommandPalette, { type PaletteCommand } from '../components/CommandPalette';
 
 /**
@@ -18,13 +19,14 @@ const targets: PaletteCommand[] = [
   { key: 'panel:traces', title: '运行追溯', group: '面板', keywords: 'trace' }
 ];
 
-function mount(overrides: Partial<{ onRunCommand: (key: string) => void; onAddNode: (type: string) => void; onClose: () => void }> = {}) {
+function mount(overrides: Partial<{ onRunCommand: (key: string) => void; onAddNode: (type: string) => void; onClose: () => void; onLocateNode: (nodeId: string) => void }> = {}, nodes: Node[] = []) {
   const onRunCommand = overrides.onRunCommand ?? vi.fn();
   const onAddNode = overrides.onAddNode ?? vi.fn();
   const onClose = overrides.onClose ?? vi.fn();
-  render(<CommandPalette open onClose={onClose} catalog={catalog} targets={targets}
-    onRunCommand={onRunCommand} onAddNode={onAddNode} />);
-  return { onRunCommand, onAddNode, onClose };
+  const onLocateNode = overrides.onLocateNode ?? vi.fn();
+  render(<CommandPalette open onClose={onClose} catalog={catalog} nodes={nodes} targets={targets}
+    onRunCommand={onRunCommand} onAddNode={onAddNode} onLocateNode={onLocateNode} />);
+  return { onRunCommand, onAddNode, onClose, onLocateNode };
 }
 
 beforeEach(() => {
@@ -47,6 +49,17 @@ describe('命令面板', () => {
     fireEvent.change(input, { target: { value: '阈值' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onAddNode).toHaveBeenCalledWith('image.threshold');
+  });
+
+  it('搜索已有画布节点时单独显示并定位，不会重复添加', () => {
+    const node = { id: 'threshold-1', position: { x: 0, y: 0 }, data: { label: 'My threshold', typeKey: 'image.threshold' } };
+    const { onAddNode, onLocateNode } = mount({}, [node]);
+    fireEvent.change(screen.getByLabelText('命令面板搜索'), { target: { value: 'threshold' } });
+    expect(screen.getByText('画布节点')).toBeTruthy();
+    expect(screen.getByText('添加节点')).toBeTruthy();
+    fireEvent.keyDown(screen.getByLabelText('命令面板搜索'), { key: 'Enter' });
+    expect(onLocateNode).toHaveBeenCalledWith('threshold-1');
+    expect(onAddNode).not.toHaveBeenCalled();
   });
 
   it('方向键移动后回车执行对应命令', () => {

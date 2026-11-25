@@ -25,7 +25,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
-function mount(override?: (base: Fetcher) => Fetcher, props?: { kiosk?: boolean }) {
+function mount(override?: (base: Fetcher) => Fetcher, props?: { kiosk?: boolean; initialJobId?: string; initialView?: 'operator' | 'stations' | 'deliveries' }) {
   let remote = { ...config };
   let revision = '"config-test"';
   let status = { ...stopped };
@@ -35,7 +35,10 @@ function mount(override?: (base: Fetcher) => Fetcher, props?: { kiosk?: boolean 
     if (url.endsWith('/config')) return ok(remote, revision);
     if (url.endsWith('/status')) return ok(status);
     if (url.endsWith('/pending')) return empty();
-    return ok(url === '/api/jobs' ? [{ id: 'A', name: '检测配方', publishedVersion: 1 }] : []);
+    return ok(url === '/api/jobs' ? [
+      { id: 'A', name: '检测配方', publishedVersion: 1 },
+      { id: 'B', name: '新发布配方', publishedVersion: 2 }
+    ] : []);
   };
   const fetchMock = vi.fn(override ? override(base) : base);
   vi.stubGlobal('fetch', fetchMock);
@@ -109,6 +112,20 @@ describe('生产配置编辑与运行入口', () => {
     expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/start'))).toHaveLength(1);
     expect(screen.getByRole('button', { name: /^停\s*止$/ })).toBeEnabled();
     expect(cycleInput()).toBeDisabled();
+  });
+
+  it('preselects a newly published recipe as an unsaved local production draft without starting it', async () => {
+    const { fetchMock } = mount(undefined, { initialJobId: 'B' });
+    await openConfig();
+
+    expect(screen.getByText('已将刚发布的配方选为本机候选生产作业')).toBeInTheDocument();
+    expect(saveButton()).toBeEnabled();
+    fireEvent.click(saveButton());
+    await flush();
+
+    const save = fetchMock.mock.calls.find(([url, init]) => url.endsWith('/config') && init?.method === 'PUT');
+    expect(JSON.parse(String(save?.[1]?.body))).toMatchObject({ jobId: 'B' });
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/start'))).toBe(false);
   });
 
   it('保存等待期间新增输入保留为未保存，下次提交才包含这些修改', async () => {

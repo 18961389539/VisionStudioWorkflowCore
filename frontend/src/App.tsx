@@ -4,19 +4,22 @@ import {
 } from '@xyflow/react';
 import { Button, message, Modal, type InputRef } from 'antd';
 import Toolbox from './components/Toolbox';
-import NodeConfigurationDialog, { type NodeConfigurationTab } from './components/NodeConfigurationDialog';
+import type { NodeConfigurationTab } from './components/NodeConfigurationDialog';
 import SplitHandle from './components/SplitHandle';
 import ErrorBoundary from './components/ErrorBoundary';
 import EditorHeader from './components/EditorHeader';
 import EditorBottomDock from './components/EditorBottomDock';
-import EditorCanvasArea, { type EditorCanvasAreaProps } from './components/EditorCanvasArea';
+import EditorCanvasArea from './components/EditorCanvasArea';
+import {
+  EditorProviders, type EditorGraphValue, type EditorLayoutValue, type EditorRunValue, type EditorSelectionValue
+} from './editorContexts';
 import EditorPanels, { type EditorPanelsProps } from './components/EditorPanels';
 import EditorOverlays, { type EditorOverlaysProps } from './components/EditorOverlays';
 import type { PaletteCommand } from './components/CommandPalette';
 import { HEADER_HEIGHT, LAYOUT_LIMITS } from './layout';
 import { useI18n } from './i18n/provider';
 import { useThemeMode } from './theme';
-import { SecurityAccountBadge } from './security';
+import { SecurityAccountBadge, useSecurityAccount } from './security';
 import { demos, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, type WorkflowDraft } from './draft';
@@ -46,14 +49,19 @@ import {
   persistNodeCompact, readNodeCompact, readRecentNodeTypes, type ConnectionPicker
 } from './appEditorShared';
 import {
-  buildDebugMenuItems, buildDeviceMenuItems, buildMoreMenu, buildNodeContextMenuItems, buildPaletteTargets,
+  buildDebugMenuItems, buildDeviceMenuItems, buildFileMenuItems, buildMoreMenu, buildNodeContextMenuItems, buildPaletteTargets,
   buildProductionMenuItems, buildToolMenuItems, runPaletteCommand
 } from './appEditorMenus';
+import { downloadWorkflowJson, parseWorkflowImportJson } from './workflowDocument';
+import { restoreCanvasAnnotations, saveCanvasAnnotations } from './canvasAnnotations';
 
 // `?view=spc` 与 `?view=operator` / runtimeOnly 独立页面按需分包，避免主编辑包体积膨胀。
 const SpcDashboard = lazy(() => import('./components/SpcDashboard'));
 const ProductionPanel = lazy(() => import('./components/ProductionPanel'));
 const DiagnosticsPanel = lazy(() => import('./components/DiagnosticsPanel'));
+const StoragePanel = lazy(() => import('./components/StoragePanel'));
+const SecurityAdminPanel = lazy(() => import('./components/SecurityAdminPanel'));
+const NodeConfigurationDialog = lazy(() => import('./components/NodeConfigurationDialog'));
 
 function Editor() {
   // 语言（2026-10-25 接线）：catalog 保存后端英文原文，显示用的本地化目录按语言派生——
@@ -105,9 +113,19 @@ function Editor() {
   // undefined = 未知基线（保存前先探测后端）；revision='' = 后端尚无修订记录。
   const workflowRevisionRef = useRef<DocumentBaseline>(undefined);
   const [designerWorkflowId, setDesignerWorkflowId] = useState('demo-linear');
+  const [annotationsReadyFor, setAnnotationsReadyFor] = useState<string>();
   // 保存基线绑定文档生命周期，整块替换才换代（A→B→A 也不接受迟到响应）。
   const documentGenerationRef = useRef(0);
   const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio · 线性流程示例');
+
+  useEffect(() => {
+    setNodes((current) => restoreCanvasAnnotations(designerWorkflowId, current));
+    setAnnotationsReadyFor(designerWorkflowId);
+  }, [designerWorkflowId, setNodes]);
+  useEffect(() => {
+    if (annotationsReadyFor !== designerWorkflowId) return;
+    saveCanvasAnnotations(designerWorkflowId, nodes);
+  }, [annotationsReadyFor, designerWorkflowId, nodes]);
 
   useEffect(() => {
     apiFetch(apiUrl('host-mode')).then(r => r.ok ? r.json() : undefined).then(data => setRuntimeOnly(Boolean(data?.runtimeOnly))).catch(() => undefined);
@@ -118,10 +136,38 @@ function Editor() {
     jobsOpen, setJobsOpen, tracesOpen, setTracesOpen, traceRunId, setTraceRunId, commandOpen, setCommandOpen,
     validationOpen, setValidationOpen, modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
     tuningOpen, setTuningOpen, modulesOpen, setModulesOpen, calibrationOpen, setCalibrationOpen, framesOpen, setFramesOpen,
-    productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
+    productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, storageOpen, setStorageOpen, securityOpen, setSecurityOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
     aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen, anyOpen, openers
   } = useEditorPanels();
+  const [validationWorkflow, setValidationWorkflow] = useState<WorkflowPayload>();
+  const [validationRecipeTarget, setValidationRecipeTarget] = useState<{ jobId: string; version: number }>();
+  const [productionInitialJobId, setProductionInitialJobId] = useState<string>();
+  const [productionInitialView, setProductionInitialView] = useState<'operator' | 'stations' | 'deliveries'>();
+  const openValidation = (candidate?: WorkflowPayload, target?: { jobId: string; version: number }) => {
+    setValidationWorkflow(candidate);
+    setValidationRecipeTarget(target);
+    setJobsOpen(false);
+    setValidationOpen(true);
+  };
+  const closeValidation = () => {
+    setValidationOpen(false);
+    setValidationWorkflow(undefined);
+    setValidationRecipeTarget(undefined);
+  };
+  const openProductionForRecipe = (jobId: string, view: 'operator' | 'stations' | 'deliveries') => {
+    setJobsOpen(false);
+    setProductionInitialJobId(view === 'operator' ? jobId : undefined);
+    setProductionInitialView(view);
+    setProductionOpen(true);
+  };
+  const closeProduction = () => {
+    setProductionOpen(false);
+    setProductionInitialJobId(undefined);
+    setProductionInitialView(undefined);
+  };
+  const [cameraInitialTab, setCameraInitialTab] = useState<'acquisition' | 'media'>('acquisition');
   const { mode: themeMode, toggle: toggleTheme } = useThemeMode();
+  const { enabled: securityEnabled, user } = useSecurityAccount();
   const [runtimeOnly, setRuntimeOnly] = useState(false);
   const { screenToFlowPosition, getZoom, setCenter, fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
@@ -199,7 +245,7 @@ function Editor() {
   // 运行 / 调试控制 + 图像资源管理（独立模块）：anyBusy 是全局唯一执行闸门；
   // 结果与图像以 result.runId 为代际统一管理（详见 useRunController.ts / useRunImages.ts）
   const {
-    running, runStartedAt, result, resultReceivedAt, clearResult, applyResult, resultStale,
+    running, runStartedAt, runProgress, result, resultReceivedAt, clearResult, applyResult, resultStale,
     run, abortRun, runNode, runFromHere, previewNode,
     debugSession, debugBusy, allowSideEffects, setAllowSideEffects, anyBusy,
     hasSideEffectNodes, hasModuleCalls,
@@ -284,6 +330,32 @@ function Editor() {
 
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
+  const [renameTarget, setRenameTarget] = useState<{ id: string; label: string }>();
+  const [renameDraft, setRenameDraft] = useState('');
+  const requestRenameNode = useCallback((nodeId: string) => {
+    if (anyBusy) return;
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    const label = String(node.data.label ?? catalog.find((item) => item.type === node.data.typeKey)?.displayName ?? node.id);
+    setRenameTarget({ id: nodeId, label });
+    setRenameDraft(label);
+  }, [anyBusy, catalog]);
+  const cancelRenameNode = useCallback(() => setRenameTarget(undefined), []);
+  const confirmRenameNode = useCallback(() => {
+    const target = renameTarget;
+    const label = renameDraft.trim();
+    if (!target || !label || anyBusy) return;
+    const node = nodesRef.current.find((item) => item.id === target.id);
+    if (!node) { setRenameTarget(undefined); return; }
+    const currentLabel = String(node.data.label ?? catalog.find((item) => item.type === node.data.typeKey)?.displayName ?? node.id);
+    if (label !== currentLabel) {
+      pushHistory('重命名节点');
+      setNodes((current) => current.map((item) => item.id === target.id
+        ? { ...item, data: { ...item.data, label } }
+        : item));
+    }
+    setRenameTarget(undefined);
+  }, [anyBusy, catalog, pushHistory, renameDraft, renameTarget, setNodes]);
   const configurationNode = nodes.find((node) => node.id === nodeConfigurationId);
   const configurationCatalog = catalog.find((item) => item.type === configurationNode?.data.typeKey) ?? moduleCatalogFromNode(configurationNode);
   const configurationPreviewBlockedReason = debugSession ? '请先结束当前调试会话，再测试暂存参数。'
@@ -341,7 +413,7 @@ function Editor() {
     nodes, nodesRef, edgesRef, selectedRef, selectedId, selectedNode, selectedNodeIds, catalog,
     setNodes, setEdges, setSelectedId, setRecentNodeTypes, setConnectionPicker, setNodeContextMenu,
     messageApi, pushHistory, onNodesChange, onEdgesChange, flowAreaRef, getZoom,
-    screenToFlowPosition, setCenter, clipboardRef, pasteIndexRef
+    screenToFlowPosition, setCenter, fitView, clipboardRef, pasteIndexRef
   });
 
   // 节点查找：按显示名 / 类型 / id 匹配；高亮直接切 DOM 类名，避免大流程里每次输入都重建节点状态
@@ -424,7 +496,7 @@ function Editor() {
   });
   const pendingGuard = workflowChanges.pending;
   // 示例应用 / 整篇恢复 / 模块插入与升级见 ./useEditorWorkflowDocument。
-  const { applyDemo, restoreWorkflow, insertModule, upgradeSelectedModule } = useEditorWorkflowDocument({
+  const { applyDemo, createBlankWorkflow, restoreWorkflow, insertModule, upgradeSelectedModule } = useEditorWorkflowDocument({
     catalog, nodesRef, selectedRef, selectedId, documentGenerationRef, workflowRevisionRef, markCleanOnNextChange, history,
     setNodes, setEdges, setSelectedId, setHistoryVersion, setDesignerWorkflowId, setDesignerWorkflowName,
     setDemoKey, setLastSavedAt, setHighlightedEdgeId, pushHistory, resetInspection, clearResult,
@@ -432,8 +504,30 @@ function Editor() {
   });
   const {
     workflowPickerOpen, setWorkflowPickerOpen, savedWorkflows, workflowToLoad, setWorkflowToLoad,
-    workflowListLoading, workflowListError, workflowImport, openWorkflowPicker, loadSelectedSavedWorkflow
-  } = useWorkflowPicker({ designerWorkflowId, messageApi, prepare: workflowChanges.prepare });
+    workflowListLoading, workflowListError, workflowDeletingId, workflowImport, openWorkflowPicker,
+    loadSelectedSavedWorkflow, loadSavedWorkflowById, deleteSavedWorkflow
+  } = useWorkflowPicker({
+    designerWorkflowId,
+    messageApi,
+    prepare: workflowChanges.prepare,
+    onDeleted: (deletedId) => {
+      if (deletedId === designerWorkflowId) {
+        workflowRevisionRef.current = undefined;
+        setLastSavedAt(undefined);
+        setSavedSnapshot('');
+      }
+    }
+  });
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
+  const pendingSaveAsRef = useRef<string | undefined>(undefined);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!pendingSaveAsRef.current || pendingSaveAsRef.current !== designerWorkflowId) return;
+    pendingSaveAsRef.current = undefined;
+    void saveRef.current();
+  }, [designerWorkflowId, designerWorkflowName, workflowSnapshot]);
   const guardingSave = saving || workflowChanges.busy;
 
 
@@ -459,10 +553,62 @@ function Editor() {
     setSavedSnapshot((current) => current ?? workflowSnapshot);
   }, [workflowSnapshot]);
 
+  const newBlankWorkflow = () => guardUnsaved('新建空白流程', () => {
+    createBlankWorkflow();
+    void messageApi.success('已新建空白流程');
+  });
+  const triggerImportJson = () => {
+    if (anyBusy) return;
+    importInputRef.current?.click();
+  };
+  const handleImportJsonFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const raw = await file.text();
+      const parsed = parseWorkflowImportJson(raw);
+      if (!parsed.workflow) {
+        void messageApi.error(parsed.error ?? '导入工作流失败');
+        return;
+      }
+      const imported = parsed.workflow;
+      guardUnsaved('导入工作流 JSON', () => {
+        restoreWorkflow(imported, { markClean: false });
+        void messageApi.success(`已导入工作流「${imported.name}」（尚未保存到后端，Ctrl+S 保存）`);
+      });
+    } catch {
+      void messageApi.error('读取工作流文件失败');
+    }
+  };
+  const exportWorkflowJson = () => {
+    downloadWorkflowJson(workflowPayload);
+    void messageApi.success(`已导出 ${workflowPayload.id}.json`);
+  };
+  const openSaveAs = () => {
+    if (saving || anyBusy) return;
+    setSaveAsOpen(true);
+  };
+  const confirmSaveAs = (nextId: string, nextName: string) => {
+    setSaveAsOpen(false);
+    if (nextId === designerWorkflowId && nextName === designerWorkflowName) {
+      void save();
+      return;
+    }
+    documentGenerationRef.current += 1;
+    workflowRevisionRef.current = undefined;
+    setLastSavedAt(undefined);
+    setDesignerWorkflowId(nextId);
+    setDesignerWorkflowName(nextName);
+    pendingSaveAsRef.current = nextId;
+  };
+
   // 命令面板（Ctrl/Cmd+K，2026-10-25）：把散在顶栏菜单、工具箱和按钮上的入口收成一个键盘入口。
-  const paletteTargets = useMemo<PaletteCommand[]>(() => buildPaletteTargets(focusMode), [focusMode]);
+  const paletteTargets = useMemo<PaletteCommand[]>(() => buildPaletteTargets(focusMode, lang), [focusMode, lang]);
   const runCommand = (key: string) => runPaletteCommand(key, {
     ...openers, run, validate, save,
+    newBlank: newBlankWorkflow, saveAs: openSaveAs, importJson: triggerImportJson, exportJson: exportWorkflowJson,
+    autoLayout: graph.autoLayout,
     focusMode,
     fitView: () => void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 }),
     toggleFocusMode, toggleTheme, toggleLang
@@ -471,6 +617,9 @@ function Editor() {
   // 动作名带上目标节点，让用户始终清楚“当前操作作用于谁”。
   const selectedLabel = selectedId ? (nodeLabels[selectedId] ?? selectedId) : '';
   const targetSuffix = selectedLabel ? `：${selectedLabel}` : '';
+  const fileMenuItems = buildFileMenuItems({
+    newBlank: newBlankWorkflow, saveAs: openSaveAs, importJson: triggerImportJson, exportJson: exportWorkflowJson
+  }, lang);
   const debugMenuItems = buildDebugMenuItems({
     debugSession, statusText: debugStatus.text, anyBusy, selectedId, selectedNode, targetSuffix,
     allowSideEffects, hasSideEffectNodes, hasModuleCalls, breakpointCount: breakpoints.length, compileBusy
@@ -482,18 +631,21 @@ function Editor() {
   const contextNodeLabel = contextNode ? (nodeLabels[contextNode.id] ?? contextNode.id) : '';
   const contextTargetSuffix = contextNodeLabel ? `：${contextNodeLabel}` : '';
   const nodeContextMenuItems = buildNodeContextMenuItems(
-    { contextNode, contextTargetSuffix, anyBusy, debugSession, nodeContextMenu },
-    { openNodeConfiguration, runNode, runFromHere, toggleBreakpoint: graph.toggleBreakpoint, copySelection: graph.copySelection, deleteElements: graph.deleteElements }
+    { contextNode, contextTargetSuffix, anyBusy, debugSession, nodeContextMenu, lang },
+    { openNodeConfiguration, requestRenameNode, runNode, runFromHere, toggleBreakpoint: graph.toggleBreakpoint, copySelection: graph.copySelection, deleteElements: graph.deleteElements }
   );
-  const deviceMenuItems = buildDeviceMenuItems(openers);
-  const productionMenuItems = buildProductionMenuItems(openers);
+  const deviceMenuItems = buildDeviceMenuItems(openers, lang);
+  const productionMenuItems = buildProductionMenuItems(openers, lang);
   const toolMenuItems = buildToolMenuItems({
     catalogSource, catalogCount: catalog.length, catalogSchemaVersion, loadedPluginCount: plugins.filter((p) => p?.loaded).length,
     history, themeMode, undo, redo, toggleTheme, openWorkflowPicker, reopenOnboarding
-  }, openers);
+  }, openers, lang);
   const moreMenu = buildMoreMenu(
-    { showTemplates, openWorkflowPicker, applyLayoutPreset, layoutPreset: layout.preset },
-    debugMenuItems, deviceMenuItems, productionMenuItems, toolMenuItems
+    {
+      showTemplates, openWorkflowPicker, newBlank: newBlankWorkflow, saveAs: openSaveAs,
+      importJson: triggerImportJson, exportJson: exportWorkflowJson, applyLayoutPreset, layoutPreset: layout.preset
+    },
+    debugMenuItems, deviceMenuItems, productionMenuItems, toolMenuItems, lang
   );
 
 
@@ -507,7 +659,7 @@ function Editor() {
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, []);
+  }, [setCommandOpen]);
 
   // 切换示例 / 加载会整块替换流程图，存在未保存修改时先让用户选择
   const guardUnsaved = (label: string, run: () => void) => { void workflowChanges.request(label, run); };
@@ -527,9 +679,15 @@ function Editor() {
   // 2026-10-25：任一功能面板/弹窗打开时，画布快捷键整体让位——此前在追溯/配方面板里按 Delete
   // 会删掉画布上选中的节点。打开状态在这里显式汇总：antd 关闭弹窗后 DOM 仍残留，
   // 用 document.querySelector 判断会让快捷键在第一次打开过面板之后永久失效。
-  const overlayOpen = Boolean(pendingGuard || templateOpen || imagePreviewOpen || workflowPickerOpen || anyOpen);
+  const overlayOpen = Boolean(pendingGuard || templateOpen || saveAsOpen || imagePreviewOpen || workflowPickerOpen || renameTarget || anyOpen);
   useEditorShortcuts({
-    nodeConfigurationId, overlayOpen, save, undo, redo, copySelection: graph.copySelection, deleteElements: graph.deleteElements, pushHistory,
+    nodeConfigurationId, overlayOpen, save, undo, redo, copySelection: graph.copySelection,
+    requestRenameNode, debugSessionActive: Boolean(debugSession), debugBusy,
+    continueDebugSession, runSelectedNodeInSession, endDebugSession,
+    selectAllNodes: graph.selectAllNodes, duplicateSelection: graph.duplicateSelection,
+    fitView: () => void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 }),
+    runWorkflow: () => { if (!anyBusy && !debugSession) void run(); },
+    deleteElements: graph.deleteElements, pushHistory,
     setNodes, setEdges, setSelectedId, messageApi, nodes, selectedNodeIds, selectedEdgeIds,
     searchInputRef, clipboardRef, pasteIndexRef
   });
@@ -567,6 +725,8 @@ function Editor() {
 
   const searchParams = new URLSearchParams(window.location.search);
   const productionView = searchParams.get('view');
+  const operatorRoleOnly = securityEnabled && user?.role === 'Operator';
+  const canAdmin = !securityEnabled || user?.role === 'Administrator';
   const operatorStationId = productionView === 'operator' ? searchParams.get('stationId') ?? undefined : undefined;
   // 车间大屏形态：`?view=operator&kiosk=1` 只留操作员工作台，隐藏诊断入口、账号徽标与标签栏，
   // 字号按视口短边放大。只对操作员视图生效——工位总览是管理视角，不应进 kiosk。
@@ -577,37 +737,70 @@ function Editor() {
       <SpcDashboard open onClose={() => undefined} embedded />
     </Suspense>
   </ErrorBoundary>;
-  if (runtimeOnly || productionView === 'operator' || productionView === 'stations') return <>
+  if (runtimeOnly || operatorRoleOnly || productionView === 'operator' || productionView === 'stations') return <>
     <ErrorBoundary variant="panel" scope="生产运行">
       <Suspense fallback={<div className="panel-loading" role="status" aria-live="polite"><span className="panel-loading-label">正在加载生产工作台…</span></div>}>
         <ProductionPanel open={true} onClose={() => undefined} embedded runtimeOnly={runtimeOnly} kiosk={kiosk}
           stationId={operatorStationId}
-          initialView={productionView === 'stations' ? 'stations' : 'operator'} />
+          initialView={productionView === 'stations' ? 'stations' : 'operator'}
+          headerActions={!kiosk ? <>
+            {canAdmin && <Button onClick={() => setSecurityOpen(true)}>安全管理</Button>}
+            {canAdmin && <Button onClick={() => setStorageOpen(true)}>存储与备份</Button>}
+            <Button type="primary" ghost onClick={() => setDiagnosticsOpen(true)}>诊断</Button>
+            <SecurityAccountBadge />
+          </> : undefined} />
       </Suspense>
     </ErrorBoundary>
-    {!kiosk && <Button className="runtime-diagnostics-button" type="primary" ghost onClick={() => setDiagnosticsOpen(true)}>诊断</Button>}
-    {/* 操作员页无顶栏：账号入口固定在「诊断」按钮下方 */}
-    {!kiosk && <div className="runtime-account-slot"><SecurityAccountBadge /></div>}
     {!kiosk && diagnosticsOpen && <ErrorBoundary variant="panel" scope="诊断" onDismiss={() => setDiagnosticsOpen(false)}>
       <Suspense fallback={<div className="panel-loading" role="status" aria-live="polite"><span className="panel-loading-label">正在加载诊断面板…</span></div>}>
         <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
       </Suspense>
     </ErrorBoundary>}
+    {!kiosk && canAdmin && storageOpen && <ErrorBoundary variant="panel" scope="存储维护" onDismiss={() => setStorageOpen(false)}>
+      <Suspense fallback={<div className="panel-loading" role="status" aria-live="polite"><span className="panel-loading-label">正在加载存储维护…</span></div>}>
+        <StoragePanel open={storageOpen} onClose={() => setStorageOpen(false)} />
+      </Suspense>
+    </ErrorBoundary>}
+    {!kiosk && canAdmin && securityOpen && <ErrorBoundary variant="panel" scope="安全与运维管理" onDismiss={() => setSecurityOpen(false)}>
+      <Suspense fallback={<div className="panel-loading" role="status" aria-live="polite"><span className="panel-loading-label">正在加载安全与运维管理…</span></div>}>
+        <SecurityAdminPanel open={securityOpen} onClose={() => setSecurityOpen(false)} />
+      </Suspense>
+    </ErrorBoundary>}
   </>;
 
-  const canvas: EditorCanvasAreaProps = {
-    layout, applyLayoutPreset, toggleFocusMode, focusMode, imagePreviewOpen, exitFocusMode, setImagePreviewOpen,
-    compactNodes, setCompactNodes, selectedNode, selectedId, openNodeConfiguration, selectedNodeIds,
-    alignSelection: graph.alignSelection, history, undo, redo, anyBusy, selectedEdgeIds,
-    deleteElements: graph.deleteElements, searchInputRef, searchQuery, setSearchQuery, searchOpen, setSearchOpen,
-    searchMatches, focusNode: graph.focusNode, fitView, nodes, edges, displayEdges, themeMode,
-    isValidConnection: graph.isValidConnection, handleNodesChange: graph.handleNodesChange,
-    handleEdgesChange: graph.handleEdgesChange, onConnect: graph.onConnect, setConnectionPicker,
-    onConnectEnd: graph.onConnectEnd, setDragging, pushHistory, setSelectedId, flowAreaRef,
-    onDrop: graph.onDrop, cancelLongPress, longPressRef, openNodeMenuAt, draftNotice, locale, restoreDraft,
-    discardDraft, showTemplates, openWorkflowPicker, connectionPicker, connectionPickerRef, catalog,
-    recentNodeTypes, addNode: graph.addNode, nodeContextMenu, setNodeContextMenu, nodeContextMenuItems,
-    designerWorkflowId, nodeLabels, result, resultStale, running, debugBusy,
+  // 画布状态按域拆成 4 组（2026-11-25）：此前是 67 个平铺 props 一次性传下去。
+  // 分组依据是刷新频率——图数据/选择态高频，布局/运行结果低频。
+  const editorGraph: EditorGraphValue = {
+    nodes, edges, displayEdges, isValidConnection: graph.isValidConnection,
+    handleNodesChange: graph.handleNodesChange, handleEdgesChange: graph.handleEdgesChange,
+    onConnect: graph.onConnect, onReconnect: graph.onReconnect, onReconnectStart: graph.onReconnectStart,
+    onReconnectEnd: graph.onReconnectEnd, onConnectEnd: graph.onConnectEnd,
+    setDragging, pushHistory, history, undo, redo,
+    addNode: graph.addNode, deleteElements: graph.deleteElements, updateNodeParameter: graph.updateNodeParameter,
+    updateCanvasAnnotation: graph.updateCanvasAnnotation, addCanvasNote: graph.addCanvasNote, createGroup: graph.createGroup,
+    alignSelection: graph.alignSelection, autoLayout: graph.autoLayout,
+    fitView, flowAreaRef, onDrop: graph.onDrop, cancelLongPress, longPressRef,
+    catalog, recentNodeTypes, nodeLabels
+  };
+
+  const editorSelection: EditorSelectionValue = {
+    selectedNode, selectedId, setSelectedId, selectedNodeIds, selectedEdgeIds,
+    openNodeConfiguration, focusNode: graph.focusNode,
+    searchInputRef, searchQuery, setSearchQuery, searchOpen, setSearchOpen, searchMatches,
+    connectionPicker, setConnectionPicker, connectionPickerRef,
+    nodeContextMenu, setNodeContextMenu, nodeContextMenuItems, openNodeMenuAt
+  };
+
+  const editorLayout: EditorLayoutValue = {
+    layout, applyLayoutPreset, focusMode, toggleFocusMode, exitFocusMode,
+    compactNodes, setCompactNodes, imagePreviewOpen, setImagePreviewOpen, themeMode, locale
+  };
+
+  const editorRun: EditorRunValue = {
+    result, resultStale, running, debugBusy, anyBusy,
+    debugSession, onContinueDebugSession: continueDebugSession,
+    onRunSelectedNodeInSession: runSelectedNodeInSession, onEndDebugSession: endDebugSession,
+    draftNotice, restoreDraft, discardDraft, showTemplates, openWorkflowPicker, importWorkflowJson: triggerImportJson, designerWorkflowId,
     onboarding: {
       open: onboardingOpen,
       onClose: closeOnboarding,
@@ -621,20 +814,26 @@ function Editor() {
 
   const overlays: EditorOverlaysProps = {
     compiledDsl, closeDsl, workflowChanges, pendingGuard, guardingSave, commandOpen, setCommandOpen, catalog,
+    nodes, onLocateNode: graph.focusNode,
     paletteTargets, runPaletteCommand: runCommand, addNode: graph.addNode, templateOpen, setTemplateOpen,
-    demoKey, guardUnsaved, applyDemo, openWorkflowPicker, workflowPickerOpen, setWorkflowPickerOpen,
+    demoKey, guardUnsaved, applyDemo, newBlankWorkflow, importWorkflowJson: triggerImportJson, openWorkflowPicker, workflowPickerOpen, setWorkflowPickerOpen,
     savedWorkflows, workflowListLoading, workflowListError, workflowToLoad, setWorkflowToLoad,
-    loadSelectedSavedWorkflow, workflowImport, shortcutsOpen, setShortcutsOpen
+    loadSelectedSavedWorkflow, loadSavedWorkflowById, deleteSavedWorkflow, workflowDeletingId, workflowImport,
+    saveAsOpen, setSaveAsOpen, designerWorkflowId, designerWorkflowName, saveBusy: saving, onConfirmSaveAs: confirmSaveAs,
+    shortcutsOpen, setShortcutsOpen, renameTarget, renameDraft, setRenameDraft,
+    onConfirmRenameNode: confirmRenameNode, onCancelRenameNode: cancelRenameNode
   };
 
   const panels: EditorPanelsProps = {
-    camerasOpen, setCamerasOpen, robotsOpen, setRobotsOpen, devicesOpen, setDevicesOpen,
+    camerasOpen, setCamerasOpen, cameraInitialTab, robotsOpen, setRobotsOpen, devicesOpen, setDevicesOpen,
     framesOpen, setFramesOpen, calibrationOpen, setCalibrationOpen, selectedNode, applyCalibrationParameters: graph.applyCalibrationParameters,
     jobsOpen, setJobsOpen, workflowPayload, workflowChanges, applyResult,
-    tracesOpen, setTracesOpen, traceRunId, setTraceRunId, modelPackagesOpen, setModelPackagesOpen,
-    modelAssetsOpen, setModelAssetsOpen, validationOpen, setValidationOpen, tuningOpen, setTuningOpen,
+    tracesOpen, setTracesOpen, traceRunId, setTraceRunId, onSelectNode: graph.focusNode, modelPackagesOpen, setModelPackagesOpen,
+    modelAssetsOpen, setModelAssetsOpen, validationOpen, setValidationOpen, validationWorkflow, validationRecipeTarget,
+    onOpenValidation: openValidation, onCloseValidation: closeValidation, tuningOpen, setTuningOpen,
     catalog, selectedId, messageApi, modulesOpen, setModulesOpen, insertModule, upgradeSelectedModule,
-    productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, aboutOpen, setAboutOpen,
+    productionOpen, setProductionOpen, productionInitialJobId, productionInitialView, onOpenProduction: openProductionForRecipe,
+    onCloseProduction: closeProduction, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, storageOpen, setStorageOpen, securityOpen, setSecurityOpen, aboutOpen, setAboutOpen,
     hardwareProvenanceOpen, setHardwareProvenanceOpen, pluginsOpen, setPluginsOpen, refreshCatalog
   };
 
@@ -649,13 +848,22 @@ function Editor() {
       } as CSSProperties}
     >
       {contextHolder}{modalContextHolder}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".json,application/json"
+        aria-label="导入工作流 JSON 文件"
+        style={{ display: 'none' }}
+        onChange={(event) => void handleImportJsonFile(event)}
+      />
       <EditorHeader
-        menus={{ debug: debugMenuItems, device: deviceMenuItems, production: productionMenuItems, tools: toolMenuItems, more: moreMenu }}
+        menus={{ file: fileMenuItems, debug: debugMenuItems, device: deviceMenuItems, production: productionMenuItems, tools: toolMenuItems, more: moreMenu }}
         layoutPreset={layout.preset}
         onApplyLayoutPreset={applyLayoutPreset}
+        onOpenCommand={() => setCommandOpen(true)}
         templates={{ show: showTemplates, openSaved: openWorkflowPicker }}
         debug={{ inSession: Boolean(debugSession), statusText: debugStatus.text }}
-        run={{ running, debugBusy, onRun: run, onAbort: abortRun, startedAt: runStartedAt }}
+        run={{ running, debugBusy, onRun: run, onAbort: abortRun, startedAt: runStartedAt, progress: runProgress }}
         workflow={{ name: designerWorkflowName, id: designerWorkflowId, onRename: setDesignerWorkflowName, dirty, lastSavedAt }}
         validation={{ status: validationState.status, summary: validationState.summary, needsRevalidate, issueCount: validationIssues.length, busy: validationBusy, onValidate: validate }}
         catalogError={catalogError}
@@ -679,14 +887,28 @@ function Editor() {
           onToggleCollapse={() => updateLayout({ leftCollapsed: !layout.leftCollapsed })}
         />
 
-        <EditorCanvasArea {...canvas} />
+        <EditorProviders graph={editorGraph} selection={editorSelection} layout={editorLayout} run={editorRun}>
+          <EditorCanvasArea />
+        </EditorProviders>
       </main>
 
-      {nodeConfigurationId && configurationNode && configurationCatalog && <NodeConfigurationDialog key={nodeConfigurationId} initialTab={configurationTab} open
-        node={configurationNode} catalogItem={configurationCatalog} catalogItems={catalog} nodes={nodes} edges={edges} disabled={anyBusy}
-        result={result} resultReceivedAt={resultReceivedAt} resultStale={resultStale}
-        onClose={() => setNodeConfigurationId(undefined)} onApply={applyNodeParameters}
-        onPreview={(parameters) => previewNode(nodeConfigurationId, parameters)} previewBlockedReason={configurationPreviewBlockedReason} />}
+      {nodeConfigurationId && configurationNode && configurationCatalog && (
+        <Suspense fallback={null}>
+          <NodeConfigurationDialog key={nodeConfigurationId} initialTab={configurationTab} open
+            node={configurationNode} catalogItem={configurationCatalog} catalogItems={catalog} nodes={nodes} edges={edges} disabled={anyBusy}
+            result={result} resultReceivedAt={resultReceivedAt} resultStale={resultStale}
+            onClose={() => setNodeConfigurationId(undefined)} onRequestRename={requestRenameNode} onApply={applyNodeParameters}
+            onOpenResourcePanel={(kind) => {
+              if (kind === 'camera' || kind === 'media') {
+                setCameraInitialTab(kind === 'media' ? 'media' : 'acquisition');
+                setCamerasOpen(true);
+              }
+              else if (kind === 'device') setDevicesOpen(true);
+              else setRobotsOpen(true);
+            }}
+            onPreview={(parameters) => previewNode(nodeConfigurationId, parameters)} previewBlockedReason={configurationPreviewBlockedReason} />
+        </Suspense>
+      )}
 
       <EditorBottomDock
         layout={layout}

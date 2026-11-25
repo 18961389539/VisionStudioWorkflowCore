@@ -51,9 +51,9 @@ export default function StationSetupWizard({ startIndex, existingIds, stationCou
   };
 
   return <Modal open title={stationCount > 0 ? `添加工位（第 ${startIndex + 1} 个）` : '配置第一个工位'}
-    width={1040} footer={null} onCancel={onClose} destroyOnHidden>
+    width="min(1040px, calc(100vw - 32px))" footer={null} onCancel={onClose} destroyOnHidden>
     {contextHolder}
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Alert type="info" showIcon title="向导只生成文本，不改配置文件"
         description={<>
           <ol style={{ margin: '4px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>

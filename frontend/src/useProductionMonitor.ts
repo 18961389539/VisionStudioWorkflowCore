@@ -221,6 +221,7 @@ export function useProductionMonitor(open: boolean, canReadPending = true, stati
   }, [monitorSnapshot, open, accept, read, scopedStationId]);
 
   useEffect(() => {
+    const activeRequests = requests.current;
     active.current = open;
     setConfirmed({});
     if (open) {
@@ -231,8 +232,8 @@ export function useProductionMonitor(open: boolean, canReadPending = true, stati
     return () => {
       active.current = false;
       clearInterval(timer);
-      for (const request of requests.current.values()) { request.controller.abort(); }
-      requests.current.clear();
+      for (const request of activeRequests.values()) { request.controller.abort(); }
+      activeRequests.clear();
     };
   }, [open, refresh]);
 

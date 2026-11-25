@@ -84,26 +84,32 @@ export default function RobotPanel({ open, onClose }: Props) {
     }
   };
 
+  const monitorCapturedAt = monitorSnapshot?.capturedAt;
+  const selectedRobotId = selected?.id;
+  const effectContextRef = useRef({ refresh, selected, settingsForm, targetForm });
+  effectContextRef.current = { refresh, selected, settingsForm, targetForm };
+
   useEffect(() => {
     if (!open) return;
-    refresh();
+    void effectContextRef.current.refresh();
     // 2026-11-12：300 ms 轮询改为推送触发（服务端内容变化才广播），定时器只做断线兜底。
-    const timer = window.setInterval(() => refresh(true), 10_000);
+    const timer = window.setInterval(() => { void effectContextRef.current.refresh(true); }, 10_000);
     return () => window.clearInterval(timer);
   }, [open, selectedId]);
 
   // 推送到达即刷新：状态变化（连上/掉线/故障）在 1 s 内反映到面板，不再靠高频轮询去撞。
   useEffect(() => {
-    if (monitorSnapshot) void refresh(true);
-  }, [monitorSnapshot?.capturedAt]);
+    if (monitorCapturedAt !== undefined) void effectContextRef.current.refresh(true);
+  }, [monitorCapturedAt]);
 
   useEffect(() => {
-    if (!selected) return;
-    settingsForm.setFieldsValue(selected.settings);
-    targetForm.setFieldsValue({
-      x: selected.activeTarget?.x ?? selected.currentPose.x,
-      y: selected.activeTarget?.y ?? selected.currentPose.y,
-      rDeg: selected.activeTarget?.rDeg ?? selected.currentPose.thetaDeg,
+    const current = effectContextRef.current.selected;
+    if (!current) return;
+    effectContextRef.current.settingsForm.setFieldsValue(current.settings);
+    effectContextRef.current.targetForm.setFieldsValue({
+      x: current.activeTarget?.x ?? current.currentPose.x,
+      y: current.activeTarget?.y ?? current.currentPose.y,
+      rDeg: current.activeTarget?.rDeg ?? current.currentPose.thetaDeg,
       action: 'Handshake',
       waitForInPosition: true,
       maxRetries: 1,
@@ -111,7 +117,7 @@ export default function RobotPanel({ open, onClose }: Props) {
       autoAck: true,
       timeoutMs: 5000
     });
-  }, [selected?.id]);
+  }, [selectedRobotId]);
 
   const command = async (id: string, action: 'connect' | 'disconnect' | 'stop' | 'reset') => {
     setBusy(action);
@@ -181,7 +187,7 @@ export default function RobotPanel({ open, onClose }: Props) {
   };
 
   return (
-    <Modal open={open} onCancel={onClose} footer={null} width={1280} title="机器人运行时 · 适配器 SDK / 工业握手" destroyOnHidden>
+    <Modal open={open} onCancel={onClose} footer={null} width="min(1280px, calc(100vw - 32px))" title="机器人运行时 · 适配器 SDK / 工业握手" destroyOnHidden>
       {contextHolder}
       <div className="robot-runtime-grid">
         <section>

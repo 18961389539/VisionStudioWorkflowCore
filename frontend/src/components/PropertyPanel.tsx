@@ -1,9 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { AutoComplete, Button, Empty, Input, InputNumber, Select, Switch, Tag, Tooltip } from 'antd';
 import type { Node } from '@xyflow/react';
-import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
+import type { CameraDescriptor, DeviceDescriptor, MediaItemDescriptor, NodeCatalogItem, ParameterDescriptor, RobotDescriptor, VisionRoi } from '../types';
 import { isParameterVisible, parameterPresentation, validateParameterValues } from '../validation';
 import { MAX_ROI_POLYGON_POINTS, roiConfigurationIssue } from '../nodeConfigurationState';
+import { responseErrorMessage } from '../apiErrors';
+import { apiFetch } from '../apiClient';
+import { apiUrl } from '../endpoints';
 import MatrixEditor from './MatrixEditor';
 import JsonTextarea from './JsonTextarea';
 import { isJsonParameter, jsonExampleFor } from '../jsonExamples';
@@ -26,6 +29,7 @@ type Props = {
   connectedInputPorts?: readonly string[];
   /** script.csharp：用暂存参数测试当前节点。 */
   onRunPreview?: () => void;
+  onOpenResourcePanel?: (kind: 'camera' | 'device' | 'robot' | 'media') => void;
   previewBusy?: boolean;
   scriptPreview?: ScriptPreviewReport;
   scriptPreviewBlockedReason?: string;
@@ -175,13 +179,71 @@ function buildSections(catalogItem?: NodeCatalogItem): Section[] {
 }
 
 export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi, roiFields, hiddenParameterNames, connectedInputPorts,
-  onRunPreview, previewBusy, scriptPreview, scriptPreviewBlockedReason }: Props) {
+  onRunPreview, onOpenResourcePanel, previewBusy, scriptPreview, scriptPreviewBlockedReason }: Props) {
   const sections = useMemo(() => buildSections(catalogItem ? { ...catalogItem,
     parameters: catalogItem.parameters.map(parameter => parameterPresentation(parameter, catalogItem.parameters,
       (node?.data.parameters ?? {}) as Record<string, unknown>)) } : undefined), [catalogItem, node?.data.parameters]);
   const [parameterFilter, setParameterFilter] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
-  useEffect(() => { setParameterFilter(''); setShowAdvanced(false); }, [node?.id, catalogItem?.type]);
+  const [resetUndoSnapshot, setResetUndoSnapshot] = useState<Record<string, unknown> | undefined>(undefined);
+  const [resourceOptions, setResourceOptions] = useState<Record<'camera' | 'device' | 'robot' | 'media', { label: string; value: string }[]>>({
+    camera: [], device: [], robot: [], media: []
+  });
+  const [resourceErrors, setResourceErrors] = useState<Partial<Record<'camera' | 'device' | 'robot' | 'media', string>>>({});
+  const [resourceLoading, setResourceLoading] = useState<Partial<Record<'camera' | 'device' | 'robot' | 'media', boolean>>>({});
+  const [deviceDescriptors, setDeviceDescriptors] = useState<DeviceDescriptor[]>([]);
+  const [resourceRetry, setResourceRetry] = useState(0);
+  useEffect(() => { setParameterFilter(''); setShowAdvanced(false); setResetUndoSnapshot(undefined); }, [node?.id, catalogItem?.type]);
+  useEffect(() => {
+    if (!catalogItem) return;
+    const names = new Set(catalogItem.parameters.map((parameter) => parameter.name));
+    const requested: { kind: 'camera' | 'device' | 'robot' | 'media'; url: string }[] = [];
+    if (names.has('cameraId')) requested.push({ kind: 'camera', url: apiUrl('cameras') });
+    if (names.has('deviceId') || names.has('tagId')) requested.push({ kind: 'device', url: apiUrl('devices') });
+    if (names.has('robotId')) requested.push({ kind: 'robot', url: apiUrl('robots') });
+    if (catalogItem.type === 'image.load' && names.has('path'))
+      requested.push({ kind: 'media', url: apiUrl('media/items?take=200') });
+    if (requested.length === 0) return;
+
+    const controller = new AbortController();
+    for (const { kind } of requested) {
+      setResourceLoading((current) => ({ ...current, [kind]: true }));
+      setResourceErrors((current) => ({ ...current, [kind]: undefined }));
+    }
+    const load = async (kind: 'camera' | 'device' | 'robot' | 'media', url: string) => {
+      try {
+        const response = await apiFetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error(await responseErrorMessage(response, `资源列表不可用 (HTTP ${response.status})`));
+        let options: { label: string; value: string }[];
+        if (kind === 'camera') {
+          const items: CameraDescriptor[] = await response.json();
+          options = items.map((item) => ({ label: `${item.name} · ${item.id}`, value: item.id }));
+        } else if (kind === 'device') {
+          const items: DeviceDescriptor[] = await response.json();
+          if (!controller.signal.aborted) setDeviceDescriptors(items);
+          options = items.map((item) => ({ label: `${item.name} · ${item.id}`, value: item.id }));
+        } else if (kind === 'robot') {
+          const items: RobotDescriptor[] = await response.json();
+          options = items.map((item) => ({ label: `${item.name} · ${item.id}`, value: item.id }));
+        } else {
+          const items: MediaItemDescriptor[] = await response.json();
+          options = items.map((item) => ({
+            label: `${item.name} · ${item.collection} · ${item.label}`,
+            value: item.source
+          }));
+        }
+        if (!controller.signal.aborted) setResourceOptions((current) => ({ ...current, [kind]: options }));
+      } catch (error) {
+        if (!controller.signal.aborted) setResourceErrors((current) => ({
+          ...current, [kind]: error instanceof Error ? error.message : '无法加载资源列表'
+        }));
+      } finally {
+        if (!controller.signal.aborted) setResourceLoading((current) => ({ ...current, [kind]: false }));
+      }
+    };
+    for (const { kind, url } of requested) void load(kind, url);
+    return () => controller.abort();
+  }, [catalogItem, resourceRetry]);
 
   if (!node || !catalogItem) {
     return (
@@ -193,6 +255,26 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
   }
 
   const parameters = (node.data.parameters ?? {}) as Record<string, unknown>;
+  const selectedDevice = deviceDescriptors.find((device) => device.id === String(parameters.deviceId ?? ''));
+  const tagOptions = (selectedDevice?.tags ?? []).map((tag) => ({
+    label: `${tag.name} · ${tag.id}`,
+    value: tag.id
+  }));
+  const resourceForParameter = (parameter: ParameterDescriptor): 'camera' | 'device' | 'robot' | 'media' | undefined => {
+    if (parameter.name === 'cameraId') return 'camera';
+    if (parameter.name === 'deviceId' || parameter.name === 'tagId') return 'device';
+    if (parameter.name === 'robotId') return 'robot';
+    if (catalogItem.type === 'image.load' && parameter.name === 'path') return 'media';
+    return undefined;
+  };
+  const resourcePanelLabel: Record<'camera' | 'device' | 'robot' | 'media', string> = {
+    camera: '管理相机', device: '管理设备', robot: '管理机器人', media: '打开媒体库'
+  };
+  const optionsForParameter = (parameter: ParameterDescriptor) => {
+    if (parameter.name === 'tagId') return tagOptions;
+    const resource = resourceForParameter(parameter);
+    return resource ? resourceOptions[resource] : [];
+  };
   const filterKeyword = parameterFilter.trim().toLowerCase();
   const matchesParameterFilter = (parameter: ParameterDescriptor) => !filterKeyword
     || [parameter.label, parameter.name, parameter.group, parameter.description]
@@ -232,7 +314,16 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
   const showParameterFilter = filterableParameterCount > PARAMETER_FILTER_THRESHOLD;
   const configuredRoiFields = roiFields ?? [{ key: 'roi', label: '感兴趣区域' }];
 
-  const resetAll = () => modified.forEach((parameter) => onChange(parameter.name, parameter.defaultValue));
+  const resetAll = () => {
+    if (modified.length === 0) return;
+    setResetUndoSnapshot(Object.fromEntries(modified.map((parameter) => [parameter.name, parameters[parameter.name]])));
+    modified.forEach((parameter) => onChange(parameter.name, parameter.defaultValue));
+  };
+  const undoResetAll = () => {
+    if (!resetUndoSnapshot) return;
+    Object.entries(resetUndoSnapshot).forEach(([key, value]) => onChange(key, value));
+    setResetUndoSnapshot(undefined);
+  };
 
   const renderControl = (parameter: ParameterDescriptor) => {
     if (catalogItem.type === 'script.csharp' && parameter.name === 'source')
@@ -266,9 +357,13 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
       );
     }
     if (parameter.type === 'text') {
-      if (parameter.options?.length) return <AutoComplete aria-label={parameter.label} disabled={disabled} status={status}
-        value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')} options={parameter.options.map(option => ({ label: option.label, value: option.value }))}
-        onChange={value => onChange(parameter.name, value)} />;
+      const options = optionsForParameter(parameter);
+      if (parameter.options?.length || resourceForParameter(parameter) || parameter.name === 'tagId')
+        return <AutoComplete aria-label={parameter.label} disabled={disabled} status={status}
+          placeholder={resourceForParameter(parameter) ? '选择或输入 ID / 路径' : undefined}
+          value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')}
+          options={[...(parameter.options ?? []).map(option => ({ label: option.label, value: option.value })), ...options]}
+          onChange={value => onChange(parameter.name, value)} />;
       return (
         <Input
           size="small"
@@ -340,6 +435,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
 
   const renderRow = (parameter: ParameterDescriptor) => {
     const wide = parameter.type === 'textarea' || parameter.type === 'text';
+    const resourceKind = resourceForParameter(parameter);
     const isModified = parameters[parameter.name] !== undefined
       && parameter.defaultValue !== undefined
       && !sameValue(parameters[parameter.name], parameter.defaultValue);
@@ -371,8 +467,18 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
         </label>
         <div className="property-control">
           {renderControl(parameter)}
+          {resourceKind && resourceLoading[resourceKind] && <span className="property-context-loading" role="status">正在加载候选项…</span>}
+          {resourceKind && resourceErrors[resourceKind] && <div className="property-context-error" role="alert">
+            <span>{resourceErrors[resourceKind]}</span>
+            <Button size="small" type="link" disabled={resourceLoading[resourceKind]}
+              onClick={() => setResourceRetry((retry) => retry + 1)}>重试</Button>
+          </div>}
+          {resourceKind && onOpenResourcePanel && <Button className="property-context-action" size="small" type="link"
+            disabled={disabled} onClick={() => onOpenResourcePanel(resourceKind)}>
+            {resourcePanelLabel[resourceKind]}
+          </Button>}
           {parameter.variantParameter === parameter.name && parameter.description && <p className="roi-polygon-note">{parameter.description}</p>}
-          {issue && <div style={{ color: '#ff4d4f', fontSize: 11, lineHeight: 1.45 }}>{issue}</div>}
+          {issue && <div style={{ color: 'var(--vs-text-danger)', fontSize: 11, lineHeight: 1.45 }}>{issue}</div>}
         </div>
       </div>
     );
@@ -394,6 +500,11 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
         <Button size="small" type="text" disabled={disabled || modified.length === 0}
           title="把已改参数恢复为节点出厂默认值；如需恢复为打开弹窗时的值，用标题栏的“还原为打开时”"
           onClick={resetAll}>恢复出厂默认（{modified.length}）</Button>
+        {resetUndoSnapshot && modified.length === 0 && (
+          <Button size="small" type="link" disabled={disabled}
+            title="撤销刚才的「恢复出厂默认」，还原之前的暂存参数"
+            onClick={undoResetAll}>撤销重置</Button>
+        )}
       </div>}
       {showParameterFilter && <div className="property-filter">
         <Input size="small" allowClear value={parameterFilter} disabled={disabled}
@@ -420,7 +531,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
                 onClick={() => onLocateRoi(field.key)} title="在图像查看器中编辑此选区">在图像中编辑</button>}
             </div>
             {roiIssue ? <div role="alert" className="roi-invalid-state" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="roi-polygon-note" style={{ color: '#ff4d4f', flex: 1 }}>{roiIssue}</span>
+              <span className="roi-polygon-note" style={{ color: 'var(--vs-text-danger)', flex: 1 }}>{roiIssue}</span>
               <Button size="small" danger disabled={disabled} onClick={() => onChange(field.key, undefined)}>清除无效区域</Button>
             </div> : roi ? <RoiEditor roi={roi} disabled={disabled} onChange={(next) => onChange(field.key, next)} />
               : value !== undefined ? <code>{JSON.stringify(value)}</code>

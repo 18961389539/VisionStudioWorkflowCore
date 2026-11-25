@@ -229,7 +229,7 @@ export default function SpcDashboard({ open, onClose, embedded = false }: Props)
     </Typography.Text>
   </>;
 
-  const body = <Space direction="vertical" size={12} style={{ width: '100%' }}>
+  const body = <Space orientation="vertical" size={12} style={{ width: '100%' }}>
     {datasetsError && <Alert type="error" showIcon title={t('spc.error.datasets')} description={datasetsError}
       action={<Button size="small" onClick={refresh}>{t('spc.refresh')}</Button>} />}
     {datasetOptions.length === 0 && !datasetsLoading && !datasetsError && <Empty description={t('spc.dataset.empty')} />}

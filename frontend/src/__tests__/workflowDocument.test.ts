@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWorkflowDocument } from '../workflowDocument';
+import { isValidWorkflowId, isWorkflowDocument, parseWorkflowImportJson, suggestWorkflowId } from '../workflowDocument';
 
 const node = { id: 'n1', type: 'image.synthetic' };
 const edge = { id: 'e1', sourceNodeId: 'n1', sourcePort: 'image', targetNodeId: 'n2', targetPort: 'image' };
@@ -38,5 +38,26 @@ describe('workflow document structure', () => {
 
   it.each([NaN, Infinity, -Infinity])('rejects non-finite positions: %s', (x) => {
     expect(isWorkflowDocument({ ...workflow, nodes: [{ ...node, position: { x, y: 0 } }] })).toBe(false);
+  });
+
+  it('validates workflow IDs and parses imported JSON workflows', () => {
+    expect(isValidWorkflowId('line-a_01')).toBe(true);
+    expect(isValidWorkflowId('bad.id')).toBe(false);
+    expect(isValidWorkflowId('')).toBe(false);
+    expect(suggestWorkflowId('Line A Demo')).toBe('line-a-demo');
+    expect(isValidWorkflowId(suggestWorkflowId('产线流程'))).toBe(true);
+
+    expect(parseWorkflowImportJson('not json').error).toContain('JSON');
+    expect(parseWorkflowImportJson(JSON.stringify({ id: 'x' })).error).toContain('有效的工作流文档');
+
+    const parsed = parseWorkflowImportJson(JSON.stringify({
+      id: 'bad.id',
+      name: '  Imported Flow  ',
+      nodes: [node],
+      edges: []
+    }));
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.workflow?.name).toBe('Imported Flow');
+    expect(isValidWorkflowId(parsed.workflow!.id)).toBe(true);
   });
 });

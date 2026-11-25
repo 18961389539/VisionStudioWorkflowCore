@@ -117,12 +117,15 @@ export const auth = {
   login: apiUrl('auth/login'),
   logout: apiUrl('auth/logout'),
   autoLogin: apiUrl('auth/auto-login'),
-  bootstrap: apiUrl('auth/bootstrap')
+  bootstrap: apiUrl('auth/bootstrap'),
+  changePassword: apiUrl('auth/change-password')
 } as const;
 
 // ── plugins ───────────────────────────────────────────────────────────────────
 export const plugins = {
   list: apiUrl('plugins'),
+  sdk: apiUrl('plugins/sdk'),
+  rescan: apiUrl('plugins/rescan'),
   packages: apiUrl('plugin-packages'),
   install: (mode: string) => apiUrl(`plugin-packages/${mode}`),
   selectVersion: (id: string, version: string) =>
@@ -420,7 +423,21 @@ export const diagnostics = {
   summary: apiUrl('diagnostics/summary'),
   events: apiUrl('diagnostics/events?take=250'),
   assets: apiUrl('diagnostics/assets'),
-  nodeDurations: apiUrl('diagnostics/node-durations')
+  nodeDurations: apiUrl('diagnostics/node-durations'),
+  bundle: apiUrl('diagnostics/bundle')
+} as const;
+
+// ── security ──────────────────────────────────────────────────────────────────
+export const security = {
+  users: apiUrl('security/users'),
+  user: (id: string) => apiUrl(`security/users/${encodeURIComponent(id)}`),
+  resetPassword: (id: string) => apiUrl(`security/users/${encodeURIComponent(id)}/reset-password`),
+  unlock: (id: string) => apiUrl(`security/users/${encodeURIComponent(id)}/unlock`),
+  serviceTokens: apiUrl('security/service-tokens'),
+  rotateServiceToken: (id: string) => apiUrl(`security/service-tokens/${encodeURIComponent(id)}/rotate`),
+  revokeServiceToken: (id: string) => apiUrl(`security/service-tokens/${encodeURIComponent(id)}/revoke`),
+  audit: (query?: string) => apiUrl(query ? `audit?${query}` : 'audit'),
+  verifyAudit: apiUrl('security/audit/verify')
 } as const;
 
 // ── hardware-provenance ──────────────────────────────────────────────────────

@@ -123,7 +123,7 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
 
   // Handle 的纵向位置由 CSS 负责（相对端口行垂直居中、水平锚定节点边缘），这里只给连线中的兼容态视觉
   const handleStyle = (verdict?: { allowed: boolean }) => ({
-    ...(verdict?.allowed === true ? { boxShadow: '0 0 0 3px rgba(82, 196, 26, 0.45)', borderColor: '#52c41a' } : {}),
+    ...(verdict?.allowed === true ? { boxShadow: '0 0 0 3px var(--vs-success-soft)', borderColor: 'var(--vs-node-ok)' } : {}),
     ...(verdict?.allowed === false ? { opacity: 0.3 } : {})
   });
 

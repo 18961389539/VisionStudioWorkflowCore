@@ -18,13 +18,14 @@ export function useProductionActions(open: boolean, messages: Messages, refresh:
   const requests = useRef(new Map<string, AbortController>());
   const runtimeGeneration = useRef(0);
   useEffect(() => {
+    const activeRequests = requests.current;
     active.current = open;
     setBusy(new Set());
     setError(undefined);
     return () => {
       active.current = false;
-      for (const controller of requests.current.values()) controller.abort();
-      requests.current.clear();
+      for (const controller of activeRequests.values()) controller.abort();
+      activeRequests.clear();
     };
   }, [open]);
 

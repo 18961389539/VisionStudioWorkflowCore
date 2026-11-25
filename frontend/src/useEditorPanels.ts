@@ -25,18 +25,20 @@ export function useEditorPanels() {
   const [productionOpen, setProductionOpen] = useState(false);
   const [spcOpen, setSpcOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [storageOpen, setStorageOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
   const [hardwareProvenanceOpen, setHardwareProvenanceOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const anyOpen = pluginsOpen || camerasOpen || robotsOpen || devicesOpen || jobsOpen || tracesOpen
     || commandOpen || validationOpen || modelPackagesOpen || modelAssetsOpen || tuningOpen || modulesOpen
-    || calibrationOpen || framesOpen || productionOpen || spcOpen || diagnosticsOpen || hardwareProvenanceOpen
+    || calibrationOpen || framesOpen || productionOpen || spcOpen || diagnosticsOpen || storageOpen || securityOpen || hardwareProvenanceOpen
     || aboutOpen || shortcutsOpen;
 
   const openers = useMemo<PanelOpeners>(() => ({
     setCalibrationOpen, setTracesOpen, setJobsOpen, setValidationOpen, setTuningOpen, setModulesOpen,
-    setCamerasOpen, setRobotsOpen, setDevicesOpen, setProductionOpen, setSpcOpen, setDiagnosticsOpen, setPluginsOpen,
+    setCamerasOpen, setRobotsOpen, setDevicesOpen, setProductionOpen, setSpcOpen, setDiagnosticsOpen, setStorageOpen, setSecurityOpen, setPluginsOpen,
     setModelPackagesOpen, setModelAssetsOpen, setFramesOpen, setHardwareProvenanceOpen, setShortcutsOpen, setAboutOpen
   }), []);
 
@@ -45,7 +47,7 @@ export function useEditorPanels() {
     jobsOpen, setJobsOpen, tracesOpen, setTracesOpen, traceRunId, setTraceRunId, commandOpen, setCommandOpen,
     validationOpen, setValidationOpen, modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
     tuningOpen, setTuningOpen, modulesOpen, setModulesOpen, calibrationOpen, setCalibrationOpen, framesOpen, setFramesOpen,
-    productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
+    productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, storageOpen, setStorageOpen, securityOpen, setSecurityOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
     aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen,
     anyOpen,
     openers

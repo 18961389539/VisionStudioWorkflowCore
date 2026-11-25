@@ -52,6 +52,32 @@ describe('追溯查询反馈', () => {
     expect(await screen.findByText('image.threshold')).toBeTruthy();
   });
 
+  it('以非阻塞抽屉打开并支持从节点报告定位回画布', async () => {
+    const onSelectNode = vi.fn();
+    const record = {
+      runId: 'run-locate', startedAt: new Date().toISOString(), source: 'job', jobId: 'job-1', jobVersion: 1,
+      workflowId: 'wf-1', workflowName: '流程', workflowHash: null, dependencyManifestHash: null,
+      executionStatus: 'Failed', disposition: 'NG', totalDurationMs: 12, nodeCount: 1, overlayCount: 0,
+      hasPreview: false, hasReplayInput: false, replaySourceNodeId: null, error: '失败', note: null,
+      nodeReports: [{ nodeId: 'thresh-1', nodeType: 'image.threshold', success: false, durationMs: 3, summary: {} }]
+    } as unknown as RunTraceRecord;
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) } as Response)));
+    vi.mocked(useTraceQuery).mockReturnValue({
+      data: { total: 1, offset: 0, limit: 50, items: [record] },
+      stats: null, storage: null, error: null, warnings: [],
+      loading: false, stale: false, rangeDescription: null, loadedAt: null, reload: vi.fn(),
+    });
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <TracePanel open onClose={vi.fn()} onSelectNode={onSelectNode} />
+      </ConfigProvider>
+    );
+
+    expect(document.querySelector('.ant-drawer')).not.toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: /定\s*位/ }));
+    expect(onSelectNode).toHaveBeenCalledWith('thresh-1');
+  });
+
   it('从运行结果跳转进来时直接筛到那次运行', () => {
     mount({}, { initialRunId: 'run-abc123' });
     expect(vi.mocked(useTraceQuery).mock.lastCall?.[1]).toMatchObject({ preset: 'week', runIdPrefix: 'run-abc123' });

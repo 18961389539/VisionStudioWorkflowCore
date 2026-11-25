@@ -9,6 +9,7 @@
 import { useEffect } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { InputRef } from 'antd';
+import { absoluteNodePosition, isCanvasGroup } from './canvasAnnotations';
 
 export type EditorClipboard = { nodes: Node[]; edges: Edge[] };
 
@@ -43,7 +44,23 @@ type EditorShortcutHandlers = {
   redo: () => void;
   /** 复制当前选中集合；返回是否真的复制了内容（决定是否 preventDefault） */
   copySelection: () => boolean;
-  deleteElements: (nodeIds: string[], edgeIds: string[]) => void;
+  /** 全选画布节点 */
+  selectAllNodes?: () => boolean;
+  /** 快速复制选中节点及内部连线 */
+  duplicateSelection?: () => boolean;
+  /** 适应画布视图 */
+  fitView?: () => void;
+  /** 运行整个流程 */
+  runWorkflow?: () => void;
+  /** F2：重命名当前选中的单个节点 */
+  requestRenameNode?: (nodeId: string) => void;
+  /** 断点会话快捷键仅在会话存在时接管浏览器默认行为。 */
+  debugSessionActive?: boolean;
+  debugBusy?: boolean;
+  continueDebugSession?: () => void;
+  runSelectedNodeInSession?: () => void;
+  endDebugSession?: () => void;
+  deleteElements: (nodeIds: string[], edgeIds: string[], bridge?: boolean) => void;
   pushHistory: (label: string) => void;
   setNodes: (updater: (current: Node[]) => Node[]) => void;
   setEdges: (updater: (current: Edge[]) => Edge[]) => void;
@@ -60,8 +77,9 @@ type EditorShortcutHandlers = {
 
 export function useEditorShortcuts(handlers: EditorShortcutHandlers): void {
   const {
-    nodeConfigurationId, overlayOpen, save, undo, redo, copySelection, deleteElements, pushHistory,
-    setNodes, setEdges, setSelectedId, messageApi, nodes, selectedNodeIds, selectedEdgeIds,
+    nodeConfigurationId, overlayOpen, save, undo, redo, copySelection, selectAllNodes, duplicateSelection, fitView, runWorkflow,
+    requestRenameNode, debugSessionActive, debugBusy, continueDebugSession, runSelectedNodeInSession, endDebugSession,
+    deleteElements, pushHistory, setNodes, setEdges, setSelectedId, messageApi, nodes, selectedNodeIds, selectedEdgeIds,
     searchInputRef, clipboardRef, pasteIndexRef
   } = handlers;
 
@@ -91,7 +109,49 @@ export function useEditorShortcuts(handlers: EditorShortcutHandlers): void {
       }
       // 输入控件内只保留原生编辑行为（保存与查找已在上面处理）。
       if (isEditableTarget(event.target as Element | null)) return;
+      if (event.key === 'F2') {
+        const explicitlySelected = nodes.find((node) => node.selected)?.id;
+        const targetId = explicitlySelected ?? (selectedEdgeIds.length > 0 ? undefined : selectedNodeIds[0]);
+        if (targetId && requestRenameNode) {
+          event.preventDefault();
+          requestRenameNode(targetId);
+        }
+        return;
+      }
+      if (debugSessionActive && !event.repeat) {
+        if (event.key === 'F5' && event.shiftKey) {
+          event.preventDefault();
+          if (!debugBusy) endDebugSession?.();
+          return;
+        }
+        if (event.key === 'F5') {
+          event.preventDefault();
+          if (!debugBusy) continueDebugSession?.();
+          return;
+        }
+        if (event.key === 'F10') {
+          event.preventDefault();
+          if (!debugBusy) runSelectedNodeInSession?.();
+          return;
+        }
+      }
       if (mod && !event.altKey) {
+        if (comboKey === 'a' && !event.shiftKey) {
+          if (selectAllNodes?.()) event.preventDefault();
+          return;
+        }
+        if (comboKey === 'd' && !event.shiftKey) {
+          if (duplicateSelection?.()) event.preventDefault();
+          return;
+        }
+        if (comboKey === '0' && !event.shiftKey) {
+          if (fitView) { event.preventDefault(); fitView(); }
+          return;
+        }
+        if (comboKey === 'enter' && event.shiftKey) {
+          if (runWorkflow) { event.preventDefault(); runWorkflow(); }
+          return;
+        }
         if (comboKey === 'z' && !event.shiftKey) { event.preventDefault(); undo(); return; }
         if ((comboKey === 'z' && event.shiftKey) || comboKey === 'y') { event.preventDefault(); redo(); return; }
         if (comboKey === 'c' && !event.shiftKey) {
@@ -106,17 +166,24 @@ export function useEditorShortcuts(handlers: EditorShortcutHandlers): void {
           pasteIndexRef.current += 1;
           const offset = 40 * pasteIndexRef.current;
           const idMap = new Map<string, string>();
+          clip.nodes.forEach((node) => idMap.set(node.id, `${node.type ?? node.data.typeKey ?? 'node'}-${crypto.randomUUID().slice(0, 8)}`));
+          const clipboardNodesById = new Map(clip.nodes.map((node) => [node.id, node]));
           const pastedNodes: Node[] = clip.nodes.map((node) => {
-            const id = `${String(node.data.typeKey ?? 'node')}-${crypto.randomUUID().slice(0, 8)}`;
-            idMap.set(node.id, id);
+            const id = idMap.get(node.id)!;
+            const parentId = node.parentId ? idMap.get(node.parentId) : undefined;
+            const position = node.parentId && !parentId ? absoluteNodePosition(node, clipboardNodesById) : node.position;
+            const data = isCanvasGroup(node) && Array.isArray(node.data.memberIds)
+              ? { ...node.data, memberIds: node.data.memberIds.map((memberId) => idMap.get(String(memberId))).filter((memberId): memberId is string => Boolean(memberId)) }
+              : { ...node.data };
             return {
               ...node,
               id,
+              ...(node.parentId ? { parentId, extent: parentId ? node.extent : undefined } : {}),
               selected: true,
-              position: { x: node.position.x + offset, y: node.position.y + offset },
+              position: { x: position.x + (parentId ? 0 : offset), y: position.y + (parentId ? 0 : offset) },
               measured: undefined,
               // 运行态字段不随粘贴继承
-              data: { ...node.data, status: 'idle', breakpoint: false, durationMs: undefined, error: undefined, disposition: undefined, summary: undefined }
+              data: { ...data, status: 'idle', breakpoint: false, durationMs: undefined, error: undefined, disposition: undefined, summary: undefined }
             };
           });
           const pastedEdges: Edge[] = clip.edges.map((edge) => ({
@@ -141,10 +208,10 @@ export function useEditorShortcuts(handlers: EditorShortcutHandlers): void {
         : selectedEdgeIds.length > 0 ? [] : selectedNodeIds;
       if (nodeIdsToDelete.length === 0 && selectedEdgeIds.length === 0) return;
       event.preventDefault();
-      deleteElements(nodeIdsToDelete, selectedEdgeIds);
+      deleteElements(nodeIdsToDelete, selectedEdgeIds, event.altKey);
     };
     // 捕获阶段监听：避免画布内部对按键的 stopPropagation 把删除快捷键吃掉
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [copySelection, deleteElements, messageApi, nodeConfigurationId, overlayOpen, nodes, pushHistory, redo, save, selectedEdgeIds, selectedNodeIds, setEdges, setNodes, undo, searchInputRef, clipboardRef, pasteIndexRef]);
+  }, [copySelection, continueDebugSession, debugBusy, debugSessionActive, deleteElements, duplicateSelection, endDebugSession, fitView, messageApi, nodeConfigurationId, overlayOpen, nodes, pushHistory, redo, requestRenameNode, runSelectedNodeInSession, runWorkflow, save, selectAllNodes, selectedEdgeIds, selectedNodeIds, setEdges, setNodes, setSelectedId, undo, searchInputRef, clipboardRef, pasteIndexRef]);
 }

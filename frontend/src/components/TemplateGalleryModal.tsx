@@ -21,11 +21,15 @@ type Props = {
   catalog: NodeCatalogItem[];
   /** 应用模板；宿主侧包装未保存守卫（guardUnsaved） */
   onApply: (key: DemoKey) => void;
+  /** 新建空白流程 */
+  onNewBlank?: () => void;
+  /** 从本地 JSON 文件导入 */
+  onImportJson?: () => void;
   /** 转去「打开已有流程」 */
   onOpenSaved: () => void;
 };
 
-export default function TemplateGalleryModal({ open, onClose, currentDemoKey, catalog, onApply, onOpenSaved }: Props) {
+export default function TemplateGalleryModal({ open, onClose, currentDemoKey, catalog, onApply, onNewBlank, onImportJson, onOpenSaved }: Props) {
   const [templateQuery, setTemplateQuery] = useState('');
   const [templateGroup, setTemplateGroup] = useState('all');
   const [templateSelected, setTemplateSelected] = useState<DemoKey | null>(null);
@@ -65,9 +69,11 @@ export default function TemplateGalleryModal({ open, onClose, currentDemoKey, ca
     <Modal
       open={open}
       title="从模板新建"
-      width={780}
+      width="min(780px, calc(100vw - 32px))"
       onCancel={onClose}
       footer={[
+        ...(onNewBlank ? [<Button key="blank" onClick={() => { onClose(); onNewBlank(); }}>新建空白流程</Button>] : []),
+        ...(onImportJson ? [<Button key="import" onClick={() => { onClose(); onImportJson(); }}>导入 JSON…</Button>] : []),
         <Button key="open" onClick={() => { onClose(); onOpenSaved(); }}>打开已有流程…</Button>,
         <Button key="cancel" onClick={onClose}>取消</Button>,
         <Button

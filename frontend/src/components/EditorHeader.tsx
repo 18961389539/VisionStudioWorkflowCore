@@ -13,18 +13,20 @@ import { type LayoutPreset, type LayoutState } from '../layout';
 
 type EditorHeaderProps = {
   menus: {
+    file?: MenuProps['items'];
     debug: MenuProps['items'];
     device: MenuProps['items'];
     production: MenuProps['items'];
     tools: MenuProps['items'];
     more: MenuProps;
   };
+  onOpenCommand: () => void;
   /** 当前布局预设（工具菜单的选中态；custom 表示手动调整过） */
   layoutPreset: LayoutState['preset'];
   onApplyLayoutPreset: (preset: LayoutPreset) => void;
   templates: { show: () => void; openSaved: () => void };
   debug: { inSession: boolean; statusText: string };
-  run: { running: boolean; debugBusy: boolean; onRun: () => void; onAbort: () => void; startedAt?: number };
+  run: { running: boolean; debugBusy: boolean; onRun: () => void; onAbort: () => void; startedAt?: number; progress?: { completed: number; total: number } };
   workflow: { name: string; id: string; onRename: (name: string) => void; dirty: boolean; lastSavedAt?: Date };
   validation: { status: string; summary?: string; needsRevalidate: boolean; issueCount: number; busy: boolean; onValidate: () => void };
   catalogError?: string;
@@ -35,7 +37,7 @@ type EditorHeaderProps = {
  * 运行中显示已用时间（2026-10-25）。长任务此前只有一个"中止"按钮：
  * 用户无法判断"后端在算"还是"连接掉了"，只能中止重来。
  */
-function RunClock({ startedAt }: { startedAt?: number }) {
+function RunClock({ startedAt, label, progress }: { startedAt?: number; label: string; progress?: { completed: number; total: number } }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -45,10 +47,11 @@ function RunClock({ startedAt }: { startedAt?: number }) {
   const text = seconds >= 3600
     ? `${Math.floor(seconds / 3600)}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
     : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-  return <span className="run-elapsed" title="本次运行已用时间">已用 {text}</span>;
+  const progressText = progress && progress.total > 0 ? ` · ${progress.completed}/${progress.total}` : '';
+  return <span className="run-elapsed" title={label}>{label} {text}{progressText}</span>;
 }
 
-export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset, templates, debug, run, workflow, validation, catalogError, save }: EditorHeaderProps) {
+export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset, onOpenCommand, templates, debug, run, workflow, validation, catalogError, save }: EditorHeaderProps) {
   // 语言切换入口此前不存在：词表与 Provider 都建好了，用户却只能靠改 localStorage 换语言（2026-10-25）。
   const { lang, toggleLang, dateLocale: locale } = useI18n();
   // 顶栏是英文界面里最显眼的一层：先把这一层的按钮/状态切过来，菜单项与面板内部文案仍按面板逐个迁移。
@@ -60,7 +63,12 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
 
         <div className="topbar-center">
           <Button className="topbar-file-action" type="text" onClick={templates.show}>{text('从模板新建', 'New from template')}</Button>
-            <Button className="topbar-file-action" type="text" onClick={() => void templates.openSaved()}>打开流程</Button>
+          <Button className="topbar-file-action" type="text" onClick={() => void templates.openSaved()}>{text('打开流程', 'Open workflow')}</Button>
+          {menus.file && (
+            <Dropdown menu={{ items: menus.file }} trigger={['click']}>
+              <Button className="topbar-file-action" type="text">{text('文件', 'File')} <span className="menu-caret">▾</span></Button>
+            </Dropdown>
+          )}
           <span className="topbar-divider" />
           <Dropdown menu={{ items: menus.debug }} trigger={['click']}>
             <Button className="topbar-domain-action" type={debug.inSession ? 'primary' : 'default'} title={debug.inSession ? '打开调试菜单继续、运行节点或结束会话' : '节点运行、断点及调试会话'}>{debug.inSession ? `${text('调试', 'Debug')} · ${debug.statusText}` : text('运行与调试', 'Run & debug')} <span className="menu-caret">▾</span></Button>
@@ -87,6 +95,9 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
             <Button type="text" className="topbar-domain-action">{text('工具', 'Tools')} <span className="menu-caret">▾</span></Button>
           </Dropdown>
         </div>
+        <Button className="topbar-command" type="text" title={text('搜索命令、面板、节点与画布内容', 'Search commands, panels, nodes and canvas')}
+          aria-label={text('打开命令面板', 'Open command palette')}
+          onClick={onOpenCommand}>{text('⌕ 命令', '⌕ Search')} <kbd>Ctrl+K</kbd></Button>
         <Dropdown trigger={['click']} menu={menus.more}>
           <Button className="topbar-more">{text('更多', 'More')} <span className="menu-caret">▾</span></Button>
         </Dropdown>
@@ -111,7 +122,7 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
                     workflow.onRename(decision.name);
                   }
                 },
-                tooltip: '点击重命名工作流',
+                tooltip: text('点击重命名工作流', 'Click to rename workflow'),
                 icon: <span className="workflow-rename-icon">✎</span>
               }}
             >{workflow.name}</Typography.Text>
@@ -119,10 +130,10 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
               className="workflow-dirty"
               color={workflow.dirty ? 'gold' : 'default'}
               title={workflow.dirty
-                ? '有未保存的修改（Ctrl+S 保存）'
+                ? text('有未保存的修改（Ctrl+S 保存）', 'Unsaved changes (Ctrl+S to save)')
                 : workflow.lastSavedAt
-                  ? `已保存 · ${workflow.lastSavedAt.toLocaleTimeString(locale)}`
-                  : '自上次保存或加载以来没有修改'}
+                  ? `${text('已保存', 'Saved')} · ${workflow.lastSavedAt.toLocaleTimeString(locale)}`
+                  : text('自上次保存或加载以来没有修改', 'No changes since last save or load')}
             >
               {workflow.dirty ? text('未保存', 'Unsaved') : workflow.lastSavedAt ? `${text('已保存', 'Saved')} ${workflow.lastSavedAt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}` : text('已保存', 'Saved')}
             </Tag>
@@ -133,7 +144,7 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
               用户需要随时可见的状态；恢复成功后自动消失 */}
           {catalogError && (
             <Tooltip title={`后端节点目录不可用，正在使用本地回退目录（节点参数可能与运行时不一致）：${catalogError}`}>
-              <Tag color="orange" className="catalog-fallback-tag">目录回退</Tag>
+              <Tag color="orange" className="catalog-fallback-tag">{text('目录回退', 'Catalog fallback')}</Tag>
             </Tooltip>
           )}
 
@@ -160,8 +171,8 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
           {/* P1：运行中把主按钮切换为“中止”——前端断开请求即触发后端取消（见 useRunController.abortRun） */}
           {run.running
             ? <>
-                <RunClock startedAt={run.startedAt} />
-                <Button danger onClick={run.onAbort} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">{text('中止', 'Abort')}</Button>
+                <RunClock startedAt={run.startedAt} label={text('已用', 'Elapsed')} progress={run.progress} />
+                <Button danger onClick={run.onAbort} title={text('中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾', 'Abort run and notify backend cancellation')}>{text('中止', 'Abort')}</Button>
               </>
             : <Button type="primary" onClick={run.onRun} disabled={run.debugBusy || debug.inSession}
               title={debug.inSession

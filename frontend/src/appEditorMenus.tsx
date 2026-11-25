@@ -10,6 +10,9 @@ import type { Node } from '@xyflow/react';
 import type { PaletteCommand } from './components/CommandPalette';
 import type { LayoutPreset } from './layout';
 import type { NodeConfigurationTab } from './components/NodeConfigurationDialog';
+import type { Lang } from './i18n/lang';
+
+const txt = (lang: Lang, zh: string, en: string) => (lang === 'en' ? en : zh);
 
 /** 面板/弹窗开关：菜单项与命令面板共用。 */
 export type PanelOpeners = {
@@ -25,6 +28,8 @@ export type PanelOpeners = {
   setProductionOpen: (value: boolean) => void;
   setSpcOpen: (value: boolean) => void;
   setDiagnosticsOpen: (value: boolean) => void;
+  setStorageOpen: (value: boolean) => void;
+  setSecurityOpen: (value: boolean) => void;
   setPluginsOpen: (value: boolean) => void;
   setModelPackagesOpen: (value: boolean) => void;
   setModelAssetsOpen: (value: boolean) => void;
@@ -38,6 +43,11 @@ export type EditorCommands = {
   run: () => void;
   validate: () => void;
   save: () => void;
+  newBlank?: () => void;
+  saveAs?: () => void;
+  importJson?: () => void;
+  exportJson?: () => void;
+  autoLayout?: () => void;
   fitView: () => void;
   toggleFocusMode: () => void;
   toggleTheme: () => void;
@@ -46,34 +56,42 @@ export type EditorCommands = {
 
 export type PaletteContext = PanelOpeners & EditorCommands & { focusMode: boolean };
 
-export function buildPaletteTargets(focusMode: boolean): PaletteCommand[] {
+export function buildPaletteTargets(focusMode: boolean, lang: Lang = 'zh'): PaletteCommand[] {
+  const t = (zh: string, en: string) => txt(lang, zh, en);
   return [
-    { key: 'run', title: '运行流程', group: '命令', hint: 'Run', keywords: 'run execute' },
-    { key: 'validate', title: '校验流程', group: '命令', hint: 'Validate', keywords: 'validate check' },
-    { key: 'save', title: '保存工作流', group: '命令', hint: 'Ctrl+S', keywords: 'save' },
-    { key: 'fit', title: '适应画布', group: '命令', hint: 'Fit view', keywords: 'fit zoom 缩放' },
-    { key: 'focus', title: focusMode ? '退出专注画布' : '专注画布', group: '命令', keywords: 'focus fullscreen 专注' },
-    { key: 'theme', title: '切换深浅主题', group: '命令', keywords: 'theme dark light 主题' },
+    { key: 'run', title: t('运行流程', 'Run workflow'), group: '命令', hint: 'Ctrl+Shift+Enter', keywords: 'run execute' },
+    { key: 'validate', title: t('校验流程', 'Validate workflow'), group: '命令', hint: 'Validate', keywords: 'validate check' },
+    { key: 'save', title: t('保存工作流', 'Save workflow'), group: '命令', hint: 'Ctrl+S', keywords: 'save' },
+    { key: 'save-as', title: t('另存为新工作流…', 'Save workflow as…'), group: '命令', keywords: 'save as copy duplicate 另存为' },
+    { key: 'new-blank', title: t('新建空白流程', 'New blank workflow'), group: '命令', keywords: 'new blank empty 新建 空白' },
+    { key: 'import-json', title: t('导入工作流 JSON…', 'Import workflow JSON…'), group: '命令', keywords: 'import json file 导入' },
+    { key: 'export-json', title: t('导出工作流 JSON', 'Export workflow JSON'), group: '命令', keywords: 'export json download 导出' },
+    { key: 'auto-layout', title: t('自动整理画布布局', 'Auto-layout canvas'), group: '命令', keywords: 'auto layout arrange tidy 整理 排布' },
+    { key: 'fit', title: t('适应画布', 'Fit view'), group: '命令', hint: 'Ctrl+0', keywords: 'fit zoom 缩放' },
+    { key: 'focus', title: focusMode ? t('退出专注画布', 'Exit focus mode') : t('专注画布', 'Focus canvas'), group: '命令', keywords: 'focus fullscreen 专注' },
+    { key: 'theme', title: t('切换深浅主题', 'Toggle light/dark theme'), group: '命令', keywords: 'theme dark light 主题' },
     { key: 'lang', title: '切换界面语言 / Switch language', group: '命令', keywords: 'language lang 语言 english' },
-    { key: 'shortcuts', title: '键盘快捷键', group: '命令', keywords: 'shortcut keyboard 快捷键 help' },
-    { key: 'about', title: '关于 VisionStudio', group: '命令', keywords: 'about version 版本 关于' },
-    { key: 'panel:calibration', title: '标定', group: '面板', keywords: 'calibration' },
-    { key: 'panel:traces', title: '运行追溯', group: '面板', keywords: 'trace' },
-    { key: 'panel:jobs', title: '配方管理', group: '面板', keywords: 'job recipe' },
-    { key: 'panel:validation', title: '数据集 / 批量验证', group: '面板', keywords: 'dataset validation' },
-    { key: 'panel:tuning', title: '参数调优', group: '面板', keywords: 'tuning' },
-    { key: 'panel:modules', title: '可复用模块', group: '面板', keywords: 'module' },
-    { key: 'panel:cameras', title: '相机采集', group: '面板', keywords: 'camera' },
-    { key: 'panel:robots', title: '机器人', group: '面板', keywords: 'robot' },
-    { key: 'panel:devices', title: '设备运行时', group: '面板', keywords: 'device plc' },
-    { key: 'panel:production', title: '生产运行', group: '面板', keywords: 'production' },
-    { key: 'panel:spc', title: 'SPC 看板', group: '面板', keywords: 'spc control chart 控制图 过程能力' },
-    { key: 'panel:diagnostics', title: '诊断中心', group: '面板', keywords: 'diagnostics' },
-    { key: 'panel:plugins', title: '插件包管理', group: '面板', keywords: 'plugin' },
-    { key: 'panel:models', title: '外部训练包', group: '面板', keywords: 'model package' },
-    { key: 'panel:model-assets', title: '模型资产', group: '面板', keywords: 'model asset shape 资产' },
-    { key: 'panel:frames', title: '坐标系树', group: '面板', keywords: 'frame 坐标' },
-    { key: 'panel:provenance', title: '硬件溯源', group: '面板', keywords: 'provenance' }
+    { key: 'shortcuts', title: t('键盘快捷键', 'Keyboard shortcuts'), group: '命令', keywords: 'shortcut keyboard 快捷键 help' },
+    { key: 'about', title: t('关于 VisionStudio', 'About VisionStudio'), group: '命令', keywords: 'about version 版本 关于' },
+    { key: 'panel:calibration', title: t('标定', 'Calibration'), group: '面板', keywords: 'calibration' },
+    { key: 'panel:traces', title: t('运行追溯', 'Traceability'), group: '面板', keywords: 'trace' },
+    { key: 'panel:jobs', title: t('配方管理', 'Recipes & jobs'), group: '面板', keywords: 'job recipe' },
+    { key: 'panel:validation', title: t('数据集 / 批量验证', 'Dataset validation'), group: '面板', keywords: 'dataset validation' },
+    { key: 'panel:tuning', title: t('参数调优', 'Parameter tuning'), group: '面板', keywords: 'tuning' },
+    { key: 'panel:modules', title: t('可复用模块', 'Reusable modules'), group: '面板', keywords: 'module' },
+    { key: 'panel:cameras', title: t('相机采集', 'Cameras'), group: '面板', keywords: 'camera' },
+    { key: 'panel:robots', title: t('机器人', 'Robots'), group: '面板', keywords: 'robot' },
+    { key: 'panel:devices', title: t('设备运行时', 'Devices / PLC'), group: '面板', keywords: 'device plc' },
+    { key: 'panel:production', title: t('生产运行', 'Production'), group: '面板', keywords: 'production' },
+    { key: 'panel:spc', title: t('SPC 看板', 'SPC dashboard'), group: '面板', keywords: 'spc control chart 控制图 过程能力' },
+    { key: 'panel:diagnostics', title: t('诊断中心', 'Diagnostics'), group: '面板', keywords: 'diagnostics' },
+    { key: 'panel:storage', title: t('存储维护与备份', 'Storage & backups'), group: '面板', keywords: 'storage backup restore 备份 还原' },
+    { key: 'panel:security', title: t('安全与运维管理', 'Security & admin'), group: '面板', keywords: 'security user token audit 用户 令牌 审计' },
+    { key: 'panel:plugins', title: t('插件包管理', 'Plugin packages'), group: '面板', keywords: 'plugin' },
+    { key: 'panel:models', title: t('外部训练包', 'Model packages'), group: '面板', keywords: 'model package' },
+    { key: 'panel:model-assets', title: t('模型资产', 'Model assets'), group: '面板', keywords: 'model asset shape 资产' },
+    { key: 'panel:frames', title: t('坐标系树', 'Coordinate frames'), group: '面板', keywords: 'frame 坐标' },
+    { key: 'panel:provenance', title: t('硬件溯源', 'Hardware provenance'), group: '面板', keywords: 'provenance' }
   ];
 }
 
@@ -82,6 +100,11 @@ export function runPaletteCommand(key: string, context: PaletteContext): void {
     case 'run': context.run(); return;
     case 'validate': context.validate(); return;
     case 'save': context.save(); return;
+    case 'save-as': context.saveAs?.(); return;
+    case 'new-blank': context.newBlank?.(); return;
+    case 'import-json': context.importJson?.(); return;
+    case 'export-json': context.exportJson?.(); return;
+    case 'auto-layout': context.autoLayout?.(); return;
     case 'fit': context.fitView(); return;
     case 'focus': context.toggleFocusMode(); return;
     case 'theme': context.toggleTheme(); return;
@@ -100,6 +123,8 @@ export function runPaletteCommand(key: string, context: PaletteContext): void {
     case 'panel:production': context.setProductionOpen(true); return;
     case 'panel:spc': context.setSpcOpen(true); return;
     case 'panel:diagnostics': context.setDiagnosticsOpen(true); return;
+    case 'panel:storage': context.setStorageOpen(true); return;
+    case 'panel:security': context.setSecurityOpen(true); return;
     case 'panel:plugins': context.setPluginsOpen(true); return;
     case 'panel:models': context.setModelPackagesOpen(true); return;
     case 'panel:model-assets': context.setModelAssetsOpen(true); return;
@@ -158,11 +183,12 @@ export function buildDebugMenuItems(state: DebugMenuState, handlers: DebugMenuHa
 
 export type ContextMenuHandlers = {
   openNodeConfiguration: (nodeId: string, tab?: NodeConfigurationTab) => void;
+  requestRenameNode: (nodeId: string) => void;
   runNode: () => void;
   runFromHere: () => void;
   toggleBreakpoint: () => void;
   copySelection: () => boolean;
-  deleteElements: (nodeIds: string[], edgeIds: string[]) => void;
+  deleteElements: (nodeIds: string[], edgeIds: string[], bridge?: boolean) => void;
 };
 
 export type ContextMenuState = {
@@ -171,12 +197,16 @@ export type ContextMenuState = {
   anyBusy: boolean;
   debugSession: { status: string } | undefined;
   nodeContextMenu: { nodeId: string } | undefined;
+  lang?: Lang;
 };
 
 export function buildNodeContextMenuItems(state: ContextMenuState, handlers: ContextMenuHandlers): NonNullable<MenuProps['items']> {
-  const { contextNode, contextTargetSuffix, anyBusy, debugSession, nodeContextMenu } = state;
+  const { contextNode, contextTargetSuffix, anyBusy, debugSession, nodeContextMenu, lang = 'zh' } = state;
+  const t = (zh: string, en: string) => txt(lang, zh, en);
   return [
     { key: 'configure', label: `配置节点${contextTargetSuffix}`, disabled: !contextNode, onClick: () => { if (contextNode) handlers.openNodeConfiguration(contextNode.id); } },
+    { key: 'rename', label: t('重命名节点…', 'Rename node…'), disabled: !contextNode || anyBusy,
+      onClick: () => { if (contextNode) handlers.requestRenameNode(contextNode.id); } },
     { key: 'view-image', label: `查看图像${contextTargetSuffix}`, disabled: !contextNode, onClick: () => { if (contextNode) handlers.openNodeConfiguration(contextNode.id, 'image'); } },
     { key: 'run-node', label: `运行此节点${contextTargetSuffix}`, disabled: anyBusy || Boolean(debugSession) || !contextNode || contextNode.data.typeKey === 'module.call', onClick: handlers.runNode },
     { key: 'run-from-here', label: `从此处运行${contextTargetSuffix}`, disabled: anyBusy || Boolean(debugSession) || !contextNode || contextNode.data.typeKey === 'module.call', onClick: handlers.runFromHere },
@@ -187,26 +217,28 @@ export function buildNodeContextMenuItems(state: ContextMenuState, handlers: Con
   ];
 }
 
-export function buildDeviceMenuItems(openers: PanelOpeners): NonNullable<MenuProps['items']> {
+export function buildDeviceMenuItems(openers: PanelOpeners, lang: Lang = 'zh'): NonNullable<MenuProps['items']> {
+  const t = (zh: string, en: string) => txt(lang, zh, en);
   return [
-    { key: 'cameras', label: '相机', onClick: () => openers.setCamerasOpen(true) },
-    { key: 'robots', label: '机器人', onClick: () => openers.setRobotsOpen(true) },
-    { key: 'devices', label: '设备 / PLC', onClick: () => openers.setDevicesOpen(true) },
+    { key: 'cameras', label: t('相机', 'Cameras'), onClick: () => openers.setCamerasOpen(true) },
+    { key: 'robots', label: t('机器人', 'Robots'), onClick: () => openers.setRobotsOpen(true) },
+    { key: 'devices', label: t('设备 / PLC', 'Devices / PLC'), onClick: () => openers.setDevicesOpen(true) },
     { type: 'divider' },
-    { key: 'calibration', label: '标定', onClick: () => openers.setCalibrationOpen(true) },
-    { key: 'frames', label: '坐标系', onClick: () => openers.setFramesOpen(true) },
+    { key: 'calibration', label: t('标定', 'Calibration'), onClick: () => openers.setCalibrationOpen(true) },
+    { key: 'frames', label: t('坐标系', 'Frames'), onClick: () => openers.setFramesOpen(true) },
     { type: 'divider' },
-    { key: 'hardware', label: '硬件信息', onClick: () => openers.setHardwareProvenanceOpen(true) },
-    { key: 'diagnostics', label: '诊断中心', onClick: () => openers.setDiagnosticsOpen(true) }
+    { key: 'hardware', label: t('硬件信息', 'Hardware provenance'), onClick: () => openers.setHardwareProvenanceOpen(true) },
+    { key: 'diagnostics', label: t('诊断中心', 'Diagnostics'), onClick: () => openers.setDiagnosticsOpen(true) }
   ];
 }
 
-export function buildProductionMenuItems(openers: PanelOpeners): NonNullable<MenuProps['items']> {
+export function buildProductionMenuItems(openers: PanelOpeners, lang: Lang = 'zh'): NonNullable<MenuProps['items']> {
+  const t = (zh: string, en: string) => txt(lang, zh, en);
   return [
-    { key: 'jobs', label: '配方管理', onClick: () => openers.setJobsOpen(true) },
-    { key: 'traces', label: '运行追溯', onClick: () => openers.setTracesOpen(true) },
-    { key: 'production', label: '生产运行', onClick: () => openers.setProductionOpen(true) },
-    { key: 'spc', label: 'SPC 看板', onClick: () => openers.setSpcOpen(true) }
+    { key: 'jobs', label: t('配方管理', 'Recipes'), onClick: () => openers.setJobsOpen(true) },
+    { key: 'traces', label: t('运行追溯', 'Traceability'), onClick: () => openers.setTracesOpen(true) },
+    { key: 'production', label: t('生产运行', 'Production'), onClick: () => openers.setProductionOpen(true) },
+    { key: 'spc', label: t('SPC 看板', 'SPC dashboard'), onClick: () => openers.setSpcOpen(true) }
   ];
 }
 
@@ -224,49 +256,79 @@ export type ToolMenuContext = {
   reopenOnboarding: () => void;
 };
 
-export function buildToolMenuItems(context: ToolMenuContext, openers: PanelOpeners): NonNullable<MenuProps['items']> {
+export function buildToolMenuItems(context: ToolMenuContext, openers: PanelOpeners, lang: Lang = 'zh'): NonNullable<MenuProps['items']> {
+  const t = (zh: string, en: string) => txt(lang, zh, en);
   return [
     // 目录/插件规模从顶栏收进菜单，降低顶栏视觉权重
-    { type: 'group', label: `节点目录 · ${context.catalogSource === 'runtime' ? '运行时' : '本地'} ${context.catalogCount}（schema ${context.catalogSchemaVersion}）` },
-    { type: 'group', label: `插件 ${context.loadedPluginCount} 个已加载` },
+    { type: 'group', label: `${t('节点目录', 'Catalog')} · ${context.catalogSource === 'runtime' ? t('运行时', 'runtime') : t('本地', 'local')} ${context.catalogCount}（schema ${context.catalogSchemaVersion}）` },
+    { type: 'group', label: t(`插件 ${context.loadedPluginCount} 个已加载`, `${context.loadedPluginCount} plugins loaded`) },
     { type: 'divider' },
-    { key: 'undo', label: `撤销${context.history.undoLabel ? ` · ${context.history.undoLabel}` : ''}（Ctrl+Z）`, disabled: !context.history.canUndo, onClick: context.undo },
-    { key: 'redo', label: `重做${context.history.redoLabel ? ` · ${context.history.redoLabel}` : ''}（Ctrl+Shift+Z）`, disabled: !context.history.canRedo, onClick: context.redo },
-    { key: 'shortcuts', label: '键盘快捷键…', onClick: () => openers.setShortcutsOpen(true) },
-    { key: 'onboarding', label: '重新打开上手引导', onClick: context.reopenOnboarding },
+    { key: 'undo', label: `${t('撤销', 'Undo')}${context.history.undoLabel ? ` · ${context.history.undoLabel}` : ''}（Ctrl+Z）`, disabled: !context.history.canUndo, onClick: context.undo },
+    { key: 'redo', label: `${t('重做', 'Redo')}${context.history.redoLabel ? ` · ${context.history.redoLabel}` : ''}（Ctrl+Shift+Z）`, disabled: !context.history.canRedo, onClick: context.redo },
+    { key: 'shortcuts', label: t('键盘快捷键…', 'Keyboard shortcuts…'), onClick: () => openers.setShortcutsOpen(true) },
+    { key: 'onboarding', label: t('重新打开上手引导', 'Reopen onboarding guide'), onClick: context.reopenOnboarding },
     { type: 'divider' },
-    { key: 'plugins', label: '插件', onClick: () => openers.setPluginsOpen(true) },
-    { key: 'modules', label: '可复用模块', onClick: () => openers.setModulesOpen(true) },
-    { key: 'tuning', label: '参数调优', onClick: () => openers.setTuningOpen(true) },
-    { key: 'model-packages', label: '外部训练包', onClick: () => openers.setModelPackagesOpen(true) },
-    { key: 'model-assets', label: '模型资产', onClick: () => openers.setModelAssetsOpen(true) },
-    { key: 'validation', label: '数据集验证', onClick: () => openers.setValidationOpen(true) },
+    { key: 'plugins', label: t('插件', 'Plugins'), onClick: () => openers.setPluginsOpen(true) },
+    { key: 'modules', label: t('可复用模块', 'Reusable modules'), onClick: () => openers.setModulesOpen(true) },
+    { key: 'tuning', label: t('参数调优', 'Parameter tuning'), onClick: () => openers.setTuningOpen(true) },
+    { key: 'model-packages', label: t('外部训练包', 'Model packages'), onClick: () => openers.setModelPackagesOpen(true) },
+    { key: 'model-assets', label: t('模型资产', 'Model assets'), onClick: () => openers.setModelAssetsOpen(true) },
+    { key: 'validation', label: t('数据集验证', 'Dataset validation'), onClick: () => openers.setValidationOpen(true) },
+    { key: 'storage', label: t('存储维护与备份', 'Storage & backups'), onClick: () => openers.setStorageOpen(true) },
+    { key: 'security', label: t('安全与运维管理', 'Security & admin'), onClick: () => openers.setSecurityOpen(true) },
     { type: 'divider' },
-    { key: 'layout-edit', label: '布局：标准布局' },
-    { key: 'layout-image', label: '布局：宽画布' },
-    { key: 'layout-reset', label: '布局：复位为预设尺寸' },
+    { key: 'layout-edit', label: t('布局：标准布局', 'Layout: Standard') },
+    { key: 'layout-image', label: t('布局：宽画布', 'Layout: Wide') },
+    { key: 'layout-reset', label: t('布局：复位为预设尺寸', 'Layout: Reset sizes') },
     { type: 'divider' },
-    { key: 'load', label: '加载已保存工作流', onClick: () => context.openWorkflowPicker() },
-    { key: 'theme', label: context.themeMode === 'dark' ? '切换到浅色主题' : '切换到深色主题', onClick: context.toggleTheme },
-    { key: 'about', label: '关于 VisionStudio', onClick: () => openers.setAboutOpen(true) }
+    { key: 'load', label: t('加载已保存工作流', 'Open saved workflow'), onClick: () => context.openWorkflowPicker() },
+    { key: 'theme', label: context.themeMode === 'dark' ? t('切换到浅色主题', 'Switch to light theme') : t('切换到深色主题', 'Switch to dark theme'), onClick: context.toggleTheme },
+    { key: 'about', label: t('关于 VisionStudio', 'About VisionStudio'), onClick: () => openers.setAboutOpen(true) }
+  ];
+}
+
+export type FileMenuHandlers = {
+  newBlank: () => void;
+  saveAs: () => void;
+  importJson: () => void;
+  exportJson: () => void;
+};
+
+export function buildFileMenuItems(handlers: FileMenuHandlers, lang: Lang = 'zh'): NonNullable<MenuProps['items']> {
+  const t = (zh: string, en: string) => txt(lang, zh, en);
+  return [
+    { key: 'file-new-blank', label: t('新建空白流程', 'New blank workflow'), onClick: handlers.newBlank },
+    { key: 'file-save-as', label: t('另存为…', 'Save as…'), onClick: handlers.saveAs },
+    { type: 'divider' },
+    { key: 'file-import-json', label: t('导入工作流 JSON…', 'Import workflow JSON…'), onClick: handlers.importJson },
+    { key: 'file-export-json', label: t('导出工作流 JSON', 'Export workflow JSON'), onClick: handlers.exportJson },
   ];
 }
 
 export type MoreMenuContext = {
   showTemplates: () => void;
   openWorkflowPicker: () => void;
+  newBlank?: () => void;
+  saveAs?: () => void;
+  importJson?: () => void;
+  exportJson?: () => void;
   applyLayoutPreset: (preset: LayoutPreset) => void;
   layoutPreset: LayoutPreset | 'custom';
 };
 
 export function buildMoreMenu(
   context: MoreMenuContext, debugMenuItems: NonNullable<MenuProps['items']>, deviceMenuItems: NonNullable<MenuProps['items']>,
-  productionMenuItems: NonNullable<MenuProps['items']>, toolMenuItems: NonNullable<MenuProps['items']>
+  productionMenuItems: NonNullable<MenuProps['items']>, toolMenuItems: NonNullable<MenuProps['items']>, lang: Lang = 'zh'
 ): MenuProps {
+  const t = (zh: string, en: string) => txt(lang, zh, en);
   return {
     items: [
-      { key: 'more-template', label: '从模板新建', onClick: context.showTemplates },
-      { key: 'more-open', label: '打开已有流程', onClick: () => context.openWorkflowPicker() },
+      { key: 'more-template', label: t('从模板新建', 'New from template'), onClick: context.showTemplates },
+      { key: 'more-open', label: t('打开已有流程', 'Open workflow'), onClick: () => context.openWorkflowPicker() },
+      ...(context.newBlank ? [{ key: 'more-new-blank', label: t('新建空白流程', 'New blank workflow'), onClick: context.newBlank }] : []),
+      ...(context.saveAs ? [{ key: 'more-save-as', label: t('另存为…', 'Save as…'), onClick: context.saveAs }] : []),
+      ...(context.importJson ? [{ key: 'more-import-json', label: t('导入工作流 JSON…', 'Import workflow JSON…'), onClick: context.importJson }] : []),
+      ...(context.exportJson ? [{ key: 'more-export-json', label: t('导出工作流 JSON', 'Export workflow JSON'), onClick: context.exportJson }] : []),
       { type: 'divider' },
       ...debugMenuItems,
       ...deviceMenuItems,

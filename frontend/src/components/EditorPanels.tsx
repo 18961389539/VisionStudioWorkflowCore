@@ -15,6 +15,8 @@ const RobotPanel = lazy(() => import('./RobotPanel'));
 const DevicePanel = lazy(() => import('./DevicePanel'));
 const ProductionPanel = lazy(() => import('./ProductionPanel'));
 const DiagnosticsPanel = lazy(() => import('./DiagnosticsPanel'));
+const StoragePanel = lazy(() => import('./StoragePanel'));
+const SecurityAdminPanel = lazy(() => import('./SecurityAdminPanel'));
 const JobPanel = lazy(() => import('./JobPanel'));
 const TracePanel = lazy(() => import('./TracePanel'));
 const DatasetValidationPanel = lazy(() => import('./DatasetValidationPanel'));
@@ -32,6 +34,7 @@ const SpcDashboard = lazy(() => import('./SpcDashboard'));
 export type EditorPanelsProps = {
   camerasOpen: boolean;
   setCamerasOpen: (value: boolean) => void;
+  cameraInitialTab?: 'acquisition' | 'media';
   robotsOpen: boolean;
   setRobotsOpen: (value: boolean) => void;
   devicesOpen: boolean;
@@ -51,12 +54,17 @@ export type EditorPanelsProps = {
   setTracesOpen: (value: boolean) => void;
   traceRunId: string | undefined;
   setTraceRunId: (value: string | undefined) => void;
+  onSelectNode?: (nodeId: string) => void;
   modelPackagesOpen: boolean;
   setModelPackagesOpen: (value: boolean) => void;
   modelAssetsOpen: boolean;
   setModelAssetsOpen: (value: boolean) => void;
   validationOpen: boolean;
   setValidationOpen: (value: boolean) => void;
+  validationWorkflow?: WorkflowPayload;
+  validationRecipeTarget?: { jobId: string; version: number };
+  onOpenValidation?: (workflow?: WorkflowPayload, target?: { jobId: string; version: number }) => void;
+  onCloseValidation?: () => void;
   tuningOpen: boolean;
   setTuningOpen: (value: boolean) => void;
   catalog: NodeCatalogItem[];
@@ -68,10 +76,18 @@ export type EditorPanelsProps = {
   upgradeSelectedModule: (version: WorkflowModuleVersion) => void;
   productionOpen: boolean;
   setProductionOpen: (value: boolean) => void;
+  productionInitialJobId?: string;
+  productionInitialView?: 'operator' | 'stations' | 'deliveries';
+  onOpenProduction?: (jobId: string, view: 'operator' | 'stations' | 'deliveries') => void;
+  onCloseProduction?: () => void;
   spcOpen: boolean;
   setSpcOpen: (value: boolean) => void;
   diagnosticsOpen: boolean;
   setDiagnosticsOpen: (value: boolean) => void;
+  storageOpen: boolean;
+  setStorageOpen: (value: boolean) => void;
+  securityOpen: boolean;
+  setSecurityOpen: (value: boolean) => void;
   aboutOpen: boolean;
   setAboutOpen: (value: boolean) => void;
   hardwareProvenanceOpen: boolean;
@@ -82,20 +98,22 @@ export type EditorPanelsProps = {
 };
 
 export default function EditorPanels({
-  camerasOpen, setCamerasOpen, robotsOpen, setRobotsOpen, devicesOpen, setDevicesOpen,
+  camerasOpen, setCamerasOpen, cameraInitialTab, robotsOpen, setRobotsOpen, devicesOpen, setDevicesOpen,
   framesOpen, setFramesOpen, calibrationOpen, setCalibrationOpen, selectedNode, applyCalibrationParameters,
   jobsOpen, setJobsOpen, workflowPayload, workflowChanges, applyResult,
-  tracesOpen, setTracesOpen, traceRunId, setTraceRunId,
+  tracesOpen, setTracesOpen, traceRunId, setTraceRunId, onSelectNode,
   modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
-  validationOpen, setValidationOpen, tuningOpen, setTuningOpen, catalog, selectedId, messageApi,
+  validationOpen, setValidationOpen, validationWorkflow, validationRecipeTarget, onOpenValidation, onCloseValidation,
+  tuningOpen, setTuningOpen, catalog, selectedId, messageApi,
   modulesOpen, setModulesOpen, insertModule, upgradeSelectedModule,
-  productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen,
-  aboutOpen, setAboutOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
+  productionOpen, setProductionOpen, productionInitialJobId, productionInitialView, onOpenProduction, onCloseProduction,
+  spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, storageOpen, setStorageOpen,
+  securityOpen, setSecurityOpen, aboutOpen, setAboutOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
   pluginsOpen, setPluginsOpen, refreshCatalog
 }: EditorPanelsProps) {
   return (
     <>
-      <LazyPanel open={camerasOpen} label="相机" onClose={() => setCamerasOpen(false)}><CameraPanel open onClose={() => setCamerasOpen(false)} /></LazyPanel>
+      <LazyPanel open={camerasOpen} label="相机" onClose={() => setCamerasOpen(false)}><CameraPanel open initialTab={cameraInitialTab} onClose={() => setCamerasOpen(false)} /></LazyPanel>
       <LazyPanel open={robotsOpen} label="机器人" onClose={() => setRobotsOpen(false)}><RobotPanel open onClose={() => setRobotsOpen(false)} /></LazyPanel>
       <LazyPanel open={devicesOpen} label="设备" onClose={() => setDevicesOpen(false)}><DevicePanel open onClose={() => setDevicesOpen(false)} /></LazyPanel>
       <LazyPanel open={framesOpen} label="图像帧" onClose={() => setFramesOpen(false)}><FrameTreePanel open onClose={() => setFramesOpen(false)} /></LazyPanel>
@@ -106,18 +124,24 @@ export default function EditorPanels({
         selectedNodeType={selectedNode ? String(selectedNode.data.typeKey) : undefined}
         onApplyToSelectedNode={applyCalibrationParameters}
       /></LazyPanel>
-      <LazyPanel open={jobsOpen} label="作业" onClose={() => setJobsOpen(false)}><JobPanel open onClose={() => setJobsOpen(false)} workflow={workflowPayload} prepareWorkflowChange={workflowChanges.prepare} onRunResult={applyResult} onOpenValidation={() => setValidationOpen(true)} /></LazyPanel>
+      <LazyPanel open={jobsOpen} label="作业" onClose={() => setJobsOpen(false)}><JobPanel open onClose={() => setJobsOpen(false)} workflow={workflowPayload} catalog={catalog} prepareWorkflowChange={workflowChanges.prepare} onRunResult={applyResult}
+        onOpenValidation={(candidate, target) => onOpenValidation?.(candidate, target)}
+        onOpenProduction={onOpenProduction} /></LazyPanel>
       <LazyPanel open={tracesOpen} label="追溯" onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }}>
-        <TracePanel open initialRunId={traceRunId} onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }} />
+        <TracePanel open initialRunId={traceRunId} onSelectNode={onSelectNode} onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }} />
       </LazyPanel>
       <LazyPanel open={modelPackagesOpen} label="模型包" onClose={() => setModelPackagesOpen(false)}><ModelPackagePanel open onClose={() => setModelPackagesOpen(false)} /></LazyPanel>
       <LazyPanel open={modelAssetsOpen} label="模型资产" onClose={() => setModelAssetsOpen(false)}><ModelAssetPanel open onClose={() => setModelAssetsOpen(false)} /></LazyPanel>
-      <LazyPanel open={validationOpen} label="数据集验证" onClose={() => setValidationOpen(false)}><DatasetValidationPanel open onClose={() => setValidationOpen(false)} currentWorkflow={workflowPayload} /></LazyPanel>
+      <LazyPanel open={validationOpen} label="数据集验证" onClose={onCloseValidation ?? (() => setValidationOpen(false))}><DatasetValidationPanel open onClose={onCloseValidation ?? (() => setValidationOpen(false))} currentWorkflow={workflowPayload}
+        initialWorkflow={validationWorkflow} autoLinkRecipe={validationRecipeTarget} /></LazyPanel>
       <LazyPanel open={tuningOpen} label="参数调优" onClose={() => setTuningOpen(false)}><ParameterTuningPanel open onClose={() => setTuningOpen(false)} currentWorkflow={workflowPayload} catalog={catalog} initialNodeId={selectedId} prepareWorkflowChange={workflowChanges.prepare} onApplied={() => { setTuningOpen(false); messageApi.success('已将调优后的候选方案应用到设计器'); }} /></LazyPanel>
       <LazyPanel open={modulesOpen} label="流程模块" onClose={() => setModulesOpen(false)}><WorkflowModulePanel open onClose={() => setModulesOpen(false)} currentWorkflow={workflowPayload} selectedNodeId={selectedId} selectedNodeType={String(selectedNode?.data.typeKey ?? '')} prepareWorkflowChange={workflowChanges.prepare} onInsertModule={insertModule} onUpgradeSelected={upgradeSelectedModule} /></LazyPanel>
-      <LazyPanel open={productionOpen} label="生产运行" onClose={() => setProductionOpen(false)}><ProductionPanel open onClose={() => setProductionOpen(false)} /></LazyPanel>
+      <LazyPanel open={productionOpen} label="生产运行" onClose={onCloseProduction ?? (() => setProductionOpen(false))}><ProductionPanel open
+        onClose={onCloseProduction ?? (() => setProductionOpen(false))} initialView={productionInitialView} initialJobId={productionInitialJobId} /></LazyPanel>
       <LazyPanel open={spcOpen} label="SPC 看板" onClose={() => setSpcOpen(false)}><SpcDashboard open onClose={() => setSpcOpen(false)} /></LazyPanel>
       <LazyPanel open={diagnosticsOpen} label="诊断" onClose={() => setDiagnosticsOpen(false)}><DiagnosticsPanel open onClose={() => setDiagnosticsOpen(false)} /></LazyPanel>
+      <LazyPanel open={storageOpen} label="存储维护" onClose={() => setStorageOpen(false)}><StoragePanel open onClose={() => setStorageOpen(false)} /></LazyPanel>
+      <LazyPanel open={securityOpen} label="安全与运维管理" onClose={() => setSecurityOpen(false)}><SecurityAdminPanel open onClose={() => setSecurityOpen(false)} /></LazyPanel>
       <LazyPanel open={aboutOpen} label="关于" onClose={() => setAboutOpen(false)}><AboutPanel open onClose={() => setAboutOpen(false)} /></LazyPanel>
       <LazyPanel open={hardwareProvenanceOpen} label="硬件溯源" onClose={() => setHardwareProvenanceOpen(false)}><HardwareProvenancePanel open onClose={() => setHardwareProvenanceOpen(false)} /></LazyPanel>
       <LazyPanel open={pluginsOpen} label="插件包" onClose={() => setPluginsOpen(false)}><PluginPackagePanel open onClose={() => setPluginsOpen(false)} onCatalogRefresh={refreshCatalog} /></LazyPanel>

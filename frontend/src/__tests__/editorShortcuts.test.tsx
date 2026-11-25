@@ -8,9 +8,15 @@ import type { Node } from '@xyflow/react';
  * 事故场景——在追溯/配方面板里按 Delete 想清空筛选或删行，画布上选中的节点被静默删除。
  */
 
-type Options = { nodeConfigurationId?: string; overlayOpen?: boolean; nodes?: Node[]; selectedNodeIds?: string[] };
+type Options = {
+  nodeConfigurationId?: string;
+  overlayOpen?: boolean;
+  nodes?: Node[];
+  selectedNodeIds?: string[];
+  debugSessionActive?: boolean;
+};
 
-function mount({ nodeConfigurationId, overlayOpen = false, nodes = [], selectedNodeIds = [] }: Options = {}) {
+function mount({ nodeConfigurationId, overlayOpen = false, nodes = [], selectedNodeIds = [], debugSessionActive = false }: Options = {}) {
   const handlers = {
     nodeConfigurationId,
     overlayOpen,
@@ -18,6 +24,16 @@ function mount({ nodeConfigurationId, overlayOpen = false, nodes = [], selectedN
     undo: vi.fn(),
     redo: vi.fn(),
     copySelection: vi.fn(() => false),
+    selectAllNodes: vi.fn(() => true),
+    duplicateSelection: vi.fn(() => true),
+    fitView: vi.fn(),
+    runWorkflow: vi.fn(),
+    requestRenameNode: vi.fn(),
+    debugSessionActive,
+    debugBusy: false,
+    continueDebugSession: vi.fn(),
+    runSelectedNodeInSession: vi.fn(),
+    endDebugSession: vi.fn(),
     deleteElements: vi.fn(),
     pushHistory: vi.fn(),
     setNodes: vi.fn(),
@@ -50,7 +66,13 @@ describe('画布快捷键与面板上下文', () => {
   it('画布聚焦时 Delete 删除选中节点（基线行为不变）', () => {
     const handlers = mount({ nodes: selectedNode(), selectedNodeIds: ['n1'] });
     pressOn(document.body, { key: 'Delete' });
-    expect(handlers.deleteElements).toHaveBeenCalledWith(['n1'], []);
+    expect(handlers.deleteElements).toHaveBeenCalledWith(['n1'], [], false);
+  });
+
+  it('Alt+Delete requests a safe bridge when deleting a selected node', () => {
+    const handlers = mount({ nodes: selectedNode(), selectedNodeIds: ['n1'] });
+    pressOn(document.body, { key: 'Delete', altKey: true });
+    expect(handlers.deleteElements).toHaveBeenCalledWith(['n1'], [], true);
   });
 
   it('面板打开、焦点落在 body 上时 Delete 不穿透', () => {
@@ -109,5 +131,44 @@ describe('画布快捷键与面板上下文', () => {
     document.body.appendChild(wrap);
     expect(isInsidePanel(document.body)).toBe(false);
     expect(isInsidePanel(wrap)).toBe(true);
+  });
+
+  it('支持 Ctrl+A 全选、Ctrl+D 复制副本、Ctrl+0 适应画布与 Ctrl+Shift+Enter 运行流程', () => {
+    const handlers = mount({ nodes: selectedNode(), selectedNodeIds: ['n1'] });
+    pressOn(document.body, { key: 'a', ctrlKey: true });
+    pressOn(document.body, { key: 'd', ctrlKey: true });
+    pressOn(document.body, { key: '0', ctrlKey: true });
+    pressOn(document.body, { key: 'Enter', ctrlKey: true, shiftKey: true });
+    expect(handlers.selectAllNodes).toHaveBeenCalledOnce();
+    expect(handlers.duplicateSelection).toHaveBeenCalledOnce();
+    expect(handlers.fitView).toHaveBeenCalledOnce();
+    expect(handlers.runWorkflow).toHaveBeenCalledOnce();
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    pressOn(input, { key: 'a', ctrlKey: true });
+    pressOn(input, { key: 'd', ctrlKey: true });
+    expect(handlers.selectAllNodes).toHaveBeenCalledOnce();
+    expect(handlers.duplicateSelection).toHaveBeenCalledOnce();
+  });
+
+  it('F2 重命名选中的单个节点', () => {
+    const handlers = mount({ nodes: selectedNode(), selectedNodeIds: ['n1'] });
+    const event = new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(handlers.requestRenameNode).toHaveBeenCalledWith('n1');
+  });
+
+  it('调试会话中的 F5、F10 与 Shift+F5 分别执行调试动作', () => {
+    const handlers = mount({ debugSessionActive: true, nodes: selectedNode(), selectedNodeIds: ['n1'] });
+    for (const [key, shiftKey] of [['F5', false], ['F10', false], ['F5', true]] as const) {
+      const event = new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true });
+      document.body.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+    expect(handlers.continueDebugSession).toHaveBeenCalledOnce();
+    expect(handlers.runSelectedNodeInSession).toHaveBeenCalledOnce();
+    expect(handlers.endDebugSession).toHaveBeenCalledOnce();
   });
 });

@@ -78,9 +78,16 @@ export function useTuningData(open: boolean) {
     }
   }, [chooseDataset]);
   useEffect(() => {
+    const activeRequests = requests.current;
+    const acknowledgedRuns = acknowledged.current;
     active.current = open;
     if (open) { setDatasets([]); setDetail(undefined); setRecords(undefined); setFailures({}); setLoading({}); void read('list'); }
-    return () => { active.current = false; for (const request of requests.current.values()) request.controller.abort(); requests.current.clear(); acknowledged.current.clear(); };
+    return () => {
+      active.current = false;
+      for (const request of activeRequests.values()) request.controller.abort();
+      activeRequests.clear();
+      acknowledgedRuns.clear();
+    };
   }, [open, read]);
   useEffect(() => { if (open && selection.datasetId) { void read('detail'); void read('runs'); } }, [open, selection.datasetId, scopeRevision, read]);
   const datasetId = selection.datasetId;

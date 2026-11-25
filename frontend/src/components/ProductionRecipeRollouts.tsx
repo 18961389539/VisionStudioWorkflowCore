@@ -99,7 +99,7 @@ export function RecipeRolloutDialog({ stations, onCompleted, onClose }: {
   };
 
   return <Modal open title="配方分批下发" footer={null} onCancel={onClose} closable={!pending}
-    keyboard={!pending} mask={{ closable: !pending }} width={870}>
+    keyboard={!pending} mask={{ closable: !pending }} width="min(870px, calc(100vw - 32px))">
     {holder}
     <div className="recipe-rollout-form">
       <p>选择已发布的配方和本批工位。接收后生成本地草稿，由站点工程师发布。每批最多 {maxBatchStations} 个工位。</p>

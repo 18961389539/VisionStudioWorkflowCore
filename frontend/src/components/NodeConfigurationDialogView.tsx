@@ -90,10 +90,14 @@ export function NodeConfigurationDetails({ model }: { model: NodeConfigurationVi
   </div>;
 }
 
-export function NodeConfigurationWorkspace({ model, shapeMode }: { model: NodeConfigurationView; shapeMode?: 'training' | 'search' }) {
+export function NodeConfigurationWorkspace({ model, shapeMode, onOpenResourcePanel }: {
+  model: NodeConfigurationView;
+  shapeMode?: 'training' | 'search';
+  onOpenResourcePanel?: (kind: 'camera' | 'device' | 'robot' | 'media') => void;
+}) {
   const {
     node, catalogItem, nodes, edges, previewBlockedReason, circleSamplingNotice,
-    circleFitConditionNotice, caliperCircleBoundsNotice, caliperLineBoundsNotice, caliperSearchLineBoundsNotice, baseline, imageSource,
+    circleFitConditionNotice, caliperCircleBoundsNotice, caliperLineBoundsNotice, caliperSearchLineBoundsNotice, baseline, imageSource, imageViewerSource, comparisonImageSource,
     setImageSource, selectedOutputAvailable, selectedInputAvailable, imageCatalogLoading, imageCatalogError, retryImageCatalog,
     imageOutputPorts, imageOutputPortName, setImageOutputPortName, changeShapeWorkspaceTab, trainingSamples, setTrainingSamples,
     trainingImageBusy, searchImageBusy, trainedModelData, trainedSourceImage, trainedPreviewData, legacyWorkflow,
@@ -340,7 +344,10 @@ export function NodeConfigurationWorkspace({ model, shapeMode }: { model: NodeCo
       <div className="node-configuration-viewer">{isMetrology ? <MetrologyObjectEditor value={draft.objects}
         onChange={value => changeParameter('objects', value)} imageSrc={displayImageSource.url}
         width={displayImageSource.width} height={displayImageSource.height} disabled={locked || previewBusy}
-        aligned={String(draft.alignMode ?? 'none') !== 'none'} overlays={resultOverlaysForViewer.filter(overlay => overlay.nodeId === node.id)} onLoadImage={() => void loadMetrologyImage()} /> : <ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
+        aligned={String(draft.alignMode ?? 'none') !== 'none'} overlays={resultOverlaysForViewer.filter(overlay => overlay.nodeId === node.id)} onLoadImage={() => void loadMetrologyImage()} /> : <ImageViewer previewUrl={displayImageSource.url}
+        comparisonUrl={displayImageSource === imageViewerSource ? comparisonImageSource?.url : undefined}
+        comparisonWidth={comparisonImageSource?.width} comparisonHeight={comparisonImageSource?.height} comparisonLabel={comparisonImageSource?.label}
+        imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
         overlays={showCaliperDiagnostics ? diagnosticOverlays : overlaysWithTrainedContour}
         roi={showCaliperDiagnostics ? undefined : canEditRoi ? (isImageCrop ? cropRoiForImage : isPerspective ? perspectiveRoi : shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
           : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined)
@@ -498,6 +505,7 @@ export function NodeConfigurationWorkspace({ model, shapeMode }: { model: NodeCo
         && connectedInputPorts.some(port => ['x', 'y', 'z', 'thetaDeg'].includes(port))
         && <Alert type="info" showIcon title="已接线的坐标分量使用上游输入，未接线分量使用本地参数。" style={{ marginBottom: 10 }} />}
       <PropertyPanel node={draftNode} catalogItem={shapePanelCatalogItem} onChange={changeParameter} disabled={locked || referenceMismatch}
+        onOpenResourcePanel={onOpenResourcePanel}
         connectedInputPorts={connectedInputPorts}
         onRunPreview={catalogItem.type === 'script.csharp' ? () => void runPreview() : undefined}
         previewBusy={previewBusy} scriptPreview={scriptPreviewReport}

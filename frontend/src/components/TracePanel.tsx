@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiErrorMessage } from '../apiErrors';
-import { Alert, Button, Empty, Input, InputNumber, Modal, Popconfirm, Select, Segmented, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Drawer, Empty, Input, InputNumber, Popconfirm, Select, Segmented, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { NodeRunReport, RunTraceRecord } from '../types';
 import { localizeStatus } from '../i18n';
 import {
@@ -24,6 +24,8 @@ type Props = {
    * 打开即筛到这一次运行并选中它，省掉"记住 runId 再去筛选框粘贴"。
    */
   initialRunId?: string;
+  /** 点击节点报告定位回画布（非阻塞 Drawer 打开时画布保持可见） */
+  onSelectNode?: (nodeId: string) => void;
 };
 
 const dispositionColor: Record<string, string> = { OK: 'green', NG: 'red', REVIEW: 'orange', ERROR: 'volcano' };
@@ -34,7 +36,7 @@ const executionColor: Record<string, string> = {
 const DEFAULT_FILTER: TraceFilterState = { preset: 'today' };
 const DEFAULT_PAGE = { current: 1, pageSize: 50 };
 
-export default function TracePanel({ open, onClose, initialRunId }: Props) {
+export default function TracePanel({ open, onClose, initialRunId, onSelectNode }: Props) {
   // applied 是真正发请求的筛选（离散控件即时生效；文本输入点“查询”或回车生效）。
   const [filter, setFilter] = useState<TraceFilterState>(DEFAULT_FILTER);
   const [appliedFilter, setAppliedFilter] = useState<TraceFilterState>(DEFAULT_FILTER);
@@ -154,7 +156,7 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
   };
 
   return (
-    <Modal open={open} width={1380} title="运行追溯" footer={null} onCancel={onClose}>
+    <Drawer open={open} size="min(1180px, 82vw)" mask={false} title="运行追溯" onClose={onClose}>
       {contextHolder}
       <div className="trace-stats-caption">
         <span>结果范围：{rangeDescription ?? '等待查询'}</span>
@@ -298,7 +300,14 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
               loading={reportLoading}
               locale={{ emptyText: reportLoading ? '正在加载节点报告…' : '该运行没有节点报告（可能在执行前失败）' }}
               columns={[
-                { title: '节点', dataIndex: 'nodeType', width: 150 },
+                {
+                  title: '节点',
+                  dataIndex: 'nodeType',
+                  width: 170,
+                  render: (v: string, row: NodeRunReport) => onSelectNode
+                    ? <Space size={4}><span>{v}</span><Button size="small" type="link" style={{ padding: 0 }} title={`在画布中定位节点 ${row.nodeId}`} onClick={() => onSelectNode(row.nodeId)}>定位</Button></Space>
+                    : v
+                },
                 { title: '阶段', dataIndex: 'phase', width: 80, render: (v: string) => v === 'Warmup' ? '预热' : '运行' },
                 { title: '耗时（毫秒）', dataIndex: 'durationMs', width: 90, render: (v: number) => v.toFixed(2) },
                 { title: '摘要', dataIndex: 'summary', render: (v: unknown) => <Typography.Text code>{JSON.stringify(v)}</Typography.Text> }
@@ -312,6 +321,6 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
       </div>
       <StoragePanel open={storageOpen} onClose={() => setStorageOpen(false)} />
       <ReplayDebuggerPanel open={replayOpen} runId={selected?.runId} initialNodeId={replayNodeId} onClose={() => setReplayOpen(false)} />
-    </Modal>
+    </Drawer>
   );
 }

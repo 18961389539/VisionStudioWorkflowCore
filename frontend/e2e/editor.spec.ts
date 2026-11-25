@@ -32,6 +32,73 @@ test.describe('编辑器画布（真实浏览器）', () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test('分组颜色跟随主题切换并兼容已有本机数据', async ({ page }) => {
+    test.setTimeout(90_000);
+    await stubApi(page);
+    await page.addInitScript(() => {
+      if (!localStorage.getItem('visionstudio.canvas-annotations')) {
+        localStorage.setItem('visionstudio.canvas-annotations', JSON.stringify({
+          'demo-linear': [
+            { id: 'legacy-group', type: 'canvasGroup', position: { x: 60, y: -30 },
+              width: 260, height: 140, title: '旧分组', color: '#13a8a8', memberIds: [] },
+            { id: 'custom-group', type: 'canvasGroup', position: { x: 400, y: -30 },
+              width: 260, height: 140, title: '自定义分组', color: '#987654', memberIds: [] }
+          ]
+        }));
+        localStorage.setItem('visionstudio.theme-mode', 'dark');
+      }
+      localStorage.setItem('visionstudio.onboarding-done', '1');
+    });
+    await page.goto('/');
+
+    const group = page.locator('.react-flow__node[data-id="legacy-group"] .canvas-group-node');
+    const customGroup = page.locator('.react-flow__node[data-id="custom-group"] .canvas-group-node');
+    const choices = [
+      { name: '蓝色', value: '#1677ff' },
+      { name: '青色', value: '#13a8a8' },
+      { name: '绿色', value: '#52c41a' },
+      { name: '橙色', value: '#fa8c16' },
+      { name: '粉色', value: '#eb2f96' }
+    ];
+    await expect(group.getByRole('button', { name: '选择分组颜色 青色' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(customGroup).toHaveCSS('border-top-color', 'rgb(152, 118, 84)');
+    await expect(customGroup.locator('button[aria-pressed="true"]')).toHaveCount(0);
+    const darkColors = await Promise.all(choices.map(({ name }) =>
+      group.getByRole('button', { name: `选择分组颜色 ${name}` }).evaluate((element) => getComputedStyle(element).backgroundColor)));
+    await expect(group).toHaveCSS('border-top-color', darkColors[1]);
+    const darkTint = await group.evaluate((element) => getComputedStyle(element).backgroundColor);
+    expect(darkTint).not.toBe('rgba(0, 0, 0, 0)');
+    expect(await group.locator('.canvas-group-heading').evaluate((element) => getComputedStyle(element).backgroundColor))
+      .not.toBe('rgba(0, 0, 0, 0)');
+
+    await page.getByRole('button', { name: '打开命令面板' }).click();
+    await page.getByLabel('命令面板搜索').fill('切换深浅主题');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('data-vs-theme', 'light');
+
+    for (const [index, choice] of choices.entries()) {
+      const swatch = group.getByRole('button', { name: `选择分组颜色 ${choice.name}` });
+      const lightColor = await swatch.evaluate((element) => getComputedStyle(element).backgroundColor);
+      expect(lightColor).not.toBe(darkColors[index]);
+      await swatch.click();
+      await expect(swatch).toHaveAttribute('aria-pressed', 'true');
+      await expect(group).toHaveCSS('border-top-color', lightColor);
+      await expect.poll(async () => page.evaluate(() => {
+        const stored = JSON.parse(localStorage.getItem('visionstudio.canvas-annotations') ?? '{}');
+        return stored['demo-linear']?.find((item: { id: string }) => item.id === 'legacy-group')?.color;
+      })).toBe(choice.value);
+      await page.reload();
+      await expect(page.locator('html')).toHaveAttribute('data-vs-theme', 'light');
+      await expect(swatch).toHaveAttribute('aria-pressed', 'true');
+      await expect(group).toHaveCSS('border-top-color', lightColor);
+    }
+    expect(await group.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+
+    await expect(customGroup).toHaveCSS('border-top-color', 'rgb(152, 118, 84)');
+    await page.getByRole('button', { name: '切换界面语言' }).click();
+    await expect(group.getByRole('button', { name: 'Select group color pink' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   test('节点在真实布局中获得非零尺寸并落在画布可视区内', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');

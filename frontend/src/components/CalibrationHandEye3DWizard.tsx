@@ -390,7 +390,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
 
   const matrixEditor = (field: 'robotToBase' | 'targetToCamera', label: string) => (_: unknown, row: SampleRow, index: number) => {
     const error = matrixError(row, field, `样本 ${index + 1} ${label}`);
-    return <Space direction="vertical" style={{ width: '100%' }} size={4}>
+    return <Space orientation="vertical" style={{ width: '100%' }} size={4}>
       <Input.TextArea rows={5} value={row[field]} onChange={(event) => updateSample(row.key, field, event.target.value)} spellCheck={false} />
       {error && <Typography.Text type="danger" style={{ fontSize: 11 }}>{error}</Typography.Text>}
     </Space>;
@@ -411,15 +411,15 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
       <Alert type="info" showIcon style={{ marginBottom: 12 }} title="三维手眼向导（SE(3)）"
         description="逐样本录入机器人基座到工具、标定板到相机的刚性 4×4 变换，或从 JSON/CSV 批量导入。至少六组样本并覆盖两个非平行旋转轴；支持鲁棒剔除、多方法交叉验证、会话持久化与版本化资产，求解后回写 handEye3D 节点。" />
 
-      {step === 0 && <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {step === 0 && <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <Space wrap>
           <Select style={{ width: 210 }} value={mode} onChange={(value) => { setMode(value); resetResult(); }} options={[
             { value: 'eyeInHand', label: '眼在手上：相机安装于工具' },
             { value: 'eyeToHand', label: '眼在手外：相机固定、标定板随工具' }
           ]} />
           <Select style={{ width: 210 }} value={method} onChange={(value) => { setMethod(value); resetResult(); }} options={methodOptions} />
-          <Input addonBefore="sourceFrame" value={sourceFrame} onChange={(event) => { setSourceFrame(event.target.value); resetResult(); }} style={{ width: 220 }} />
-          <Input addonBefore="targetFrame" placeholder="默认 RobotTool/Base" value={targetFrame} onChange={(event) => { setTargetFrame(event.target.value); resetResult(); }} style={{ width: 250 }} />
+          <Space.Compact style={{ width: 220 }}><Space.Addon>sourceFrame</Space.Addon><Input value={sourceFrame} onChange={(event) => { setSourceFrame(event.target.value); resetResult(); }} /></Space.Compact>
+          <Space.Compact style={{ width: 250 }}><Space.Addon>targetFrame</Space.Addon><Input placeholder="默认 RobotTool/Base" value={targetFrame} onChange={(event) => { setTargetFrame(event.target.value); resetResult(); }} /></Space.Compact>
           <Select style={{ width: 130 }} value={unit} onChange={(value) => { setUnit(value); resetResult(); }} options={[
             { value: 'mm', label: '毫米 mm' }, { value: 'cm', label: '厘米 cm' }, { value: 'm', label: '米 m' }
           ]} />
@@ -432,18 +432,18 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
           <Select style={{ width: 220 }} value={crossCheckMethod} onChange={(value) => { setCrossCheckMethod(value); resetResult(); }} options={[
             { value: 'NONE', label: '交叉验证：无' }, ...methodOptions.map((o) => ({ value: o.value, label: `交叉验证：${o.label}` }))
           ]} />
-          <InputNumber addonBefore="旋转权重" min={0.001} max={1000000} value={rotationWeight} onChange={(value) => { setRotationWeight(Number(value ?? 50)); resetResult(); }} />
+          <Space.Compact><Space.Addon>旋转权重</Space.Addon><InputNumber min={0.001} max={1000000} value={rotationWeight} onChange={(value) => { setRotationWeight(Number(value ?? 50)); resetResult(); }} /></Space.Compact>
         </Space>
         <Space wrap>
-          <InputNumber addonBefore={`平移门限 ${unit}`} min={0} value={maxTranslationError} onChange={(value) => { setMaxTranslationError(Number(value ?? 0)); resetResult(); }} />
-          <InputNumber addonBefore="旋转门限°" min={0} max={180} value={maxRotationErrorDeg} onChange={(value) => { setMaxRotationErrorDeg(Number(value ?? 0)); resetResult(); }} />
-          <InputNumber addonBefore={`最小跨度 ${unit}`} min={0} value={minTranslationSpan} onChange={(value) => { setMinTranslationSpan(Number(value ?? 0)); resetResult(); }} />
+          <Space.Compact><Space.Addon>{`平移门限 ${unit}`}</Space.Addon><InputNumber min={0} value={maxTranslationError} onChange={(value) => { setMaxTranslationError(Number(value ?? 0)); resetResult(); }} /></Space.Compact>
+          <Space.Compact><Space.Addon>旋转门限°</Space.Addon><InputNumber min={0} max={180} value={maxRotationErrorDeg} onChange={(value) => { setMaxRotationErrorDeg(Number(value ?? 0)); resetResult(); }} /></Space.Compact>
+          <Space.Compact><Space.Addon>{`最小跨度 ${unit}`}</Space.Addon><InputNumber min={0} value={minTranslationSpan} onChange={(value) => { setMinTranslationSpan(Number(value ?? 0)); resetResult(); }} /></Space.Compact>
           <Typography.Text type="secondary">门限填 0 表示关闭。输入矩阵的平移量和所选单位必须一致。</Typography.Text>
         </Space>
         <Button type="primary" onClick={() => setStep(1)}>下一步：录入样本</Button>
       </Space>}
 
-      {step === 1 && <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      {step === 1 && <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         <Alert type={canSolve ? 'success' : 'warning'} showIcon
           title={samples.length < 6 ? `当前 ${samples.length} 组，至少需要 6 组`
             : firstError ? firstError
@@ -466,7 +466,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
             { title: '', width: 72, fixed: 'right', render: (_: unknown, row: SampleRow) => <Button size="small" danger onClick={() => removeSample(row.key)}>删除</Button> }
           ]} />
         <Space wrap>
-          <Input addonBefore="会话名" placeholder="保存会话用" value={sessionName} onChange={(e) => setSessionName(e.target.value)} style={{ width: 260 }} />
+          <Space.Compact style={{ width: 260 }}><Space.Addon>会话名</Space.Addon><Input placeholder="保存会话用" value={sessionName} onChange={(e) => setSessionName(e.target.value)} /></Space.Compact>
           <Button loading={busy} disabled={!samples.length} onClick={() => void handleSaveSession()}>保存会话</Button>
         </Space>
         {sessions.length > 0 && (
@@ -491,7 +491,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
         </Space>
       </Space>}
 
-      {step === 2 && <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      {step === 2 && <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         {result && <Alert type="success" showIcon
           title={`平移 RMS ${Number(result.translationRms ?? 0).toFixed(4)} ${unit} · 旋转 RMS ${Number(result.rotationRmsDeg ?? 0).toFixed(3)}° · 使用 ${String(result.usedSampleCount ?? samples.length)}/${samples.length} 组`}
           description={`最差样本 #${String(result.worstSampleIndex ?? '-')} · 最大平移 ${Number(result.maxTranslationError ?? 0).toFixed(4)} ${unit} · 最大旋转 ${Number(result.maxRotationErrorDeg ?? 0).toFixed(3)}° · 机器人位移跨度 ${Number(result.robotTranslationSpan ?? 0).toFixed(3)} ${unit}` +
@@ -525,8 +525,8 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
         </Space>
         {!canApply3D && <Typography.Text type="secondary">选择一个 calibration.handEye3D 节点后即可回写参数。</Typography.Text>}
         <Space wrap>
-          <Input addonBefore="资产ID" placeholder="如 handeye3d-cell1" value={assetId} onChange={(e) => setAssetId(e.target.value)} style={{ width: 260 }} />
-          <Input addonBefore="资产名" placeholder="资产名称" value={assetName} onChange={(e) => setAssetName(e.target.value)} style={{ width: 240 }} />
+          <Space.Compact style={{ width: 260 }}><Space.Addon>资产ID</Space.Addon><Input placeholder="如 handeye3d-cell1" value={assetId} onChange={(e) => setAssetId(e.target.value)} /></Space.Compact>
+          <Space.Compact style={{ width: 240 }}><Space.Addon>资产名</Space.Addon><Input placeholder="资产名称" value={assetName} onChange={(e) => setAssetName(e.target.value)} /></Space.Compact>
           <Button loading={busy} onClick={() => void saveAsset()}>保存为版本化资产</Button>
           {pinnedAssetId && <Tag color="blue">已锁定 {pinnedAssetId} V{pinnedVersion}</Tag>}
         </Space>
@@ -559,7 +559,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
         )}
       </Space>}
 
-      {step === 3 && <Space direction="vertical" style={{ width: '100%' }}>
+      {step === 3 && <Space orientation="vertical" style={{ width: '100%' }}>
         <Alert type="success" showIcon title="三维手眼参数已写入节点"
           description={pinnedAssetId ? `附带资产锁定 ${pinnedAssetId} V${pinnedVersion}：发布/产线校验会复核求解结果与该版本一致。` : '节点保存了本次样本和质量门限，可在工作流运行时重新计算并校验。'} />
         <Input.TextArea rows={12} value={toSamplesJson(samples)} readOnly spellCheck={false} />

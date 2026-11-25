@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Empty, Input, Modal, Tag } from 'antd';
 import type { InputRef } from 'antd';
+import type { Node } from '@xyflow/react';
 import type { NodeCatalogItem } from '../types';
 import { searchTools } from '../toolboxModel';
 import { useI18n } from '../i18n/provider';
@@ -10,7 +11,7 @@ import { useI18n } from '../i18n/provider';
  *
  * 背景：能力都散着——171 个节点在左侧工具箱、18 个面板在顶栏菜单、运行/校验/布局在按钮上，
  * 熟练用户记不住"某个功能在哪个菜单"。这里把四类目标（命令 / 面板 / 节点 / 最近工作流）
- * 收进一个键盘优先的入口，节点匹配直接复用工具箱那套 `searchTools`（含同义词与排序）。
+ * 收进一个键盘优先的入口，添加节点复用工具箱的 `searchTools`，已有画布节点则只定位、不重复添加。
  */
 
 export type PaletteCommand = {
@@ -28,24 +29,29 @@ type Props = {
   open: boolean;
   onClose: () => void;
   catalog: NodeCatalogItem[];
+  nodes?: Node[];
   /** 非节点类目标：命令与面板入口由调用方提供 */
   targets: PaletteCommand[];
   onRunCommand: (key: string) => void;
   onAddNode: (type: string) => void;
+  onLocateNode?: (nodeId: string) => void;
 };
 
-type Row = { key: string; title: string; hint?: string; group: string; type?: string };
+type Row = { key: string; title: string; hint?: string; group: string; type?: string; nodeId?: string };
 
 const MAX_PER_GROUP = 8;
-const GROUP_ORDER = ['命令', '面板', '节点'];
+const GROUP_ORDER = ['命令', '面板', '画布节点', '添加节点'];
 
 // 中英双语的默认分组名：命令面板本身要能在两种语言下用
 const groupLabel = (group: string, lang: string) => {
   if (lang !== 'en') return group;
-  return group === '命令' ? 'Commands' : group === '面板' ? 'Panels' : group === '节点' ? 'Nodes' : group;
+  return group === '命令' ? 'Commands'
+    : group === '面板' ? 'Panels'
+      : group === '画布节点' ? 'Canvas nodes'
+        : group === '添加节点' ? 'Add nodes' : group;
 };
 
-export default function CommandPalette({ open, onClose, catalog, targets, onRunCommand, onAddNode }: Props) {
+export default function CommandPalette({ open, onClose, catalog, nodes = [], targets, onRunCommand, onAddNode, onLocateNode }: Props) {
   const { lang } = useI18n();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -67,22 +73,32 @@ export default function CommandPalette({ open, onClose, catalog, targets, onRunC
     const commandRows = targets
       .filter((item) => match(item.title) || (item.keywords ? item.keywords.toLowerCase().includes(keyword) : false))
       .map((item) => ({ key: item.key, title: item.title, hint: item.hint, group: item.group }));
+    const canvasNodeRows = keyword ? nodes
+      .filter((node) => [node.data.label, node.data.typeKey, node.id]
+        .some((value) => String(value ?? '').toLowerCase().includes(keyword)))
+      .map((node) => ({
+        key: `canvas-node:${node.id}`,
+        title: String(node.data.label ?? node.data.typeKey ?? node.id),
+        hint: node.id,
+        group: '画布节点',
+        nodeId: node.id
+      })) : [];
     const nodeRows = (keyword ? searchTools(catalog, query) : catalog.slice(0, 30)).map((item) => ({
       key: `node:${item.type}`,
       title: item.displayName,
       hint: item.type,
-      group: '节点',
+      group: '添加节点',
       type: item.type
     }));
     const byGroup = new Map<string, Row[]>();
-    for (const row of [...commandRows, ...nodeRows]) {
+    for (const row of [...commandRows, ...canvasNodeRows, ...nodeRows]) {
       const bucket = byGroup.get(row.group) ?? [];
       if (bucket.length < MAX_PER_GROUP) bucket.push(row);
       byGroup.set(row.group, bucket);
     }
     return [...GROUP_ORDER, ...byGroup.keys()].filter((group, index, all) => all.indexOf(group) === index)
       .flatMap((group) => byGroup.get(group) ?? []);
-  }, [catalog, query, targets]);
+  }, [catalog, nodes, query, targets]);
 
   useEffect(() => { setActive(0); }, [query]);
 
@@ -94,7 +110,8 @@ export default function CommandPalette({ open, onClose, catalog, targets, onRunC
 
   const run = (row: Row | undefined) => {
     if (!row) return;
-    if (row.type) onAddNode(row.type);
+    if (row.nodeId) onLocateNode?.(row.nodeId);
+    else if (row.type) onAddNode(row.type);
     else onRunCommand(row.key);
     onClose();
   };

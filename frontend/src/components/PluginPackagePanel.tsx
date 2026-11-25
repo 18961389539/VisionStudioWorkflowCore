@@ -1,24 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Divider, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tag, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import type { PluginBenchmarkRun, PluginLoadInfo, PluginPackagePreflightResult, PluginPackageVersionInfo, PluginWorkerPerformanceProfile, PluginWorkerStatus, TrustedPluginPublisher, ValidationDatasetSummary, ValidationRunRecord } from '../types';
+import type { ContractDto, PluginBenchmarkRun, PluginLoadInfo, PluginPackagePreflightResult, PluginPackageVersionInfo, PluginWorkerPerformanceProfile, PluginWorkerStatus, TrustedPluginPublisher, ValidationDatasetSummary, ValidationRunRecord } from '../types';
 import { localizeStatus } from '../i18n';
 import { APP_VERSION } from '../version';
 import { apiFetch } from '../apiClient';
 import { responseErrorMessage } from '../apiErrors';
 import { plugins, validation } from '../endpoints';
+import { useSecurityAccount } from '../security';
 import DataErrorAlert from './DataErrorAlert';
 import PanelTable from './PanelTable';
 
+type PluginSdkInfo = ContractDto<'PluginSdkInfo'>;
+type PluginRescanResult = ContractDto<'PluginRescanResult'>;
+
 type Props = { open: boolean; onClose: () => void; onCatalogRefresh: () => Promise<void> };
 
-async function readError(response: Response): Promise<string> {
-  const body = await response.json().catch(() => undefined);
-  return body?.detail ?? body?.error ?? `${response.status} ${response.statusText}`;
-}
-
 export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: Props) {
+  const { enabled: securityEnabled, user } = useSecurityAccount();
+  const canAdmin = !securityEnabled || user?.role === 'Administrator';
+  const canEngineer = !securityEnabled || user?.role === 'Engineer' || user?.role === 'Administrator';
   const [runtime, setRuntime] = useState<PluginLoadInfo[]>([]);
+  const [sdkInfo, setSdkInfo] = useState<PluginSdkInfo>();
   const [packages, setPackages] = useState<PluginPackageVersionInfo[]>([]);
   const [publishers, setPublishers] = useState<TrustedPluginPublisher[]>([]);
   const [workers, setWorkers] = useState<PluginWorkerStatus[]>([]);
@@ -40,8 +43,15 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
 
   const refresh = useCallback(async () => {
     try {
-      const [runtimeResponse, packageResponse, publisherResponse, workerResponse, performanceResponse, benchmarkResponse, datasetResponse] = await Promise.all([
-        apiFetch(plugins.list), apiFetch(plugins.packages), apiFetch(plugins.publishers), apiFetch(plugins.workers), apiFetch(plugins.workerPerformance), apiFetch(plugins.benchmarks), apiFetch(validation.datasets)
+      const [runtimeResponse, sdkResponse, packageResponse, publisherResponse, workerResponse, performanceResponse, benchmarkResponse, datasetResponse] = await Promise.all([
+        apiFetch(plugins.list),
+        apiFetch(plugins.sdk).catch(() => undefined),
+        apiFetch(plugins.packages),
+        apiFetch(plugins.publishers),
+        apiFetch(plugins.workers),
+        apiFetch(plugins.workerPerformance),
+        apiFetch(plugins.benchmarks),
+        apiFetch(validation.datasets)
       ]);
       // 失败不等于"没有"：逐项收集失败原因，成功的项照常更新，失败的项保留上一次已知列表。
       const failures: string[] = [];
@@ -53,6 +63,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
         return response.json() as Promise<T>;
       };
       const runtimeData = await read<PluginLoadInfo[]>(runtimeResponse, '插件运行时');
+      const sdkData = sdkResponse && sdkResponse.ok ? await sdkResponse.json().catch(() => undefined) as PluginSdkInfo | undefined : undefined;
       const packageData = await read<PluginPackageVersionInfo[]>(packageResponse, '已安装版本');
       const publisherData = await read<TrustedPluginPublisher[]>(publisherResponse, '受信任发布者');
       const workerData = await read<PluginWorkerStatus[]>(workerResponse, '进程池状态');
@@ -60,6 +71,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       const benchmarkData = await read<PluginBenchmarkRun[]>(benchmarkResponse, '基准测试');
       const datasetData = await read<ValidationDatasetSummary[]>(datasetResponse, '验证数据集');
       if (runtimeData) setRuntime(runtimeData);
+      if (sdkData && typeof sdkData.apiVersion === 'number') setSdkInfo(sdkData);
       if (packageData) setPackages(packageData);
       if (publisherData) setPublishers(publisherData);
       if (workerData) setWorkers(workerData);
@@ -76,23 +88,23 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
 
   const submitPackage = async (mode: 'preflight' | 'install') => {
     const native = packageFile?.originFileObj;
-    if (!native) return messageApi.warning('Select a .vspkg first');
+    if (!native) return messageApi.warning('请先选择 .vspkg 插件包文件');
     setBusy(true);
     try {
       const form = new FormData(); form.append('file', native, native.name);
       const response = await apiFetch(plugins.install(mode), { method: 'POST', body: form });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, mode === 'preflight' ? '插件包预检失败' : '插件包安装失败'));
       const body = await response.json();
       if (mode === 'preflight') {
         setPreflight(body);
-        messageApi.success(body.valid ? 'Package preflight passed' : 'Package preflight failed');
+        messageApi.success(body.valid ? '插件包预检通过' : '插件包预检未通过');
       } else {
         setPreflight(undefined);
-        messageApi.success(body.message ?? 'Package installed');
+        messageApi.success(body.message ?? '插件包安装成功');
         await refresh();
         await onCatalogRefresh();
       }
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Plugin package operation failed'); }
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '插件包操作失败'); }
     finally { setBusy(false); }
   };
 
@@ -100,7 +112,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBusy(true);
     try {
       const response = await apiFetch(plugins.selectVersion(id, version), { method: 'POST' });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '选择版本失败'));
       const body = await response.json(); messageApi.success(body.message ?? '已选择版本'); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '选择版本失败'); }
     finally { setBusy(false); }
@@ -112,7 +124,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       const response = await apiFetch(plugins.packageRollback(id), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetVersion: null })
       });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '回滚失败'));
       const body = await response.json(); messageApi.success(body.message ?? '已提交回滚操作'); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '回滚失败'); }
     finally { setBusy(false); }
@@ -122,7 +134,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBusy(true);
     try {
       const response = await apiFetch(plugins.packageVersion(id, version), { method: 'DELETE' });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '移除失败'));
       messageApi.success('已移除已安装版本'); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '移除失败'); }
     finally { setBusy(false); }
@@ -135,7 +147,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     try {
       const form = new FormData(); form.append('file', native, native.name);
       const response = await apiFetch(plugins.publisherTrust, { method: 'POST', body: form });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '信任发布者失败'));
       messageApi.success('已信任该发布者'); setPublisherFile(undefined); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '信任发布者失败'); }
     finally { setBusy(false); }
@@ -145,7 +157,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBusy(true);
     try {
       const response = await apiFetch(plugins.publisherByThumbprint(thumbprint), { method: 'DELETE' });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '移除发布者失败'));
       messageApi.success('已从信任库移除发布者'); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '移除发布者失败'); }
     finally { setBusy(false); }
@@ -155,17 +167,33 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBusy(true);
     try {
       const response = await apiFetch(plugins.workerRestart(pluginId), { method: 'POST' });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '工作进程重启失败'));
       messageApi.success(`插件 ${pluginId} 的工作进程已重启`); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '工作进程重启失败'); }
     finally { setBusy(false); }
+  };
+
+  const rescanPlugins = async () => {
+    setBusy(true);
+    try {
+      const response = await apiFetch(plugins.rescan, { method: 'POST' });
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '插件目录重扫失败'));
+      const result = await response.json() as PluginRescanResult;
+      messageApi.success(`插件目录重扫完成：新加载 ${result.loadedNow} 个插件，当前共 ${result.plugins.length} 个（需重启 ${result.restartRequired} 个）`);
+      await refresh();
+      await onCatalogRefresh();
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : '插件目录重扫失败');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const resetPerformance = async (pluginId: string) => {
     setBusy(true);
     try {
       const response = await apiFetch(plugins.workerPerformanceReset(pluginId), { method: 'POST' });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '重置性能统计失败'));
       messageApi.success(`已重置插件 ${pluginId} 的性能统计窗口`); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '重置性能统计失败'); }
     finally { setBusy(false); }
@@ -178,7 +206,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setValidationRuns([]);
     if (!datasetId) return;
     const response = await apiFetch(validation.datasetRuns(datasetId));
-    if (!response.ok) return messageApi.error(await readError(response));
+    if (!response.ok) return messageApi.error(await responseErrorMessage(response, '读取验证记录失败'));
     const runs: ValidationRunRecord[] = await response.json();
     setValidationRuns(runs.filter(x => x.status === 'Completed'));
   };
@@ -200,7 +228,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
           baselineRunId: benchmarkBaselineRunId ?? null
         })
       });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '启动基准测试失败'));
       const body: PluginBenchmarkRun = await response.json();
       messageApi.success(`基准测试 ${body.runId} 已启动`);
       await refresh();
@@ -212,7 +240,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBusy(true);
     try {
       const response = await apiFetch(plugins.benchmarkCancel(runId), { method: 'POST' });
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '取消基准测试失败'));
       messageApi.success('已请求取消基准测试');
       await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '取消基准测试失败'); }
@@ -223,7 +251,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBusy(true);
     try {
       const response = await apiFetch(plugins.benchmarkCiSpec(runId));
-      if (!response.ok) throw new Error(await readError(response));
+      if (!response.ok) throw new Error(await responseErrorMessage(response, 'CI 规范导出失败'));
       const text = JSON.stringify(await response.json(), null, 2);
       const blob = new Blob([text], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -235,18 +263,27 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     finally { setBusy(false); }
   };
 
-  return <Modal open={open} title={`插件包管理器 · V${APP_VERSION}`} width={1280} footer={null} onCancel={onClose}>
+  return <Modal open={open} title={`插件包管理器 · V${APP_VERSION}`} width="min(1280px, calc(100vw - 32px))" footer={null} onCancel={onClose}>
     {contextHolder}
     <DataErrorAlert scope="插件包数据" error={loadError} onRetry={() => void refresh()} />
     <Alert type="info" showIcon title="签名插件包与 CI 性能回归门禁" description="保留可重复的进程池 1/2/4 基准测试，并增加便携式基线 CI 规范和无界面运行器。导出已完成的基线并提交规范，GitHub Actions/Jenkins 会在 P95/P99、吞吐量、内存或失败率超出预算时使构建失败。" />
 
     <Divider titlePlacement="left">安装插件包</Divider>
+    {!canAdmin && (
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 10 }}
+        title="当前角色仅支持预检、进程池重启、性能分析与基准测试"
+        description="安装、切换生效版本、回滚、移除插件包以及信任/移除发布者证书需要管理员（Administrator）权限。"
+      />
+    )}
     <Space wrap>
       <Upload accept=".vspkg,.zip" maxCount={1} fileList={packageFile ? [packageFile] : []} beforeUpload={() => false} onChange={(info) => { setPackageFile(info.fileList.at(-1)); setPreflight(undefined); }} onRemove={() => { setPackageFile(undefined); setPreflight(undefined); return true; }}>
         <Button>选择 .vspkg 文件</Button>
       </Upload>
       <Button loading={busy} disabled={!packageFile} onClick={() => submitPackage('preflight')}>预检</Button>
-      <Button type="primary" loading={busy} disabled={!packageFile || (preflight ? !preflight.valid : false)} onClick={() => submitPackage('install')}>安装</Button>
+      <Button type="primary" loading={busy} disabled={!canAdmin || !packageFile || (preflight ? !preflight.valid : false)} onClick={() => submitPackage('install')}>安装</Button>
     </Space>
     {preflight && <Alert style={{ marginTop: 10 }} type={preflight.valid ? (preflight.publisherTrusted ? 'success' : 'warning') : 'error'} showIcon
       title={`${preflight.id ?? '插件包'} ${preflight.version ?? ''} · ${preflight.signed ? (preflight.signatureValid ? '签名有效' : '签名无效') : '未签名'}`}
@@ -260,20 +297,20 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       { title: '发布者', render: (_: unknown, row: PluginPackageVersionInfo) => <div>{row.publisherSubject ?? '未签名'}<br/><Tag color={row.publisherTrusted ? 'green' : 'default'}>{row.publisherTrusted ? '可信' : '不可信'}</Tag></div> },
       { title: '插件包 SHA', render: (_: unknown, row: PluginPackageVersionInfo) => <code>{row.packageSha256.slice(0, 12)}…</code> },
       { title: '操作', width: 260, render: (_: unknown, row: PluginPackageVersionInfo) => <Space>
-        <Button size="small" disabled={row.active} onClick={() => selectVersion(row.id, row.version)}>选择</Button>
+        <Button size="small" disabled={!canAdmin || row.active} onClick={() => selectVersion(row.id, row.version)}>选择</Button>
         <Popconfirm title="回滚插件版本" description={`将 ${row.id} 切回其他已安装版本，正在使用该插件的流程需要重启后生效。`} okText="回滚" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => rollback(row.id)}>
-          <Button size="small" disabled={!row.active}>回滚</Button>
+          <Button size="small" disabled={!canAdmin || !row.active}>回滚</Button>
         </Popconfirm>
         <Popconfirm title="移除已安装版本" description={`从磁盘移除 ${row.id} V${row.version}。该操作不可撤销，需要重新安装才能恢复。`} okText="移除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => removeVersion(row.id, row.version)}>
-          <Button size="small" danger disabled={row.active || row.pending}>移除</Button>
+          <Button size="small" danger disabled={!canAdmin || row.active || row.pending}>移除</Button>
         </Popconfirm>
       </Space> }
     ]} />
 
     <Divider titlePlacement="left">受信任的发布者</Divider>
     <Space wrap style={{ marginBottom: 8 }}>
-      <Upload accept=".cer,.crt" maxCount={1} fileList={publisherFile ? [publisherFile] : []} beforeUpload={() => false} onChange={(info) => setPublisherFile(info.fileList.at(-1))} onRemove={() => { setPublisherFile(undefined); return true; }}><Button>选择证书</Button></Upload>
-      <Button type="primary" loading={busy} disabled={!publisherFile} onClick={trustPublisher}>信任发布者</Button>
+      <Upload accept=".cer,.crt" maxCount={1} fileList={publisherFile ? [publisherFile] : []} beforeUpload={() => false} onChange={(info) => setPublisherFile(info.fileList.at(-1))} onRemove={() => { setPublisherFile(undefined); return true; }}><Button disabled={!canAdmin}>选择证书</Button></Upload>
+      <Button type="primary" loading={busy} disabled={!canAdmin || !publisherFile} onClick={trustPublisher}>信任发布者</Button>
     </Space>
     <PanelTable emptyText="尚未信任任何发布者；未签名插件包会在预检时提示警告。" rowKey="thumbprint" dataSource={publishers} columns={[
       { title: '发布者', render: (_: unknown, row: TrustedPluginPublisher) => <><b>{row.displayName ?? row.subject}</b><br/><Typography.Text type="secondary">{row.subject}</Typography.Text></> },
@@ -284,11 +321,26 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
         description={`移除后，由 ${row.displayName ?? row.subject} 签名的插件包将不再被信任，后续安装需要重新选择证书。`}
         okText="移除" cancelText="取消" okButtonProps={{ danger: true }}
         onConfirm={() => untrustPublisher(row.thumbprint)}>
-        <Button danger size="small">移除</Button>
+        <Button danger size="small" disabled={!canAdmin}>移除</Button>
       </Popconfirm> }
     ]} />
 
     <Divider titlePlacement="left">运行时注册表</Divider>
+    <Space wrap style={{ marginBottom: 8 }}>
+      {canEngineer && (
+        <Button size="small" loading={busy} onClick={() => void rescanPlugins()}>
+          重新扫描插件目录
+        </Button>
+      )}
+      {sdkInfo && (
+        <Typography.Text type="secondary">
+          SDK v{sdkInfo.apiVersion} · 清单 Schema v{sdkInfo.packageManifestSchemaVersion} · 支持隔离模式：{sdkInfo.supportedIsolationModes.join(' / ')} · 生命周期：{sdkInfo.supportedLifetimes.join(' / ')}
+        </Typography.Text>
+      )}
+    </Space>
+    {sdkInfo?.isolationBoundary && (
+      <Alert type="info" showIcon style={{ marginBottom: 8 }} title="插件隔离边界说明" description={sdkInfo.isolationBoundary} />
+    )}
     <PanelTable emptyText="运行时没有加载任何插件。" rowKey={(p) => `${p.id}-${p.assemblyPath}`} dataSource={runtime} columns={[
       { title: '状态', width: 150, render: (_: unknown, row: PluginLoadInfo) => <Space wrap><Tag color={row.loaded ? 'green' : 'red'}>{row.loaded ? '已加载' : '失败'}</Tag>{row.restartRequired && <Tag color="orange">需要重启</Tag>}</Space> },
       { title: '插件', render: (_: unknown, row: PluginLoadInfo) => <><b>{row.name}</b> <code>{row.id}</code></> },
@@ -357,7 +409,10 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       <Select style={{ width: 220 }} placeholder="选择数据集" value={benchmarkDatasetId} onChange={chooseBenchmarkDataset} options={datasets.map(x => ({ value: x.id, label: `${x.name} (${x.itemCount})` }))} />
       <Select style={{ width: 250 }} placeholder="选择已完成的验证运行" value={benchmarkValidationRunId} onChange={setBenchmarkValidationRunId} options={validationRuns.map(x => ({ value: x.runId, label: `${x.runId.slice(0, 16)}… · ${x.workflowHash.slice(0, 8)}` }))} />
       <Select style={{ width: 220 }} placeholder="选择 WorkerProcess 插件" value={benchmarkPluginId} onChange={setBenchmarkPluginId} options={runtime.filter(x => x.loaded && x.isolationMode === 'WorkerProcess').map(x => ({ value: x.id, label: `${x.name} ${x.version}` }))} />
-      <InputNumber min={1} max={1000} value={benchmarkItems} onChange={(value) => setBenchmarkItems(value ?? 50)} addonBefore="样本数" />
+      <Space.Compact>
+        <Space.Addon>样本数</Space.Addon>
+        <InputNumber min={1} max={1000} value={benchmarkItems} onChange={(value) => setBenchmarkItems(value ?? 50)} />
+      </Space.Compact>
       <Select allowClear style={{ width: 260 }} placeholder="可选：选择基线基准测试" value={benchmarkBaselineRunId} onChange={setBenchmarkBaselineRunId} options={benchmarks.filter(x => x.status === 'Completed' && (!benchmarkPluginId || x.pluginId === benchmarkPluginId) && (!benchmarkDatasetId || x.datasetId === benchmarkDatasetId)).map(x => ({ value: x.runId, label: `${x.pluginVersion} · ${x.runId.slice(0, 12)}…` }))} />
       <Button type="primary" loading={busy} onClick={startBenchmark}>运行进程池 1 / 2 / 4 对比</Button>
     </Space>

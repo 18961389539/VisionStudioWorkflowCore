@@ -234,7 +234,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
 
   return (
     // 非模态（2026-10-25）：标定要对着画布上的 ROI / 坐标系操作，遮罩挡住的正是要看的区域。
-    <Modal open={open} onCancel={onClose} footer={null} width={1480} mask={false} title="标定 · 平面九点 / 相机内参向导" destroyOnHidden>
+    <Modal open={open} onCancel={onClose} footer={null} width="min(1480px, calc(100vw - 32px))" mask={false} title="标定 · 平面九点 / 相机内参向导" destroyOnHidden>
       {contextHolder}
       <DataErrorAlert scope="标定资产" error={assetError} onRetry={() => void refreshAssets()} />
       <Tabs
@@ -247,11 +247,25 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
 
       <div className="calibration-toolbar">
         <Space wrap>
-          <Input value={sourceFrame} onChange={(e) => { setSourceFrame(e.target.value); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="源坐标系" style={{ width: 205 }} />
-          <Input value={targetFrame} onChange={(e) => { setTargetFrame(e.target.value); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="目标坐标系" style={{ width: 205 }} />
+          <Space.Compact style={{ width: 205 }}>
+            <Space.Addon>源坐标系</Space.Addon>
+            <Input value={sourceFrame} onChange={(e) => { setSourceFrame(e.target.value); setWorkspaceDirty(true); setResult(undefined); }} />
+          </Space.Compact>
+          <Space.Compact style={{ width: 205 }}>
+            <Space.Addon>目标坐标系</Space.Addon>
+            <Input value={targetFrame} onChange={(e) => { setTargetFrame(e.target.value); setWorkspaceDirty(true); setResult(undefined); }} />
+          </Space.Compact>
           <Select value={targetUnit} onChange={(v) => { setTargetUnit(v); setWorkspaceDirty(true); setResult(undefined); }} style={{ width: 88 }} options={[{ value: 'mm' }, { value: 'cm' }, { value: 'm' }, { value: 'px' }]} />
-          <InputNumber value={maxRmse} min={0} step={0.001} onChange={(value) => { setMaxRmse(Number(value ?? 0)); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="RMSE 上限" addonAfter={targetUnit} style={{ width: 178 }} />
-          <InputNumber value={maxPointError} min={0} step={0.001} onChange={(value) => { setMaxPointError(Number(value ?? 0)); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="单点误差上限" addonAfter={targetUnit} style={{ width: 198 }} />
+          <Space.Compact style={{ width: 178 }}>
+            <Space.Addon>RMSE 上限</Space.Addon>
+            <InputNumber value={maxRmse} min={0} step={0.001} onChange={(value) => { setMaxRmse(Number(value ?? 0)); setWorkspaceDirty(true); setResult(undefined); }} />
+            <Space.Addon>{targetUnit}</Space.Addon>
+          </Space.Compact>
+          <Space.Compact style={{ width: 198 }}>
+            <Space.Addon>单点误差上限</Space.Addon>
+            <InputNumber value={maxPointError} min={0} step={0.001} onChange={(value) => { setMaxPointError(Number(value ?? 0)); setWorkspaceDirty(true); setResult(undefined); }} />
+            <Space.Addon>{targetUnit}</Space.Addon>
+          </Space.Compact>
           <Button onClick={() => { setPoints(ninePointGrid()); setVerificationPoints(verificationGrid()); setWorkspaceDirty(true); setResult(undefined); }}>重置 9 点</Button>
           <Button onClick={autoCapture} loading={busy}>自动采集 9 点</Button>
           <Button type="primary" onClick={solve} loading={busy}>计算</Button>
@@ -285,7 +299,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
           <div className="calibration-heatmap" style={{ gridTemplateColumns: `repeat(${Math.max(1, Math.max(...(result?.heatmap.map((x) => x.column) ?? [0])) + 1)},1fr)` }}>
             {(result?.heatmap ?? []).map((cell) => {
               const ratio = Math.min(1, cell.error / heatMax);
-              return <div key={`${cell.column}-${cell.row}`} className="heat-cell" title={`(${cell.x.toFixed(2)}, ${cell.y.toFixed(2)}) · ${cell.error.toFixed(4)} ${targetUnit}`} style={{ background: `rgba(255,77,79,${0.10 + ratio * 0.78})` }}><b>{cell.error.toFixed(3)}</b><span>{cell.x.toFixed(0)},{cell.y.toFixed(0)}</span></div>;
+              return <div key={`${cell.column}-${cell.row}`} className="heat-cell" title={`(${cell.x.toFixed(2)}, ${cell.y.toFixed(2)}) · ${cell.error.toFixed(4)} ${targetUnit}`} style={{ background: `color-mix(in srgb, var(--vs-danger) ${Math.round((0.10 + ratio * 0.78) * 100)}%, transparent)` }}><b>{cell.error.toFixed(3)}</b><span>{cell.x.toFixed(0)},{cell.y.toFixed(0)}</span></div>;
             })}
           </div>
           {result && <pre className="calibration-matrix">{[
@@ -299,8 +313,14 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
       <div className="calibration-assets">
         <div className="panel-title">标定资产版本</div>
         <Space wrap className="calibration-asset-form">
-          <Input value={assetId} onChange={(e) => setAssetId(e.target.value)} addonBefore="ID" style={{ width: 270 }} />
-          <Input value={assetName} onChange={(e) => setAssetName(e.target.value)} addonBefore="名称" style={{ width: 300 }} />
+          <Space.Compact style={{ width: 270 }}>
+            <Space.Addon>ID</Space.Addon>
+            <Input value={assetId} onChange={(e) => setAssetId(e.target.value)} />
+          </Space.Compact>
+          <Space.Compact style={{ width: 300 }}>
+            <Space.Addon>名称</Space.Addon>
+            <Input value={assetName} onChange={(e) => setAssetName(e.target.value)} />
+          </Space.Compact>
           <Button onClick={saveVersion} disabled={!result} loading={busy}>保存版本</Button>
           <Button onClick={refreshAssets}>刷新</Button>
         </Space>

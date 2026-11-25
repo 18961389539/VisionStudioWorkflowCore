@@ -11,6 +11,7 @@ import { LAYOUT_LIMITS, type LayoutState } from '../layout';
 import type { WorkflowIssue } from '../validation';
 import type { BottomTab } from '../useRunController';
 import type { RunResult } from '../types';
+import { useI18n } from '../i18n/provider';
 
 type EditorBottomDockProps = {
   layout: LayoutState;
@@ -39,6 +40,8 @@ export default function EditorBottomDock({
   bottomTab, onBottomTabChange, onPreviewHeight, validationIssues, locateIssue,
   result, resultStale, focusNode, onOpenTrace, nodeLabels, nodeTypeLabels
 }: EditorBottomDockProps) {
+  const { lang } = useI18n();
+  const text = (zh: string, en: string) => (lang === 'en' ? en : zh);
   return (
     <>
       <SplitHandle
@@ -77,9 +80,9 @@ export default function EditorBottomDock({
                 if (layout.bottomCollapsed) updateLayout({ bottomCollapsed: false });
               }}
               options={[
-                { label: '运行结果', value: 'result' },
-                { label: `校验问题${validationIssues.length > 0 ? ` · ${validationIssues.length}` : ''}`, value: 'issues' },
-                { label: '运行观测', value: 'observability' }
+                { label: text('运行结果', 'Results'), value: 'result' },
+                { label: `${text('校验问题', 'Issues')}${validationIssues.length > 0 ? ` · ${validationIssues.length}` : ''}`, value: 'issues' },
+                { label: text('运行观测', 'Observability'), value: 'observability' }
               ]}
             />
           </span>
@@ -88,17 +91,17 @@ export default function EditorBottomDock({
             updateLayout({ bottomCollapsed: false, bottomMaximized: false });
             const failed = result.nodeReports.find((report) => !report.success);
             if (failed) focusNode(failed.nodeId);
-          }}>{resultStale ? '查看上次错误' : '查看运行错误'}{result.nodeReports.some((report) => !report.success) ? ` · ${result.nodeReports.filter((report) => !report.success).length}` : ''}</Button>}
-          {result && onOpenTrace && <Button size="small" type="link" title="在追溯中打开这次运行：失败帧、节点时间线、诊断与调查"
-            onClick={() => onOpenTrace(result.runId)}>在追溯中打开</Button>}
-          {layout.bottomCollapsed && <span className="bottom-collapsed-hint">点击标签展开结果区</span>}
+          }}>{resultStale ? text('查看上次错误', 'View last error') : text('查看运行错误', 'View run error')}{result.nodeReports.some((report) => !report.success) ? ` · ${result.nodeReports.filter((report) => !report.success).length}` : ''}</Button>}
+          {result && onOpenTrace && <Button size="small" type="link" title={text('在追溯中打开这次运行：失败帧、节点时间线、诊断与调查', 'Open this run in Traceability')}
+            onClick={() => onOpenTrace(result.runId)}>{text('在追溯中打开', 'Open in Trace')}</Button>}
+          {layout.bottomCollapsed && <span className="bottom-collapsed-hint">{text('点击标签展开结果区', 'Click tab to expand')}</span>}
         </div>
         {!layout.bottomCollapsed && bottomTab === 'result' && (
           <RunPanel result={result} nodeLabels={nodeLabels} onSelectNode={focusNode} stale={resultStale} embedded />
         )}
         {!layout.bottomCollapsed && bottomTab === 'issues' && (
           validationIssues.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击顶部“校验”检查流程；发现的问题将显示在这里，点击可定位到画布" />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text('点击顶部“校验”检查流程；发现的问题将显示在这里，点击可定位到画布', 'Click "Validate" above to check the workflow; issues will appear here')} />
           ) : (
             <div className="bottom-issues">
               {validationIssues.map((issue) => {

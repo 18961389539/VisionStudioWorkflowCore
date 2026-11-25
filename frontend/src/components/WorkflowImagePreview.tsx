@@ -1,26 +1,41 @@
 import { useEffect, useState } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { Button, Segmented, Select, Tag } from 'antd';
-import type { RunResult } from '../types';
+import type { NodeCatalogItem, RunResult } from '../types';
 import { runImagePortLabel, useRunImages } from '../useRunImages';
+import { moduleCatalogFromNode } from '../appEditorShared';
 import ImageViewer from './ImageViewer';
+import PropertyPanel from './PropertyPanel';
 
 type Props = {
   nodes: Node[];
   edges: Edge[];
   selectedId: string;
   nodeLabels: Record<string, string>;
+  catalog?: NodeCatalogItem[];
   result?: RunResult;
   stale: boolean;
   running: boolean;
   onClose: () => void;
+  onParameterChange?: (nodeId: string, key: string, value: unknown) => void;
+  onOpenConfiguration?: (nodeId: string) => void;
 };
 
-export default function WorkflowImagePreview({ nodes, edges, selectedId, nodeLabels, result, stale, running, onClose }: Props) {
+const quickParameterTypes = new Set(['number', 'boolean', 'string', 'enum', 'select']);
+
+export default function WorkflowImagePreview({ nodes, edges, selectedId, nodeLabels, catalog = [], result, stale, running, onClose,
+  onParameterChange = () => {}, onOpenConfiguration = () => {} }: Props) {
   const [pinnedId, setPinnedId] = useState<string>();
   // 删除固定的节点后立即跟随当前选择，避免固定入口指向不存在的节点。
   const pinned = Boolean(pinnedId && nodes.some((node) => node.id === pinnedId));
   const targetId = (pinned ? pinnedId : selectedId) ?? '';
+  const targetNode = nodes.find((node) => node.id === targetId);
+  const targetType = String(targetNode?.data.typeKey ?? '');
+  const targetCatalog = moduleCatalogFromNode(targetNode) ?? catalog.find((item) => item.type === targetType);
+  const quickParameters = targetCatalog?.parameters.filter((parameter) => quickParameterTypes.has(parameter.type)).slice(0, 6) ?? [];
+  const hiddenQuickParameterNames = targetCatalog?.parameters
+    .filter((parameter) => !quickParameters.some((quick) => quick.name === parameter.name))
+    .map((parameter) => parameter.name) ?? [];
   useEffect(() => {
     if (pinnedId && !pinned) setPinnedId(undefined);
   }, [pinnedId, pinned]);
@@ -71,5 +86,16 @@ export default function WorkflowImagePreview({ nodes, edges, selectedId, nodeLab
         loading={imageCatalogLoading && !imageViewerSource.url}
         emptyHint={running ? '正在运行，等待图像…' : result ? '本次运行未产生可显示的图像，请检查运行结果。' : '运行流程后可查看最终预览及捕获的节点输入、输出图像'} />
     </div>
+    <section className="preview-quick-settings" aria-label="节点快速调参">
+      <div className="preview-quick-heading">
+        <strong>快速调参</strong>
+        <Button size="small" type="link" disabled={!targetNode || running}
+          onClick={() => targetNode && onOpenConfiguration(targetNode.id)}>完整配置…</Button>
+      </div>
+      {targetNode && targetCatalog && quickParameters.length
+        ? <PropertyPanel node={targetNode} catalogItem={targetCatalog} hiddenParameterNames={hiddenQuickParameterNames} disabled={running}
+          onChange={(key, value) => onParameterChange(targetNode.id, key, value)} />
+        : <small className="preview-quick-empty">{targetNode ? '此节点没有可快速调整的标量参数。' : '选择节点后可在此调整常用参数。'}</small>}
+    </section>
   </aside>;
 }

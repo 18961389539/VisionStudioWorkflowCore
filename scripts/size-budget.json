@@ -16,7 +16,7 @@
     "backend/src/VisionStudio.Api/Storage/StorageMaintenance.cs": 666,
     "backend/src/VisionStudio.Api/Storage/StorageBackupService.cs": 262,
     "backend/src/VisionStudio.Api/Storage/StorageBackupService.Restore.cs": 499,
-    "frontend/src/components/CameraPanel.tsx": 782,
-    "frontend/src/components/ImageViewer.tsx": 257
+    "frontend/src/components/CameraPanel.tsx": 707,
+    "frontend/src/components/ImageViewer.tsx": 247
   }
 }

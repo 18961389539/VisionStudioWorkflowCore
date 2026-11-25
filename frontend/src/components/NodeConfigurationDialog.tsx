@@ -33,6 +33,8 @@ export type Props = {
   open: boolean;
   disabled: boolean;
   onClose: () => void;
+  onRequestRename?: (nodeId: string) => void;
+  onOpenResourcePanel?: (kind: 'camera' | 'device' | 'robot' | 'media') => void;
   onApply: (parameters: NodeParameters) => boolean | void;
   onPreview: (parameters: NodeParameters) => Promise<RunResult>;
   previewBlockedReason?: string;
@@ -226,7 +228,7 @@ export default function NodeConfigurationDialog(props: Props) {
     const active = document.activeElement as HTMLElement | null;
     if (active && active.closest('input, textarea, select, [contenteditable="true"], .ant-select, .ant-input-number')) return;
     workspaceRef.current?.focus({ preventScroll: true });
-  }, [previewBusy]);
+  }, [previewBusy, workspaceRef]);
 
   // P1（评审）：弹窗打开时主程序会吞掉 Ctrl+S（preventDefault 后无动作，属“按键黑洞”）。
   // 这里把它变成“应用”，并补 Ctrl+Enter“运行此节点”；用 ref 读取最新闭包，避免每次渲染重注册监听。
@@ -280,6 +282,8 @@ export default function NodeConfigurationDialog(props: Props) {
       afterOpenChange={(visible) => { if (visible && initialTab === 'result') focusResult(); }}
       className={'node-configuration-modal' + (maximized ? ' is-maximized' : '')} width={maximized ? '100vw' : 'min(1680px, calc(100vw - 32px))'} style={{ top: maximized ? 0 : 16 }}
       title={<div className="node-configuration-title"><NodeCategoryIcon type={catalogItem.type} /><span>节点配置 · {String(node.data.label ?? catalogItem.displayName)}</span>
+        {props.onRequestRename && <Button type="text" size="small" aria-label="重命名节点" title="重命名节点（F2）"
+          onClick={() => props.onRequestRename?.(node.id)}>✎</Button>}
         {catalogMaturity !== 'stable' && <span className={`maturity-badge maturity-${catalogMaturity}`}
           data-maturity={catalogMaturity} title={maturityTitle(catalogMaturity, 'zh')}>{maturityLabel(catalogMaturity, 'zh')}</span>}
         <Button className="node-dialog-maximize" size="small" type="text" aria-label={maximized ? '还原窗口' : '最大化窗口'} title={maximized ? '还原窗口' : '最大化窗口'} onClick={() => setMaximized((value) => !value)}>{maximized ? '⤡' : '⤢'}</Button>
@@ -313,10 +317,10 @@ export default function NodeConfigurationDialog(props: Props) {
         { key: 'workspace', label: '配置', forceRender: true, children: <>
           {isShapeMatch
             ? <Tabs className="shape-match-workspace-tabs" activeKey={shapeWorkspaceTab} onChange={changeShapeWorkspaceTab} items={[
-              { key: 'training', label: '模型训练', disabled: locked, children: shapeWorkspaceTab === 'training' ? <NodeConfigurationWorkspace model={view} shapeMode="training" /> : null },
-              { key: 'search', label: '搜索推理', disabled: locked, children: shapeWorkspaceTab === 'search' ? <NodeConfigurationWorkspace model={view} shapeMode="search" /> : null }
+              { key: 'training', label: '模型训练', disabled: locked, children: shapeWorkspaceTab === 'training' ? <NodeConfigurationWorkspace model={view} shapeMode="training" onOpenResourcePanel={props.onOpenResourcePanel} /> : null },
+              { key: 'search', label: '搜索推理', disabled: locked, children: shapeWorkspaceTab === 'search' ? <NodeConfigurationWorkspace model={view} shapeMode="search" onOpenResourcePanel={props.onOpenResourcePanel} /> : null }
             ]} />
-            : <NodeConfigurationWorkspace model={view} />}
+            : <NodeConfigurationWorkspace model={view} onOpenResourcePanel={props.onOpenResourcePanel} />}
           <div ref={resultRef} tabIndex={-1} className="node-result-anchor">
             <NodeExecutionResult nodeId={node.id} catalog={catalogItem} result={isShapeMatch ? searchPreview?.result ?? result : displayedResult}
               receivedAt={isShapeMatch ? searchPreview?.receivedAt ?? resultReceivedAt : receivedAt}

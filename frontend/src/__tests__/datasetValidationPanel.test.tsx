@@ -1,8 +1,8 @@
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DatasetValidationPanel from '../components/DatasetValidationPanel';
-import { deferred, jsonResponse, tuningDataset, tuningRun } from './fixtures/tuning';
+import { deferred, jsonResponse, tuningDataset, tuningRun, tuningWorkflow } from './fixtures/tuning';
 
 const flush = async () => { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); }); };
 
@@ -86,5 +86,40 @@ describe('dataset validation panel', () => {
 
     expect(screen.getByText(/结果 · run-B/)).toBeInTheDocument();
     expect(screen.queryByText(/结果 · run-A/)).toBeNull();
+  });
+
+  it('runs the recipe snapshot and automatically links a completed passing validation', async () => {
+    let started = false;
+    let startBody: Record<string, unknown> | undefined;
+    let linkBody: Record<string, unknown> | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/validation/datasets') return jsonResponse([tuningDataset('A').dataset]);
+      if (url === '/api/traces?take=500' || url === '/api/media/items?take=500') return jsonResponse([]);
+      if (url === '/api/validation/datasets/A') return jsonResponse(tuningDataset('A'));
+      if (url === '/api/validation/datasets/A/runs' && init?.method === 'POST') {
+        started = true;
+        startBody = JSON.parse(String(init.body));
+        return jsonResponse({ runId: 'recipe-run' });
+      }
+      if (url === '/api/validation/datasets/A/runs') return jsonResponse(started ? [tuningRun('A', 'recipe-run')] : []);
+      if (url === '/api/validation/runs/recipe-run?includeResults=true') return jsonResponse(tuningRun('A', 'recipe-run'));
+      if (url === '/api/jobs/recipe-a/versions/2/validation' && init?.method === 'POST') {
+        linkBody = JSON.parse(String(init.body));
+        return jsonResponse({ accepted: true });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<DatasetValidationPanel open onClose={() => undefined} initialWorkflow={tuningWorkflow}
+      autoLinkRecipe={{ jobId: 'recipe-a', version: 2 }} />);
+    await screen.findByText('A-sample');
+    expect(screen.getByPlaceholderText('加载来源工作流后，可编辑参数或 ROI JSON。留空时将直接使用来源工作流。'))
+      .toHaveValue(JSON.stringify(tuningWorkflow, null, 2));
+    fireEvent.click(screen.getByRole('button', { name: '运行数据集验证' }));
+
+    await waitFor(() => expect(linkBody).toEqual({ validationRunId: 'recipe-run' }));
+    expect(startBody).toEqual({ sourceWorkflowRunId: 'designer-current', workflow: tuningWorkflow });
+    expect(await screen.findByText('V2 验证通过并已自动关联')).toBeInTheDocument();
   });
 });

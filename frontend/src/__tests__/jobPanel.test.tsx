@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigProvider } from 'antd';
 import JobPanel from '../components/JobPanel';
-import type { JobDescriptor, WorkflowPayload } from '../types';
+import type { JobDescriptor, NodeCatalogItem, WorkflowPayload } from '../types';
 import type { PrepareWorkflowChange } from '../useWorkflowChanges';
 
 const workflow: WorkflowPayload = { id: 'designer', name: '当前检测流程', nodes: [{ id: 'source', type: 'image.synthetic', parameters: {} }], edges: [] };
@@ -22,7 +22,8 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 function mount(initialJobs = [recipe('b-main', 'B 检测')], delayedRecipe?: Promise<unknown>,
   prepare: PrepareWorkflowChange = () => ({ apply: vi.fn(async () => true), cancel: vi.fn(), isCurrent: () => true, isSameDocument: () => true }),
-  onOpenValidation?: () => void) {
+  onOpenValidation?: (candidate?: WorkflowPayload, target?: { jobId: string; version: number }) => void,
+  catalog: NodeCatalogItem[] = []) {
   let jobs = [...initialJobs];
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     let data: unknown = {};
@@ -37,6 +38,17 @@ function mount(initialJobs = [recipe('b-main', 'B 检测')], delayedRecipe?: Pro
         publishedDependencyManifestHash: 'manifest-1', updatedAt: '2026-10-20T12:00:00Z',
         versions: job.versions.map((version) => ({ ...version, published: version.version === Number(parts[5]) })) } : job);
       data = jobs.find((job) => job.id === parts[3]);
+    } else if (url === '/api/jobs/b-main/versions/1/diff/2') data = {
+      jobId: 'b-main', fromVersion: 1, toVersion: 2, fromHash: 'before', toHash: 'after',
+      changes: [{ kind: 'Parameter', path: 'nodes/detect/parameters/threshold', before: '0.4', after: '0.7' }]
+    };
+    else if (url === '/api/jobs/b-main/versions/1' && jobs[0]?.latestVersion === 1)
+      data = { jobId: 'b-main', version: 1, workflow: { ...workflow, id: 'b-main-effective' } };
+    else if (/^\/api\/jobs\/b-main\/versions\/[12]$/.test(url)) {
+      const version = Number(url.split('/').pop());
+      data = { jobId: 'b-main', version, workflow: { ...workflow, nodes: [{
+        id: 'detect', name: '检测节点', type: 'image.threshold', parameters: { threshold: version === 1 ? 0.4 : 0.7 }
+      }] } };
     } else if (/^\/api\/jobs\/[^/]+$/.test(url)) data = jobs.find((job) => job.id === url.split('/')[3]);
     else if (url.endsWith('/parameterization')) data = { parameterBindings: {}, baseWorkflow: { ...workflow, id: 'recipe-base' } };
     else if (url === '/api/jobs/b-main/parameters' && delayedRecipe) data = await delayedRecipe;
@@ -45,7 +57,7 @@ function mount(initialJobs = [recipe('b-main', 'B 检测')], delayedRecipe?: Pro
     return { ok: true, json: async () => data } as Response;
   });
   vi.stubGlobal('fetch', fetchMock);
-  render(<ConfigProvider theme={{ token: { motion: false } }}><JobPanel open onClose={vi.fn()} workflow={workflow} prepareWorkflowChange={prepare} onRunResult={vi.fn()} onOpenValidation={onOpenValidation} /></ConfigProvider>);
+  render(<ConfigProvider theme={{ token: { motion: false } }}><JobPanel open onClose={vi.fn()} workflow={workflow} catalog={catalog} prepareWorkflowChange={prepare} onRunResult={vi.fn()} onOpenValidation={onOpenValidation} /></ConfigProvider>);
   return fetchMock;
 }
 
@@ -95,6 +107,44 @@ describe('recipe workbench', () => {
     // 空表不能只写“没有记录”：告诉用户下一步去哪跑出记录
     fireEvent.click(await screen.findByRole('button', { name: '打开数据集验证' }));
     expect(onOpenValidation).toHaveBeenCalledOnce();
+  });
+
+  it('starts validation from the selected immutable recipe workflow snapshot', async () => {
+    const onOpenValidation = vi.fn();
+    mount(undefined, undefined, undefined, onOpenValidation);
+    await screen.findByRole('button', { name: '去验证' });
+    fireEvent.click(screen.getByRole('tab', { name: '验证' }));
+    fireEvent.click(screen.getByRole('button', { name: '对此版本运行数据集验证' }));
+
+    await waitFor(() => expect(onOpenValidation).toHaveBeenCalledWith(
+      { ...workflow, id: 'b-main-effective' }, { jobId: 'b-main', version: 1 }
+    ));
+  });
+
+  it('renders recipe diffs as localized node and parameter rows', async () => {
+    const job = {
+      ...recipe('b-main', 'B 检测'),
+      latestVersion: 2,
+      versions: [
+        { version: 1, workflowHash: 'before', createdAt: time, note: '', published: false },
+        { version: 2, workflowHash: 'after', createdAt: time, note: '', published: false }
+      ]
+    };
+    const catalog: NodeCatalogItem[] = [{
+      type: 'image.threshold', displayName: '阈值节点', category: '图像', description: '',
+      inputs: [], outputs: [],
+      parameters: [{ name: 'threshold', label: '阈值', type: 'number', defaultValue: 0.5, internal: false }],
+      declaresActions: false, declaresFrames: false, declaresTransformFrames: false,
+      declaresOutputFrames: false, declaresRoiImageBindings: false
+    }];
+    mount([job], undefined, undefined, undefined, catalog);
+    await screen.findAllByRole('button', { name: '更多 ▾' });
+    fireEvent.click(screen.getAllByRole('button', { name: '更多 ▾' })[0]);
+    fireEvent.click(await screen.findByText('对比最近两个版本'));
+
+    const row = await screen.findByRole('row', { name: /参数变更.*检测节点.*阈值/ });
+    expect(row).toHaveTextContent('0.4');
+    expect(row).toHaveTextContent('0.7');
   });
 
   it('filters navigation without changing the selected recipe', async () => {

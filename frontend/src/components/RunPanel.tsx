@@ -255,6 +255,16 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
                 </span>
               )
             },
+            ...(failedCount > 0 ? [{
+              title: '失败详情',
+              dataIndex: 'error',
+              width: 240,
+              render: (_: string | null | undefined, record: ReportRow) => record.success
+                ? '—'
+                : <Typography.Text type="danger" ellipsis={{ tooltip: record.error ?? '未提供错误详情' }}>
+                  {record.error ?? '未提供错误详情'}
+                </Typography.Text>
+            }] : []),
             {
               title: '摘要',
               dataIndex: 'summary',

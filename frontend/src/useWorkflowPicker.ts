@@ -18,13 +18,15 @@ export function useWorkflowPicker(options: {
   designerWorkflowId: string;
   messageApi: MessageApi;
   prepare: ReturnType<typeof useWorkflowChanges>['prepare'];
+  onDeleted?: (id: string) => void;
 }) {
-  const { designerWorkflowId, messageApi, prepare } = options;
+  const { designerWorkflowId, messageApi, prepare, onDeleted } = options;
   const [workflowPickerOpen, setWorkflowPickerOpen] = useState(false);
   const [savedWorkflows, setSavedWorkflows] = useState<WorkflowDocumentSummary[]>([]);
   const [workflowToLoad, setWorkflowToLoad] = useState<string>();
   const [workflowListLoading, setWorkflowListLoading] = useState(false);
   const [workflowListError, setWorkflowListError] = useState<string>();
+  const [workflowDeletingId, setWorkflowDeletingId] = useState<string>();
 
   const workflowImport = useWorkflowImport({ active: workflowPickerOpen, contextKey: workflowToLoad,
     prepare, error: (text) => { void messageApi.error(text); } });
@@ -59,8 +61,37 @@ export function useWorkflowPicker(options: {
 
   const loadSelectedSavedWorkflow = () => { if (workflowToLoad) void load(workflowToLoad); };
 
+  const deleteSavedWorkflow = async (id: string): Promise<boolean> => {
+    if (workflowDeletingId || workflowImport.loading) return false;
+    setWorkflowDeletingId(id);
+    try {
+      const response = await apiFetch(workflows.byId(id), {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        void messageApi.error(await responseErrorMessage(response, '删除工作流失败'));
+        return false;
+      }
+      setSavedWorkflows((current) => {
+        const next = current.filter((item) => item.id !== id);
+        setWorkflowToLoad((selected) => selected === id ? next[0]?.id : selected);
+        return next;
+      });
+      onDeleted?.(id);
+      void messageApi.success(`已删除工作流 ${id}`);
+      return true;
+    } catch (error) {
+      void messageApi.error(error instanceof Error ? error.message : '删除工作流失败');
+      return false;
+    } finally {
+      setWorkflowDeletingId(undefined);
+    }
+  };
+
   return {
     workflowPickerOpen, setWorkflowPickerOpen, savedWorkflows, workflowToLoad, setWorkflowToLoad,
-    workflowListLoading, workflowListError, workflowImport, openWorkflowPicker, loadSelectedSavedWorkflow
+    workflowListLoading, workflowListError, workflowDeletingId, workflowImport, openWorkflowPicker,
+    loadSelectedSavedWorkflow, loadSavedWorkflowById: load, deleteSavedWorkflow
   };
 }

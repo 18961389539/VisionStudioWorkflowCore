@@ -18,7 +18,11 @@ const stateColor = (state: StationRuntimeStatus['state']) => {
   return 'default';
 };
 
-export default function LocalParallelRuntimes({ jobs, canConfigure }: { jobs: ProductionJobItem[]; canConfigure: boolean }) {
+export default function LocalParallelRuntimes({ jobs, canConfigure, canReconcile = false }: {
+  jobs: ProductionJobItem[];
+  canConfigure: boolean;
+  canReconcile?: boolean;
+}) {
   const [messageApi, contextHolder] = message.useMessage();
   const [runtimes, setRuntimes] = useState<StationRuntimeStatus[]>([]);
   const [loading, setLoading] = useState(false);
@@ -199,7 +203,7 @@ export default function LocalParallelRuntimes({ jobs, canConfigure }: { jobs: Pr
   };
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       {contextHolder}
       <Alert
         type="info"
@@ -370,7 +374,7 @@ export default function LocalParallelRuntimes({ jobs, canConfigure }: { jobs: Pr
                       恢复
                     </Button>
                   )}
-                  {isStopped && (
+                  {canReconcile && isStopped && (
                     <Button
                       size="small"
                       disabled={busyKey !== null}
@@ -418,7 +422,7 @@ export default function LocalParallelRuntimes({ jobs, canConfigure }: { jobs: Pr
         onOk={() => void saveConfigModal()}
       >
         {configDraft && (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
             <Space wrap>
               <span>生产配方</span>
               <Select
@@ -439,11 +443,17 @@ export default function LocalParallelRuntimes({ jobs, canConfigure }: { jobs: Pr
             </Space>
             <Space wrap>
               <span>周期延迟</span>
-              <InputNumber min={0} max={60000} addonAfter="ms" value={configDraft.cycleDelayMs}
-                onChange={(v) => setConfigDraft({ ...configDraft, cycleDelayMs: Number(v ?? 0) })} />
+              <Space.Compact>
+                <InputNumber min={0} max={60000} value={configDraft.cycleDelayMs}
+                  onChange={(v) => setConfigDraft({ ...configDraft, cycleDelayMs: Number(v ?? 0) })} />
+                <Space.Addon>ms</Space.Addon>
+              </Space.Compact>
               <span>看门狗超时</span>
-              <InputNumber min={100} max={600000} addonAfter="ms" value={configDraft.maxCycleMs}
-                onChange={(v) => setConfigDraft({ ...configDraft, maxCycleMs: Number(v ?? 15000) })} />
+              <Space.Compact>
+                <InputNumber min={100} max={600000} value={configDraft.maxCycleMs}
+                  onChange={(v) => setConfigDraft({ ...configDraft, maxCycleMs: Number(v ?? 15000) })} />
+                <Space.Addon>ms</Space.Addon>
+              </Space.Compact>
               <span>连续失败上限</span>
               <InputNumber min={1} max={1000} value={configDraft.maxConsecutiveFailures}
                 onChange={(v) => setConfigDraft({ ...configDraft, maxConsecutiveFailures: Number(v ?? 3) })} />
@@ -460,20 +470,22 @@ export default function LocalParallelRuntimes({ jobs, canConfigure }: { jobs: Pr
                 onChange={(triggerMode) => setConfigDraft({ ...configDraft, triggerMode })}
               />
               <span>触发等待超时</span>
-              <InputNumber
-                min={100}
-                max={300000}
-                addonAfter="ms"
-                disabled={(configDraft.triggerMode ?? 'Continuous') !== 'ExternalSignal'}
-                value={configDraft.triggerTimeoutMs ?? 30000}
-                onChange={(v) => setConfigDraft({ ...configDraft, triggerTimeoutMs: Number(v ?? 30000) })}
-              />
+              <Space.Compact>
+                <InputNumber
+                  min={100}
+                  max={300000}
+                  disabled={(configDraft.triggerMode ?? 'Continuous') !== 'ExternalSignal'}
+                  value={configDraft.triggerTimeoutMs ?? 30000}
+                  onChange={(v) => setConfigDraft({ ...configDraft, triggerTimeoutMs: Number(v ?? 30000) })}
+                />
+                <Space.Addon>ms</Space.Addon>
+              </Space.Compact>
             </Space>
           </Space>
         )}
       </Modal>
       <Modal
-        open={resolveStationId !== null}
+        open={canReconcile && resolveStationId !== null}
         title={`核对未确认设备动作 · ${resolveStationId ?? ''}`}
         okText="提交核对并解除"
         cancelText="取消"
@@ -482,7 +494,7 @@ export default function LocalParallelRuntimes({ jobs, canConfigure }: { jobs: Pr
         onOk={() => void submitResolve()}
       >
         {pendingState && (
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="small" style={{ width: '100%' }}>
             <div>运行 ID：{pendingState.runId ?? '未知'}</div>
             <div>清单哈希：{pendingState.manifestHash ?? '未知'}</div>
             <Form form={resolveForm} layout="vertical" disabled={resolveSubmitting}>

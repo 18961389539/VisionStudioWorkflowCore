@@ -75,6 +75,7 @@ export function useRunController({
   const [running, setRunning] = useState(false);
   /** 本次运行的开始时刻（界面显示已用时间）；未运行时为空 */
   const [runStartedAt, setRunStartedAt] = useState<number>();
+  const [runProgress, setRunProgress] = useState<{ completed: number; total: number }>();
   const [result, setResult] = useState<RunResult>();
   const [resultReceivedAt, setResultReceivedAt] = useState<string>();
   const operationRef = useRef<Operation | undefined>(undefined);
@@ -91,6 +92,36 @@ export function useRunController({
   );
   const currentWorkflowRef = useRef('');
   currentWorkflowRef.current = currentFingerprint;
+  const workflowIdRef = useRef(workflowPayload.id);
+  workflowIdRef.current = workflowPayload.id;
+  useEffect(() => {
+    if (!running) {
+      setRunProgress(undefined);
+      return;
+    }
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    void import('./useRunProgress')
+      .then(({ subscribeRunProgress }) => {
+        if (cancelled) return;
+        unsubscribe = subscribeRunProgress((event) => {
+          if (cancelled || !mounted.current) return;
+          if (event.workflowId && event.workflowId !== workflowIdRef.current) return;
+          setRunProgress({ completed: event.completedCount, total: event.totalCount });
+          setNodes((current) => current.map((node) => {
+            if (node.id !== event.nodeId) return node;
+            const nextDuration = typeof event.durationMs === 'number' ? event.durationMs : node.data.durationMs;
+            if (node.data.status === event.state && node.data.durationMs === nextDuration) return node;
+            return { ...node, data: { ...node.data, status: event.state, durationMs: nextDuration } };
+          }));
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [running, setNodes]);
   // 调试会话（后端有状态会话）：启动到断点 / 继续 / 用缓存输入运行单节点 / 结束会话。
   // anyBusy 供界面禁用入口，operationRef 在事件内同步互斥，避免重渲染前重复提交。
   const [debugSession, setDebugSession] = useState<DebugSessionView>();
@@ -543,6 +574,7 @@ export function useRunController({
   return {
     running,
     runStartedAt,
+    runProgress,
     result,
     resultReceivedAt,
     clearResult,

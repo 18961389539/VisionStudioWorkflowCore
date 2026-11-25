@@ -9,6 +9,8 @@ import { Skeleton } from 'antd';
 import type { Edge, Node } from '@xyflow/react';
 import ErrorBoundary from './components/ErrorBoundary';
 import VisionNode from './components/VisionNode';
+import { CanvasGroupNode, CanvasNoteNode } from './components/CanvasAnnotationNodes';
+import { absoluteNodePosition, isCanvasAnnotation } from './canvasAnnotations';
 import { catalogNodeData, fallbackCatalogRaw, makeDefaultParameters } from './catalog';
 import { localizeCatalog } from './i18n';
 import type { Lang } from './i18n/lang';
@@ -42,7 +44,7 @@ export function LazyPanel({ open, label, onClose, children }: { open: boolean; l
     : null;
 }
 
-export const nodeTypes = { vision: VisionNode };
+export const nodeTypes = { vision: VisionNode, canvasGroup: CanvasGroupNode, canvasNote: CanvasNoteNode };
 export type NodeAttachment = PortRecommendation & { nodeId: string; portName: string; newPort: string };
 export type ConnectionPicker = PortRecommendation & { nodeId: string; portName: string; x: number; y: number; position: { x: number; y: number } };
 export type WorkflowDocumentSummary = { id: string; name: string; nodeCount: number; edgeCount: number; updatedAt: string };
@@ -166,22 +168,25 @@ export function edgePresentation(kind: 'control' | 'data') {
  * 性能：先建「节点 → 端口」Map，整体 O(N+E)，避免每条边都 nodes.find + 端口 find。
  */
 export function buildWorkflowPayload(id: string, name: string, nodes: Node[], edges: Edge[]): WorkflowPayload {
+  const workflowNodes = nodes.filter((node) => !isCanvasAnnotation(node));
+  const workflowNodeIds = new Set(workflowNodes.map((node) => node.id));
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const outputsByNode = new Map<string, Map<string, PortDescriptor>>();
-  for (const node of nodes) {
+  for (const node of workflowNodes) {
     const ports = getPorts(node, 'outputs');
     outputsByNode.set(node.id, new Map(ports.map((port) => [port.name, port])));
   }
   return {
     id,
     name,
-    nodes: nodes.map((node) => ({
+    nodes: workflowNodes.map((node) => ({
       id: node.id,
       type: String(node.data.typeKey),
       name: String(node.data.label ?? node.id),
-      position: node.position,
+      position: absoluteNodePosition(node, nodesById),
       parameters: (node.data.parameters ?? {}) as Record<string, unknown>
     })),
-    edges: edges.map((edge) => {
+    edges: edges.filter((edge) => workflowNodeIds.has(edge.source) && workflowNodeIds.has(edge.target)).map((edge) => {
       const sourcePort = outputsByNode.get(edge.source)?.get(edge.sourceHandle ?? '');
       const kind = String(edge.data?.kind ?? (sourcePort?.dataType === 'Control' ? 'control' : 'data'));
       return {

@@ -24,6 +24,7 @@ export const STORAGE_KEYS = {
   toolboxFavorites: 'toolbox-favorites',
   autoLoginSkipped: 'auto-login-skipped',
   onboardingDone: 'onboarding-done',
+  canvasAnnotations: 'canvas-annotations',
   draftWorkflow: 'draft.workflow'
 } as const;
 

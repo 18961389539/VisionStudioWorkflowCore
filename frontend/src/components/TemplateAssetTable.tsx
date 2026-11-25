@@ -91,7 +91,7 @@ export default function TemplateAssetTable() {
   };
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Space orientation="vertical" style={{ width: '100%' }}>
       {holder}
       <Space wrap>
         <Button size="small" onClick={() => void load()} loading={busy}>刷新</Button>
@@ -110,7 +110,7 @@ export default function TemplateAssetTable() {
         locale={{ emptyText: <Empty description="还没有模板图资产：点「上传模板图」选一张本地图片" /> }}
         columns={[
           { title: '资产', dataIndex: 'name', render: (_: string, asset) => (
-            <Space direction="vertical" size={0}>
+            <Space orientation="vertical" size={0}>
               <Typography.Text strong>{asset.name}</Typography.Text>
               <Typography.Text type="secondary" code>{asset.id}</Typography.Text>
             </Space>

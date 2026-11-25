@@ -8,6 +8,8 @@ export function useProductionPoll<T>(read: (signal: AbortSignal) => Promise<T>, 
   const [refreshing, setRefreshing] = useState(enabled);
   const [generation, setGeneration] = useState(0);
   const lifecycle = useRef<AbortController | undefined>(undefined);
+  const readRef = useRef(read);
+  readRef.current = read;
 
   const refresh = useCallback(() => {
     if (!enabled) return;
@@ -23,7 +25,7 @@ export function useProductionPoll<T>(read: (signal: AbortSignal) => Promise<T>, 
     let next: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const latest = await runTimedAbortable(controller.signal, 5_000, read);
+        const latest = await runTimedAbortable(controller.signal, 5_000, (signal) => readRef.current(signal));
         if (controller.signal.aborted) return;
         setData(latest);
         setError(undefined);
@@ -44,7 +46,7 @@ export function useProductionPoll<T>(read: (signal: AbortSignal) => Promise<T>, 
       clearTimeout(next);
       if (lifecycle.current === controller) lifecycle.current = undefined;
     };
-  }, [enabled, read, generation, intervalMs]);
+  }, [enabled, generation, intervalMs]);
 
   return { data, error, refresh, refreshing };
 }

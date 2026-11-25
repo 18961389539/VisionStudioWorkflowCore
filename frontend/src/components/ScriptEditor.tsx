@@ -100,7 +100,8 @@ const LOCAL_COMPLETIONS: ScriptCompletion[] = [
   { label: 'Image', kind: 'Variable', detail: '输入 Mat 或 null', insertText: 'Image' },
   { label: 'Log', kind: 'Method', detail: 'void Log(string message)', insertText: 'Log(' },
   { label: 'Fail', kind: 'Method', detail: 'void Fail(string code, string message)', insertText: 'Fail(' },
-  { label: 'Mat', kind: 'Type', detail: 'OpenCvSharp.Mat', insertText: 'Mat' },
+  { label: 'Mat', kind: 'Type', detail: 'OpenCvSharp.Mat（推荐配合 using 语句）', insertText: 'Mat' },
+  { label: 'using', kind: 'Snippet', detail: '自动释放 Mat 非托管内存', insertText: 'using (var mat = new Mat())\n{\n    \n}' },
   { label: 'Cv2', kind: 'Type', detail: 'OpenCvSharp.Cv2', insertText: 'Cv2' },
   { label: 'for', kind: 'Keyword', detail: '循环', insertText: 'for (var i = 0; i < ; i++) {\n    \n}' },
   { label: 'if', kind: 'Keyword', detail: '条件', insertText: 'if () {\n    \n}' }
@@ -108,8 +109,8 @@ const LOCAL_COMPLETIONS: ScriptCompletion[] = [
 
 const SNIPPETS = [
   { label: '数值输出', value: 'number', code: 'Output.Number = Input.Number("a") * 2;' },
-  { label: '灰度转换', value: 'gray', code: 'var gray = new Mat();\nCv2.CvtColor(Image, gray, ColorConversionCodes.BGR2GRAY);\nOutput.Image = gray;\ngray.Dispose();' },
-  { label: '阈值', value: 'threshold', code: 'var binary = new Mat();\nCv2.Threshold(Image, binary, 128, 255, ThresholdTypes.Binary);\nOutput.Image = binary;\nbinary.Dispose();' },
+  { label: '灰度转换', value: 'gray', code: 'if (Image is null) Fail("E_NO_IMAGE", "未连接输入图像");\nusing (var gray = new Mat())\n{\n    Cv2.CvtColor(Image!, gray, ColorConversionCodes.BGR2GRAY);\n    Output.Image = gray;\n}' },
+  { label: '阈值', value: 'threshold', code: 'if (Image is null) Fail("E_NO_IMAGE", "未连接输入图像");\nusing (var binary = new Mat())\n{\n    Cv2.Threshold(Image!, binary, 128, 255, ThresholdTypes.Binary);\n    Output.Image = binary;\n}' },
   {
     label: '异常处理', value: 'try',
     code: 'try {\n    \n} catch (OpenCvSharpException ex) {\n    Fail("E_CV", ex.Message);\n}'
@@ -117,7 +118,7 @@ const SNIPPETS = [
   { label: 'JSON 输出', value: 'json', code: 'Output.Json = "{\\"ok\\":true}";' },
   {
     label: '轮廓统计', value: 'contours',
-    code: 'var gray = new Mat();\nCv2.CvtColor(Image, gray, ColorConversionCodes.BGR2GRAY);\nvar binary = new Mat();\nCv2.Threshold(gray, binary, 0, 255, ThresholdTypes.Otsu);\nCv2.FindContours(binary, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);\nvar areas = contours.Select(item => Cv2.ContourArea(item)).OrderByDescending(area => area).ToArray();\nOutput.Json = "{\\"count\\":" + contours.Length + ",\\"largest\\":" + (areas.Length > 0 ? areas[0] : 0) + "}";\ngray.Dispose();\nbinary.Dispose();'
+    code: 'if (Image is null) Fail("E_NO_IMAGE", "未连接输入图像");\nusing (var gray = new Mat())\nusing (var binary = new Mat())\n{\n    Cv2.CvtColor(Image!, gray, ColorConversionCodes.BGR2GRAY);\n    Cv2.Threshold(gray, binary, 0, 255, ThresholdTypes.Otsu);\n    Cv2.FindContours(binary, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);\n    var areas = contours.Select(item => Cv2.ContourArea(item)).OrderByDescending(area => area).ToArray();\n    Output.Json = "{\\"count\\":" + contours.Length + ",\\"largest\\":" + (areas.Length > 0 ? areas[0] : 0) + "}";\n}'
   }
 ];
 
@@ -142,6 +143,7 @@ const API_GROUPS: Array<{ title: string; items: Array<[string, string]> }> = [
   {
     title: '常用类型',
     items: [
+      ['using (var m = new Mat()) { }', '自动释放 Mat 内存（赋值 Output.Image 会立即克隆）'],
       ['Mat', 'OpenCV 图像'],
       ['MatType', '像素类型 CV_8UC1 等'],
       ['Scalar', '颜色/标量'],

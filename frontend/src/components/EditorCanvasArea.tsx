@@ -1,128 +1,66 @@
 /**
  * 编辑器中央画布区（巨型组件拆分，2026-11-13）：画布工具栏（查找 / 撤销 / 对齐 / 布局）、
  * React Flow 画布、草稿恢复提示、端口连接选点与节点右键菜单、图像预览。
- * 纯展示：状态与回调由 App 注入，行为与拆分前一致。
+ * 纯展示：状态与回调由 4 个域 Context 注入（见 ../editorContexts），行为与拆分前一致。
  */
-import { lazy, Suspense, useCallback, useEffect, type RefObject } from 'react';
-import { Alert, Button, Dropdown, Input, Segmented, Switch, Tag, type InputRef, type MenuProps } from 'antd';
-import {
-  Background, Controls, ReactFlow, useReactFlow, type Connection, type Edge, type FitViewOptions,
-  type IsValidConnection, type Node, type OnConnectEnd, type OnEdgesChange, type OnNodesChange
-} from '@xyflow/react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { Alert, Button, Dropdown, Input, Segmented, Switch, Tag } from 'antd';
+import { Background, Controls, ReactFlow, useReactFlow } from '@xyflow/react';
 import Toolbox from './Toolbox';
 import CanvasMiniMap from './CanvasMiniMap';
+import { useEditorGraph, useEditorLayout, useEditorRun, useEditorSelection } from '../editorContexts';
+import { useI18n } from '../i18n/provider';
+import { isCanvasAnnotation } from '../canvasAnnotations';
 
 // 首次引导只在未关闭时出现一次，不占首屏体积（主包 JS 预算已接近上限）
 const OnboardingCard = lazy(() => import('./OnboardingCard'));
 import WorkflowImagePreview from './WorkflowImagePreview';
-import type { LayoutPreset, LayoutState } from '../layout';
-import type { WorkflowDraft } from '../draft';
-import type { GraphHistory } from '../history';
-import type { NodeCatalogItem, RunResult } from '../types';
-import { CANVAS_FIT_PADDING, nodeTypes, type ConnectionPicker, type NodeAttachment } from '../appEditorShared';
-import type { NodeConfigurationTab } from './NodeConfigurationDialog';
+import type { LayoutPreset } from '../layout';
+import { CANVAS_FIT_PADDING, nodeTypes } from '../appEditorShared';
 
-export type EditorCanvasAreaProps = {
-  layout: LayoutState;
-  applyLayoutPreset: (preset: LayoutPreset) => void;
-  toggleFocusMode: () => void;
-  focusMode: boolean;
-  imagePreviewOpen: boolean;
-  exitFocusMode: (restoreSnapshot: boolean) => void;
-  setImagePreviewOpen: (value: boolean | ((open: boolean) => boolean)) => void;
-  compactNodes: boolean;
-  setCompactNodes: (value: boolean) => void;
-  selectedNode: Node | undefined;
-  selectedId: string;
-  openNodeConfiguration: (nodeId: string, tab?: NodeConfigurationTab) => void;
-  selectedNodeIds: string[];
-  alignSelection: (mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom') => void;
-  history: GraphHistory;
-  undo: () => void;
-  redo: () => void;
-  anyBusy: boolean;
-  selectedEdgeIds: string[];
-  deleteElements: (nodeIds: string[], edgeIds: string[]) => void;
-  searchInputRef: RefObject<InputRef | null>;
-  searchQuery: string;
-  setSearchQuery: (value: string) => void;
-  searchOpen: boolean;
-  setSearchOpen: (value: boolean) => void;
-  searchMatches: Node[];
-  focusNode: (nodeId: string) => void;
-  fitView: (options?: FitViewOptions) => Promise<boolean>;
-  nodes: Node[];
-  edges: Edge[];
-  displayEdges: Edge[];
-  themeMode: 'light' | 'dark';
-  isValidConnection: IsValidConnection;
-  handleNodesChange: OnNodesChange;
-  handleEdgesChange: OnEdgesChange;
-  onConnect: (connection: Connection) => void;
-  setConnectionPicker: (value: ConnectionPicker | undefined) => void;
-  onConnectEnd: OnConnectEnd;
-  setDragging: (value: boolean) => void;
-  pushHistory: (label: string, coalesceKey?: string) => void;
-  setSelectedId: (value: string) => void;
-  flowAreaRef: RefObject<HTMLDivElement | null>;
-  onDrop: (event: React.DragEvent) => void;
-  cancelLongPress: () => void;
-  longPressRef: { current: { timer: number; startX: number; startY: number } | undefined };
-  openNodeMenuAt: (nodeId: string, clientX: number, clientY: number) => void;
-  draftNotice: WorkflowDraft | undefined;
-  locale: string;
-  restoreDraft: () => void;
-  discardDraft: () => void;
-  showTemplates: () => void;
-  openWorkflowPicker: () => Promise<void>;
-  connectionPicker: ConnectionPicker | undefined;
-  connectionPickerRef: RefObject<HTMLDivElement | null>;
-  catalog: NodeCatalogItem[];
-  recentNodeTypes: string[];
-  addNode: (typeKey: string, position?: { x: number; y: number }, attachment?: NodeAttachment) => void;
-  nodeContextMenu: { x: number; y: number; nodeId: string } | undefined;
-  setNodeContextMenu: (value: { x: number; y: number; nodeId: string } | undefined) => void;
-  nodeContextMenuItems: MenuProps['items'];
-  designerWorkflowId: string;
-  nodeLabels: Record<string, string>;
-  result: RunResult | undefined;
-  resultStale: boolean;
-  running: boolean;
-  debugBusy: boolean;
-  /** 首次上手引导：仅在画布已有节点时显示——空画布已经有更聚焦的空态引导。 */
-  onboarding?: {
-    open: boolean;
-    onClose: () => void;
-    onOpenTemplates: () => void;
-    onOpenCameras: () => void;
-    onOpenCommand: () => void;
-    onOpenValidation: () => void;
-    onOpenJobs: () => void;
-  };
-};
 
-export default function EditorCanvasArea({
-  layout, applyLayoutPreset, toggleFocusMode, focusMode, imagePreviewOpen, exitFocusMode, setImagePreviewOpen,
-  compactNodes, setCompactNodes, selectedNode, selectedId, openNodeConfiguration, selectedNodeIds, alignSelection,
-  history, undo, redo, anyBusy, selectedEdgeIds, deleteElements,
-  searchInputRef, searchQuery, setSearchQuery, searchOpen, setSearchOpen, searchMatches, focusNode,
-  fitView, nodes, edges, displayEdges, themeMode, isValidConnection, handleNodesChange, handleEdgesChange, onConnect,
-  setConnectionPicker, onConnectEnd, setDragging, pushHistory, setSelectedId,
-  flowAreaRef, onDrop, cancelLongPress, longPressRef, openNodeMenuAt,
-  draftNotice, locale, restoreDraft, discardDraft, showTemplates, openWorkflowPicker,
-  connectionPicker, connectionPickerRef, catalog, recentNodeTypes, addNode,
-  nodeContextMenu, setNodeContextMenu, nodeContextMenuItems,
-  designerWorkflowId, nodeLabels, result, resultStale, running, debugBusy, onboarding
-}: EditorCanvasAreaProps) {
+export default function EditorCanvasArea() {
+  const { lang } = useI18n();
+  const text = (zh: string, en: string) => (lang === 'en' ? en : zh);
+  // 状态改由 4 个域 Context 提供（2026-11-25）：此前是 67 个平铺 props。
+  // 解构保留原变量名，画布 JSX 与交互逻辑一行未改。
+  const {
+    nodes, edges, displayEdges, isValidConnection, handleNodesChange, handleEdgesChange, onConnect, onReconnect,
+    onReconnectStart, onReconnectEnd, onConnectEnd,
+    setDragging, pushHistory, history, undo, redo, addNode, deleteElements, updateNodeParameter, addCanvasNote, createGroup, alignSelection, autoLayout, fitView,
+    flowAreaRef, onDrop, cancelLongPress, longPressRef, catalog, recentNodeTypes, nodeLabels
+  } = useEditorGraph();
+  const {
+    selectedNode, selectedId, setSelectedId, selectedNodeIds, selectedEdgeIds, openNodeConfiguration, focusNode,
+    searchInputRef, searchQuery, setSearchQuery, searchOpen, setSearchOpen, searchMatches,
+    connectionPicker, setConnectionPicker, connectionPickerRef, nodeContextMenu, setNodeContextMenu,
+    nodeContextMenuItems, openNodeMenuAt
+  } = useEditorSelection();
+  const configurableSelectedNode = selectedNode && !isCanvasAnnotation(selectedNode) ? selectedNode : undefined;
+  const {
+    layout, applyLayoutPreset, focusMode, toggleFocusMode, exitFocusMode, compactNodes, setCompactNodes,
+    imagePreviewOpen, setImagePreviewOpen, themeMode, locale
+  } = useEditorLayout();
+  const {
+    result, resultStale, running, debugBusy, anyBusy, draftNotice, restoreDraft, discardDraft,
+    showTemplates, openWorkflowPicker, importWorkflowJson, designerWorkflowId, onboarding,
+    debugSession, onContinueDebugSession, onRunSelectedNodeInSession, onEndDebugSession
+  } = useEditorRun();
   // 缩放分级（far/mid/near）：直接写画布容器 dataset，不经 React 状态——拖画布不会触发整树重渲；
   // CSS 按级别显隐端口文字/类型/摘要（Handle 恒在，连线落点不受影响）
   const { getViewport } = useReactFlow();
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0);
+  const visibleSearchMatches = searchMatches.slice(0, 8);
+  const groupableSelectionCount = nodes.filter((node) => selectedNodeIds.includes(node.id) && !node.parentId && !isCanvasAnnotation(node)).length;
+  const clampedSearchIndex = visibleSearchMatches.length > 0
+    ? Math.min(searchActiveIndex, visibleSearchMatches.length - 1)
+    : -1;
   const syncZoomLevel = useCallback((viewport: { zoom: number }) => {
     const area = flowAreaRef.current;
     if (!area) return;
     const level = viewport.zoom >= 1.05 ? 'near' : viewport.zoom >= 0.6 ? 'mid' : 'far';
     if (area.dataset.zoomLevel !== level) area.dataset.zoomLevel = level;
-  }, []);
+  }, [flowAreaRef]);
   useEffect(() => {
     syncZoomLevel(getViewport());
   }, [getViewport, syncZoomLevel]);
@@ -136,35 +74,64 @@ export default function EditorCanvasArea({
               ref={searchInputRef}
               size="small"
               allowClear
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={searchOpen && searchQuery.trim() !== ''}
+              aria-controls="canvas-search-listbox"
+              aria-activedescendant={searchOpen && searchQuery.trim() !== '' && clampedSearchIndex >= 0
+                ? `canvas-search-option-${clampedSearchIndex}`
+                : undefined}
               className="canvas-search-input"
-              placeholder="画布中查找（Ctrl+F）"
+              placeholder={text('画布中查找（Ctrl+F）', 'Find on canvas (Ctrl+F)')}
               value={searchQuery}
-              onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true); }}
+              onChange={(event) => { setSearchQuery(event.target.value); setSearchActiveIndex(0); setSearchOpen(true); }}
               onFocus={() => setSearchOpen(true)}
               onBlur={() => setSearchOpen(false)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && searchMatches.length > 0) {
-                  focusNode(searchMatches[0].id);
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setSearchOpen(true);
+                  if (visibleSearchMatches.length > 0) {
+                    setSearchActiveIndex((index) => (index + 1) % visibleSearchMatches.length);
+                  }
+                  return;
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setSearchOpen(true);
+                  if (visibleSearchMatches.length > 0) {
+                    setSearchActiveIndex((index) => (index - 1 + visibleSearchMatches.length) % visibleSearchMatches.length);
+                  }
+                  return;
+                }
+                if (event.key === 'Enter' && visibleSearchMatches.length > 0) {
+                  const target = visibleSearchMatches[Math.max(0, clampedSearchIndex)] ?? visibleSearchMatches[0];
+                  focusNode(target.id);
                   setSearchOpen(false);
                 }
                 if (event.key === 'Escape') {
                   setSearchQuery('');
+                  setSearchActiveIndex(0);
                   setSearchOpen(false);
                 }
               }}
             />
             {searchOpen && searchQuery.trim() !== '' && (
               // 用 mousedown 阻止默认行为，点结果时输入框不失焦，onClick 才能拿到这一次点击
-              <div className="canvas-search-results" onMouseDown={(event) => event.preventDefault()}>
+              <div id="canvas-search-listbox" role="listbox" aria-label="画布节点搜索结果" className="canvas-search-results" onMouseDown={(event) => event.preventDefault()}>
                 <div className="canvas-search-count">
                   命中 {searchMatches.length} / {nodes.length}{searchMatches.length > 8 ? '（仅显示前 8 条）' : ''}
                 </div>
-                {searchMatches.slice(0, 8).map((node) => (
+                {visibleSearchMatches.map((node, index) => (
                   <button
                     key={node.id}
+                    id={`canvas-search-option-${index}`}
                     type="button"
-                    className="canvas-search-item"
+                    role="option"
+                    aria-selected={index === clampedSearchIndex}
+                    className={`canvas-search-item${index === clampedSearchIndex ? ' is-active' : ''}`}
                     title="定位并选中该节点"
+                    onMouseEnter={() => setSearchActiveIndex(index)}
                     onClick={() => { focusNode(node.id); setSearchOpen(false); }}
                   >
                     <span className="canvas-search-label">{String(node.data.label ?? node.id)}</span>
@@ -179,57 +146,65 @@ export default function EditorCanvasArea({
           {/* 撤销/重做可见入口（P0）：高频编辑动作不再只藏在「工具」菜单与快捷键里；
               tooltip 带历史标签（如“撤销 · 连线”），运行中也随 anyBusy 一起禁用 */}
           <Button size="small" className="canvas-history-button" disabled={!history.canUndo || anyBusy}
-            title={`撤销${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`} aria-label="撤销" onClick={undo}>↶</Button>
+            title={`${text('撤销', 'Undo')}${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`} aria-label={text('撤销', 'Undo')} onClick={undo}>↶</Button>
           <Button size="small" className="canvas-history-button" disabled={!history.canRedo || anyBusy}
-            title={`重做${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`} aria-label="重做" onClick={redo}>↷</Button>
+            title={`${text('重做', 'Redo')}${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`} aria-label={text('重做', 'Redo')} onClick={redo}>↷</Button>
           {selectedEdgeIds.length > 0 && <Button size="small" danger disabled={anyBusy}
-            aria-label={`删除选中连线 ${selectedEdgeIds.length} 条`}
-            title="删除选中的连线（Delete / Backspace）"
-            onClick={() => deleteElements([], selectedEdgeIds)}>删除连线 · {selectedEdgeIds.length}</Button>}
-          {selectedEdgeIds.length === 0 && <span className="canvas-edge-delete-hint" title="单击画布中的连线将其选中">连线：选中后按 Del 删除</span>}
+            aria-label={text(`删除选中连线 ${selectedEdgeIds.length} 条`, `Delete ${selectedEdgeIds.length} selected edges`)}
+            title={text('删除选中的连线（Delete / Backspace）', 'Delete selected edges (Delete / Backspace)')}
+            onClick={() => deleteElements([], selectedEdgeIds)}>{text(`删除连线 · ${selectedEdgeIds.length}`, `Delete edges · ${selectedEdgeIds.length}`)}</Button>}
+          {selectedEdgeIds.length === 0 && <span className="canvas-edge-delete-hint" title={text('单击画布中的连线将其选中', 'Click an edge on canvas to select')}>{text('连线：选中后按 Del 删除', 'Edge: select & press Del')}</span>}
           <span className="canvas-toolbar-divider" />
-          <label className="canvas-compact-toggle" title="紧凑模式：压缩节点标题与端口间距，适合多端口的大型流程">
+          <label className="canvas-compact-toggle" title={text('紧凑模式：压缩节点标题与端口间距，适合多端口的大型流程', 'Compact mode: tighten node header & port spacing')}>
             <Switch size="small" checked={compactNodes} onChange={setCompactNodes} />
-            <span>紧凑</span>
+            <span>{text('紧凑', 'Compact')}</span>
           </label>
-          <Button size="small" disabled={!selectedNode} title="打开所选节点的参数、图像和详细说明（也可双击节点）" onClick={() => openNodeConfiguration(selectedId)}>节点配置</Button>
-          <Button size="small" type={imagePreviewOpen && !focusMode ? 'primary' : 'default'} aria-pressed={imagePreviewOpen && !focusMode} onClick={() => { if (focusMode) exitFocusMode(true); setImagePreviewOpen((open) => focusMode || !open); }}>图像预览</Button>
+          <Button size="small" disabled={!configurableSelectedNode} title={text('打开所选节点的参数、图像和详细说明（也可双击节点）', 'Configure selected node (or double-click)')} onClick={() => openNodeConfiguration(selectedId)}>{text('节点配置', 'Configure')}</Button>
+          <Button size="small" type={imagePreviewOpen && !focusMode ? 'primary' : 'default'} aria-pressed={imagePreviewOpen && !focusMode} onClick={() => { if (focusMode) exitFocusMode(true); setImagePreviewOpen((open) => focusMode || !open); }}>{text('图像预览', 'Preview')}</Button>
+          <Button size="small" disabled={anyBusy} title={text('添加只保存在本机画布中的流程说明', 'Add a canvas-only note')} onClick={addCanvasNote}>{text('便签', 'Note')}</Button>
+          <Button size="small" disabled={anyBusy || groupableSelectionCount === 0}
+            title={text('将选中的未分组节点收纳为可移动的画布分组', 'Group selected ungrouped nodes on the canvas')}
+            onClick={createGroup}>{text('分组', 'Group')}</Button>
         </div>
 
         {selectedNodeIds.length >= 2 && (
           <div className="canvas-align-toolbar" role="toolbar" aria-label="多选对齐工具">
-            <Tag style={{ marginInlineEnd: 0 }}>已选 {selectedNodeIds.length}</Tag>
-            <Button size="small" onClick={() => alignSelection('left')}>左对齐</Button>
-            <Button size="small" onClick={() => alignSelection('centerX')}>水平居中</Button>
-            <Button size="small" onClick={() => alignSelection('right')}>右对齐</Button>
-            <Button size="small" onClick={() => alignSelection('top')}>顶对齐</Button>
-            <Button size="small" onClick={() => alignSelection('centerY')}>垂直居中</Button>
-            <Button size="small" onClick={() => alignSelection('bottom')}>底对齐</Button>
+            <Tag style={{ marginInlineEnd: 0 }}>{text(`已选 ${selectedNodeIds.length}`, `${selectedNodeIds.length} selected`)}</Tag>
+            <Button size="small" onClick={() => alignSelection('left')}>{text('左对齐', 'Left')}</Button>
+            <Button size="small" onClick={() => alignSelection('centerX')}>{text('水平居中', 'Center X')}</Button>
+            <Button size="small" onClick={() => alignSelection('right')}>{text('右对齐', 'Right')}</Button>
+            <Button size="small" onClick={() => alignSelection('top')}>{text('顶对齐', 'Top')}</Button>
+            <Button size="small" onClick={() => alignSelection('centerY')}>{text('垂直居中', 'Center Y')}</Button>
+            <Button size="small" onClick={() => alignSelection('bottom')}>{text('底对齐', 'Bottom')}</Button>
           </div>
         )}
 
         {/* 布局切换与编辑工具同处独立工具栏，结果区折叠后仍然可达。 */}
         <div className="canvas-layout-toolbar">
+          {autoLayout && (
+            <Button size="small" disabled={nodes.length === 0 || anyBusy} onClick={autoLayout}
+              title={text('按节点连线关系自动整理布局（可撤销）', 'Auto-arrange nodes by topology (undoable)')}>{text('自动排布', 'Auto layout')}</Button>
+          )}
           <Button size="small" onClick={() => void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 })}
-            title="缩放并居中显示整个流程">适应画布</Button>
+            title={text('缩放并居中显示整个流程（Ctrl+0）', 'Fit workflow to view (Ctrl+0)')}>{text('适应画布', 'Fit view')}</Button>
           <Segmented
             size="small"
             value={layout.preset}
             // 切预设即退出专注：由 applyLayoutPreset 统一处理（丢弃专注快照，布局完全由预设接管，P2）
             onChange={(value) => { if (value !== 'custom') applyLayoutPreset(value as LayoutPreset); }}
             options={[
-              { label: '标准布局', value: 'edit' },
-              { label: '宽画布', value: 'image' },
-              ...(layout.preset === 'custom' ? [{ label: '自定义', value: 'custom' }] : [])
+              { label: text('标准布局', 'Standard'), value: 'edit' },
+              { label: text('宽画布', 'Wide'), value: 'image' },
+              ...(layout.preset === 'custom' ? [{ label: text('自定义', 'Custom'), value: 'custom' }] : [])
             ]}
           />
           <Button
             size="small"
             type={focusMode ? 'primary' : 'default'}
             onClick={toggleFocusMode}
-            title={focusMode ? '退出专注：还原进入前的面板布局' : '专注画布：收起工具箱与结果区'}
+            title={focusMode ? text('退出专注：还原进入前的面板布局', 'Exit focus mode') : text('专注画布：收起工具箱与结果区', 'Focus canvas')}
           >
-            {focusMode ? '退出专注' : '专注'}
+            {focusMode ? text('退出专注', 'Exit focus') : text('专注', 'Focus')}
           </Button>
         </div>
       </div>
@@ -237,7 +212,23 @@ export default function EditorCanvasArea({
         {/* 触屏长按等价右键（2026-10-25）：React Flow 没有 onNodePointerDown，
             用容器上的指针事件做委托；移动超过 10px 或抬起即取消，避免与拖拽/平移打架。 */}
         <div className={`flow-area${compactNodes ? ' compact-nodes' : ''}`} style={{ position: 'relative' }} ref={flowAreaRef}
-          onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+          onDrop={(event) => {
+            flowAreaRef.current?.querySelectorAll('.edge-drop-target').forEach((edge) => edge.classList.remove('edge-drop-target'));
+            onDrop(event);
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+            const target = event.target instanceof Element ? event.target.closest('.react-flow__edge') : null;
+            flowAreaRef.current?.querySelectorAll('.edge-drop-target').forEach((edge) => {
+              if (edge !== target) edge.classList.remove('edge-drop-target');
+            });
+            target?.classList.add('edge-drop-target');
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+              flowAreaRef.current?.querySelectorAll('.edge-drop-target').forEach((edge) => edge.classList.remove('edge-drop-target'));
+          }}
           onPointerDown={(event) => {
             if (event.pointerType !== 'touch') return;
             const nodeElement = (event.target as HTMLElement).closest('.react-flow__node') as HTMLElement | null;
@@ -259,12 +250,12 @@ export default function EditorCanvasArea({
               <Alert
                 type="warning"
                 showIcon
-                title="检测到未保存的本地草稿"
-                description={`${draftNotice.workflowName || draftNotice.workflowId || '未命名工作流'} · 保存于 ${new Date(draftNotice.savedAt).toLocaleString(locale)}`}
+                title={text('检测到未保存的本地草稿', 'Unsaved local draft detected')}
+                description={`${draftNotice.workflowName || draftNotice.workflowId || text('未命名工作流', 'Untitled workflow')} · ${text('保存于', 'Saved')} ${new Date(draftNotice.savedAt).toLocaleString(locale)}`}
                 action={(
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <Button size="small" type="primary" onClick={restoreDraft}>恢复草稿</Button>
-                    <Button size="small" onClick={discardDraft}>丢弃</Button>
+                    <Button size="small" type="primary" onClick={restoreDraft}>{text('恢复草稿', 'Restore')}</Button>
+                    <Button size="small" onClick={discardDraft}>{text('丢弃', 'Discard')}</Button>
                   </div>
                 )}
               />
@@ -274,13 +265,31 @@ export default function EditorCanvasArea({
           {/* 空画布引导（P1）：首屏/新流程时给出下一步动作 */}
           {nodes.length === 0 && (
             <div className="canvas-empty-state">
-              <div className="canvas-empty-title">从左侧工具箱拖入节点，搭建你的第一条视觉流程</div>
+              <div className="canvas-empty-title">{text('从左侧工具箱拖入节点，搭建你的第一条视觉流程', 'Drag nodes from the left toolbox to build your vision workflow')}</div>
               <div className="canvas-empty-actions">
-                <Button size="small" type="primary" onClick={showTemplates}>从模板新建</Button>
-                <Button size="small" onClick={() => void openWorkflowPicker()}>打开已有流程</Button>
+                <Button size="small" type="primary" onClick={showTemplates}>{text('从模板新建', 'New from template')}</Button>
+                <Button size="small" onClick={() => void openWorkflowPicker()}>{text('打开已有流程', 'Open workflow')}</Button>
+                {importWorkflowJson && <Button size="small" onClick={importWorkflowJson}>{text('导入 JSON…', 'Import JSON…')}</Button>}
               </div>
             </div>
           )}
+
+          {debugSession && <div className="debug-session-toolbar" role="toolbar" aria-label={text('断点调试控制', 'Breakpoint debugging controls')}>
+            <Tag color={debugSession.status === 'faulted' ? 'red' : debugSession.status === 'halted' ? 'gold' : 'green'}>
+              {debugSession.status === 'halted' ? text('已暂停', 'Paused')
+                : debugSession.status === 'faulted' ? text('会话中断', 'Session faulted') : text('会话完成', 'Session completed')}
+            </Tag>
+            {debugSession.haltNodeId && <Button size="small" type="link" onClick={() => focusNode(debugSession.haltNodeId!)}>
+              {text('暂停于', 'Paused at')} {nodeLabels[debugSession.haltNodeId] ?? debugSession.haltNodeId}
+            </Button>}
+            <Button size="small" disabled={debugBusy || debugSession.status !== 'halted'}
+              aria-keyshortcuts="F5" onClick={onContinueDebugSession}>{text('继续', 'Continue')} <kbd>F5</kbd></Button>
+            <Button size="small" disabled={debugBusy || debugSession.status === 'faulted' || !configurableSelectedNode}
+              aria-keyshortcuts="F10" title={configurableSelectedNode ? `${text('使用缓存输入运行', 'Run with cached inputs')}: ${String(configurableSelectedNode.data.label ?? configurableSelectedNode.id)}` : text('先选择要运行的节点', 'Select a node to run')}
+              onClick={onRunSelectedNodeInSession}>{text('运行选中节点', 'Run selected')} <kbd>F10</kbd></Button>
+            <Button size="small" danger disabled={debugBusy} aria-keyshortcuts="Shift+F5"
+              onClick={onEndDebugSession}>{text('结束会话', 'End session')} <kbd>Shift+F5</kbd></Button>
+          </div>}
 
           <ReactFlow
             nodes={nodes}
@@ -295,6 +304,9 @@ export default function EditorCanvasArea({
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
             onConnect={onConnect}
+            onReconnect={onReconnect}
+            onReconnectStart={onReconnectStart}
+            onReconnectEnd={onReconnectEnd}
             // 连线进行中：临时恢复端口名（远缩放下也能确认落点）。写 dataset 而不是 className，避免与 React 的 className 互相覆盖
             onConnectStart={() => {
               setConnectionPicker(undefined);
@@ -310,13 +322,13 @@ export default function EditorCanvasArea({
             onSelectionDragStart={() => setDragging(true)}
             onSelectionDragStop={() => setDragging(false)}
             onNodeClick={(_, node) => setSelectedId(node.id)}
-            onNodeDoubleClick={(_, node) => openNodeConfiguration(node.id)}
+            onNodeDoubleClick={(_, node) => { if (!isCanvasAnnotation(node)) openNodeConfiguration(node.id); }}
             onMove={(_, viewport) => syncZoomLevel(viewport)}
             // 右键即选中：菜单里的“运行/断点”动作与用户所见目标一致
             onNodeContextMenu={(event, node) => {
               event.preventDefault();
               cancelLongPress();
-              openNodeMenuAt(node.id, event.clientX, event.clientY);
+              if (!isCanvasAnnotation(node)) openNodeMenuAt(node.id, event.clientX, event.clientY);
             }}
             fitView
             fitViewOptions={{ padding: CANVAS_FIT_PADDING }}
@@ -364,7 +376,8 @@ export default function EditorCanvasArea({
         </div>
 
         {imagePreviewOpen && !focusMode && <WorkflowImagePreview key={designerWorkflowId} nodes={nodes} edges={edges} selectedId={selectedId}
-          nodeLabels={nodeLabels} result={result} stale={resultStale} running={running || debugBusy}
+          nodeLabels={nodeLabels} catalog={catalog} result={result} stale={resultStale} running={running || debugBusy}
+          onParameterChange={updateNodeParameter} onOpenConfiguration={openNodeConfiguration}
           onClose={() => setImagePreviewOpen(false)} />}
       </div>
     </section>

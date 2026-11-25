@@ -4,13 +4,19 @@ import type { MediaItemDescriptor, RunTraceRecord, ValidationDatasetDetail, Vali
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
 import { responseErrorMessage, apiErrorMessage } from '../apiErrors';
-import { validation, apiUrl } from '../endpoints';
+import { jobs as jobEndpoints, validation, apiUrl } from '../endpoints';
 import DataErrorAlert from './DataErrorAlert';
 
-type Props = { open: boolean; onClose: () => void; currentWorkflow?: WorkflowPayload };
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  currentWorkflow?: WorkflowPayload;
+  initialWorkflow?: WorkflowPayload;
+  autoLinkRecipe?: { jobId: string; version: number };
+};
 const clsColor: Record<string, string> = { TRUE_OK: 'green', TRUE_NG: 'green', FALSE_OK: 'red', FALSE_NG: 'orange', ERROR: 'volcano' };
 
-export default function DatasetValidationPanel({ open, onClose, currentWorkflow }: Props) {
+export default function DatasetValidationPanel({ open, onClose, currentWorkflow, initialWorkflow, autoLinkRecipe }: Props) {
   const [datasets, setDatasets] = useState<ValidationDatasetSummary[]>([]);
   const [datasetId, setDatasetId] = useState<string>();
   const [detail, setDetail] = useState<ValidationDatasetDetail>();
@@ -30,6 +36,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const [candidateRunId, setCandidateRunId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string>();
+  const [autoLinkRunId, setAutoLinkRunId] = useState<string>();
   const [messageApi, holder] = message.useMessage();
   // 数据集/运行详情按选择变化并发加载：只有最后一次请求可以写状态，旧响应必须丢弃，
   // 否则慢响应会把新选择的数据集明细或运行结果覆盖成上一个对象。
@@ -37,6 +44,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const runRequest = useRef(0);
   const detailAbort = useRef<AbortController | null>(null);
   const runAbort = useRef<AbortController | null>(null);
+  const autoLinkedRunRef = useRef<string | undefined>(undefined);
 
   const replayableTraces = useMemo(() => traces.filter((x) => x.hasReplayInput && !x.nodeReports.some((r) => r.nodeType === 'camera.syncCapture')), [traces]);
   const labeledMediaItems = useMemo(() => mediaItems.filter((x) => x.label === 'OK' || x.label === 'NG'), [mediaItems]);
@@ -129,6 +137,13 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   };
 
   useEffect(() => { if (open) { void loadDatasets(); void loadTraces(); void loadMedia(); } }, [open]);
+  useEffect(() => {
+    if (!open || !initialWorkflow) return;
+    setWorkflowSourceRunId(undefined);
+    setWorkflowText(JSON.stringify(initialWorkflow, null, 2));
+    setAutoLinkRunId(undefined);
+    autoLinkedRunRef.current = undefined;
+  }, [open, initialWorkflow]);
   useEffect(() => () => { detailAbort.current?.abort(); runAbort.current?.abort(); }, []);
   useEffect(() => { if (open && datasetId) void loadDetail(datasetId); }, [open, datasetId]);
   useEffect(() => { if (open && selectedRunId) void loadRun(selectedRunId); }, [open, selectedRunId]);
@@ -137,6 +152,33 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
     const timer = window.setInterval(() => { void loadDetail(datasetId); if (selectedRunId) void loadRun(selectedRunId); }, 1000);
     return () => window.clearInterval(timer);
   }, [open, datasetId, selectedRunId, runs]);
+  useEffect(() => {
+    if (!open || !autoLinkRecipe || !autoLinkRunId || autoLinkedRunRef.current === autoLinkRunId) return;
+    const run = runs.find((item) => item.runId === autoLinkRunId);
+    if (!run || run.status === 'Running' || run.status === 'Queued') return;
+    autoLinkedRunRef.current = autoLinkRunId;
+    if (run.status !== 'Completed') {
+      setLoadError(`V${autoLinkRecipe.version} 的验证未完成（${localizeStatus(run.status)}），未自动关联。`);
+      return;
+    }
+    void (async () => {
+      const response = await apiFetch(jobEndpoints.validate(autoLinkRecipe.jobId, autoLinkRecipe.version), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ validationRunId: autoLinkRunId })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setLoadError(apiErrorMessage(data, '验证完成，但自动关联到配方版本失败'));
+        return;
+      }
+      if (!data.accepted) {
+        setLoadError(`验证已完成，但未达到 V${autoLinkRecipe.version} 的发布门槛：${data.reason ?? '验证策略未通过'}`);
+        return;
+      }
+      messageApi.success(`V${autoLinkRecipe.version} 验证通过并已自动关联`);
+    })().catch((error) => {
+      setLoadError(error instanceof Error ? `验证完成，但自动关联失败：${error.message}` : '验证完成，但自动关联失败');
+    });
+  }, [autoLinkRecipe, autoLinkRunId, messageApi, open, runs]);
 
   const createDataset = async () => {
     const response = await apiFetch(validation.datasets, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName, description: newDescription }) });
@@ -179,7 +221,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const loadCandidateWorkflow = async () => {
     if (!workflowSourceRunId) return;
     const response = await apiFetch(apiUrl(`traces/${workflowSourceRunId}/workflow`));
-    if (!response.ok) return messageApi.error('加载工作流失败');
+    if (!response.ok) return messageApi.error(await responseErrorMessage(response, '加载工作流失败'));
     const workflow: WorkflowPayload = await response.json();
     setWorkflowText(JSON.stringify(workflow, null, 2));
   };
@@ -195,7 +237,9 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
       const response = await apiFetch(validation.datasetRuns(datasetId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceWorkflowRunId: workflowSourceRunId ?? 'designer-current', workflow }) });
       const data = await response.json();
       if (!response.ok) return messageApi.error(apiErrorMessage(data, '启动验证失败'));
-      setSelectedRunId(data.runId); messageApi.success('批量验证已启动'); await loadDetail(datasetId);
+      setSelectedRunId(data.runId);
+      if (autoLinkRecipe && typeof data.runId === 'string') setAutoLinkRunId(data.runId);
+      messageApi.success('批量验证已启动'); await loadDetail(datasetId);
     } finally { setBusy(false); }
   };
   const cancelRun = async (runId: string) => {
@@ -205,7 +249,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   };
 
   // 非模态（2026-10-25）：对照画布挑失败样本时不需要反复开关面板。
-  return <Modal open={open} width={1560} mask={false} title="数据集 / 批量验证" footer={null} onCancel={onClose} destroyOnHidden>
+  return <Modal open={open} width="min(1560px, calc(100vw - 32px))" mask={false} title="数据集 / 批量验证" footer={null} onCancel={onClose} destroyOnHidden>
     {holder}
     <DataErrorAlert scope="验证数据" error={loadError} onRetry={retrySources} />
     <Alert type="info" showIcon style={{ marginBottom: 12 }} title="可在已保存的回放输入上运行同一候选工作流。数据集标签表示预期 OK/NG；批量结果会统计误判、失败节点和耗时分布。" />
