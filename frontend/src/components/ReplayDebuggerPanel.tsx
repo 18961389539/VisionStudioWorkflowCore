@@ -59,14 +59,18 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
     }
   };
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
   useEffect(() => {
+    const loadController = loadAbort;
+    const executeController = executeAbort;
     if (!open || !runId) return;
     setContext(undefined);
     setResult(undefined);
     setSelectedNodeId(undefined);
     setRunning(false);
-    void load();
-    return () => { loadAbort.current?.abort(); executeAbort.current?.abort(); };
+    void loadRef.current();
+    return () => { loadController.current?.abort(); executeController.current?.abort(); };
   }, [open, runId, initialNodeId]);
   useEffect(() => () => { loadAbort.current?.abort(); executeAbort.current?.abort(); }, []);
   useEffect(() => {
@@ -125,7 +129,7 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
   const comparisonById = useMemo(() => new Map((result?.comparison ?? []).map((x) => [x.nodeId, x])), [result]);
 
   return (
-    <Modal open={open} width={1480} mask={false} title={`离线回放 / 工作流调试器${runId ? ` · ${runId.slice(0, 12)}` : ''}`} footer={null} onCancel={onClose} destroyOnHidden>
+    <Modal open={open} width="min(1480px, calc(100vw - 32px))" mask={false} title={`离线回放 / 工作流调试器${runId ? ` · ${runId.slice(0, 12)}` : ''}`} footer={null} onCancel={onClose} destroyOnHidden>
       {holder}
       {!context ? <Alert type="info" showIcon title="正在加载回放上下文…" /> : <>
         <Alert

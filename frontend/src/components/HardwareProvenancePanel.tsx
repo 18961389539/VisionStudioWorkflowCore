@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { HardwareProvenanceDeclaration, HardwareProvenanceSnapshot } from '../types';
 import { localizeStatus } from '../i18n';
@@ -46,7 +46,9 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
     if (selected) setSelected(data.find((x) => x.kind === selected.kind && x.id === selected.id));
   };
 
-  useEffect(() => { if (open) void refresh(); }, [open]);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  useEffect(() => { if (open) void refreshRef.current(); }, [open]);
 
   const visible = useMemo(() => filter === 'all' ? items : items.filter((x) => x.kind === filter), [items, filter]);
 
@@ -107,7 +109,7 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
     finally { setBusy(false); }
   };
 
-  return <Modal open={open} onCancel={onClose} footer={null} width={1180} title="硬件来源信息 · 物理依赖锁定">
+  return <Modal open={open} onCancel={onClose} footer={null} width="min(1180px, calc(100vw - 32px))" title="硬件来源信息 · 物理依赖锁定">
     {contextHolder}
     <DataErrorAlert scope="硬件溯源信息" error={loadError} onRetry={() => void refresh()} />
     <Space style={{ marginBottom: 10 }}>
@@ -160,7 +162,7 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
       </section>
     </div>
 
-    <Modal open={editing} onCancel={() => setEditing(false)} onOk={save} confirmLoading={busy} title={`${localizeStatus(selected?.kind) ?? ''} ${selected?.id ?? ''} · 现场声明`} width={760}>
+    <Modal open={editing} onCancel={() => setEditing(false)} onOk={save} confirmLoading={busy} title={`${localizeStatus(selected?.kind) ?? ''} ${selected?.id ?? ''} · 现场声明`} width="min(760px, calc(100vw - 32px))">
       <Typography.Paragraph type="secondary">仅填写适配器无法可靠读取的信息。被生产作业引用时，系统会阻止修改这些信息。</Typography.Paragraph>
       <Form form={form} layout="vertical">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>

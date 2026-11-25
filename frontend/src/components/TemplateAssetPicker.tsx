@@ -69,8 +69,8 @@ export default function TemplateAssetPicker({ assetId, version, disabled, onChan
         <Button size="small" disabled={disabled} onClick={() => { setVersions({}); setOpen(true); }}>从资产选择</Button>
         {assetId && <Button size="small" disabled={disabled} onClick={() => { onChange('', 0); messageApi.success('已清除模板资产，节点将按端口或模板文件取图'); }}>清除</Button>}
       </Space>
-      <Modal open={open} onCancel={() => setOpen(false)} footer={null} width={900} title="选择模板图资产">
-        <Space direction="vertical" style={{ width: '100%' }}>
+      <Modal open={open} onCancel={() => setOpen(false)} footer={null} width="min(900px, calc(100vw - 32px))" title="选择模板图资产">
+        <Space orientation="vertical" style={{ width: '100%' }}>
           {error && <Alert type="error" showIcon title="读取模板图资产失败" description={error} />}
           <Table<TemplateAsset>
             size="small"
@@ -81,7 +81,7 @@ export default function TemplateAssetPicker({ assetId, version, disabled, onChan
             locale={{ emptyText: '还没有模板图资产；先用 POST /api/template-assets 上传一张模板图' }}
             columns={[
               { title: '资产', dataIndex: 'name', render: (_: string, asset) => (
-                <Space direction="vertical" size={0}>
+                <Space orientation="vertical" size={0}>
                   <Typography.Text strong>{asset.name}</Typography.Text>
                   <Typography.Text type="secondary" code>{asset.id}</Typography.Text>
                 </Space>

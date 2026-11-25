@@ -34,10 +34,10 @@ type AutoTuneReport = {
 };
 
 const qualityText: Record<string, { label: string; color: string }> = {
-  good: { label: '良好', color: '#389e0d' },
-  thin: { label: '偏薄', color: '#d48806' },
-  flat: { label: '过于平坦', color: '#d48806' },
-  'too-few-points': { label: '点数不足', color: '#cf1322' }
+  good: { label: '良好', color: 'var(--vs-status-success)' },
+  thin: { label: '偏薄', color: 'var(--vs-warn-text)' },
+  flat: { label: '过于平坦', color: 'var(--vs-warn-text)' },
+  'too-few-points': { label: '点数不足', color: 'var(--vs-text-danger)' }
 };
 
 function asReport(value: unknown): AutoTuneReport | undefined {

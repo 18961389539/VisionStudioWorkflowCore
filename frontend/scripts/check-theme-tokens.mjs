@@ -10,12 +10,13 @@
  * 为什么不是 vitest 用例：Vitest 在 test.css=false 下把 `styles.css?raw` 处理成空串，
  * 读不到真实源码；这里用 Node fs 直读，和 check-bundle-budget.py 一样作为门禁步骤运行。
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const css = readFileSync(path.join(root, 'src/styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const workstationCss = readFileSync(path.join(root, 'src/components/ProductionWorkstation.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
 function blockBody(selector) {
   const start = css.indexOf(selector);
@@ -72,7 +73,9 @@ const UI_TOKENS = [
   '--vs-accent', '--vs-accent-strong', '--vs-info', '--vs-edge', '--vs-warn', '--vs-danger',
   '--vs-success', '--vs-neutral', '--vs-pending', '--vs-module-border', '--vs-control',
   '--vs-node-ok', '--vs-node-error', '--vs-node-running', '--vs-run-ok', '--vs-run-error',
-  '--vs-run-bar', '--vs-selected-outline'
+  '--vs-run-bar', '--vs-selected-outline',
+  '--vs-canvas-group-blue', '--vs-canvas-group-teal', '--vs-canvas-group-green',
+  '--vs-canvas-group-orange', '--vs-canvas-group-pink'
 ];
 
 const themes = [['dark', dark], ['light', light]];
@@ -105,7 +108,30 @@ const lightBody = blockBody("[data-vs-theme='light']");
 const withoutTokens = css.replace(rootBody, '').replace(lightBody, '');
 const hardcoded = [...withoutTokens.matchAll(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g)].map((match) => match[0]);
 if (hardcoded.length > 0) {
-  failures.push(`hardcoded colors outside theme tokens: ${[...new Set(hardcoded)].join(', ')}`);
+  failures.push(`hardcoded colors outside theme tokens in styles.css: ${[...new Set(hardcoded)].join(', ')}`);
+}
+
+const workstationHardcoded = [...workstationCss.matchAll(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g)].map((match) => match[0]);
+if (workstationHardcoded.length > 0) {
+  failures.push(`hardcoded colors in ProductionWorkstation.css: ${[...new Set(workstationHardcoded)].join(', ')}`);
+}
+
+// 像素图像/Konva/节点装饰叠加层直接绘制在相机图或节点语义色条上，其余 UI 组件禁止硬编码颜色。
+const IMAGE_OVERLAY_COMPONENTS = new Set([
+  'ImageViewerStage.tsx',
+  'imageViewerUtils.tsx',
+  'MetrologyObjectEditor.tsx',
+  'useNodeConfigurationDialogModel.ts',
+  'TemplateFlowPreview.tsx'
+]);
+const componentsDir = path.join(root, 'src/components');
+for (const entry of readdirSync(componentsDir, { withFileTypes: true })) {
+  if (!entry.isFile() || !entry.name.endsWith('.tsx') || IMAGE_OVERLAY_COMPONENTS.has(entry.name)) continue;
+  const source = readFileSync(path.join(componentsDir, entry.name), 'utf8');
+  const matches = [...source.matchAll(/(?<![&\w])#[0-9a-fA-F]{3,8}\b|rgba?\(/g)].map((m) => m[0]);
+  if (matches.length > 0) {
+    failures.push(`hardcoded colors in src/components/${entry.name}: ${[...new Set(matches)].join(', ')}`);
+  }
 }
 
 console.log('== Theme tokens ==');

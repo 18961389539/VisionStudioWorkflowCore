@@ -23,6 +23,41 @@ function applyMode(mode: ThemeMode) {
   document.documentElement.dataset.vsTheme = mode;
 }
 
+const ANT_THEME_TOKENS: Record<ThemeMode, Record<string, string | number>> = {
+  dark: {
+    borderRadius: 6,
+    fontSize: 13,
+    colorPrimary: '#5d94d7',
+    colorInfo: '#71a8ee',
+    colorSuccess: '#4f9d69',
+    colorWarning: '#e3a04a',
+    colorError: '#e64b59',
+    colorBgLayout: '#11151b',
+    colorBgContainer: '#171c23',
+    colorBgElevated: '#181d25',
+    colorBorder: '#2a313c',
+    colorBorderSecondary: '#242b34',
+    colorText: '#d8dee9',
+    colorTextSecondary: '#aeb9c7'
+  },
+  light: {
+    borderRadius: 6,
+    fontSize: 13,
+    colorPrimary: '#1668dc',
+    colorInfo: '#0958d9',
+    colorSuccess: '#2f7d4a',
+    colorWarning: '#9a5b00',
+    colorError: '#c62828',
+    colorBgLayout: '#f4f6f9',
+    colorBgContainer: '#ffffff',
+    colorBgElevated: '#ffffff',
+    colorBorder: '#d7dde5',
+    colorBorderSecondary: '#e8ecf1',
+    colorText: '#1f2328',
+    colorTextSecondary: '#3f4753'
+  }
+};
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   // antd 内置文案跟随界面语言（分页、日期、空态、Select 无数据…）。此前固定 zhCN，
   // 英文界面里这些角落仍是中文（2026-10-25 接线）。
@@ -50,10 +85,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         button={{ autoInsertSpace: false }}
         theme={{
           algorithm: mode === 'dark' ? theme.darkAlgorithm : theme.defaultAlgorithm,
-          token: {
-            borderRadius: 6,
-            fontSize: 13
-          }
+          token: ANT_THEME_TOKENS[mode]
         }}
       >
         {children}

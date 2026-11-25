@@ -101,7 +101,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
   };
 
   return (
-    <Modal open={open} onCancel={onClose} onOk={onClose} width={960} title="外部训练包（导入 / 校验 / 冒烟）" okText="关闭" cancelButtonProps={{ style: { display: 'none' } }}>
+    <Modal open={open} onCancel={onClose} onOk={onClose} width="min(960px, calc(100vw - 32px))" title="外部训练包（导入 / 校验 / 冒烟）" okText="关闭" cancelButtonProps={{ style: { display: 'none' } }}>
       {holder}
       <DataErrorAlert scope="训练包列表" error={loadError} onRetry={() => void load()} />
       <Alert
@@ -112,7 +112,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
         description="可导入 OCR tessdata、ONNX 分类、异常检测、实例分割和缺陷金样参考包。"
       />
       <Card size="small" title="导入" style={{ marginBottom: 12 }}>
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Input placeholder="源目录或 .zip 绝对路径" value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} />
           <Space wrap>
             <Select

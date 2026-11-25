@@ -21,7 +21,7 @@ const capabilities: { name: string; color: string; description: string }[] = [
 
 export default function AboutPanel({ open, onClose }: Props) {
   return (
-    <Modal open={open} onCancel={onClose} footer={null} width={820} title="关于 VisionStudio">
+    <Modal open={open} onCancel={onClose} footer={null} width="min(820px, calc(100vw - 32px))" title="关于 VisionStudio">
       <div className="about-intro">
         <div className="about-title">VisionStudio Workflow Core <Tag color="blue">V{APP_VERSION}</Tag></div>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>

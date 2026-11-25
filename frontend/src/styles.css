@@ -77,6 +77,7 @@
   --vs-danger-soft: rgba(230,75,89,.22);
   --vs-danger-ring: rgba(247,196,201,.85);
   --vs-success: #3a7f56;
+  --vs-success-soft: rgba(58,127,86,.26);
   --vs-neutral: #657386;
   --vs-pending: #5b6b8c;
   --vs-skipped: #4a4b50;
@@ -89,6 +90,11 @@
   --vs-run-error: #c2565f;
   --vs-run-bar: #4f7fb9;
   --vs-selected-outline: #4a90e2;
+  --vs-canvas-group-blue: #1677ff;
+  --vs-canvas-group-teal: #13a8a8;
+  --vs-canvas-group-green: #52c41a;
+  --vs-canvas-group-orange: #fa8c16;
+  --vs-canvas-group-pink: #eb2f96;
   --vs-text-on-color: #ffffff;
   --vs-bg-letterbox: #000000;
   --vs-shadow-pop: rgba(0,0,0,.18);
@@ -162,6 +168,7 @@
   --vs-accent: #1668dc;
   --vs-accent-strong: #0f56ba;
   --vs-accent-soft: rgba(22,104,220,.12);
+  --vs-success-soft: rgba(47,125,74,.22);
   --vs-info: #0958d9;
   --vs-edge: #5b7595;
   --vs-warn: #9a5b00;
@@ -183,6 +190,11 @@
   --vs-run-error: #b23a45;
   --vs-run-bar: #2f6db3;
   --vs-selected-outline: #1668dc;
+  --vs-canvas-group-blue: #1668dc;
+  --vs-canvas-group-teal: #087579;
+  --vs-canvas-group-green: #2f7d4a;
+  --vs-canvas-group-orange: #9a5b00;
+  --vs-canvas-group-pink: #c41d7f;
   --vs-text-on-color: #ffffff;
   --vs-bg-letterbox: #000000;
   --vs-shadow-pop: rgba(31,35,40,.12);
@@ -216,6 +228,8 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 /* P0-3：窄窗口把顶栏中段（模板/打开/调试/设备/生产/工具）整体收进“更多”，保存/校验/运行与流程名恒可见。
    窄屏隐藏/显示的媒体查询在下方 .topbar-center 基础规则之后（P1：媒体查询不提升层叠优先级，置于此处会被 display:flex 覆盖） */
 .topbar-more { display: none; }
+.topbar-command { flex: none; }
+.topbar-command kbd { margin-left: 4px; color: var(--vs-text-6); font-size: 10px; }
 .menu-caret { margin-left: 2px; font-size: 9px; opacity: .55; }
 .brand { flex: none; font-size: 16px; font-weight: 700; letter-spacing: .3px; }
 .brand span { color: var(--vs-text-brand); font-weight: 600; }
@@ -224,6 +238,9 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .left-panel { border-right: 1px solid var(--vs-border-frame); }
 .center-panel { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--vs-bg-center); }
 .flow-area { min-height: 0; border-bottom: 1px solid var(--vs-border-frame); }
+.debug-session-toolbar { position: absolute; z-index: 45; top: 10px; right: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; max-width: calc(100% - 24px); padding: 5px 8px; border: 1px solid var(--vs-border-toolbar); border-radius: 8px; background: var(--vs-bg-badge); box-shadow: 0 2px 8px var(--vs-shadow-pop); backdrop-filter: blur(6px); }
+.debug-session-toolbar .ant-btn { padding-inline: 6px; }
+.debug-session-toolbar kbd { margin-left: 3px; color: var(--vs-text-6); font-size: 10px; }
 .image-stage { min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; background-image: linear-gradient(45deg,var(--vs-checker) 25%,transparent 25%),linear-gradient(-45deg,var(--vs-checker) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--vs-checker) 75%),linear-gradient(-45deg,transparent 75%,var(--vs-checker) 75%); background-size: 20px 20px; background-position: 0 0,0 10px,10px -10px,-10px 0; }
 .image-stage img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: auto; }
 .image-placeholder { color: var(--vs-text-6); font-size: 13px; }
@@ -246,7 +263,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .template-card:hover { border-color: var(--vs-text-brand); }
 .template-card.active { border-color: var(--vs-text-brand); box-shadow: 0 0 0 1px var(--vs-text-brand) inset; }
 .template-card-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-.template-card-current { font-size: 10px; padding: 0 5px; border-radius: 3px; background: var(--vs-accent-soft); color: var(--vs-text-brand); font-weight: 600; }
+.template-card-current { font-size: 11px; padding: 0 5px; border-radius: 3px; background: var(--vs-accent-soft); color: var(--vs-text-brand); font-weight: 600; }
 .template-card-desc { margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--vs-text-3); }
 .template-card-meta { margin-top: 6px; font-size: 11px; color: var(--vs-text-5); display: flex; gap: 6px; align-items: baseline; min-width: 0; }
 .template-card-chips { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -261,7 +278,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .toolbox-tabs button { flex: 1; border: 0; border-radius: 4px; padding: 5px 3px; background: transparent; color: var(--vs-text-4); font: inherit; font-size: 12px; cursor: pointer; }
 .toolbox-tabs button[aria-pressed='true'] { color: var(--vs-text-brand); background: var(--vs-bg-toolbox); box-shadow: 0 1px 3px var(--vs-shadow); }
 .toolbox-tabs small { margin-left: 3px; font-variant-numeric: tabular-nums; }
-.toolbox-hint { padding: 0 10px 8px; color: var(--vs-text-4); font-size: 10px; line-height: 1.5; }
+.toolbox-hint { padding: 0 10px 8px; color: var(--vs-text-4); font-size: 11px; line-height: 1.5; }
 .toolbox-list { min-height: 64px; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; padding: 4px 0 8px; }
 .toolbox-list > .toolbox-hint { padding-top: 6px; }
 .toolbox-empty { padding: 28px 12px; color: var(--vs-text-3); font-size: 12px; text-align: center; overflow-wrap: anywhere; }
@@ -282,7 +299,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .toolbox-item-name { display: -webkit-box; overflow: hidden; white-space: normal; line-height: 1.32; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .toolbox-item-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .toolbox-item-purpose { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--vs-text-5); font-size: 11px; line-height: 1.45; }
-.toolbox-category-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; padding: 0 10px 8px; color: var(--vs-text-5); font-size: 10px; }
+.toolbox-category-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; padding: 0 10px 8px; color: var(--vs-text-5); font-size: 11px; }
 .metric-help { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .metric-help:focus-visible { outline: 1px solid var(--vs-text-brand); outline-offset: 3px; }
 .node-icon-badge { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--node-accent, var(--vs-text-brand)) 28%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--node-accent, var(--vs-text-brand)) 11%, transparent); color: var(--node-accent, var(--vs-text-brand)); }
@@ -292,7 +309,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .node-icon-cell.filled { opacity: 1; }
 /* 节点成熟度徽标（2026-10-29）：Stable 不渲染，只在预览/实验节点上提示"验证到什么程度"。
    放到工具箱条目右侧与配置对话框标题栏，颜色跟随主题 warn/danger 变量，暗色主题自动适配。 */
-.maturity-badge { flex: none; padding: 0 5px; border-radius: 999px; border: 1px solid currentColor; font-size: 10px; line-height: 15px; font-weight: 600; letter-spacing: .02em; cursor: help; white-space: nowrap; }
+.maturity-badge { flex: none; padding: 0 5px; border-radius: 999px; border: 1px solid currentColor; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .02em; cursor: help; white-space: nowrap; }
 .maturity-preview { color: var(--vs-warn-text); background: var(--vs-warn-bg); }
 .maturity-experimental { color: var(--vs-text-danger); background: color-mix(in srgb, var(--vs-text-danger) 12%, transparent); }
 .node-configuration-title .maturity-badge { margin-left: 8px; vertical-align: 1px; }
@@ -308,7 +325,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .toolbox-detail { flex: 0 1 auto; min-height: 0; max-height: 45%; overflow: auto; overscroll-behavior: contain; padding: 10px; border-top: 1px solid var(--vs-border-frame); background: var(--vs-bg-toolbox); }
 .toolbox-detail-heading { display: flex; align-items: center; gap: 4px; color: var(--vs-text-1); font-size: 13px; }
 .toolbox-detail-heading strong { flex: 1; overflow-wrap: anywhere; }
-.toolbox-detail code { display: block; color: var(--vs-text-4); font-size: 10px; overflow-wrap: anywhere; }
+.toolbox-detail code { display: block; color: var(--vs-text-4); font-size: 11px; overflow-wrap: anywhere; }
 .toolbox-detail p { margin: 8px 0; color: var(--vs-text-3); font-size: 12px; line-height: 1.6; }
 .toolbox-badges { display: flex; flex-wrap: wrap; gap: 4px; }
 .toolbox-badges > span { padding: 2px 5px; border-radius: 4px; background: var(--vs-bg-track); color: var(--vs-text-3); font-size: 12px; overflow-wrap: anywhere; }
@@ -325,7 +342,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .connection-node-picker { position: absolute; z-index: 70; width: min(300px, calc(100% - 16px)); height: min(460px, calc(100% - 16px)); border: 1px solid var(--vs-border-frame); border-radius: 8px; background: var(--vs-bg-side); box-shadow: 0 8px 28px var(--vs-shadow-soft); overflow: hidden; }
 .vision-node-name { min-width: 0; display: flex; align-items: center; gap: 6px; }
 .vision-node-name > span:not(.legacy-node-badge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.legacy-node-badge { flex: none; padding: 0 4px; border-radius: 3px; background: var(--vs-warn-bg); color: var(--vs-warn-text); font-size: 10px; font-weight: 400; line-height: 16px; }
+.legacy-node-badge { flex: none; padding: 0 4px; border-radius: 3px; background: var(--vs-warn-bg); color: var(--vs-warn-text); font-size: 11px; font-weight: 400; line-height: 16px; }
 .vision-node-title .node-icon-badge { width: 21px; height: 21px; border-radius: 5px; }
 .vision-node-title .node-category-icon { width: 15px; height: 15px; }
 .node-added .vision-node { animation: node-added-pulse 1.2s ease-out; }
@@ -377,7 +394,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .shape-match-workspace-tabs .roi-property-title { color: var(--vs-text-secondary); }
 /* 参数区标题右侧：脏状态徽标 + “还原为打开时” */
 .node-parameter-tools { display: flex; align-items: center; gap: 6px; }
-.node-parameter-dirty.ant-tag { margin-inline-end: 0; font-size: 10px; line-height: 16px; }
+.node-parameter-dirty.ant-tag { margin-inline-end: 0; font-size: 11px; line-height: 16px; }
 /* 参数说明的元信息行（默认值 / 范围 / 步进） */
 .node-info-param-meta { display: block; margin-top: 4px; color: var(--vs-text-5); font-size: 11px; }
 /* 关闭确认弹窗正文 */
@@ -456,6 +473,9 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .property-reset:hover { border-color: var(--vs-accent-strong); color: var(--vs-text-1); }
 .property-description { color: var(--vs-text-4); font-size: 12px; line-height: 1.45; }
 .property-control { min-width: 0; }
+.property-context-loading { display: block; color: var(--vs-text-5); font-size: 11px; }
+.property-context-error { display: flex; align-items: center; gap: 4px; color: var(--vs-text-danger); font-size: 11px; line-height: 1.4; }
+.property-context-error .ant-btn, .property-context-action { padding-inline: 0; font-size: 11px; }
 .property-group { padding: 8px 10px 2px; color: var(--vs-text-3); font-size: 13px; letter-spacing: .8px; text-transform: uppercase; }
 .property-row .ant-input-number, .property-row .ant-input { width: 100%; }
 @container (max-width: 250px) { .property-row { grid-template-columns: minmax(0, 1fr); } }
@@ -504,6 +524,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 /* 端口命中区：端口列间距为 24px（行高 16 + 间隔 8），向外扩 6px（共 20px）不会侵占相邻端口 */
 .react-flow__handle::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
 .react-flow__edge-path { stroke: var(--vs-edge); stroke-width: 1.8; }
+.react-flow__edge.edge-drop-target .react-flow__edge-path { stroke: var(--vs-accent-strong); stroke-width: 4; filter: drop-shadow(0 0 4px var(--vs-accent-soft)); }
 .react-flow__controls { box-shadow: none; }
 
 /* 画布浮动工具条：节点查找 + 紧凑模式；多选时顶部另显示对齐工具条 */
@@ -511,14 +532,14 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .canvas-search { position: relative; }
 .canvas-search-input { width: 208px; }
 .canvas-search-results { position: absolute; top: calc(100% + 4px); left: 0; width: 284px; max-height: 264px; overflow: auto; padding: 4px; border: 1px solid var(--vs-border-frame); border-radius: 8px; background: var(--vs-bg-card); box-shadow: 0 8px 22px var(--vs-shadow-pop-strong); }
-.canvas-search-count { padding: 2px 6px 4px; color: var(--vs-text-6); font-size: 10px; }
+.canvas-search-count { padding: 2px 6px 4px; color: var(--vs-text-6); font-size: 11px; }
 .canvas-search-item { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 6px; border: none; border-radius: 5px; background: transparent; color: var(--vs-text-2); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-.canvas-search-item:hover { background: var(--vs-bg-flow-title); }
+.canvas-search-item:hover, .canvas-search-item.is-active { background: var(--vs-bg-flow-title); }
 .canvas-search-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.canvas-search-item small { flex: none; color: var(--vs-text-6); font-size: 10px; }
+.canvas-search-item small { flex: none; color: var(--vs-text-6); font-size: 11px; }
 .canvas-search-empty { padding: 6px; color: var(--vs-text-6); font-size: 11px; }
 .canvas-toolbar-divider { width: 1px; height: 16px; background: var(--vs-border-frame); }
-.canvas-edge-delete-hint { color: var(--vs-text-6); font-size: 10px; white-space: nowrap; }
+.canvas-edge-delete-hint { color: var(--vs-text-6); font-size: 11px; white-space: nowrap; }
 /* 撤销 / 重做：图形按钮（↶ ↷），标题与禁用态由 antd Button 承担 */
 .canvas-history-button { padding-inline: 7px; font-size: 14px; line-height: 1; }
 .canvas-compact-toggle { display: flex; align-items: center; gap: 5px; color: var(--vs-text-4); font-size: 11px; cursor: pointer; }
@@ -536,7 +557,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .flow-area.compact-nodes .vision-node-body { min-height: 40px; gap: 6px; padding: 6px 8px; }
 .flow-area.compact-nodes .port-column { gap: 6px; }
 .flow-area.compact-nodes .port-row { height: 16px; font-size: 12px; }
-.flow-area.compact-nodes .port-row small { font-size: 9px; }
+.flow-area.compact-nodes .port-row small { font-size: 10px; }
 .flow-area.compact-nodes .vision-node-footer { height: 26px; padding: 3px 8px; }
 
 .run-panel { padding-bottom: 10px; }
@@ -587,7 +608,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .vision-node.status-pending { border-color: var(--vs-pending); opacity: .92; }
 .vision-node.status-skipped { border-color: var(--vs-skipped); border-style: dashed; opacity: .55; }
 .breakpoint-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--vs-danger); border: 2px solid var(--vs-danger-ring); top: -6px; left: -6px; z-index: 5; }
-.port-row small { font-size: 10px; opacity: .55; }
+.port-row small { font-size: 11px; opacity: .65; }
 .dsl-view { max-height: 620px; overflow: auto; background: var(--vs-bg-code); color: var(--vs-text-code); padding: 16px; border-radius: 8px; }
 .modal-actions { padding-top: 12px; display: flex; justify-content: flex-end; }
 
@@ -625,13 +646,13 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 }
 .viewer-stage { position: relative; min-height: 0; overflow: hidden; background-color: var(--vs-bg-viewer); background-image: linear-gradient(45deg,var(--vs-checker) 25%,transparent 25%),linear-gradient(-45deg,var(--vs-checker) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--vs-checker) 75%),linear-gradient(-45deg,transparent 75%,var(--vs-checker) 75%); background-size: 18px 18px; background-position: 0 0,0 9px,9px -9px,-9px 0; user-select: none; }
 .viewer-stage .konvajs-content { position: absolute !important; inset: 0; }
-.viewer-loading { position: absolute; top: 12px; right: 12px; padding: 5px 9px; border: 1px solid var(--vs-loading-border); border-radius: 4px; background: var(--vs-bg-loading); color: var(--vs-loading-text); font-size: 10px; letter-spacing: .8px; pointer-events: none; }
+.viewer-loading { position: absolute; top: 12px; right: 12px; padding: 5px 9px; border: 1px solid var(--vs-loading-border); border-radius: 4px; background: var(--vs-bg-loading); color: var(--vs-loading-text); font-size: 11px; letter-spacing: .8px; pointer-events: none; }
 .viewer-stage .image-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 12px; text-align: center; pointer-events: none; }
 /* 空态里的操作入口（如“运行此节点”）需要可点击：仅按钮恢复指针事件 */
 .viewer-stage .image-placeholder .ant-btn { pointer-events: auto; }
 .roi-property { margin: 8px 10px; padding: 8px; border: 1px solid var(--vs-border-roi); border-radius: 5px; background: var(--vs-bg-roi); }
-.roi-property-title { margin-bottom: 5px; color: var(--vs-text-danger); font-size: 10px; font-weight: 700; }
-.roi-property code { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--vs-text-3); font-size: 9px; white-space: nowrap; }
+.roi-property-title { margin-bottom: 5px; color: var(--vs-text-danger); font-size: 11px; font-weight: 700; }
+.roi-property code { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--vs-text-3); font-size: 11px; white-space: nowrap; }
 
 /* V0.6 camera runtime */
 .camera-runtime-grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 16px; min-height: 540px; align-items: start; }
@@ -682,6 +703,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .job-draft-add { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; margin-top: 2px; }
 .job-draft-error { margin-top: 4px; color: var(--vs-text-danger); font-size: 11px; }
 .job-diff-pre { max-height: 320px; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+.job-diff-value { max-width: 260px; max-height: 140px; overflow: auto; margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
 @media (max-width: 1050px) { .job-draft-grid { grid-template-columns: 1fr; } }
 .job-selected-row td, .trace-selected-row td { background: var(--vs-row-selected) !important; }
 .job-create-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 8px; }
@@ -763,7 +785,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .calibration-section-title { margin-top: 12px; }
 .calibration-actions { display: flex; justify-content: flex-end; padding-top: 6px; }
 .calibration-heatmap { display: grid; gap: 3px; margin-top: 10px; min-height: 210px; }
-.heat-cell { min-height: 38px; border: 1px solid var(--vs-border-heat); border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--vs-text-on-color); text-shadow: 0 1px 2px var(--vs-shadow-text); font-size: 10px; }
+.heat-cell { min-height: 38px; border: 1px solid var(--vs-border-heat); border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--vs-text-on-color); text-shadow: 0 1px 2px var(--vs-shadow-text); font-size: 11px; }
 .heat-cell b { font-size: 11px; }
 .heat-cell span { opacity: .65; margin-top: 2px; }
 .calibration-matrix { margin: 10px 0 0; padding: 10px; overflow: auto; border-radius: 5px; border: 1px solid var(--vs-border-input); background: var(--vs-bg-image); color: var(--vs-text-3); font-size: 11px; }
@@ -797,11 +819,24 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
   /* 运行时全屏页介于弹窗与 kiosk 之间：卡片数字跟随视口短边，1080p 下约 59px */
   --operator-number-size: clamp(32px, 5.5vmin, 72px);
 }
+.runtime-only-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
 .runtime-only-title {
   font-size: 18px;
   font-weight: 700;
   letter-spacing: .08em;
-  margin-bottom: 18px;
+}
+.runtime-only-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .security-screen { min-height: 100vh; display: grid; place-content: center; gap: 14px; background: var(--vs-bg-card); color: var(--vs-text-1); }
@@ -818,7 +853,8 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .diagnostics-spans { margin-top: 16px; padding: 10px; border: 1px solid var(--vs-border-panel); border-radius: 7px; background: var(--vs-bg-card); }
 .diagnostics-spans-note { margin-left: 10px; font-size: 12px; font-weight: 400; }
 @media (max-width: 1120px) { .diagnostics-grid { grid-template-columns: 1fr; } .diagnostics-summary { grid-template-columns: repeat(3,1fr); } }
-.runtime-diagnostics-button { position: fixed; top: 24px; right: 24px; z-index: 1100; }
+/* 非全屏节点配置弹窗与非命令面板的其他业务 Modal：限制正文最大高度并允许纵向滚动，避免 720p/768p 工控屏溢出 */
+.ant-modal:not(.node-configuration-modal):not(.command-palette) .ant-modal-body { max-height: calc(100dvh - 150px); overflow-y: auto; }
 
 /* V0.29 recursive structured-flow visualization */
 .react-flow__edge.branch-taken .react-flow__edge-path { stroke-width: 3; opacity: 1; }
@@ -867,7 +903,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .run-observability-loading { min-height: 44px; display: flex; gap: 8px; align-items: center; color: var(--vs-text-4); }
 .run-observability-stats { display: grid; grid-template-columns: repeat(5,minmax(92px,1fr)); gap: 8px; }
 .run-observability-stats .ant-statistic { padding: 8px 10px; border: 1px solid var(--vs-border-toolbar); border-radius: 6px; background: var(--vs-bg-deep); }
-.run-observability-stats .ant-statistic-title { font-size: 10px; }
+.run-observability-stats .ant-statistic-title { font-size: 11px; }
 .run-observability-stats .ant-statistic-content { font-size: 17px; }
 .run-timeline { display: flex; flex-direction: column; gap: 5px; padding: 9px; border: 1px solid var(--vs-border-toolbar); border-radius: 6px; background: var(--vs-bg-deep); }
 .run-timeline-row { display: grid; grid-template-columns: 150px minmax(180px,1fr) 78px 90px; gap: 8px; align-items: center; min-height: 23px; }
@@ -886,7 +922,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .trace-analysis-loading { min-height: 44px; display: flex; gap: 8px; align-items: center; color: var(--vs-text-4); }
 .trace-analysis-stats { display: grid; grid-template-columns: repeat(5,minmax(92px,1fr)); gap: 8px; }
 .trace-analysis-stats .ant-statistic { padding: 8px 10px; border: 1px solid var(--vs-border-toolbar); border-radius: 6px; background: var(--vs-bg-deep); }
-.trace-analysis-stats .ant-statistic-title { font-size: 10px; }
+.trace-analysis-stats .ant-statistic-title { font-size: 11px; }
 .trace-analysis-stats .ant-statistic-content { font-size: 17px; }
 .failure-signature-card { padding: 10px; border: 1px solid var(--vs-border-toolbar); border-radius: 6px; background: var(--vs-bg-deep); }
 .failure-signature-title { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
@@ -983,7 +1019,7 @@ body.resizing-x, body.resizing-y { user-select: none; }
   .react-flow__controls-button { width: 34px; height: 34px; }
 }
 /* 结果已过期：标题右侧徽标，避免把旧 OK/NG 当成当前结论 */
-.node-stale { padding: 1px 3px; border-radius: 3px; background: var(--vs-warn-soft-strong); color: var(--vs-warn); font-size: 9px; font-weight: 700; line-height: 1.4; }
+.node-stale { padding: 1px 4px; border-radius: 3px; background: var(--vs-warn-soft-strong); color: var(--vs-warn); font-size: 11px; font-weight: 700; line-height: 1.4; }
 
 /* 缩放分级：far 只隐藏“次要文字”（端口类型/耗时 meta/detail），
    端口名与关键结果行（footer-summary）对所有节点恒显示——节点缩小后必须仍然可读，
@@ -1057,9 +1093,11 @@ body.resizing-x, body.resizing-y { user-select: none; }
 }
 @media (max-width: 680px) {
   .topbar-center { display: none; }
+  .topbar-command { padding-inline: 5px !important; }
+  .topbar-command kbd { display: none; }
   .topbar-menu-row, .topbar-workflow-row { gap: 8px; padding-inline: 10px; }
   .workflow-identity { gap: 4px; }
-  .workflow-dirty { font-size: 10px; }
+  .workflow-dirty { font-size: 11px; }
   .topbar-right { gap: 4px; }
   .topbar-right .ant-btn { padding-inline: 8px; }
 }
@@ -1078,8 +1116,6 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .security-role-dot.role-administrator { background: var(--vs-danger); }
 .security-role-dot.role-engineer { background: var(--vs-accent); }
 .security-role-dot.role-operator { background: var(--vs-success); }
-/* 运行时（操作员）页没有顶栏：账号入口浮层放在「诊断」按钮下方 */
-.runtime-account-slot { position: fixed; top: 62px; right: 24px; z-index: 1100; }
 
 /* 懒加载面板占位（2026-10-25）：首次打开分包时给可见反馈，此前 Suspense fallback=null 等于白屏。
    固定在右上角、不接收指针事件——加载窗口不能挡住画布拖拽与缩放。 */
@@ -1168,7 +1204,7 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .caliper-diagnostic-explanation summary { color: var(--vs-text-4); font-size: 11px; cursor: pointer; }
 .caliper-diagnostic-explanation p { margin-top: 5px; }
 .caliper-circle-diagnostics .caliper-diagnostic-quality-note { color: var(--vs-warn-text); }
-.caliper-diagnostic-provenance { color: var(--vs-text-5); overflow-wrap: anywhere; font-size: 10px; }
+.caliper-diagnostic-provenance { color: var(--vs-text-5); overflow-wrap: anywhere; font-size: 11px; }
 .caliper-edge-candidates { width: 100%; margin-block: 6px; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
 .caliper-edge-candidates caption { padding-block: 4px; color: var(--vs-text-5); text-align: left; caption-side: top; }
 .caliper-edge-candidates th, .caliper-edge-candidates td { padding: 3px 4px; border-bottom: 1px solid var(--vs-border-subtle); text-align: right; }
@@ -1197,6 +1233,24 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .preview-load-error { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--vs-text-danger); }
 .preview-viewer { flex: 1; min-height: 220px; }
 .preview-viewer .viewer-toolbar { flex-wrap: wrap; gap: 6px; }
+.preview-quick-settings { flex: 0 0 auto; max-height: 38%; overflow: auto; border-top: 1px solid var(--vs-border-subtle); padding: 8px 12px 12px; }
+.preview-quick-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.preview-quick-heading strong { font-size: 13px; }
+.preview-quick-empty { display: block; padding: 8px 0; color: var(--vs-text-4); }
+.preview-quick-settings .property-panel { padding: 0; }
+.preview-quick-settings .property-actions { display: none; }
+.canvas-group-node { width: 100%; height: 100%; min-width: 180px; min-height: 100px; border: 1px dashed; border-radius: 10px; overflow: visible; }
+.canvas-group-heading { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 8px; border-radius: 9px 9px 0 0; }
+.canvas-group-grip { color: var(--vs-text-4); cursor: grab; }
+.canvas-group-heading input { min-width: 40px; flex: 1; padding: 0; border: 0; outline: 0; color: var(--vs-text-1); background: transparent; font-weight: 600; }
+.canvas-group-colors { display: flex; gap: 3px; }
+.canvas-group-colors button { width: 11px; height: 11px; padding: 0; border: 1px solid var(--vs-bg-card); border-radius: 50%; cursor: pointer; }
+.canvas-group-colors button[aria-pressed="true"] { outline: 1px solid var(--vs-text-1); outline-offset: 1px; }
+.canvas-group-caption { padding: 4px 9px; color: var(--vs-text-4); font-size: 10px; }
+.canvas-note-node { display: flex; flex-direction: column; min-height: 90px; padding: 8px 10px; border: 1px solid var(--vs-border-frame); border-radius: 8px; background: var(--vs-bg-card); box-shadow: 0 4px 12px var(--vs-shadow-pop); }
+.canvas-note-heading { margin-bottom: 5px; color: var(--vs-text-3); font-size: 11px; font-weight: 600; }
+.canvas-note-node textarea { width: 100%; min-height: 54px; flex: 1; resize: vertical; border: 0; outline: 0; color: var(--vs-text-1); background: transparent; font: inherit; font-size: 12px; }
+.canvas-note-node small { margin-top: 4px; color: var(--vs-text-5); font-size: 10px; }
 .template-filters { display: flex; gap: 10px; margin-bottom: 12px; }
 .template-filters > .ant-input-affix-wrapper { flex: 1; }
 .template-filters > .ant-select { flex: 0 0 160px; }
@@ -1204,13 +1258,14 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .toolbox-hint, .toolbox-category, .toolbox-item-purpose, .node-status, .port-row, .canvas-compact-toggle, .run-summary-line, .run-toolbar-label, .run-toolbar-hint { font-size: 12px; }
 @media (max-width: 1050px) {
   .editor-content.has-preview { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 1fr) minmax(300px, 48%); overflow: auto; }
-  .workflow-image-preview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 1fr); grid-template-rows: auto auto auto minmax(150px, 1fr); border-left: 0; border-top: 1px solid var(--vs-border-frame); }
+  .workflow-image-preview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 1fr); grid-template-rows: auto auto auto minmax(150px, 1fr) auto; border-left: 0; border-top: 1px solid var(--vs-border-frame); }
   .preview-heading { grid-column: 1 / -1; padding-block: 6px; }
   .preview-context { padding-block: 6px; }
   .preview-source { align-self: center; }
   .preview-provenance { grid-column: 1 / -1; padding-block: 4px; }
   .preview-provenance small { flex-basis: auto; }
   .preview-viewer { grid-column: 1 / -1; min-height: 150px; }
+  .preview-quick-settings { grid-column: 1 / -1; max-height: 220px; }
 }
 @media (max-width: 680px) {
   .workflow-image-preview { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto minmax(150px, 1fr); }
@@ -1336,7 +1391,7 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .spc-control > span { color: var(--vs-text-5); font-size: 11px; }
 .spc-stat-grid { display: grid; grid-template-columns: repeat(7, minmax(96px, 1fr)); gap: 8px; }
 .spc-stat-grid .ant-statistic { padding: 8px 10px; border: 1px solid var(--vs-border-subtle); border-radius: 6px; background: var(--vs-bg-card); }
-.spc-stat-grid .ant-statistic-title { font-size: 10px; }
+.spc-stat-grid .ant-statistic-title { font-size: 11px; }
 .spc-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
 .spc-chart-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--vs-border-subtle); border-radius: 8px; background: var(--vs-bg-card); min-width: 0; }
 .spc-chart { width: 100%; height: auto; display: block; }

@@ -158,7 +158,7 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
   const version = review?.job.versions.find((item) => item.version === target.version);
   const accuracy = version?.validation?.summary?.accuracy;
   const cancel = () => { if (!publishingRef.current) onCancel(); };
-  return <Modal open title={`${action} ${review?.job.name ?? target.name} V${target.version}`} width={720}
+  return <Modal open title={`${action} ${review?.job.name ?? target.name} V${target.version}`} width="min(720px, calc(100vw - 32px))"
     closable={!publishing} keyboard={!publishing} mask={{ closable: !publishing }}
     onCancel={cancel}
     footer={<Space>

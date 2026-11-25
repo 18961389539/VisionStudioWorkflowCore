@@ -171,7 +171,7 @@ export default function WorkflowModulePanel(props: Props) {
   };
 
   // 版本号不再写死在标题里（此前与顶栏 V{APP_VERSION} 互相矛盾）：产品版本只有一个来源。
-  return <Drawer open={props.open} onClose={props.onClose} width={1080} title="可复用模块">
+  return <Drawer open={props.open} onClose={props.onClose} width="min(1080px, 96vw)" title="可复用模块">
     {contextHolder}
     <Typography.Paragraph type="secondary">
       将稳定的节点组封装为带类型端口的模块。模块调用会固定到不可变的版本和哈希；修改模块不会自动升级现有配方。

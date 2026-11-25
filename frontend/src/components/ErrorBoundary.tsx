@@ -100,8 +100,8 @@ export default class ErrorBoundary extends Component<Props, State> {
       return (
         <div style={{ padding: 32, fontFamily: 'sans-serif', lineHeight: 1.7 }}>
           <h2>界面遇到未处理的错误</h2>
-          <p style={{ color: '#888', wordBreak: 'break-all' }}>{this.state.error.message}</p>
-          <p style={{ color: '#888' }}>
+          <p style={{ color: 'var(--vs-text-4)', wordBreak: 'break-all' }}>{this.state.error.message}</p>
+          <p style={{ color: 'var(--vs-text-4)' }}>
             建议先「导出诊断」把故障上下文保存下来交给工程支持，再尝试恢复；
             若刚才有未保存的工作流修改，请勿直接刷新，先与工程师确认草稿/备份恢复方式。
           </p>

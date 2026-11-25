@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { apiErrorMessage } from '../apiErrors';
-import { Button, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd';
+import { Button, Drawer, Input, InputNumber, Select, Space, Table, Tag, message } from 'antd';
 import { apiFetch } from '../apiClient';
 import { apiUrl } from '../endpoints';
 
@@ -63,7 +63,7 @@ export default function FrameTreePanel({ open, onClose }: { open: boolean; onClo
   };
 
   return (
-    <Modal open={open} title="坐标系树" width={1120} footer={null} onCancel={onClose}>
+    <Drawer open={open} title="坐标系树" size="min(960px, 76vw)" mask={false} onClose={onClose}>
       {contextHolder}
       <div style={{ marginBottom: 12 }}>
         <Space wrap>
@@ -106,6 +106,6 @@ export default function FrameTreePanel({ open, onClose }: { open: boolean; onClo
       <div style={{ marginTop: 12, opacity: 0.72 }}>
         眼在手上等动态坐标变换（例如 Tool → RobotBase）会在工作流中根据机器人当前位姿生成，不应添加到此静态列表中。
       </div>
-    </Modal>
+    </Drawer>
   );
 }

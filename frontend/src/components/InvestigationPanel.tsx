@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Input, Select, Space, Spin, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { InvestigationCaseDetail, InvestigationTrendDashboard, InvestigationVerificationEvidence, ValidationDatasetSummary, ValidationRunRecord } from '../types';
 import { apiFetch } from '../apiClient';
@@ -85,10 +85,12 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
     }
   };
 
-  useEffect(() => { if (runId) void load(); else setDetail(undefined); }, [runId]);
-  useEffect(() => { if (detail?.case.status === 'Resolved') void loadDatasets(); }, [detail?.case.id, detail?.case.status]);
+  const actionsRef = useRef({ load, loadDatasets, loadValidationRuns });
+  actionsRef.current = { load, loadDatasets, loadValidationRuns };
+  useEffect(() => { if (runId) void actionsRef.current.load(); else setDetail(undefined); }, [runId]);
+  useEffect(() => { if (detail?.case.status === 'Resolved') void actionsRef.current.loadDatasets(); }, [detail?.case.id, detail?.case.status]);
   useEffect(() => {
-    if (datasetId) void loadValidationRuns(datasetId);
+    if (datasetId) void actionsRef.current.loadValidationRuns(datasetId);
     else { setValidationRuns([]); setValidationRunsError(undefined); }
   }, [datasetId]);
 
@@ -207,7 +209,7 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
       {detail.case.resolutionNote && <Alert type="info" showIcon title="处理记录" description={detail.case.resolutionNote} style={{ marginTop: 8 }} />}
       {detail.case.verificationNote && <Alert type="success" showIcon title="验证记录" description={detail.case.verificationNote} style={{ marginTop: 8 }} />}
 
-      {detail.case.status === 'Resolved' && <div style={{ marginTop: 12, padding: 12, border: '1px solid rgba(128,128,128,.25)', borderRadius: 6 }}>
+      {detail.case.status === 'Resolved' && <div style={{ marginTop: 12, padding: 12, border: '1px solid var(--vs-border-panel)', borderRadius: 6 }}>
         <Typography.Text strong>数据集回归验证门禁</Typography.Text>
         <div><Typography.Text type="secondary">基线运行必须复现此特征；候选运行必须消除该特征，且不能引入质量回归。</Typography.Text></div>
         <DataErrorAlert scope="验证数据集" error={datasetError} onRetry={() => void loadDatasets()} />
