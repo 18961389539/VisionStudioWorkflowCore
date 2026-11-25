@@ -23,29 +23,31 @@ while [[ $# -gt 0 ]]; do
       SKIP_INSTALL=1
       shift
       ;;
-    All|Backend|Frontend)
+    All|Backend|Frontend|E2E)
       SCOPE="$1"
       shift
       ;;
     *)
-      echo "Unknown option: $1 (expected --scope All|Backend|Frontend or --skip-install)" >&2
+      echo "Unknown option: $1 (expected --scope All|Backend|Frontend|E2E or --skip-install)" >&2
       exit 2
       ;;
   esac
 done
 
 case "$SCOPE" in
-  All|Backend|Frontend) ;;
+  All|Backend|Frontend|E2E) ;;
   *)
-    echo "Invalid scope: $SCOPE (expected All, Backend, or Frontend)" >&2
+    echo "Invalid scope: $SCOPE (expected All, Backend, Frontend, or E2E)" >&2
     exit 2
     ;;
 esac
 
 RUN_BACKEND=0
 RUN_FRONTEND=0
+RUN_E2E=0
 if [[ "$SCOPE" == "All" || "$SCOPE" == "Backend" ]]; then RUN_BACKEND=1; fi
 if [[ "$SCOPE" == "All" || "$SCOPE" == "Frontend" ]]; then RUN_FRONTEND=1; fi
+if [[ "$SCOPE" == "All" || "$SCOPE" == "E2E" ]]; then RUN_E2E=1; fi
 
 echo "== VisionStudio V0.63 Quality Gate (scope=$SCOPE) =="
 
@@ -138,6 +140,74 @@ if [[ "$RUN_FRONTEND" -eq 1 ]]; then
     npm run build
     python3 "$ROOT/scripts/check-bundle-budget.py"
   )
+fi
+
+if [[ "$RUN_E2E" -eq 1 ]]; then
+  if [[ ! -f "$ROOT/frontend/node_modules/@playwright/test/package.json" ]]; then
+    echo "E2E: frontend dependencies missing; running npm ci from the lockfile."
+    (cd "$ROOT/frontend" && npm ci --no-audit --no-fund)
+  fi
+
+  E2E_API="http://127.0.0.1:5199"
+  E2E_DATA="$ROOT/artifacts/e2e-data/$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+  E2E_LOG_DIR="$RESULTS/e2e-api"
+  mkdir -p "$E2E_DATA" "$E2E_LOG_DIR"
+
+  (cd "$ROOT/backend" && dotnet build src/VisionStudio.Api/VisionStudio.Api.csproj -c Debug --nologo -v q)
+  API_DLL="$(find "$ROOT/backend/src/VisionStudio.Api/bin/Debug" -name 'VisionStudio.Api.dll' -print | head -n 1)"
+  if [[ -z "$API_DLL" ]]; then
+    echo "E2E smoke: cannot locate VisionStudio.Api.dll after build." >&2
+    exit 1
+  fi
+  API_DIR="$(dirname "$API_DLL")"
+
+  API_PID=""
+  cleanup_e2e() {
+    if [[ -n "$API_PID" ]] && kill -0 "$API_PID" 2>/dev/null; then
+      kill "$API_PID" 2>/dev/null || true
+      wait "$API_PID" 2>/dev/null || true
+    fi
+  }
+  trap cleanup_e2e EXIT
+
+  (
+    cd "$API_DIR"
+    ASPNETCORE_ENVIRONMENT=Development \
+    ASPNETCORE_URLS="$E2E_API" \
+    VISIONSTUDIO_DATA_ROOT="$E2E_DATA" \
+    Security__AutoLoginAdmin=true \
+    dotnet "$API_DLL" --urls "$E2E_API" \
+      >"$E2E_LOG_DIR/host.out.log" 2>"$E2E_LOG_DIR/host.err.log"
+  ) &
+  API_PID=$!
+
+  HEALTHY=0
+  for _ in $(seq 1 240); do
+    if ! kill -0 "$API_PID" 2>/dev/null; then break; fi
+    if curl -sf "$E2E_API/healthz" >/dev/null 2>&1; then
+      HEALTHY=1
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ "$HEALTHY" -ne 1 ]]; then
+    echo "E2E smoke: backend did not become healthy; host log tail follows." >&2
+    tail -n 40 "$E2E_LOG_DIR/host.err.log" 2>/dev/null || true
+    tail -n 40 "$E2E_LOG_DIR/host.out.log" 2>/dev/null || true
+    exit 1
+  fi
+
+  echo "E2E smoke: auth/status = $(curl -sf "$E2E_API/api/auth/status" || true)"
+
+  (
+    cd "$ROOT/frontend"
+    npx playwright install chromium --no-shell
+    export VISIONSTUDIO_E2E_API="$E2E_API"
+    export VISIONSTUDIO_E2E_OUTPUT_DIR="${TMPDIR:-/tmp}/visionstudio-e2e-output-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+    npm run test:e2e
+  )
+  cleanup_e2e
+  trap - EXIT
 fi
 
 echo "Quality Gate PASSED (scope=$SCOPE)"

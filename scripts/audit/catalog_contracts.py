@@ -142,8 +142,9 @@ def audit_executor_and_catalog_contracts(ctx: AuditContext) -> dict:
         ctx.fail(f"Catalog parameter drift: {problem}")
     ctx.ok(f"Catalog parameter contract: {len(declared_parameters)} nodes, no undeclared reads")
 
-    matching_dir = ctx.root / "backend/src/VisionStudio.Engine/Algorithms"
-    matching_files = sorted(matching_dir.glob("JLVisionMatching*.cs"))
+    # JLVisionMatching 于 2026-11-25 从 Algorithms 目录移入 Nodes（它是节点执行实现，
+    # 不是纯算法），因此这里按文件名跨源根查找，不再依赖固定目录。
+    matching_files = ctx.source_files("JLVisionMatching*.cs")
     if not matching_files:
         ctx.fail("JLVisionMatching*.cs not found; the algorithm-layer parameter contract cannot be checked.")
     algo_matching = "\n".join(path.read_text(encoding="utf-8") for path in matching_files)
@@ -164,7 +165,10 @@ def audit_executor_and_catalog_contracts(ctx: AuditContext) -> dict:
         )
 
     algo_reads: set[str] = set()
-    for algo_path in sorted((ctx.root / "backend/src/VisionStudio.Engine/Algorithms").glob("*.cs")):
+    # 算法层已独立为 VisionStudio.Algorithms 程序集（2026-11-25），并保留 Engine 侧的
+    # JLVisionMatching 节点实现：两边都要覆盖，否则"算法读了未声明参数"会漏检。
+    algo_sources = list((ctx.root / "backend/src/VisionStudio.Algorithms").glob("*.cs")) + matching_files
+    for algo_path in sorted(algo_sources):
         algo_reads |= set(re.findall(r'node\.Get\w+\(\s*"([^"]+)"', algo_path.read_text(encoding="utf-8")))
     all_declared = set().union(*declared_parameters.values()) if declared_parameters else set()
     orphan_reads = sorted(algo_reads - all_declared)
@@ -388,10 +392,18 @@ def audit_opencv_baseline(ctx: AuditContext, write_baseline: bool) -> bool:
         opencv_baseline = {tuple(entry) for entry in json.loads(opencv_baseline_path.read_text(encoding="utf-8"))}
     opencv_baseline_hits: set[tuple[str, str, str]] = set()
 
-    for source in (ctx.root / "backend/src/VisionStudio.Engine/Nodes").glob("*.cs"):
+    # 判定标准（2026-11-25）：扫描"节点执行器"，而不是"Nodes 目录下的每个文件"。
+    # 起因：契约/图像/算法拆出引擎程序集后，算法实现细节与节点执行器被先后放进同一目录，
+    # 按目录判定会让门禁覆盖范围随文件移动而改变——要么漏检（历史盲区），要么把既有实现
+    # 突击登记进 baseline（等于追认）。按"文件里是否存在 IVisionNodeExecutor 实现"判定，
+    # 让门禁与语义一致，并对子目录（Nodes/Matching 等）递归生效。
+    node_root = ctx.root / "backend/src/VisionStudio.Engine/Nodes"
+    for source in sorted(node_root.rglob("*.cs")):
         body = source.read_text(encoding="utf-8-sig")
         scan_body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
         scan_body = re.sub(r"//[^\n]*", "", scan_body)
+        if not re.search(r"\bIVisionNodeExecutor\b|\bVisionToolBase\b", scan_body):
+            continue
         for match in re.finditer(r"\bCv2\.(\w+)", scan_body):
             call = match.group(1)
             enclosing_classes = re.findall(r"\bclass\s+(\w+)", scan_body[:match.start()])

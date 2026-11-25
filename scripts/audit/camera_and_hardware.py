@@ -96,7 +96,7 @@ REQUIRED_ARTIFACTS = [
     "backend/tests/VisionStudio.Api.Tests/Assets/MediaLibraryTests.cs",
     "MEDIA_LIBRARY.md",
     "MIGRATION_V029_TO_V030.md",
-    "backend/src/VisionStudio.Engine/Provenance/HardwareProvenance.cs",
+    "backend/src/VisionStudio.Hardware.Abstractions/HardwareProvenance.cs",
     "backend/src/VisionStudio.Api/Provenance/HardwareProvenanceStore.cs",
     "backend/src/VisionStudio.Api/Provenance/HardwareProvenanceService.cs",
     "backend/src/VisionStudio.Api/Endpoints/HardwareProvenanceEndpoints.cs",
@@ -123,7 +123,7 @@ REQUIRED_ARTIFACTS = [
     "backend/tests/VisionStudio.Engine.Tests/Camera/CameraAcquisitionTests.cs",
     "CAMERA_VENDOR_ADAPTERS.md",
     "MIGRATION_V032_TO_V033.md",
-    "backend/src/VisionStudio.Engine/Camera/CameraFeatureProfiles.cs",
+    "backend/src/VisionStudio.Hardware.Abstractions/CameraFeatureProfiles.cs",
     "backend/src/VisionStudio.Camera.Basler/BaslerCameraFeatures.cs",
     "backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs",
     "backend/src/VisionStudio.Api/Camera/CameraFeatureProfileStore.cs",
@@ -263,7 +263,7 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
             ctx.fail(f"V0.30 media regression test missing: {token}")
     ctx.ok("V0.30 File Camera sandbox + Media Library + content provenance present")
 
-    hardware_contracts = ctx.read_safe("backend/src/VisionStudio.Engine/Provenance/HardwareProvenance.cs")
+    hardware_contracts = ctx.read_source("HardwareProvenance.cs")
     hardware_store = ctx.read_safe("backend/src/VisionStudio.Api/Provenance/HardwareProvenanceStore.cs")
     hardware_service = ctx.read_safe("backend/src/VisionStudio.Api/Provenance/HardwareProvenanceService.cs")
     hardware_endpoints = ctx.read_safe("backend/src/VisionStudio.Api/Endpoints/HardwareProvenanceEndpoints.cs")
@@ -330,7 +330,7 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
         ctx.fail("V0.32 VendorProvenance configuration section missing")
     ctx.ok("V0.32 live Basler/Hikrobot/ABB provenance probes + required-production guard present")
 
-    camera_contracts = ctx.read_safe("backend/src/VisionStudio.Abstractions/CameraContracts.cs") + "\n" + ctx.read_safe("backend/src/VisionStudio.Engine/Camera/CameraContracts.cs")
+    camera_contracts = ctx.read_source("CameraContracts.cs")  # 契约与帧类型分居 Abstractions / Hardware.Abstractions 两个程序集
     camera_worker = ctx.read_safe("backend/src/VisionStudio.Engine/Camera/CameraAcquisitionWorker.cs")
     basler_adapter = ctx.read_safe("backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs")
     basler_provider = ctx.read_safe("backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraAdapterProvider.cs")
@@ -381,7 +381,7 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
         ctx.fail(f"V0.33 package contains vendor camera DLLs: {[str(x.relative_to(ctx.root)) for x in vendor_dlls]}")
     ctx.ok("V0.33 runtime-loaded Basler/Hikrobot acquisition + trigger/buffer/telemetry path present")
 
-    camera_profile_hash = ctx.read_safe("backend/src/VisionStudio.Engine/Camera/CameraFeatureProfiles.cs")
+    camera_profile_hash = ctx.read_source("CameraFeatureProfiles.cs")
     basler_features = ctx.read_safe("backend/src/VisionStudio.Camera.Basler/BaslerCameraFeatures.cs")
     hik_features = ctx.read_safe("backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs")
     profile_store = ctx.read_safe("backend/src/VisionStudio.Api/Camera/CameraFeatureProfileStore.cs")
@@ -457,7 +457,7 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
     ctx.ok("V0.35 multi-camera PTP diagnostics + Action Command runtime + skew measurement retained")
 
     frameset_contract = ctx.read_safe("backend/src/VisionStudio.Abstractions/VisionData.cs")
-    frameset_runtime = ctx.read_safe("backend/src/VisionStudio.Engine/Camera/VisionFrameSet.cs")
+    frameset_runtime = ctx.read_source("VisionFrameSet.cs")
     camera_nodes = ctx.read_safe("backend/src/VisionStudio.Engine/Nodes/CameraNodes.cs")
     frameset_tests = ctx.read_safe("backend/tests/VisionStudio.Engine.Tests/Camera/FrameSetWorkflowTests.cs")
     frameset_sample = json.loads(ctx.read_safe("samples/synchronized-frameset-workflow.json"))
@@ -592,9 +592,12 @@ def audit_camera_and_hardware(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
     for token in ["MV_CC_GetAllMatchInfo_NET", "MV_MATCH_INFO_NET_DETECT", "nLostPacketCount", "nRequestResendPacketCount", "hikrobot-mvs-net-detect"]:
         if token not in hik_transport:
             ctx.fail(f"V0.45 Hikrobot transport telemetry token missing: {token}")
-    for token in ["transport_json", "TransportSnapshots", "CaptureTransportSnapshots"]:
+    ef_alarm_camera_config = ctx.read_safe("backend/src/VisionStudio.Api/Storage/EfCore/Configurations/AlarmAndCameraConfigurations.cs")
+    for token in ["TransportJson", "TransportSnapshots", "CaptureTransportSnapshots"]:
         if token not in sync_runtime:
             ctx.fail(f"V0.45 synchronization transport evidence missing: {token}")
+    if "transport_json" not in ef_alarm_camera_config:
+        ctx.fail("V0.45 synchronization EF Core mapping missing: transport_json")
     for token in ["ApplyCameraTransportTelemetryEvidenceAsync", "camera_sync_runs.transport_json"]:
         if token not in schema_migration_source:
             ctx.fail(f"V0.45 schema v10 transport evidence migration missing: {token}")

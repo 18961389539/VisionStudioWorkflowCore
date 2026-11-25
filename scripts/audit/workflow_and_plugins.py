@@ -112,9 +112,13 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
     parameter_source = ctx.read_safe("backend/src/VisionStudio.Api/Workflow/RecipeParameterization.cs")
     parameter_endpoints = ctx.read_safe("backend/src/VisionStudio.Api/Endpoints/RecipeParameterEndpoints.cs")
     parameter_tests = ctx.read_safe("backend/tests/VisionStudio.Api.Tests/Recipe/RecipeParameterBindingTests.cs")
-    for token in ["RecipeParameterStore", "ResolvedRecipeParameterization", "ResolveForJobAsync", "product_parameter_values", "recipe_parameter_values", "IsCompatible"]:
+    ef_job_config = ctx.read_safe("backend/src/VisionStudio.Api/Storage/EfCore/Configurations/JobAndRecipeConfigurations.cs")
+    for token in ["RecipeParameterStore", "ResolvedRecipeParameterization", "ResolveForJobAsync", "ProductParameterValues", "RecipeParameterValues", "IsCompatible"]:
         if token not in parameter_source:
             ctx.fail(f"V0.51 parameter binding token missing: {token}")
+    for token in ["product_parameter_values", "recipe_parameter_values"]:
+        if token not in ef_job_config:
+            ctx.fail(f"V0.51 parameter EF Core mapping missing: {token}")
     for token in ["/api/jobs/{id}/parameters", "/api/jobs/{id}/parameterization/resolve", "/api/jobs/{id}/versions/{version:int}/parameterization"]:
         if token not in parameter_endpoints:
             ctx.fail(f"V0.51 parameter endpoint missing: {token}")
@@ -147,7 +151,7 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
     for token in ["WorkflowModuleRuntimeDependency", "moduleExpander", "WorkflowModule"]:
         if token not in dependency_source:
             ctx.fail(f"V0.52 module runtime provenance missing: {token}")
-    if "ModuleAwareVisionWorkflowRunner" not in host_registration or "AddSingleton<WorkflowModuleStore>()" not in host_registration:
+    if "ModuleAwareVisionWorkflowRunner" not in host_registration or "AddSingleton<WorkflowModuleStore>" not in host_registration:
         ctx.fail("V0.52 module-aware runtime DI is incomplete")
     ctx.ok("V0.52 immutable typed Subflow/Reusable Module extraction + expansion + version pinning present")
 
@@ -422,7 +426,7 @@ def audit_workflow_and_plugins(ctx: AuditContext, catalog_ctx: dict, host_ctx: d
             ctx.fail(f"V0.60 monotonic timeline primitive missing: {token}")
     if "run_node_observations" not in schema_migration_source or current_schema_token not in schema_migration_source:
         ctx.fail("V0.60 SQLite schema v17 run_node_observations migration missing")
-    if "InsertNodeObservationsAsync" not in trace_store:
+    if "RunNodeObservations" not in trace_store:
         ctx.fail("V0.60 trace persistence does not write node observations")
     for token in ["NodeTimelineObservation", "NodePerformanceBaseline", "PeakConcurrency", "Percentile", "VerySlow"]:
         if token not in observability_source:

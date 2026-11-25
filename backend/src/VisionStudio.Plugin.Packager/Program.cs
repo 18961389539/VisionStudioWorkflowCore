@@ -19,7 +19,7 @@ var algorithm = args.Length > 4 ? args[4] : "RSA-SHA256";
 if (!Directory.Exists(packageDir)) throw new DirectoryNotFoundException(packageDir);
 if (!File.Exists(Path.Combine(packageDir, "plugin.json"))) throw new InvalidOperationException("plugin.json is required at package root.");
 
-using var cert = new X509Certificate2(File.ReadAllBytes(pfxPath), password, X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+using var cert = X509CertificateLoader.LoadPkcs12FromFile(pfxPath, password, X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
 var entries = Directory.GetFiles(packageDir, "*", SearchOption.AllDirectories)
     .Where(x => !string.Equals(Path.GetFileName(x), "signature.json", StringComparison.OrdinalIgnoreCase))
     .ToDictionary(x => Path.GetRelativePath(packageDir, x).Replace('\\','/'), File.ReadAllBytes, StringComparer.OrdinalIgnoreCase);

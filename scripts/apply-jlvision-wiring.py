@@ -78,7 +78,7 @@ def main() -> None:
         [("            services.GetRequiredService<CaliperArrayNode>(),", "            services.GetRequiredService<CaliperArrayNode>(),\n            services.GetRequiredService<MetrologyNode>(),\n            services.GetRequiredService<JLVisionImageOpNode>(),")],
     )
     patch(
-        "backend/src/VisionStudio.Engine/Algorithms/VisionAlgorithmRuntime.cs",
+        "backend/src/VisionStudio.Algorithms/VisionAlgorithmRuntime.cs",
         [('or "measure.contourThickness" or "measure.metrology") return "jlvision";', 'or "measure.contourThickness" or "measure.metrology" or "jlvision.imageOp") return "jlvision";')],
     )
     patch(

@@ -324,9 +324,13 @@ def audit_storage_and_runtime(ctx: AuditContext, catalog_ctx: dict, host_ctx: di
     ctx.ok("Diagnostic bundle stays administrator-only and excludes configuration files")
 
     security_store = ctx.read_safe("backend/src/VisionStudio.Api/Security/SecurityStore.cs")
-    for token in ["failed_attempts", "locked_until", "RecordFailedLoginAsync", "UnlockAsync"]:
+    ef_security_config = ctx.read_safe("backend/src/VisionStudio.Api/Storage/EfCore/Configurations/SecurityConfigurations.cs")
+    for token in ["FailedAttempts", "LockedUntil", "RecordFailedLoginAsync", "UnlockAsync"]:
         if token not in security_store:
             ctx.fail(f"Login lockout implementation missing: {token}")
+    for token in ["failed_attempts", "locked_until"]:
+        if token not in ef_security_config:
+            ctx.fail(f"Login lockout EF Core mapping missing: {token}")
     if "account_locked" not in ctx.read_safe("backend/src/VisionStudio.Api/Infrastructure/ApiExceptions.cs"):
         ctx.fail("Locked accounts must answer 429 account_locked (401 makes clients retry and extends the lockout)")
     if "users/{id}/unlock" not in ctx.read_safe("backend/src/VisionStudio.Api/Endpoints/SecurityEndpoints.cs"):

@@ -12,21 +12,42 @@
 | 路径 | 内容 |
 |---|---|
 | `backend/src/VisionStudio.Api` | 宿主：Minimal API、认证/审计、限流、存储、发布与运行入口 |
-| `backend/src/VisionStudio.Engine` | 执行引擎：节点执行器、图调度、相机/设备/机器人、算法与诊断 |
-| `backend/src/VisionStudio.Abstractions` | 跨层契约：图定义、目录条目、数据值、成熟度 |
-| `backend/src/VisionStudio.Camera.*` | 厂商相机适配（Basler pylon / 海康 MVS），按需装载 |
+| `backend/src/VisionStudio.Engine` | 执行引擎：节点执行器、图调度、设备/机器人实现、诊断 |
+| `backend/src/VisionStudio.Abstractions` | 跨层契约：图定义、目录条目、数据值、相机/溯源/标定/卡尺诊断 DTO、成熟度 |
+| `backend/src/VisionStudio.Hardware.Abstractions` | 硬件适配契约：`ICameraDevice` 与 6 个 provider 接口、`VisionFrame`、`HardwareProvenanceData`、适配器共用辅助（SDK 诊断 / profile 哈希 / PTP 映射 / 帧池） |
+| `backend/src/VisionStudio.Imaging` | 图像基础类型：`VisionImage` / `VisionRoi` / `VisionDomainImage` / `VisionFrameSet`、执行上下文取图扩展 |
+| `backend/src/VisionStudio.Algorithms` | 算法内核：JLVision 算子封装、几何拟合、形状匹配评分、OCR、标定分析 |
+| `backend/src/VisionStudio.Camera.*` | 厂商相机适配（Basler pylon / 海康 MVS），只依赖 `Hardware.Abstractions`，按需装载 |
 | `backend/src/VisionStudio.Plugin.*` | 插件打包、Worker 与示例插件 |
 | `backend/src/VisionStudio.*Tool`/`SqliteSnapshot`/`Benchmark.Cli` | 目录导出、快照维护、基准 CLI |
-| `backend/tests` | xUnit：`VisionStudio.Api.Tests`（宿主/接口）、`VisionStudio.Engine.Tests`（算法/调度） |
+| `backend/tests` | xUnit：`VisionStudio.Api.Tests`（宿主/接口）、`VisionStudio.Engine.Tests`（算法/调度）；`Contracts/AssemblyBoundaryTests` 守护程序集依赖方向 |
 | `frontend/src` | 编辑器：画布、节点配置、调参工作区、配方与生产面板 |
 | `frontend/src/generated` | 生成物：目录快照、OpenAPI 快照、由快照生成的 TS 类型 |
 | `scripts` | 开发/发布/质量门禁脚本（见下） |
 | `docs` | 设计与审计文档，索引见 [`docs/README.md`](docs/README.md) |
 | `samples` | 可直接导入的示例流程 |
 
+### 后端程序集依赖方向
+
+```
+Api ──► Engine ──► Algorithms ──► Imaging ──► Abstractions
+ │        │            │
+ │        └──► Hardware.Abstractions ──► Abstractions
+ └──► Camera.Basler / Camera.Hikrobot ──► Hardware.Abstractions
+```
+
+只允许向下依赖：算法不得引用引擎，图像层不得引用算法，厂商适配器不得引用引擎。
+这条边界由 `backend/tests/VisionStudio.Engine.Tests/Contracts/AssemblyBoundaryTests.cs`
+读 csproj 断言（项目依赖白名单），违反即失败。namespace 仍是 `VisionStudio.Engine.*`
+（重命名涉及上百处 `using`，属独立议题）。
+
 ## 2. 本地开发
 
 ```powershell
+# 一键拉起（打包示例插件 + 后端 5180 + 前端 5173；支持 -Port / -SkipPlugin / -BackendOnly）
+./run-dev.ps1
+
+# 或分终端手动启动：
 # 终端 1：后端（Development 环境，自动登录内置管理员，端口 5180）
 ./scripts/run-dev.ps1
 

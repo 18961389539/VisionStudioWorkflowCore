@@ -12,7 +12,7 @@
 ./scripts/quality-gate.ps1 -Scope E2E       # Playwright 真浏览器
 
 ./scripts/quality-gate.ps1 -Scope Frontend -SkipInstall   # 本地迭代：跳过 npm ci
-bash ./scripts/quality-gate.sh --scope Backend           # Linux/macOS/Git Bash 同口径入口（支持 --scope 与 --skip-install）
+bash ./scripts/quality-gate.sh --scope Backend           # Linux/macOS/Git Bash 同口径入口（支持 All/Backend/Frontend/E2E 与 --skip-install）
 ```
 
 `-Scope` 只是把同一套检查分到不同 runner 并行跑（2026-11-12 拆分，CI 关键路径从一条 25 分钟
@@ -59,7 +59,7 @@ bash ./scripts/quality-gate.sh --scope Backend           # Linux/macOS/Git Bash 
 |---|---|
 | `npm ci` | 锁文件与 package.json 一致（不允许"本地能装、CI 装不上"） |
 | `npm audit --audit-level=high`（2026-11-12） | 前端依赖已知漏洞（只拦 high/critical）。首次接入即发现 vite 8.3.2 与 undici 各带 high |
-| `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径。另运行 `check-hooks-deps.mjs`：`react/exhaustive-deps` 存量基线 60 处只许减（新代码新增即失败） |
+| `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径。另运行 `check-hooks-deps.mjs`：`react/exhaustive-deps` 存量基线 14 处只许减（新代码新增即失败） |
 | `npm run check:theme`（2026-11-13） | 主题令牌守卫：颜色只能出现在 `:root` / `[data-vs-theme='light']` 两个块里；语义 token 在深/浅主题下按 WCAG 校验对比度（文字 4.5:1、图形 3:1）。此前 62 行硬编码颜色在浅色主题下最低仅 2.2:1 |
 | `npm run test:coverage` | 单测 + 覆盖率阈值（写在 `vite.config.ts` 的 `test.coverage.thresholds`，棘轮同理）；其中 `apiUsage.test.ts` 另有静默失败棘轮：组件里禁止用 `if (!response.ok) return;` 把失败渲染成空数据，白名单仅保留附加信息路径与组件文档反例 |
 | `npm run build` | `tsc -b`（`strict: true`）+ 生产构建；类型不过不产出包 |
@@ -89,7 +89,7 @@ Vitest 5 的 `fsModuleCachePath` 也指到系统临时目录：默认 `node_modu
 React Compiler 系列规则（`set-state-in-effect` 82 处、`refs` 56 处，2026-11-12 首次启用时统计）暂未开启：
 这些是"重写渲染方式"级别的改造，一次性开启会让门禁长期变红而失去意义。
 `exhaustive-deps` 已先行接入（2026-11-13）：规则本体仍保持 `off`，由 `frontend/scripts/check-hooks-deps.mjs`
-用 `oxlint -D` 单独统计并与 `lint-hooks-baseline.json` 的存量基线（当前 60，由 65→63→60 下调）比较——新代码新增违规直接失败，
+用 `oxlint -D` 单独统计并与 `lint-hooks-baseline.json` 的存量基线（当前 14，由 65→63→60→14 下调）比较——新代码新增违规直接失败，
 修掉一处则要求同步下调基线。这样不必一次性改写 26 个存量组件里的内联 `refresh/load`。
 
 `no-unused-vars` 对 `src/__tests__/**` 关闭：测试里 `const { result, rerender } = renderHook(...)`

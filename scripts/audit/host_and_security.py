@@ -4,7 +4,7 @@ import json
 import re
 from .context import AuditContext
 
-EXPECTED_ROUTE_COUNT = 357
+EXPECTED_ROUTE_COUNT = 358
 
 
 def audit_host_and_api_contracts(ctx: AuditContext, catalog_ctx: dict) -> dict:
@@ -169,9 +169,13 @@ def audit_host_and_api_contracts(ctx: AuditContext, catalog_ctx: dict) -> dict:
     for token in ["Request.Cookies[_security.CookieName]", "Bearer ", "HandleChallengeAsync", "HandleForbiddenAsync"]:
         if token not in auth_handler:
             ctx.fail(f"Authentication handler missing: {token}")
-    for token in ["AuditActionMetadata", "audit_events", "FindFirstValue", "RouteTarget"]:
+    ef_security_config = ctx.read_safe("backend/src/VisionStudio.Api/Storage/EfCore/Configurations/SecurityConfigurations.cs")
+    ef_job_config = ctx.read_safe("backend/src/VisionStudio.Api/Storage/EfCore/Configurations/JobAndRecipeConfigurations.cs")
+    for token in ["AuditActionMetadata", "AuditEvents", "FindFirstValue", "RouteTarget"]:
         if token not in audit_source:
             ctx.fail(f"Audit implementation missing: {token}")
+    if "audit_events" not in ef_security_config:
+        ctx.fail("Audit EF Core table mapping missing: audit_events")
     for token in ["/api/auth/bootstrap", "/api/auth/login", "/api/auth/me", "/api/security/users", "/api/audit"]:
         if token not in security_endpoints:
             ctx.fail(f"Security endpoint missing: {token}")
@@ -238,9 +242,12 @@ def audit_host_and_api_contracts(ctx: AuditContext, catalog_ctx: dict) -> dict:
     for token in ["GenesisHash", "AuditChainEntry", "ComputeHash"]:
         if token not in audit_chain_source:
             ctx.fail(f"P3 audit-chain hash implementation missing: {token}")
-    for token in ["ReadChainHeadAsync", "VerifyChainAsync", "deferred: false", "prev_hash", "hash"]:
+    for token in ["BeginImmediateTransactionAsync", "VerifyChainAsync", "PrevHash", "Hash"]:
         if token not in audit_source:
             ctx.fail(f"P3 audit-chain append/verify missing: {token}")
+    for token in ["prev_hash", "hash"]:
+        if token not in ef_security_config:
+            ctx.fail(f"P3 audit-chain EF Core mapping missing: {token}")
     for token in ["ServiceToken_IsStoredHashed", "ResultsReadToken_ReadsTraces", "RotationReplacesTheSecret"]:
         if token not in service_token_tests:
             ctx.fail(f"P3 service-token regression test missing: {token}")
@@ -267,9 +274,11 @@ def audit_host_and_api_contracts(ctx: AuditContext, catalog_ctx: dict) -> dict:
     for token in ["runtime_dependency_manifests", "published_dependency_manifest_hash", "dependency_manifest_hash", current_schema_token]:
         if token not in security_schema:
             ctx.fail(f"V0.25 dependency schema missing: {token}")
-    for token in ["StoreManifestAsync", "GetPublishedSnapshotAsync", "dependency_manifest_hash", "PublishedDependencyManifestHash"]:
+    for token in ["StoreManifestAsync", "GetPublishedSnapshotAsync", "DependencyManifestHash", "PublishedDependencyManifestHash"]:
         if token not in job_store_source:
             ctx.fail(f"Job publication dependency persistence missing: {token}")
+    if "dependency_manifest_hash" not in ef_job_config:
+        ctx.fail("Job publication EF Core mapping missing: dependency_manifest_hash")
     for token in ["GetPublishedSnapshotAsync", "ValidateOrThrowAsync", "PROD-DEPENDENCY-DRIFT", "EnsureDependencyMutationAllowed", "LockedDependencyManifestHash"]:
         if token not in production_source:
             ctx.fail(f"Production dependency drift guard missing: {token}")

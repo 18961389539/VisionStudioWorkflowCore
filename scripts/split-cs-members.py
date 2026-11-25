@@ -16,7 +16,7 @@
 `CompileWarning` 记录），那些行原样留在主文件末尾，不参与分组。
 
 用法：
-    python scripts/split-cs-members.py scripts/splits/<name>.json
+    python scripts/split-cs-members.py <split-plan.json>   # 历史拆分方案见 docs/archive/splits/
 """
 from __future__ import annotations
 

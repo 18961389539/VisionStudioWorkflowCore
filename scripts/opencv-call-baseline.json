@@ -330,19 +330,54 @@
     "SolvePnP"
   ],
   [
-    "OnnxRuntimeInferenceCore.cs",
-    "OnnxInferenceHelpers",
+    "PreprocessGapNodes.Color.cs",
+    "ChannelMixNode",
+    "Transform"
+  ],
+  [
+    "PreprocessGapNodes.Color.cs",
+    "QualityMetricsNode",
+    "Absdiff"
+  ],
+  [
+    "PreprocessGapNodes.Color.cs",
+    "QualityMetricsNode",
+    "Add"
+  ],
+  [
+    "PreprocessGapNodes.Color.cs",
+    "QualityMetricsNode",
+    "CvtColor"
+  ],
+  [
+    "PreprocessGapNodes.Color.cs",
+    "QualityMetricsNode",
+    "Laplacian"
+  ],
+  [
+    "PreprocessGapNodes.Color.cs",
+    "QualityMetricsNode",
+    "Multiply"
+  ],
+  [
+    "PreprocessGapNodes.Color.cs",
+    "QualityMetricsNode",
+    "Sobel"
+  ],
+  [
+    "PreprocessGapNodes.Color.cs",
+    "WhiteBalanceNode",
+    "Merge"
+  ],
+  [
+    "PreprocessGapNodes.Color.cs",
+    "WhiteBalanceNode",
     "Split"
   ],
   [
     "PreprocessGapNodes.cs",
     "BilateralFilterNode",
     "BilateralFilter"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "ChannelMixNode",
-    "Transform"
   ],
   [
     "PreprocessGapNodes.cs",
@@ -388,46 +423,6 @@
     "PreprocessGapNodes.cs",
     "PreprocessGapMath",
     "Threshold"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "QualityMetricsNode",
-    "Absdiff"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "QualityMetricsNode",
-    "Add"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "QualityMetricsNode",
-    "CvtColor"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "QualityMetricsNode",
-    "Laplacian"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "QualityMetricsNode",
-    "Multiply"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "QualityMetricsNode",
-    "Sobel"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "WhiteBalanceNode",
-    "Merge"
-  ],
-  [
-    "PreprocessGapNodes.Color.cs",
-    "WhiteBalanceNode",
-    "Split"
   ],
   [
     "PreprocessNodes.cs",
