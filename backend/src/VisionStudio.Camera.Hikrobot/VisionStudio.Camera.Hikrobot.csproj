@@ -6,6 +6,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\VisionStudio.Engine\VisionStudio.Engine.csproj" />
+    <!-- 只依赖硬件契约程序集（理由见 VisionStudio.Camera.Basler.csproj）。 -->
+    <ProjectReference Include="..\VisionStudio.Hardware.Abstractions\VisionStudio.Hardware.Abstractions.csproj" />
   </ItemGroup>
 </Project>

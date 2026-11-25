@@ -1,6 +1,5 @@
 using JLVisionLib;
 using OpenCvSharp;
-using VisionStudio.Engine.Nodes;
 
 namespace VisionStudio.Engine.Algorithms;
 

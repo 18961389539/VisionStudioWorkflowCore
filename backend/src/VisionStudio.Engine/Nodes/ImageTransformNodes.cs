@@ -2,7 +2,6 @@ using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
@@ -496,16 +495,6 @@ public sealed class PerspectiveCorrectionNode : IVisionNodeExecutor
                 new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["meanIntensity"] = VisionValue.Double(meanIntensity), ["minIntensity"] = VisionValue.Double(minIntensity), ["maxIntensity"] = VisionValue.Double(maxIntensity), ["diagnostics"] = VisionValue.String(diag) },
                 new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["autoWidth"] = autoWidth, ["autoHeight"] = autoHeight, ["sourceArea"] = area, ["interpolation"] = method, ["diagnostics"] = diag }));
         }
-        catch { output.Dispose(); throw; }
-    }
-}
-
-internal static class ImageTransformOutput
-{
-    public static Mat Create(Action<Mat> transform)
-    {
-        var output = new Mat();
-        try { transform(output); return output; }
         catch { output.Dispose(); throw; }
     }
 }

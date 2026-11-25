@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
-using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Camera.Hikrobot;
 

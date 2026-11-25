@@ -15,8 +15,8 @@ public sealed class RecursiveStructuredWorkflowTests
         var compiled = compiler.Compile(workflow);
 
         Assert.Equal(2, compiled.ControlRegions.Count);
-        var outer = Assert.Single(compiled.ControlRegions.Where(x => x.ControlNodeId == "outer-if"));
-        var inner = Assert.Single(compiled.ControlRegions.Where(x => x.ControlNodeId == "inner-if"));
+        var outer = Assert.Single(compiled.ControlRegions, x => x.ControlNodeId == "outer-if");
+        var inner = Assert.Single(compiled.ControlRegions, x => x.ControlNodeId == "inner-if");
         Assert.Equal(0, outer.Depth);
         Assert.Equal("outer-join", outer.JoinNodeId);
         Assert.Equal(1, inner.Depth);
@@ -127,7 +127,7 @@ public sealed class RecursiveStructuredWorkflowTests
 
         var compiled = compiler.Compile(workflow);
 
-        var region = Assert.Single(compiled.ControlRegions.Where(x => x.ControlNodeId == "source"));
+        var region = Assert.Single(compiled.ControlRegions, x => x.ControlNodeId == "source");
         Assert.Equal("join", region.JoinNodeId);
         Assert.Equal(["branch-a"], region.BranchNodeIds["branch1"]);
         Assert.Equal(["branch-b"], region.BranchNodeIds["branch2"]);

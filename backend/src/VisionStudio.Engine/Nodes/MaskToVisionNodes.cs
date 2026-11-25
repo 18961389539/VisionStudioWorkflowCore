@@ -1,8 +1,9 @@
+using System.Buffers;
+using System.Runtime.InteropServices;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
@@ -77,7 +78,8 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
         if (labelCount - 1 > VisionRegion.MaxComponents)
             throw new InvalidOperationException($"region.fromMask found {labelCount - 1} components; the limit is {VisionRegion.MaxComponents}. Reduce mask noise before conversion.");
         var runsByLabel = new Dictionary<int, List<VisionRegionRun>>(labelCount);
-        var indexer = labels.GetGenericIndexer<int>();
+        var width = labels.Width;
+        var height = labels.Height;
         long pixelCount = 0;
         var runCount = 0;
 
@@ -91,29 +93,41 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
             pixelCount += end - start + 1;
         }
 
-        for (var y = 0; y < labels.Height; y++)
+        if (width > 0 && height > 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var runStart = -1;
-            var runLabel = 0;
-            for (var x = 0; x < labels.Width; x++)
+            var rowBuffer = ArrayPool<int>.Shared.Rent(width);
+            try
             {
-                var label = indexer[y, x];
-                if (label == runLabel)
+                for (var y = 0; y < height; y++)
                 {
-                    if (label != 0 && runStart < 0) runStart = x;
-                    continue;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Marshal.Copy(labels.Ptr(y), rowBuffer, 0, width);
+                    var runStart = -1;
+                    var runLabel = 0;
+                    for (var x = 0; x < width; x++)
+                    {
+                        var label = rowBuffer[x];
+                        if (label == runLabel)
+                        {
+                            if (label != 0 && runStart < 0) runStart = x;
+                            continue;
+                        }
+
+                        // 标签切换：先收束上一段行程。
+                        if (runLabel != 0 && runStart >= 0)
+                            AddRun(runLabel, y, runStart, x - 1);
+                        runLabel = label;
+                        runStart = label == 0 ? -1 : x;
+                    }
+
+                    if (runLabel != 0 && runStart >= 0)
+                        AddRun(runLabel, y, runStart, width - 1);
                 }
-
-                // 标签切换：先收束上一段行程。
-                if (runLabel != 0 && runStart >= 0)
-                    AddRun(runLabel, y, runStart, x - 1);
-                runLabel = label;
-                runStart = label == 0 ? -1 : x;
             }
-
-            if (runLabel != 0 && runStart >= 0)
-                AddRun(runLabel, y, runStart, labels.Width - 1);
+            finally
+            {
+                ArrayPool<int>.Shared.Return(rowBuffer);
+            }
         }
 
         // 按标签顺序输出，保证同一掩码两次运行得到相同的 component 顺序。

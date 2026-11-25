@@ -1,4 +1,3 @@
-﻿using VisionStudio.Engine.Runtime;
 namespace VisionStudio.Engine.Nodes;
 public sealed class IfConditionNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {

@@ -69,7 +69,7 @@ internal static class ImageOperationGeometry
             token.ThrowIfCancellationRequested();
             using var preview = Nodes.JLVisionNodeSupport.Preview(output);
             var transform = new VisionTransform2D(source.CoordinateFrame, $"image:{node.Id}:spatial", "px", a, b, c, d, e, f, 0, 0, 1);
-            var diagnostics = Nodes.CoordinateValidation.Diagnostics(node.Type, ("operator", operation), ("coordinateMapping", "explicit-pixel-affine"),
+            var diagnostics = CoordinateValidation.Diagnostics(node.Type, ("operator", operation), ("coordinateMapping", "explicit-pixel-affine"),
                 ("inputWidth", source.Width), ("inputHeight", source.Height), ("outputWidth", width), ("outputHeight", height));
             return new(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)),
                 ["overlay"] = VisionValue.Image(VisionImage.Own(preview.Clone())), ["transform"] = VisionValue.Transform(transform),

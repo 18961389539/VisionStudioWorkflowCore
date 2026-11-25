@@ -28,7 +28,7 @@ public sealed class WorkflowCoreRuntimeTests
 
         Assert.True(result.Success, result.Error);
         Assert.Equal(2, result.NodeReports.Count);
-        var add = Assert.Single(result.NodeReports.Where(x => x.NodeId == "add"));
+        var add = Assert.Single(result.NodeReports, x => x.NodeId == "add");
         Assert.Equal(5d, Assert.IsType<double>(add.Summary["result"]));
         Assert.All(result.NodeReports, report => Assert.True(report.ExecutionSequence > 0));
         Assert.All(result.NodeReports, report => Assert.True(report.EndOffsetMs >= report.StartOffsetMs));

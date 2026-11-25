@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!--
+      硬件适配契约程序集（2026-11-25 从 VisionStudio.Engine 拆出）。
+
+      为什么单独成项目：厂商相机适配器（Camera.Basler / Camera.Hikrobot）只实现本程序集里的
+      ICameraDevice / ICamera*Provider 与 HardwareProvenanceData，此前却必须引用整个
+      VisionStudio.Engine（66k 行，连带 JLVisionLib、WorkflowCore、Tesseract、ZXing、
+      NModbus、S7netplus）。拆出后适配器的依赖集 = Abstractions + OpenCvSharp + 厂商 SDK，
+      可独立编译、独立分发、独立排期。
+
+      namespace 仍保留 VisionStudio.Engine.Camera / VisionStudio.Engine.Provenance：
+      本次要修的是程序集边界，命名空间重命名涉及 219 处 using，是独立议题（见 docs）。
+    -->
+    <Description>硬件适配契约：相机设备/遥测/调试/同步/动作命令接口与硬件溯源契约</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VisionStudio.Abstractions\VisionStudio.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- VisionFrame 以 OpenCvSharp.Mat 承载像素缓冲，契约层因此需要该包；Abstractions 保持零依赖。 -->
+    <PackageReference Include="OpenCvSharp5.Windows" />
+  </ItemGroup>
+</Project>

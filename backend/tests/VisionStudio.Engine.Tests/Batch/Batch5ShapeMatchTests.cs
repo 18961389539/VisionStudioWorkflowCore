@@ -378,8 +378,10 @@ public sealed class Batch5ShapeMatchTests
         var serializedNode = JsonSerializer.Serialize(new NodeDefinition("n1", "match.shape", "Shape", null, Params(runtimeParameters)));
         var restoredNode = JsonSerializer.Deserialize<NodeDefinition>(serializedNode, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
         var restoredParameters = JsonSerializer.Serialize(restoredNode.Parameters);
-        typeof(ShapeMatchNode).Assembly.GetType("VisionStudio.Engine.Algorithms.JLVisionModelCache")!
-            .GetMethod("Clear", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!.Invoke(null, null);
+        // 2026-11-25：JLVisionModelCache 随算法内核迁到 VisionStudio.Algorithms 程序集，
+        // 原先 typeof(ShapeMatchNode).Assembly.GetType(...) 的按程序集反射查不到它了。
+        // 该类型已为跨程序集开放（引擎侧同样使用），直接调用即可，不必再反射。
+        VisionStudio.Engine.Algorithms.JLVisionModelCache.Clear();
         var matched = await Run(new ShapeMatchNode(),
             new Dictionary<string, VisionValue> { ["image"] = Image(scene) }, restoredParameters);
         Assert.True(Convert.ToBoolean(matched.Summary["found"]), SummaryText(matched));

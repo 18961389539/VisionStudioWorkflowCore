@@ -3,13 +3,12 @@ using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
-public sealed record CameraCalibrationView(List<List<double>> ObjectPoints, List<List<double>> ImagePoints);
-public sealed record CameraCalibrationRequest(int ImageWidth, int ImageHeight, List<CameraCalibrationView> Views);
-public sealed record CameraCalibrationModel(int ImageWidth, int ImageHeight, double[][] CameraMatrix, double[] DistCoeffs, double Rms, string? NativeCameraType = null, double[]? NativeCameraParameters = null, string? LensModel = null);
+// CameraCalibrationView / CameraCalibrationRequest / CameraCalibrationModel 已下沉到
+// VisionStudio.Abstractions/CameraCalibrationContracts.cs —— 算法层（CalibrationIntrinsicsWizard、
+// JLVisionCalibration）也消费它们，不应为了 3 个 DTO 反向引用引擎。
 
 /// <summary>Intrinsic pinhole, fisheye, or object-side telecentric calibration from corresponding object/image points.</summary>
 public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor

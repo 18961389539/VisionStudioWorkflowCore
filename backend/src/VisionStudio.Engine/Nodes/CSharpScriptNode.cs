@@ -1,5 +1,4 @@
 using OpenCvSharp;
-using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Scripting;
 using VisionStudio.Scripting;
 

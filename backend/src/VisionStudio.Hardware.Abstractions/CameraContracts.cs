@@ -1,5 +1,10 @@
 using OpenCvSharp;
 
+// 程序集归属：VisionStudio.Hardware.Abstractions（2026-11-25 从 VisionStudio.Engine 迁出）。
+// namespace 沿用 VisionStudio.Engine.Camera 以避免 219 处 using 的机械改动；类型定义、接口实现
+// 与引擎运行时的边界由程序集引用关系保证——厂商适配器只引用本程序集，不再依赖引擎。
+// 本文件只放"相机适配器必须知道的契约"，任何带实现逻辑的类型都不应搬回这里。
+
 namespace VisionStudio.Engine.Camera;
 
 /// <summary>

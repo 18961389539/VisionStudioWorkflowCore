@@ -394,7 +394,7 @@ public sealed partial class HikrobotMvsCameraDevice : ICameraDevice, ICameraTele
         _camera = null; _deviceInfo = null; _identity = null; _myCameraType = null; _assembly = null;
     }
 
-    private static Exception Unwrap(Exception ex) => ex is TargetInvocationException { InnerException: not null } tie ? tie.InnerException : ex;
+    private static Exception Unwrap(Exception ex) => ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
     public async ValueTask DisposeAsync()
     {

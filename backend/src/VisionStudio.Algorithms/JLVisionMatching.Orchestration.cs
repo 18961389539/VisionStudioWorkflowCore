@@ -3,8 +3,7 @@ using System.Security.Cryptography;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Nodes;
-using VisionStudio.Engine.Runtime;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Algorithms;
 
@@ -269,7 +268,7 @@ internal static partial class JLVisionMatching
                         ["warnings"] = legacyAuto.Warnings.Select(warning => warning.Code).ToArray()
                     };
                 }
-                using var binary = ContourNodesHelper.Binarize(templateBuffer, node.GetString("binarize", "auto"), node.GetDouble("threshold", 128), node.GetBool("invert", false), out _, out _);
+                using var binary = BinarizationOps.Binarize(templateBuffer, node.GetString("binarize", "auto"), node.GetDouble("threshold", 128), node.GetBool("invert", false), out _, out _);
                 JLVisionOperators.FindContours(binary, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
                 var bestContour = contours.OrderByDescending(c => JLVisionOperators.ContourArea(c)).FirstOrDefault();
                 if (bestContour is null || JLVisionOperators.ContourArea(bestContour) <= 0)

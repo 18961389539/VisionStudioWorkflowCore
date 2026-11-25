@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!--
+      算法内核（2026-11-25 从 VisionStudio.Engine 拆出，51 文件 / 10k 行）。
+
+      为什么单独成项目：这些是纯计算（JLVision 算子封装、Chamfer/几何拟合、OCR 解析、
+      形状匹配评分），不参与图调度、不碰设备 I/O、不需要 WorkflowCore。此前与引擎同程序集，
+      导致 Benchmark.Cli / CatalogExporter 想复用算法就必须拉入 WorkflowCore、NModbus、
+      S7netplus、ZXing 与整套运行时。
+
+      依赖边界：Abstractions（契约）+ Imaging（VisionImage/VisionRoi/VisionFrameSet）
+      + OpenCvSharp / JLVisionLib / ONNX / Tesseract。**不得**引用 VisionStudio.Engine。
+      namespace 仍为 VisionStudio.Engine.Algorithms（命名空间重命名是独立议题）。
+    -->
+    <Description>视觉算法内核：JLVision 算子封装、几何拟合、形状匹配、OCR 与标定分析</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VisionStudio.Abstractions\VisionStudio.Abstractions.csproj" />
+    <ProjectReference Include="..\VisionStudio.Imaging\VisionStudio.Imaging.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 算法内核的大量辅助类型（JLVisionOperators / JLVisionRegions / VisionAlgorithmRuntime.BackendFor）
+         原本在引擎程序集内是 internal，节点实现与运行时直接调用它们。拆包后仍只对引擎开放：
+         插件作者看到这些"半成品算子"没有好处，但把它们全部 public 化等于把内部实现变成对外承诺。
+         开放 internal 是精确的、可随时收回的边界。 -->
+    <InternalsVisibleTo Include="VisionStudio.Engine" />
+    <InternalsVisibleTo Include="VisionStudio.Engine.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp5.Windows" />
+    <PackageReference Include="JLVisionLib" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="TesseractOCR" />
+  </ItemGroup>
+</Project>

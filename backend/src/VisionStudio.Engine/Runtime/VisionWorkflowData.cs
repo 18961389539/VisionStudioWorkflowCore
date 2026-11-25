@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using OpenCvSharp;
-using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Engine.Runtime;
 
@@ -38,6 +37,8 @@ public sealed class VisionWorkflowData : IDisposable
     private readonly ConcurrentDictionary<string, ControlFlowDecision> _controlFlowDecisions = new(StringComparer.OrdinalIgnoreCase);
     private long _timelineOrigin;
     private long _executionSequence;
+    private int _completedNodeCount;
+    private Action<NodeRunProgressEvent>? _progressObserver;
     private HashSet<string> _breakpoints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _executedNodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<NodeImageKey, RunNodeImage> _nodeImages = new(NodeImageKeyComparer.Instance);
@@ -382,6 +383,8 @@ public sealed class VisionWorkflowData : IDisposable
         _breakpoints = new HashSet<string>(options.Breakpoints ?? [], StringComparer.OrdinalIgnoreCase);
         ReportStartReached = DebugMode is not (DebugRunMode.RunFromNode or DebugRunMode.RunNode);
         CaptureNodeImages = options.CaptureNodeImages;
+        _progressObserver = options.ProgressObserver;
+        _completedNodeCount = 0;
     }
 
     public StepDebugDecision BeforeNode(string nodeId)
@@ -586,12 +589,23 @@ public sealed class VisionWorkflowData : IDisposable
     public void BeginExecutionTimeline()
     {
         Interlocked.Exchange(ref _executionSequence, 0);
+        Interlocked.Exchange(ref _completedNodeCount, 0);
         Volatile.Write(ref _timelineOrigin, Stopwatch.GetTimestamp());
     }
 
-    public (long Sequence, double StartOffsetMs) BeginNodeObservation()
+    public (long Sequence, double StartOffsetMs) BeginNodeObservation(string? nodeId = null)
     {
         var sequence = Interlocked.Increment(ref _executionSequence);
+        if (!string.IsNullOrEmpty(nodeId))
+        {
+            TryEmitProgress(new NodeRunProgressEvent(
+                RunId ?? string.Empty,
+                Definition.Id,
+                nodeId,
+                "running",
+                Volatile.Read(ref _completedNodeCount),
+                Definition.Nodes.Count));
+        }
         return (sequence, CurrentExecutionOffsetMs());
     }
 
@@ -605,6 +619,23 @@ public sealed class VisionWorkflowData : IDisposable
     {
         _nodeReports.Enqueue(report);
         if (report.Success) _executedNodes[report.NodeId] = true;
+        var completed = Interlocked.Increment(ref _completedNodeCount);
+        TryEmitProgress(new NodeRunProgressEvent(
+            RunId ?? string.Empty,
+            Definition.Id,
+            report.NodeId,
+            report.Success ? "ok" : "error",
+            completed,
+            Definition.Nodes.Count,
+            report.Success,
+            report.DurationMs));
+    }
+
+    private void TryEmitProgress(NodeRunProgressEvent evt)
+    {
+        if (_progressObserver is not { } observer) return;
+        try { observer(evt); }
+        catch { /* 实时进度推送失败不得影响工作流执行 */ }
     }
     public IReadOnlyList<NodeRunReport> SnapshotReports() => _nodeReports.ToArray();
 

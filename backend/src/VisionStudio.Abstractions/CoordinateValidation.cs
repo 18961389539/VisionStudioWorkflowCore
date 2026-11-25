@@ -1,5 +1,10 @@
-﻿using System.Text.Json;
-namespace VisionStudio.Engine.Nodes;
+using System.Text.Json;
+
+// 2026-11-25 从 Engine/Nodes 迁入契约层：它是纯校验/诊断文本工具，
+// 只依赖本程序集的坐标类型。算法层（ToleranceGeometry.Missing）与引擎共用它，
+// 让它留在节点目录会迫使算法层反向依赖引擎。
+namespace VisionStudio.Abstractions;
+
 public static class CoordinateValidation
 {
     public static double RequireFinite(double value, string name)

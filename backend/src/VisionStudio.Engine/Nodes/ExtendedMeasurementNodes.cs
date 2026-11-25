@@ -1,7 +1,5 @@
 using VisionStudio.Engine.Algorithms;
 using VisionStudio.Abstractions;
-using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
@@ -258,19 +256,6 @@ internal static class MultiPointFit
     public static VisionLine2D Line(VisionPoint2D[] p, CancellationToken cancellationToken = default) => LineFit(p, cancellationToken).Line;
     public static VisionCircle Circle(VisionPoint2D[] p, CancellationToken cancellationToken = default) => CircleFit(p, cancellationToken).Circle;
 
-}
-
-internal static class MeasurementMath
-{
-    public static double Hypot(double x, double y)
-    {
-        x = Math.Abs(x); y = Math.Abs(y);
-        var max = Math.Max(x, y);
-        if (double.IsInfinity(max)) return double.PositiveInfinity;
-        if (max == 0) return 0;
-        var min = Math.Min(x, y) / max;
-        return max * Math.Sqrt(1 + min * min);
-    }
 }
 
 public sealed class FitLineNode : IVisionNodeExecutor

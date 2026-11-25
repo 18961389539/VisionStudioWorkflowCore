@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!--
+      图像基础层（2026-11-25 从 VisionStudio.Engine 拆出）。
+
+      为什么单独成项目：算法层（VisionStudio.Algorithms，10k 行）只需要
+      VisionImage / VisionRoi / VisionDomainImage / VisionFrameSet 四个类型，
+      却因为它们在引擎程序集里而必须反向依赖整个 Engine（含 WorkflowCore、
+      NModbus、S7netplus、ZXing、Tesseract、Scripting）。下沉到本程序集后，
+      算法层与引擎之间只剩"引擎引用算法"这一条正向边。
+
+      namespace 仍保留 VisionStudio.Engine.Camera / VisionStudio.Engine：
+      本次要修的是程序集边界，命名空间重命名涉及上百处 using，是独立议题。
+    -->
+    <Description>图像基础类型：工作流持有的图像包装、ROI 栅格化、框集</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VisionStudio.Abstractions\VisionStudio.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 引擎仍然要读写 VisionImage.CoordinateFrame（坐标系标注是执行期语义），
+         但那是实现细节，不该成为插件可用的公开 API。开放 internal 而不是 public 化。 -->
+    <InternalsVisibleTo Include="VisionStudio.Engine" />
+    <InternalsVisibleTo Include="VisionStudio.Engine.Tests" />
+    <!-- ImageTransformOutput（Mat 输出工厂）被算法层的 BinarizationOps 复用；
+         它不该 public 成插件 API，只对算法层开放 internal。 -->
+    <InternalsVisibleTo Include="VisionStudio.Algorithms" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp5.Windows" />
+  </ItemGroup>
+</Project>

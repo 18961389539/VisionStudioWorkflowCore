@@ -1,18 +1,7 @@
 namespace VisionStudio.Engine;
 
-/// <summary>Actual single-caliper samples retained only for interactive runs.</summary>
-public sealed record CaliperEdgeDiagnostic(
-    int ImageWidth, int ImageHeight, string? CoordinateFrame,
-    VisionPoint2D Start, VisionPoint2D End, VisionPoint2D? ProfileStart, VisionPoint2D? ProfileEnd,
-    bool Clipped, double StartOffset, double Spacing, double MinContrast, int SampleWidth,
-    string Polarity, string Direction, string Refine, bool Found, string Reason,
-    double[] Profile, IReadOnlyList<CaliperEdgeCandidate> Candidates, int? SelectedCandidateIndex,
-    double? EdgePosition, VisionPoint2D? EdgePoint, double? EdgeStrength, double? FitError)
-{
-    public long EstimatedBytes => 1024L + Profile.LongLength * sizeof(double) + Candidates.Count * 64L;
-}
-
-public sealed record RunCaliperEdgeDiagnostic(string NodeId, long ExecutionSequence, CaliperEdgeDiagnostic Data);
+// 诊断数据结构已下沉到 VisionStudio.Abstractions（CaliperDiagnosticContracts.cs）。
+// 本文件只保留"捕获作用域"这一实现细节。
 
 internal static class CaliperEdgeDiagnosticCapture
 {

@@ -33,6 +33,16 @@ public enum DebugRunMode
     Breakpoints
 }
 
+public sealed record NodeRunProgressEvent(
+    string RunId,
+    string WorkflowId,
+    string NodeId,
+    string State,
+    int CompletedCount,
+    int TotalCount,
+    bool? Success = null,
+    double? DurationMs = null);
+
 public sealed record VisionRunOptions(
     DebugRunMode Mode = DebugRunMode.Full,
     string? TargetNodeId = null,
@@ -41,7 +51,8 @@ public sealed record VisionRunOptions(
     [property: System.Text.Json.Serialization.JsonIgnore] RunArtifactOptions? Artifacts = null,
     bool AllowSideEffects = false,
     bool CaptureNodeImages = false,
-    [property: System.Text.Json.Serialization.JsonIgnore] IModelAssetSource? ModelAssets = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] IModelAssetSource? ModelAssets = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] Action<NodeRunProgressEvent>? ProgressObserver = null);
 
 public sealed record ControlFlowDecision(
     string NodeId,

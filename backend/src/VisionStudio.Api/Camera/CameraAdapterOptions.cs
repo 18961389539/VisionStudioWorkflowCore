@@ -1,4 +1,3 @@
-using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Api;
 

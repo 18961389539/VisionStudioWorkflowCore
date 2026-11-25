@@ -1,5 +1,5 @@
 using JLVisionLib;
-using VisionStudio.Engine.Nodes;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Algorithms;
 

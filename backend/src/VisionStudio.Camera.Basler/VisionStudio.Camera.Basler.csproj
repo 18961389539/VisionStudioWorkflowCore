@@ -5,6 +5,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\VisionStudio.Engine\VisionStudio.Engine.csproj" />
+    <!-- 只依赖硬件契约程序集。此前引用整个 VisionStudio.Engine，使适配器连带
+         JLVisionLib / WorkflowCore / Tesseract / ZXing / NModbus / S7netplus，
+         违反"厂商 SDK 可选装载"的设计意图。 -->
+    <ProjectReference Include="..\VisionStudio.Hardware.Abstractions\VisionStudio.Hardware.Abstractions.csproj" />
   </ItemGroup>
 </Project>

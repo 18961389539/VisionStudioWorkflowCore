@@ -197,7 +197,7 @@ public sealed class TextRegexNode : IVisionNodeExecutor
             throw new InvalidOperationException("text.regex pattern must be non-empty.");
         var withMode = AliasParameters.With(node, ("mode", "regex"), ("countMatches", "true"));
         // 旧节点的默认空输入策略是 fail；旧文档显式写了 nomatch 时保持不变。
-        var effective = string.IsNullOrWhiteSpace(node.GetString("emptyInputPolicy", null))
+        var effective = string.IsNullOrWhiteSpace(node.GetString("emptyInputPolicy", string.Empty))
             ? AliasParameters.With(withMode, ("emptyInputPolicy", "fail"))
             : withMode;
         return new TextValidationNode().ExecuteAsync(context, effective, cancellationToken);

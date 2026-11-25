@@ -1,7 +1,6 @@
-﻿using VisionStudio.Engine.Algorithms;
+using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 

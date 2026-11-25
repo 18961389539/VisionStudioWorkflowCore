@@ -37,7 +37,7 @@ public sealed class HybridRuntimeTests
 
         Assert.True(result.Success, result.Error);
         Assert.Equal(4, result.NodeReports.Count);
-        var final = Assert.Single(result.NodeReports.Where(x => x.NodeId == "p3"));
+        var final = Assert.Single(result.NodeReports, x => x.NodeId == "p3");
         Assert.Equal(25d, Assert.IsType<double>(final.Summary["value"]));
     }
 

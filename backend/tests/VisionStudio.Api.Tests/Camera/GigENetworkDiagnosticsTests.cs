@@ -1,5 +1,4 @@
 using System.Net;
-using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Api.Tests;
 

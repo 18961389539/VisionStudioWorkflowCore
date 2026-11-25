@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using VisionStudio.Engine.Camera;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Runtime;
 
@@ -31,7 +31,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             return VisionNodeRuntimeOutcome.HaltedBefore;
 
         var phase = data.CurrentPhase;
-        var observation = data.BeginNodeObservation();
+        var observation = data.BeginNodeObservation(node.Id);
         var sw = Stopwatch.StartNew();
         IReadOnlyDictionary<string, VisionValue> inputs = new Dictionary<string, VisionValue>();
         CaliperCircleDiagnostic? caliperDiagnostic = null;
@@ -244,7 +244,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
         var elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         var stackTrace = captureStack && lastError is not null ? lastError.ToString() : null;
         if (stackTrace?.Length > 65536) stackTrace = stackTrace[..65536];
-        var diagnostics = Nodes.CoordinateValidation.Diagnostics(node.Type, ("succeeded", succeeded), ("error", errorText),
+        var diagnostics = CoordinateValidation.Diagnostics(node.Type, ("succeeded", succeeded), ("error", errorText),
             ("attempts", attempts), ("retried", attempts > 1), ("elapsedMs", elapsedMs), ("failurePolicy", failurePolicy), ("stackTrace", stackTrace));
         if (!succeeded && failurePolicy == "rethrow" && lastError is not null)
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(lastError).Throw();

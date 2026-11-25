@@ -1,9 +1,11 @@
+using System.Buffers;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using OpenCvSharp;
 using OpenCvSharp.XImgProc;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Runtime;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Nodes;
 
@@ -83,23 +85,34 @@ public sealed class SuperpixelNode : IVisionNodeExecutor
     private static (List<VisionRegionComponent> Components, long PixelCount, int LabelCount) BuildComponentsByLabel(Mat labels, CancellationToken cancellationToken)
     {
         var runsByLabel = new SortedDictionary<int, List<VisionRegionRun>>();
-        var indexer = labels.GetGenericIndexer<int>();
-        var width = labels.Width; var height = labels.Height;
+        var width = labels.Width;
+        var height = labels.Height;
+        if (width <= 0 || height <= 0) return ([], 0, 0);
         long pixelCount = 0;
-        for (var y = 0; y < height; y++)
+        var rowBuffer = ArrayPool<int>.Shared.Rent(width);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var runStart = 0; var runLabel = indexer[y, 0];
-            for (var x = 1; x <= width; x++)
+            for (var y = 0; y < height; y++)
             {
-                var label = x < width ? indexer[y, x] : int.MinValue;
-                if (label == runLabel) continue;
-                if (!runsByLabel.TryGetValue(runLabel, out var runs)) runsByLabel[runLabel] = runs = [];
-                runs.Add(new VisionRegionRun(y, runStart, x - 1));
-                pixelCount += x - runStart;
-                runLabel = label;
-                runStart = x;
+                cancellationToken.ThrowIfCancellationRequested();
+                Marshal.Copy(labels.Ptr(y), rowBuffer, 0, width);
+                var runStart = 0;
+                var runLabel = rowBuffer[0];
+                for (var x = 1; x <= width; x++)
+                {
+                    var label = x < width ? rowBuffer[x] : int.MinValue;
+                    if (label == runLabel) continue;
+                    if (!runsByLabel.TryGetValue(runLabel, out var runs)) runsByLabel[runLabel] = runs = [];
+                    runs.Add(new VisionRegionRun(y, runStart, x - 1));
+                    pixelCount += x - runStart;
+                    runLabel = label;
+                    runStart = x;
+                }
             }
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(rowBuffer);
         }
         var components = runsByLabel.Values.Select(runs => new VisionRegionComponent(runs)).ToList();
         return (components, pixelCount, runsByLabel.Count);

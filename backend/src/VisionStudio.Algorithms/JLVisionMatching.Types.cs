@@ -1,3 +1,5 @@
+using VisionStudio.Engine.Algorithms;
+
 namespace VisionStudio.Engine.Algorithms;
 
 // 2026-11-12 从单文件 JLVisionMatching.cs（2809 行）按域拆出，纯移动、未改方法体。

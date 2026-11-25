@@ -214,7 +214,11 @@ public static class VisionRoiOpenCvExtensions
         }
     }
 
-    internal static void DrawBrushStrokes(Mat target, IReadOnlyList<VisionRoiBrushStroke>? strokes, double offsetX = 0, double offsetY = 0,
+    /// <summary>
+    /// 笔刷描边栅格化。算法层（VisionStudio.Algorithms 的 JLVisionMatching 模板掩膜）
+    /// 需要与 ROI 掩膜生成走同一条栅格化路径，因此这里对跨程序集开放。
+    /// </summary>
+    public static void DrawBrushStrokes(Mat target, IReadOnlyList<VisionRoiBrushStroke>? strokes, double offsetX = 0, double offsetY = 0,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

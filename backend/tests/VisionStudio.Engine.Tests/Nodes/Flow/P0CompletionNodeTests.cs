@@ -47,7 +47,7 @@ public sealed class P0CompletionNodeTests
         var skipped = await Run(new JsonBuildNode(), "value.jsonBuild", new(inputs), """{"keys":"count,-"}""");
         using var document = JsonDocument.Parse(skipped.Outputs["json"].Require<string>("json"));
         Assert.True(document.RootElement.TryGetProperty("count", out _));
-        Assert.Equal(1, document.RootElement.EnumerateObject().Count());
+        Assert.Single(document.RootElement.EnumerateObject());
     }
 
     [Fact]

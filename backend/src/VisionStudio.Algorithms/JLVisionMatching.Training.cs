@@ -3,8 +3,7 @@ using JLVisionLib;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Nodes;
-using VisionStudio.Engine.Runtime;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Algorithms;
 
@@ -82,7 +81,7 @@ internal static partial class JLVisionMatching
         var trainingRegionMoments = Cv2.Moments(roiMask, binaryImage: true);
         if (trainingRegionMoments.M00 < 64) throw new InvalidOperationException("Training region must contain at least 64 pixels.");
         token.ThrowIfCancellationRequested();
-        using var originBinary = ContourNodesHelper.Binarize(crop, node.GetString("binarize", "auto"), node.GetDouble("threshold", 128), node.GetBool("invert", false), out _, out _);
+        using var originBinary = BinarizationOps.Binarize(crop, node.GetString("binarize", "auto"), node.GetDouble("threshold", 128), node.GetBool("invert", false), out _, out _);
         Cv2.BitwiseAnd(originBinary, roiMask, originBinary);
         Cv2.FindContours(originBinary, out Point[][] originContours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
         var originContour = originContours.OrderByDescending(candidate => Cv2.ContourArea(candidate)).FirstOrDefault(candidate => Cv2.ContourArea(candidate) > 0);

@@ -106,6 +106,25 @@ public sealed class FlowObservabilityTests
         Assert.Contains("兜底分支", Convert.ToString(log.Summary["message"]));
     }
 
+    [Fact]
+    public async Task RunAsync_EmitsNodeProgressEventsInExecutionOrder()
+    {
+        using var sp = Provider();
+        var runner = sp.GetRequiredService<WorkflowCoreVisionRunner>();
+        var events = new List<NodeRunProgressEvent>();
+        var workflow = Workflow(("log", "flow.log", """{"message":"progress","level":"info"}"""));
+
+        var result = await runner.RunAsync(
+            workflow,
+            new VisionRunOptions(ProgressObserver: evt => { lock (events) events.Add(evt); }),
+            runId: "run-progress-test");
+
+        Assert.True(result.Success, result.Error);
+        Assert.Contains(events, e => e.RunId == "run-progress-test" && e.WorkflowId == "observability" && e.NodeId == "start" && e.State == "running");
+        Assert.Contains(events, e => e.NodeId == "start" && e.State == "ok" && e.CompletedCount >= 1 && e.TotalCount == 3);
+        Assert.Contains(events, e => e.NodeId == "after" && e.State == "ok" && e.CompletedCount == 3 && e.TotalCount == 3);
+    }
+
     // ===== 夹具 =====
 
     private static NodeDefinition Def(string codeOrLevel, params (string Key, string Value)[] extra)

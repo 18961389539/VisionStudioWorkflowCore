@@ -238,7 +238,7 @@ public sealed class ParallelDispositionTests
             ]);
 
     private static NodeRunReport Report(WorkflowRunResult result, string nodeId)
-        => Assert.Single(result.NodeReports.Where(x => x.NodeId == nodeId));
+        => Assert.Single(result.NodeReports, x => x.NodeId == nodeId);
 
     private static NodeDefinition Node(string id, string type, Dictionary<string, JsonElement>? parameters = null)
         => new(id, type, id, null, parameters);

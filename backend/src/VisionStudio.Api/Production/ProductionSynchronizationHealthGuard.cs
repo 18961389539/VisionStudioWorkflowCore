@@ -1,6 +1,5 @@
 using System.Text.Json;
 using VisionStudio.Abstractions;
-using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Api;
 

@@ -10,6 +10,13 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VisionStudio.Abstractions\VisionStudio.Abstractions.csproj" />
+    <!-- 相机/溯源契约（ICameraDevice、VisionFrame、HardwareProvenanceData）住在契约程序集，
+         厂商适配器与我方实现共同引用它，避免适配器被迫依赖整个引擎。 -->
+    <ProjectReference Include="..\VisionStudio.Hardware.Abstractions\VisionStudio.Hardware.Abstractions.csproj" />
+    <!-- 图像基础类型与算法内核下沉为独立程序集：引擎引用它们，它们不引用引擎。
+         这条单向边由 Engine.Tests/Contracts/AssemblyBoundaryTests 守护。 -->
+    <ProjectReference Include="..\VisionStudio.Imaging\VisionStudio.Imaging.csproj" />
+    <ProjectReference Include="..\VisionStudio.Algorithms\VisionStudio.Algorithms.csproj" />
     <ProjectReference Include="..\VisionStudio.Scripting\VisionStudio.Scripting.csproj" />
   </ItemGroup>
   <ItemGroup>

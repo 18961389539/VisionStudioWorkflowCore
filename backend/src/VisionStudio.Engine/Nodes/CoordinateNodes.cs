@@ -1,5 +1,4 @@
-﻿using System.Text.Json;
-using VisionStudio.Engine.Runtime;
+using System.Text.Json;
 namespace VisionStudio.Engine.Nodes;
 public sealed record CalibrationPair(double ImageX, double ImageY, double WorldX, double WorldY);
 public static class CalibrationMath

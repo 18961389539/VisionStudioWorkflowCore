@@ -353,7 +353,7 @@ public sealed partial class BaslerPylonCameraDevice : ICameraDevice, ICameraTele
         _ => native?.Contains("Mono", StringComparison.OrdinalIgnoreCase) == true ? CameraOutputPixelFormat.Mono8 : CameraOutputPixelFormat.Bgr8
     };
 
-    private static Exception Unwrap(Exception ex) => ex is TargetInvocationException { InnerException: not null } tie ? tie.InnerException : ex;
+    private static Exception Unwrap(Exception ex) => ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
     public async ValueTask DisposeAsync()
     {

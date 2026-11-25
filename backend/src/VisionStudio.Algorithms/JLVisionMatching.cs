@@ -4,9 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
-using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Nodes;
-using VisionStudio.Engine.Runtime;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Algorithms;
 

@@ -1,7 +1,11 @@
 namespace VisionStudio.Engine.Algorithms;
 
-/// <summary>Bounded native-model cache. An active model is never disposed while a matcher uses it.</summary>
-internal static class JLVisionModelCache
+/// <summary>
+/// Bounded native-model cache. An active model is never disposed while a matcher uses it.
+/// 对引擎开放（2026-11-25）：ONNX 推理节点与 JLVision 匹配共用同一份缓存预算，
+/// 两条路径各自持缓存会造成"总内存 = 2 × Capacity"的隐性放大。
+/// </summary>
+public static class JLVisionModelCache
 {
     private const int Capacity = 16;
     private static readonly object Gate = new();
@@ -13,7 +17,7 @@ internal static class JLVisionModelCache
         public long LastUse;
         public bool Cached;
     }
-    internal sealed class Lease : IDisposable
+    public sealed class Lease : IDisposable
     {
         private Action? _release;
         public IDisposable Model { get; }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Algorithms;
 

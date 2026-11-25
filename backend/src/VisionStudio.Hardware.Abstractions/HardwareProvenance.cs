@@ -1,3 +1,7 @@
+// 程序集归属：VisionStudio.Hardware.Abstractions（2026-11-25 从 VisionStudio.Engine 迁出）。
+// namespace 沿用 VisionStudio.Engine.Provenance 以避免机械改动；相机 / PLC / 机器人适配器
+// 实现 IHardwareProvenanceProvider 时应只引用本程序集。
+
 namespace VisionStudio.Engine.Provenance;
 
 /// <summary>

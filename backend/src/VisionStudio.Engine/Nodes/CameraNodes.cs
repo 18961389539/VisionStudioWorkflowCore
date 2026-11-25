@@ -1,5 +1,4 @@
 using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
@@ -110,7 +109,7 @@ public sealed class AcquireImageNode(CameraManager cameraManager, IReplayInputRe
 
         return NodeOutputContracts.CreateOwnedResult(lease, () =>
         {
-            var image = VisionImage.FromLease(lease);
+            var image = VisionImage.FromLease(lease.Image, lease);
             if (node.GetBool("requireNonEmpty", true) && (image.Width < 1 || image.Height < 1 || image.Mat.Empty()))
                 throw new InvalidOperationException($"Acquire Image camera '{lease.CameraId}' returned an empty frame.");
             var diag = CoordinateValidation.Diagnostics(Type,

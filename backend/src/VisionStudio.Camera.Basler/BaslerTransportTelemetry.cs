@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Reflection;
-using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Camera.Basler;
 

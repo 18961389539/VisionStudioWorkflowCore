@@ -1,7 +1,7 @@
 using JLVisionLib;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
-using VisionStudio.Engine.Camera;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Engine.Algorithms;
 

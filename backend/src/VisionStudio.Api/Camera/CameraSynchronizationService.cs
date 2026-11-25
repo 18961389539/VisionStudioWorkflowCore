@@ -333,7 +333,8 @@ public sealed class CameraSynchronizationService(
             var frames = new Dictionary<string, VisionFrameSetFrameInfo>(StringComparer.OrdinalIgnoreCase);
             foreach (var lease in leases)
             {
-                var image = VisionImage.FromLease(lease);
+                // 租约同时给出像素与释放责任，Imaging 层不需要认识 CameraFrameLease。
+                var image = VisionImage.FromLease(lease.Image, lease);
                 images.Add(lease.CameraId, image);
                 frames.Add(lease.CameraId, new VisionFrameSetFrameInfo(
                     lease.CameraId, lease.Sequence, lease.Timestamp, lease.DeviceTimestampNs, lease.TriggerId, lease.PixelFormat));
