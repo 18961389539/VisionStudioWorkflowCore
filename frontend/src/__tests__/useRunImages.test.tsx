@@ -75,6 +75,27 @@ describe('run image catalog ownership', () => {
     expect(hook.result.current.imageViewerSource.url).toContain('/nodes/target/image?portName=image');
   });
 
+  it('exposes the opposite connected input or output as the held comparison source', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response({
+      runId: 'run-1',
+      images: [
+        { nodeId: 'source', portName: 'image', width: 120, height: 90 },
+        { nodeId: 'target', portName: 'image', width: 100, height: 80 }
+      ]
+    })));
+    const hook = renderHook(() => useRunImages(props));
+    await act(async () => {});
+
+    expect(hook.result.current.imageSource).toBe('output');
+    expect(hook.result.current.comparisonImageSource).toMatchObject({
+      url: '/api/runs/run-1/nodes/source/image?portName=image', width: 120, height: 90
+    });
+    act(() => hook.result.current.setImageSource('input'));
+    expect(hook.result.current.comparisonImageSource).toMatchObject({
+      url: '/api/runs/run-1/nodes/target/image?portName=image', width: 100, height: 80
+    });
+  });
+
   it('includes ProblemDetails reason and correlation ID in catalog errors', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response({ detail: 'Capture unavailable', correlationId: 'trace-images' }, 503)));
     const hook = renderHook(() => useRunImages(props));

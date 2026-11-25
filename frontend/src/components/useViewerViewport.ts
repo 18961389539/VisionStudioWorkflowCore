@@ -59,6 +59,8 @@ export function useViewerViewport({
       y: size.height / 2 - (target.y + target.height / 2) * scale
     });
   };
+  const setViewToTargetRef = useRef(setViewToTarget);
+  setViewToTargetRef.current = setViewToTarget;
 
   const fit = () => {
     if (!actualWidth || !actualHeight) return;
@@ -89,13 +91,13 @@ export function useViewerViewport({
   useEffect(() => {
     if (!actualWidth || !actualHeight) return;
     fitTargetRef.current = { x: 0, y: 0, width: actualWidth, height: actualHeight };
-    setViewToTarget(fitTargetRef.current, 12);
+    setViewToTargetRef.current(fitTargetRef.current, 12);
   }, [actualWidth, actualHeight]);
 
   // 容器尺寸变化：按当前目标（全图或 ROI）重新适配
   useEffect(() => {
     if (!fitTargetRef.current) return;
-    setViewToTarget(fitTargetRef.current, 12);
+    setViewToTargetRef.current(fitTargetRef.current, 12);
   }, [size.width, size.height]);
 
   // 定位选区：属性面板每次触发递增 focusTick，这里把视图适配到当前 ROI 包围盒
@@ -104,7 +106,7 @@ export function useViewerViewport({
     lastFocusTick.current = focusTick;
     if (!roi) return;
     fitTargetRef.current = roiBounds(roi);
-    setViewToTarget(fitTargetRef.current, 28);
+    setViewToTargetRef.current(fitTargetRef.current, 28);
   }, [focusTick, roi, size.width, size.height]);
 
   return { size, view, setView, setViewToTarget, fit, oneToOne, focusSearchLine };

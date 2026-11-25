@@ -1,11 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import type Konva from 'konva';
-import type { VisionOverlay, VisionRoi } from '../types';
 import { roiConfigurationIssue } from '../nodeConfigurationState';
 import { useImagePixelSampler } from './useImagePixelSampler';
 import { clipSegmentToImage, useHtmlImage, readPixelated, persistPixelated } from './imageViewerUtils';
-import type { MeasurementGeometry } from './imageViewerUtils';
-import type { CaliperDiagnosticSelection } from './imageViewerTypes';
+import type { ImageViewerProps } from './imageViewerTypes';
 import { useViewerViewport } from './useViewerViewport';
 import { useViewerCursorStyle } from './useViewerCursorStyle';
 import { useImageViewerInteractions } from './useImageViewerInteractions';
@@ -19,6 +17,10 @@ export { buildCaliperCircleAngles } from '../caliperCircleSampling';
 
 export default function ImageViewer({
   previewUrl,
+  comparisonUrl,
+  comparisonWidth,
+  comparisonHeight,
+  comparisonLabel,
   imageWidth,
   imageHeight,
   overlays,
@@ -39,39 +41,7 @@ export default function ImageViewer({
   focusTick,
   emptyHint = '运行工作流以显示图像和矢量覆盖层',
   emptyAction
-}: {
-  previewUrl?: string;
-  imageWidth?: number;
-  imageHeight?: number;
-  overlays: VisionOverlay[];
-  roi?: VisionRoi;
-  roiEnabled: boolean;
-  /** 纯图像预览时隐藏无关的绘图操作。 */
-  showRoiTools?: boolean;
-  /** 多边形点数上限；设置后只保留平移/多边形工具，达到点数立即闭合（如透视四角）。 */
-  roiPointLimit?: number;
-  /** 固定结构 ROI 无法用“清除”表达时关闭清除按钮（如透视四角始终需要四个点）。 */
-  roiClearable?: boolean;
-  roiTargetLabel?: string;
-  loading?: boolean;
-  onRoiChange: (roi?: VisionRoi) => void;
-  /** Search geometry authored in the displayed image coordinate frame. */
-  measurementGeometry?: MeasurementGeometry;
-  measurementGeometryEditable?: boolean;
-  onMeasurementGeometryChange?: (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => void;
-  /** Read-only samples in the displayed run image frame. Picking never changes measurement geometry. */
-  caliperDiagnosticSelection?: CaliperDiagnosticSelection;
-  /** Diagnostic cursor and candidates stay visible above the search geometry. */
-  measurementMarkers?: VisionOverlay[];
-  /** 覆盖层按节点筛选时的显示名映射 */
-  nodeLabels?: Record<string, string>;
-  /** 递增信号：来自属性面板“定位选区”，把视图适配到当前 ROI 区域 */
-  focusTick?: number;
-  /** 无图像时的提示文案（默认面向主画布流程运行；弹窗内可改为“运行此节点”） */
-  emptyHint?: string;
-  /** 无图像时的操作入口（如“运行此节点”）：空态不再只有一行灰字 */
-  emptyAction?: { label: string; onClick: () => void; disabled?: boolean; title?: string };
-}) {
+}: ImageViewerProps) {
   // Imported workflows can contain malformed legacy ROI JSON. Ignore it in the canvas so
   // the parameter editor can explain and clear it without crashing the whole configuration UI.
   const roi = useMemo(() => inputRoi && !roiConfigurationIssue(inputRoi, 'ROI', 1024) ? inputRoi : undefined, [inputRoi]);
@@ -79,19 +49,34 @@ export default function ImageViewer({
   const stageRef = useRef<Konva.Stage | null>(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [overlayFilter, setOverlayFilter] = useState<string[]>([]);
+  const [comparing, setComparing] = useState(false);
+  const comparisonActive = comparing && Boolean(comparisonUrl);
+  const displayedUrl = comparisonActive ? comparisonUrl : previewUrl;
   // 像素化（最近邻）默认开：放大即真实像素方块；开关可切回平滑插值
   const [pixelated, setPixelated] = useState(readPixelated);
   useEffect(() => { persistPixelated(pixelated); }, [pixelated]);
   useEffect(() => { setOverlayFilter([]); }, [previewUrl]);
-  const { image, failed } = useHtmlImage(previewUrl);
-  const actualWidth = imageWidth || image?.naturalWidth || 0;
-  const actualHeight = imageHeight || image?.naturalHeight || 0;
+  useEffect(() => {
+    if (!comparing) return;
+    const release = () => setComparing(false);
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    window.addEventListener('blur', release);
+    return () => {
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+      window.removeEventListener('blur', release);
+    };
+  }, [comparing]);
+  const { image, failed } = useHtmlImage(displayedUrl);
+  const actualWidth = (comparisonActive ? comparisonWidth : imageWidth) || image?.naturalWidth || 0;
+  const actualHeight = (comparisonActive ? comparisonHeight : imageHeight) || image?.naturalHeight || 0;
   // 视口（缩放/平移/适配目标）由独立 hook 持有：它需要跨渲染保住"适配意图"，
   // 混在手势状态机里最容易在改交互时被无意重置。
   const { size, view, setView, fit, oneToOne, focusSearchLine } = useViewerViewport({
     hostRef, actualWidth, actualHeight, roi, focusTick, measurementGeometry
   });
-  const canDrawMeasurementGeometry = Boolean(measurementGeometryEditable && measurementGeometry && (measurementGeometry.type === 'line'
+  const canDrawMeasurementGeometry = Boolean(!comparisonActive && measurementGeometryEditable && measurementGeometry && (measurementGeometry.type === 'line'
     || measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false));
   const {
     tool, cursorScreen, cursor, setCursor, brushWidth, setBrushWidth,
@@ -105,20 +90,20 @@ export default function ImageViewer({
   } = useImageViewerInteractions({
     hostRef,
     stageRef,
-    previewUrl,
+    previewUrl: displayedUrl,
     actualWidth,
     actualHeight,
     view,
     setView,
-    roi,
-    roiEnabled,
+    roi: comparisonActive ? undefined : roi,
+    roiEnabled: !comparisonActive && roiEnabled,
     roiPointLimit,
     onRoiChange,
-    measurementGeometry,
-    measurementGeometryEditable,
+    measurementGeometry: comparisonActive ? undefined : measurementGeometry,
+    measurementGeometryEditable: !comparisonActive && measurementGeometryEditable,
     canDrawMeasurementGeometry,
     onMeasurementGeometryChange,
-    caliperDiagnosticSelection
+    caliperDiagnosticSelection: comparisonActive ? undefined : caliperDiagnosticSelection
   });
   const { pixel, pixelUnavailable } = useImagePixelSampler(image, cursor, actualWidth, actualHeight);
 
@@ -187,6 +172,11 @@ export default function ImageViewer({
         overlayFilter={overlayFilter}
         onOverlayFilterChange={setOverlayFilter}
         nodeLabels={nodeLabels}
+        comparisonAvailable={Boolean(comparisonUrl)}
+        comparisonLabel={comparisonLabel}
+        comparing={comparisonActive}
+        onCompareStart={() => setComparing(true)}
+        onCompareEnd={() => setComparing(false)}
       />
       {showDrawingHint && measurementGeometry && <ImageViewerDrawingHint
           kind={measurementGeometry.type}
@@ -209,23 +199,23 @@ export default function ImageViewer({
         pixelated={pixelated}
         cursorStyle={cursorStyle}
         loading={Boolean(loading)}
-        previewUrl={previewUrl}
+        previewUrl={displayedUrl}
         failed={failed}
         emptyHint={emptyHint}
-        emptyAction={emptyAction}
-        showOverlay={showOverlay}
+        emptyAction={comparisonActive ? undefined : emptyAction}
+        showOverlay={showOverlay && !comparisonActive}
         visibleOverlays={visibleOverlays}
-        measurementGeometry={measurementGeometry}
+        measurementGeometry={comparisonActive ? undefined : measurementGeometry}
         measurementDraft={measurementDraft}
-        measurementGeometryEditable={measurementGeometryEditable}
+        measurementGeometryEditable={!comparisonActive && measurementGeometryEditable}
         geometryDrawMode={geometryDrawMode}
         circleConstructionPoints={circleConstructionPoints}
         circleDrawMode={circleDrawMode}
         cursor={cursor}
-        measurementMarkers={measurementMarkers}
-        caliperDiagnosticSelection={caliperDiagnosticSelection}
-        roi={roi}
-        roiEnabled={roiEnabled}
+        measurementMarkers={comparisonActive ? [] : measurementMarkers}
+        caliperDiagnosticSelection={comparisonActive ? undefined : caliperDiagnosticSelection}
+        roi={comparisonActive ? undefined : roi}
+        roiEnabled={!comparisonActive && roiEnabled}
         tool={tool}
         draft={draft}
         brushPreview={brushPreview}

@@ -42,7 +42,12 @@ export function ImageViewerToolbar({
   overlayNodeIds,
   overlayFilter,
   onOverlayFilterChange,
-  nodeLabels
+  nodeLabels,
+  comparisonAvailable,
+  comparisonLabel,
+  comparing,
+  onCompareStart,
+  onCompareEnd
 }: {
   showRoiTools: boolean;
   roiEnabled: boolean;
@@ -77,6 +82,11 @@ export function ImageViewerToolbar({
   overlayFilter: string[];
   onOverlayFilterChange: (value: string[]) => void;
   nodeLabels?: Record<string, string>;
+  comparisonAvailable: boolean;
+  comparisonLabel?: string;
+  comparing: boolean;
+  onCompareStart: () => void;
+  onCompareEnd: () => void;
 }) {
   return (
     <div className="viewer-toolbar">
@@ -138,6 +148,16 @@ export function ImageViewerToolbar({
         <Button size="small" onClick={onFit}>适应窗口</Button>
         <Button size="small" onClick={onOneToOne}>原始比例</Button>
         {showRoiTools && roiClearable && <Button size="small" danger disabled={!roi || !roiEnabled} onClick={onClearRoi}>清除选区</Button>}
+        {comparisonAvailable && <Button size="small" type={comparing ? 'primary' : 'default'}
+          aria-pressed={comparing} title={`按住查看${comparisonLabel ?? '另一来源'}`}
+          onPointerDown={onCompareStart} onPointerUp={onCompareEnd} onPointerLeave={onCompareEnd}
+          onPointerCancel={onCompareEnd} onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); onCompareStart(); }
+          }} onKeyUp={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') onCompareEnd();
+          }} onBlur={onCompareEnd}>
+          {comparing ? '松开恢复' : `按住对比${comparisonLabel ? ` · ${comparisonLabel}` : ''}`}
+        </Button>}
         <span className="viewer-toolbar-divider" />
         <span className="viewer-toggle" title="像素化（默认）：放大时按真实像素方块显示，便于逐像素核对；关闭则使用平滑插值（缩小总览更顺眼）">像素化 <Switch size="small" checked={pixelated} onChange={onPixelatedChange} /></span>
         <span className="viewer-toggle">显示覆盖层 <Switch size="small" checked={showOverlay} onChange={onShowOverlayChange} /></span>

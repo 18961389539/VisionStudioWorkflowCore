@@ -267,7 +267,7 @@ export function useNodeConfigurationDialogModel(props: Props) {
     return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—';
   };
   const nodeLabels = Object.fromEntries(nodes.map((item) => [item.id, String(item.data.label ?? item.id)]));
-  const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable,
+  const { imageSource, setImageSource, imageViewerSource, comparisonImageSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable,
     runImageCatalog, imageCatalogLoading, imageCatalogError, retryImageCatalog,
     imageOutputPorts, imageOutputPortName, setImageOutputPortName } =
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
@@ -473,7 +473,7 @@ export function useNodeConfigurationDialogModel(props: Props) {
     node, catalogItem, catalogItems, nodes, edges, open, disabled, onPreview, previewBlockedReason,
     initialTab, result, resultReceivedAt, resultStale, circleSamplingNotice, circleFitConditionNotice,
     caliperCircleBoundsNotice, caliperLineBoundsNotice, caliperSearchLineBoundsNotice,
-    baseline, imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable,
+    baseline, imageSource, setImageSource, imageViewerSource, comparisonImageSource, viewerOverlays, selectedOutputAvailable,
     selectedInputAvailable, runImageCatalog, imageCatalogLoading, imageCatalogError, retryImageCatalog,
     imageOutputPorts, imageOutputPortName, setImageOutputPortName, shapeWorkspaceTab, setShapeWorkspaceTab,
     changeShapeWorkspaceTab, shapeImageKind, setShapeImageKind, trainingView, setTrainingView,

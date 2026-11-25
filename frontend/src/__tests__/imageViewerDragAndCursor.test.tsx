@@ -15,6 +15,19 @@ beforeEach(() => { stubResizeObserver(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('ImageViewer measurement geometry editing', () => {
+  it('shows the alternate image while the comparison control is held', () => {
+    render(<ImageViewer previewUrl="https://example.test/after.png" comparisonUrl="https://example.test/before.png"
+      comparisonWidth={120} comparisonHeight={90} comparisonLabel="输入图像" imageWidth={100} imageHeight={80}
+      overlays={overlays} roiEnabled={false} onRoiChange={emptyRoi} />);
+    const compareButton = screen.getByRole('button', { name: /按住对比/ });
+    expect(compareButton.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.pointerDown(compareButton);
+    expect(compareButton.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.pointerUp(document.body);
+    expect(compareButton.getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('drags the start angle while keeping the circle arc endpoint fixed', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 6,

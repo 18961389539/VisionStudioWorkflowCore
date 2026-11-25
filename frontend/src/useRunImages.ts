@@ -169,6 +169,28 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels, pre
     return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: '最终预览', nodeId: undefined as string | undefined };
   }, [catalog, imageInputConnection, imageSource, nodeLabels, nodes, previewUrl, result, selectedId, imageCatalogLoading, imageCatalogError, outputPortName]);
 
+  const comparisonImageSource = useMemo(() => {
+    if (imageSource === 'output' && catalog && imageInputConnection) {
+      const entry = runImageEntryForPort(catalog, imageInputConnection.nodeId, imageInputConnection.portName);
+      if (entry) return {
+        url: runs.nodeImage(catalog.runId, imageInputConnection.nodeId, entry.portName),
+        width: entry.width,
+        height: entry.height,
+        label: `输入 · ${nodeLabels[imageInputConnection.nodeId] ?? imageInputConnection.nodeId}`
+      };
+    }
+    if (imageSource === 'input' && catalog && selectedId) {
+      const entry = runImageEntryForPort(catalog, selectedId, outputPortName);
+      if (entry) return {
+        url: runs.nodeImage(catalog.runId, selectedId, entry.portName),
+        width: entry.width,
+        height: entry.height,
+        label: `输出 · ${nodeLabels[selectedId] ?? selectedId}`
+      };
+    }
+    return undefined;
+  }, [catalog, imageInputConnection, imageSource, nodeLabels, outputPortName, selectedId]);
+
   // 查看节点图像时只显示该节点自己的覆盖层，避免与上游/下游标注混淆
   const viewerOverlays = useMemo(
     () => (imageViewerSource.nodeId ? (result?.overlays ?? []).filter((overlay) => overlay.nodeId === imageViewerSource.nodeId) : (result?.overlays ?? [])),
@@ -188,6 +210,7 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels, pre
     imageSource,
     setImageSource,
     imageViewerSource,
+    comparisonImageSource,
     viewerOverlays,
     selectedOutputAvailable,
     selectedInputAvailable,
