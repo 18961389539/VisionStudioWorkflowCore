@@ -1,5 +1,7 @@
-# 统一换行策略：仓库内以 LF 存储、检出保持 LF（仓库级 core.autocrlf=false）。
-# shell / python 脚本固定 LF，避免在 Git Bash 下出现 "bad interpreter"。
-* text=auto
+# 文本在索引中使用 LF，默认以 LF 检出，不依赖全局 core.autocrlf。
+# 自动识别的二进制文件不转换；Windows 批处理检出为 CRLF。
+* text=auto eol=lf
 *.sh text eol=lf
 *.py text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf

@@ -32,6 +32,21 @@ bash ./scripts/quality-gate.sh --scope Backend           # Linux/macOS/Git Bash 
 用进程级放开：`powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/quality-gate.ps1 ...`，
 或当前会话先 `Set-ExecutionPolicy -Scope Process Bypass -Force`（进程退出即失效）。
 
+## Git 换行契约
+
+仓库以 [`.gitattributes`](../.gitattributes) 为准：自动识别的文本在索引中保存为 LF，
+默认检出为 LF（包括 PowerShell、Shell、Python 和前后端源码）；只有 `.bat` / `.cmd`
+检出为 CRLF，索引仍为 LF。自动识别的二进制文件不转换，已有 UTF-8 BOM 也不移除。
+[`.editorconfig`](../.editorconfig) 使用相同的编辑器保存规则。
+
+显式 `eol` 规则不依赖个人或系统的 `core.autocrlf`，无需修改全局 Git 配置。规则生效不会
+立即重写已有工作区文件；旧检出的 CRLF 可以暂时保留，后续正常保存或检出时再遵循契约。
+PowerShell 的 LF 规则不改变静态审计要求的编码契约：含非 ASCII 字符的脚本仍须 UTF-8 BOM。
+
+排查时使用 `git ls-files --eol` 和 `git check-attr text eol -- <文件>`。
+本次固化时索引文本已全部为 LF，因此没有批量归一化源码；不要在有在途改动时盲目运行
+`git add --renormalize .`。未来确需归一化时，应先隔离业务改动，再单独审查并提交换行差异。
+
 ## 后端段
 
 | 检查 | 守什么 | 失败时该做什么 |
