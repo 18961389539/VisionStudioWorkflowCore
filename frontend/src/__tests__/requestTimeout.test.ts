@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { withRequestTimeout } from '../requestTimeout';
+import { runTimedAbortable, withRequestTimeout } from '../requestTimeout';
 import { deferred } from './fixtures/tuning';
 
 beforeEach(() => { vi.useFakeTimers(); });
@@ -80,6 +80,21 @@ describe('request deadlines', () => {
     reject(new Error('late failure'));
     await Promise.resolve();
     expect(failed).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('links parent cancellation and timeout in runTimedAbortable', async () => {
+    const parent = new AbortController();
+    const pending = deferred<number>();
+    let capturedSignal!: AbortSignal;
+    const promise = runTimedAbortable(parent.signal, 5_000, (signal) => {
+      capturedSignal = signal;
+      return pending.promise;
+    });
+    expect(capturedSignal.aborted).toBe(false);
+    parent.abort(new Error('parent cancelled'));
+    await expect(promise).rejects.toThrow('parent cancelled');
+    expect(capturedSignal.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
 });

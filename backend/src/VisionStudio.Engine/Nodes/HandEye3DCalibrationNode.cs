@@ -172,7 +172,7 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
         if (string.IsNullOrWhiteSpace(targetFrameValue)) targetFrameValue = defaultTarget;
         var targetFrame = CoordinateValidation.RequireFrame(targetFrameValue, "targetFrame");
         var unit = CoordinateValidation.RequireUnit(node.GetString("unit", "mm"), "unit");
-        var transform = new VisionTransform3D(sourceFrame, targetFrame, unit, cameraToRobot);
+        var transform = new VisionTransform3D(sourceFrame, targetFrame, unit, [.. cameraToRobot]);
         var canonicalMode = eyeInHand ? "eyeInHand" : "eyeToHand";
         var calibrationModel = new HandEye3DCalibrationModel(canonicalMode, methodName, sourceFrame, targetFrame, unit, cameraToRobot, outlierRejection);
         var summary = new Dictionary<string, object?>

@@ -2,7 +2,8 @@
  * 编辑器的低频面板 / 弹窗开关（巨型组件拆分，2026-11-13）。
  * 每个开关独立持有，不做互斥；与拆分前一致。
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { PanelOpeners } from './appEditorMenus';
 
 export function useEditorPanels() {
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -27,12 +28,26 @@ export function useEditorPanels() {
   const [hardwareProvenanceOpen, setHardwareProvenanceOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  const anyOpen = pluginsOpen || camerasOpen || robotsOpen || devicesOpen || jobsOpen || tracesOpen
+    || commandOpen || validationOpen || modelPackagesOpen || modelAssetsOpen || tuningOpen || modulesOpen
+    || calibrationOpen || framesOpen || productionOpen || spcOpen || diagnosticsOpen || hardwareProvenanceOpen
+    || aboutOpen || shortcutsOpen;
+
+  const openers = useMemo<PanelOpeners>(() => ({
+    setCalibrationOpen, setTracesOpen, setJobsOpen, setValidationOpen, setTuningOpen, setModulesOpen,
+    setCamerasOpen, setRobotsOpen, setDevicesOpen, setProductionOpen, setSpcOpen, setDiagnosticsOpen, setPluginsOpen,
+    setModelPackagesOpen, setModelAssetsOpen, setFramesOpen, setHardwareProvenanceOpen, setShortcutsOpen, setAboutOpen
+  }), []);
+
   return {
     pluginsOpen, setPluginsOpen, camerasOpen, setCamerasOpen, robotsOpen, setRobotsOpen, devicesOpen, setDevicesOpen,
     jobsOpen, setJobsOpen, tracesOpen, setTracesOpen, traceRunId, setTraceRunId, commandOpen, setCommandOpen,
     validationOpen, setValidationOpen, modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
     tuningOpen, setTuningOpen, modulesOpen, setModulesOpen, calibrationOpen, setCalibrationOpen, framesOpen, setFramesOpen,
     productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
-    aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen
+    aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen,
+    anyOpen,
+    openers
   };
 }

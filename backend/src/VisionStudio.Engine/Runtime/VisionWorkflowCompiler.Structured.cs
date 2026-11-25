@@ -16,13 +16,13 @@ public sealed partial class VisionWorkflowCompiler
         return new CompileResult(steps, ir.VisualOrder, ir.Regions);
     }
 
-    private IReadOnlyList<Dictionary<string, object?>> CompileSequence(
+    private IReadOnlyList<WorkflowDslStep> CompileSequence(
         StructuredSequenceIr sequence,
         string? continuationStepId,
         CompileContext context,
         string? loopNodeId = null)
     {
-        var steps = new List<Dictionary<string, object?>>();
+        var steps = new List<WorkflowDslStep>();
         var items = sequence.Items;
 
         for (var i = 0; i < items.Count;)
@@ -89,7 +89,7 @@ public sealed partial class VisionWorkflowCompiler
         return steps;
     }
 
-    private IReadOnlyList<Dictionary<string, object?>> CompileIf(
+    private IReadOnlyList<WorkflowDslStep> CompileIf(
         StructuredIfIr conditional,
         string? continuationStepId,
         CompileContext context,
@@ -101,36 +101,27 @@ public sealed partial class VisionWorkflowCompiler
         var conditionExpression = $"data.BranchConditions[{JsonSerializer.Serialize(node.Id)}]";
 
         var marker = CreateVisionStep(node.Id, truePrimitiveId, loopNodeId);
-        var truePrimitive = new Dictionary<string, object?>
-        {
-            ["Id"] = truePrimitiveId,
-            ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string> { ["Condition"] = $"data.Halted == false && {conditionExpression}" },
-            ["Do"] = new object[] { CompileSequence(conditional.TrueBranch, continuationStepId: null, context, loopNodeId).ToArray() },
-            ["NextStepId"] = falsePrimitiveId,
-            ["ErrorBehavior"] = "Terminate"
-        };
-        var falsePrimitive = new Dictionary<string, object?>
-        {
-            ["Id"] = falsePrimitiveId,
-            ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string> { ["Condition"] = $"data.Halted == false && {conditionExpression} == false" },
-            ["Do"] = new object[] { CompileSequence(conditional.FalseBranch, continuationStepId: null, context, loopNodeId).ToArray() },
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (continuationStepId is not null)
-            falsePrimitive["NextStepId"] = continuationStepId;
+        var truePrimitive = WorkflowStepDsl.If(
+            truePrimitiveId,
+            $"data.Halted == false && {conditionExpression}",
+            CompileSequence(conditional.TrueBranch, continuationStepId: null, context, loopNodeId),
+            nextStepId: falsePrimitiveId);
+        var falsePrimitive = WorkflowStepDsl.If(
+            falsePrimitiveId,
+            $"data.Halted == false && {conditionExpression} == false",
+            CompileSequence(conditional.FalseBranch, continuationStepId: null, context, loopNodeId),
+            nextStepId: continuationStepId);
 
         return [marker, truePrimitive, falsePrimitive];
     }
 
-    private IReadOnlyList<Dictionary<string, object?>> CompileSwitch(
+    private IReadOnlyList<WorkflowDslStep> CompileSwitch(
         StructuredSwitchIr branch,
         string? continuationStepId,
         CompileContext context,
         string? loopNodeId = null)
     {
-        var steps = new List<Dictionary<string, object?>>();
+        var steps = new List<WorkflowDslStep>();
         var firstPrimitiveId = branch.Branches.Count == 0 ? continuationStepId : $"{branch.Node.Id}.__switch_{branch.Branches[0].Port}";
         steps.Add(CreateVisionStep(branch.Node.Id, firstPrimitiveId, loopNodeId));
         for (var index = 0; index < branch.Branches.Count; index++)
@@ -138,22 +129,19 @@ public sealed partial class VisionWorkflowCompiler
             var item = branch.Branches[index];
             var primitiveId = $"{branch.Node.Id}.__switch_{item.Port}";
             var condition = $"data.Halted == false && data.SwitchSelections[{JsonSerializer.Serialize(branch.Node.Id)}] == {JsonSerializer.Serialize(item.Port)}";
-            var primitive = new Dictionary<string, object?>
-            {
-                ["Id"] = primitiveId,
-                ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
-                ["Inputs"] = new Dictionary<string, string> { ["Condition"] = condition },
-                ["Do"] = new object[] { CompileSequence(item.Sequence, continuationStepId: null, context, loopNodeId).ToArray() },
-                ["ErrorBehavior"] = "Terminate"
-            };
-            if (index == branch.Branches.Count - 1 && continuationStepId is not null) primitive["NextStepId"] = continuationStepId;
-            else if (index + 1 < branch.Branches.Count) primitive["NextStepId"] = $"{branch.Node.Id}.__switch_{branch.Branches[index + 1].Port}";
-            steps.Add(primitive);
+            var next = index == branch.Branches.Count - 1
+                ? continuationStepId
+                : $"{branch.Node.Id}.__switch_{branch.Branches[index + 1].Port}";
+            steps.Add(WorkflowStepDsl.If(
+                primitiveId,
+                condition,
+                CompileSequence(item.Sequence, continuationStepId: null, context, loopNodeId),
+                nextStepId: next));
         }
         return steps;
     }
 
-    private IReadOnlyList<Dictionary<string, object?>> CompileTry(
+    private IReadOnlyList<WorkflowDslStep> CompileTry(
         StructuredTryIr attempt,
         string? continuationStepId,
         CompileContext context,
@@ -163,28 +151,20 @@ public sealed partial class VisionWorkflowCompiler
         var errorId = $"{attempt.Node.Id}.__try_error";
         var successCondition = $"data.TrySucceeded[{JsonSerializer.Serialize(attempt.Node.Id)}]";
         var marker = CreateVisionStep(attempt.Node.Id, successId, loopNodeId);
-        var success = new Dictionary<string, object?>
-        {
-            ["Id"] = successId,
-            ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string> { ["Condition"] = successCondition },
-            ["Do"] = new object[] { CompileSequence(attempt.Success, continuationStepId: null, context, loopNodeId).ToArray() },
-            ["NextStepId"] = errorId,
-            ["ErrorBehavior"] = "Terminate"
-        };
-        var error = new Dictionary<string, object?>
-        {
-            ["Id"] = errorId,
-            ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string> { ["Condition"] = $"{successCondition} == false" },
-            ["Do"] = new object[] { CompileSequence(attempt.Error, continuationStepId: null, context, loopNodeId).ToArray() },
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (continuationStepId is not null) error["NextStepId"] = continuationStepId;
+        var success = WorkflowStepDsl.If(
+            successId,
+            successCondition,
+            CompileSequence(attempt.Success, continuationStepId: null, context, loopNodeId),
+            nextStepId: errorId);
+        var error = WorkflowStepDsl.If(
+            errorId,
+            $"{successCondition} == false",
+            CompileSequence(attempt.Error, continuationStepId: null, context, loopNodeId),
+            nextStepId: continuationStepId);
         return [marker, success, error];
     }
 
-    private IReadOnlyList<Dictionary<string, object?>> CompileForEach(
+    private IReadOnlyList<WorkflowDslStep> CompileForEach(
         StructuredForEachIr loop,
         string? continuationStepId,
         CompileContext context,
@@ -192,20 +172,11 @@ public sealed partial class VisionWorkflowCompiler
     {
         var primitiveId = $"{loop.Node.Id}.__foreach";
         var marker = CreateVisionStep(loop.Node.Id, primitiveId, enclosingLoopNodeId);
-        var foreachPrimitive = new Dictionary<string, object?>
-        {
-            ["Id"] = primitiveId,
-            ["StepType"] = "WorkflowCore.Primitives.Foreach, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string>
-            {
-                ["Collection"] = $"data.ForEachCollections[{JsonSerializer.Serialize(loop.Node.Id)}]",
-                ["RunParallel"] = "false"
-            },
-            ["Do"] = new object[] { CompileSequence(loop.Body, continuationStepId: null, context, loop.Node.Id).ToArray() },
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (continuationStepId is not null)
-            foreachPrimitive["NextStepId"] = continuationStepId;
+        var foreachPrimitive = WorkflowStepDsl.Foreach(
+            primitiveId,
+            $"data.ForEachCollections[{JsonSerializer.Serialize(loop.Node.Id)}]",
+            CompileSequence(loop.Body, continuationStepId: null, context, loop.Node.Id),
+            nextStepId: continuationStepId);
         return [marker, foreachPrimitive];
     }
 
@@ -214,7 +185,7 @@ public sealed partial class VisionWorkflowCompiler
     /// （Do = [begin, 循环体..., end]）。条件表达式只用到 &amp;&amp; / == 与字典索引器，
     /// 与既有 BranchConditions 表达式同一形态，不依赖求值器对比较运算符或方法调用的支持。
     /// </summary>
-    private IReadOnlyList<Dictionary<string, object?>> CompileLoop(
+    private IReadOnlyList<WorkflowDslStep> CompileLoop(
         StructuredLoopIr loop,
         string? continuationStepId,
         CompileContext context,
@@ -231,22 +202,15 @@ public sealed partial class VisionWorkflowCompiler
         var bodySteps = CompileSequence(loop.Body, continuationStepId: endId, context, loopId).ToList();
         // begin 必须显式指向循环体第一步：Workflow Core 的容器从 Do 的第一个步骤开始，
         // 之后只沿 NextStepId 前进，缺少链路的步骤会被直接跳过（body 永不执行）。
-        var firstBodyStepId = bodySteps.Count > 0 ? bodySteps[0]["Id"] as string : null;
+        var firstBodyStepId = bodySteps.Count > 0 ? bodySteps[0].Id : null;
         bodySteps.Insert(0, CreateLoopStep(beginId, loopId, "begin", loop.Kind, loop.ConditionSource, nextStepId: firstBodyStepId ?? endId));
         bodySteps.Add(CreateLoopStep(endId, loopId, "end", loop.Kind, loop.ConditionSource));
 
-        var whilePrimitive = new Dictionary<string, object?>
-        {
-            ["Id"] = whileId,
-            ["StepType"] = "WorkflowCore.Primitives.While, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string>
-            {
-                ["Condition"] = $"data.LoopConditions[{JsonSerializer.Serialize(loopId)}] && data.LoopBreaks[{JsonSerializer.Serialize(loopId)}] == false"
-            },
-            ["Do"] = new object[] { bodySteps.ToArray() },
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (continuationStepId is not null) whilePrimitive["NextStepId"] = continuationStepId;
+        var whilePrimitive = WorkflowStepDsl.While(
+            whileId,
+            $"data.LoopConditions[{JsonSerializer.Serialize(loopId)}] && data.LoopBreaks[{JsonSerializer.Serialize(loopId)}] == false",
+            bodySteps,
+            nextStepId: continuationStepId);
         return [marker, whilePrimitive];
     }
 
@@ -254,7 +218,7 @@ public sealed partial class VisionWorkflowCompiler
     /// break 编译：节点本身先执行（记录原因）→ 置位中断标志 → 用 If 守卫本轮剩余步骤。
     /// 守卫被跳过时直接接 continuation（循环末尾的 end 步），所以仍会刷新条件并正常退出。
     /// </summary>
-    private IReadOnlyList<Dictionary<string, object?>> CompileBreak(
+    private IReadOnlyList<WorkflowDslStep> CompileBreak(
         StructuredBreakIr breakItem,
         string? continuationStepId,
         CompileContext context,
@@ -266,44 +230,16 @@ public sealed partial class VisionWorkflowCompiler
         var marker = CreateVisionStep(breakItem.Node.Id, setBreakId, loopNodeId);
         var guardId = $"{breakItem.Node.Id}.__break_guard";
         var setBreak = CreateLoopStep(setBreakId, loopNodeId, "break", "while", source: null, nextStepId: guardId);
-        var guard = new Dictionary<string, object?>
-        {
-            ["Id"] = guardId,
-            ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string>
-            {
-                ["Condition"] = $"data.LoopBreaks[{JsonSerializer.Serialize(loopNodeId)}] == false"
-            },
-            ["Do"] = new object[] { CompileSequence(breakItem.Remaining, continuationStepId, context, loopNodeId).ToArray() },
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (continuationStepId is not null) guard["NextStepId"] = continuationStepId;
+        var guard = WorkflowStepDsl.If(
+            guardId,
+            $"data.LoopBreaks[{JsonSerializer.Serialize(loopNodeId)}] == false",
+            CompileSequence(breakItem.Remaining, continuationStepId, context, loopNodeId),
+            nextStepId: continuationStepId);
         return [marker, setBreak, guard];
     }
 
-    private Dictionary<string, object?> CreateLoopStep(string stepId, string loopNodeId, string action, string kind, LoopConditionSource? source, string? nextStepId = null)
-    {
-        var inputs = new Dictionary<string, string>
-        {
-            ["LoopNodeId"] = JsonSerializer.Serialize(loopNodeId),
-            ["Action"] = JsonSerializer.Serialize(action),
-            ["Kind"] = JsonSerializer.Serialize(kind)
-        };
-        if (source is not null)
-        {
-            inputs["SourceNodeId"] = JsonSerializer.Serialize(source.NodeId);
-            inputs["SourcePort"] = JsonSerializer.Serialize(source.Port);
-        }
-        var step = new Dictionary<string, object?>
-        {
-            ["Id"] = stepId,
-            ["StepType"] = _loopStepType,
-            ["Inputs"] = inputs,
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (nextStepId is not null) step["NextStepId"] = nextStepId;
-        return step;
-    }
+    private WorkflowDslStep CreateLoopStep(string stepId, string loopNodeId, string action, string kind, LoopConditionSource? source, string? nextStepId = null)
+        => WorkflowStepDsl.LoopControlStep(_loopStepType, stepId, loopNodeId, action, kind, source, nextStepId);
 
     private void ValidateTryBody(StructuredTryIr attempt, IReadOnlyList<EdgeDefinition> edges)
     {
@@ -325,7 +261,7 @@ public sealed partial class VisionWorkflowCompiler
         }
     }
 
-    private IReadOnlyList<Dictionary<string, object?>> CompileParallel(
+    private IReadOnlyList<WorkflowDslStep> CompileParallel(
         StructuredParallelIr parallel,
         string? continuationStepId,
         CompileContext context,
@@ -370,20 +306,12 @@ public sealed partial class VisionWorkflowCompiler
             "Branch outputs and disposition are unchanged; only concurrency (cycle time) is affected.",
             parallel.Node.Id));
 
-        var sequence = new Dictionary<string, object?>
-        {
-            ["Id"] = sequenceId,
-            ["StepType"] = "WorkflowCore.Primitives.Sequence, WorkflowCore",
-            ["Do"] = new object[]
-            {
-                CompileSequence(parallel.Branch1, continuationStepId: null, context, loopNodeId).ToArray(),
-                CompileSequence(parallel.Branch2, continuationStepId: null, context, loopNodeId).ToArray()
-            },
-            ["ErrorBehavior"] = "Terminate"
-        };
         var sequenceNext = parallel.VirtualJoin ? parallel.JoinNodeId : continuationStepId;
-        if (sequenceNext is not null)
-            sequence["NextStepId"] = sequenceNext;
+        var sequence = WorkflowStepDsl.Sequence(
+            sequenceId,
+            CompileSequence(parallel.Branch1, continuationStepId: null, context, loopNodeId),
+            CompileSequence(parallel.Branch2, continuationStepId: null, context, loopNodeId),
+            nextStepId: sequenceNext);
 
         var fallback = parallel.Implicit
             ? new[] { sequence }
@@ -393,18 +321,8 @@ public sealed partial class VisionWorkflowCompiler
             : fallback;
     }
 
-    private Dictionary<string, object?> CreateImplicitJoinStep(string joinId, string? nextStepId)
-    {
-        var step = new Dictionary<string, object?>
-        {
-            ["Id"] = joinId,
-            ["StepType"] = _implicitJoinStepType,
-            ["Inputs"] = new Dictionary<string, string> { ["JoinNodeId"] = JsonSerializer.Serialize(joinId) },
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (nextStepId is not null) step["NextStepId"] = nextStepId;
-        return step;
-    }
+    private WorkflowDslStep CreateImplicitJoinStep(string joinId, string? nextStepId)
+        => WorkflowStepDsl.ImplicitJoinStep(_implicitJoinStepType, joinId, nextStepId);
 
     /// <summary>
     /// 分支可整体融合为一个流水线段的条件：全部为可融合普通节点（无嵌套控制结构）。

@@ -12,6 +12,7 @@
 ./scripts/quality-gate.ps1 -Scope E2E       # Playwright 真浏览器
 
 ./scripts/quality-gate.ps1 -Scope Frontend -SkipInstall   # 本地迭代：跳过 npm ci
+bash ./scripts/quality-gate.sh --scope Backend           # Linux/macOS/Git Bash 同口径入口（支持 --scope 与 --skip-install）
 ```
 
 `-Scope` 只是把同一套检查分到不同 runner 并行跑（2026-11-12 拆分，CI 关键路径从一条 25 分钟
@@ -35,13 +36,13 @@
 
 | 检查 | 守什么 | 失败时该做什么 |
 |---|---|---|
-| `static-audit.py` | 结构性与契约性断言：安全中间件顺序、反向代理边界、生产模拟器边界、发布门禁、脚本编码契约、文档必备 token | 按报文补齐实现；若断言本身过期（实现搬到别处），改断言并写清为什么 |
+| `static-audit.py` | 结构性与契约性断言（入口 `scripts/static-audit.py` 协调 `scripts/audit/*.py` 各域模块）：安全中间件顺序、反向代理边界、生产模拟器边界、发布门禁、脚本编码契约、文档必备 token | 按报文补齐实现；若断言本身过期（实现搬到别处），改断言并写清为什么 |
 | `check-metric-floor.py` | 节点目录条数与测试数量下限（`scripts/metric-floor.json`） | 覆盖率挡不住"删测试"——被删的往往是难覆盖的分支，删完覆盖率反而更高。数量下限是唯一能发现"测试悄悄消失"的信号 |
-| `check-size-budget.py` | 单文件行数预算（`scripts/size-budget.json`，默认 1200，目标 800） | 拆文件，或**下调**预算记录值。2026-11-13 起后端第二梯队五条大文件已按语义拆分并登记显式预算，`backend/src` 无超过默认上限的文件 |
+| `check-size-budget.py` | 单文件行数预算（`scripts/size-budget.json`，默认 1200，目标 800；覆盖前后端源码及 `scripts/` / `frontend/scripts/` 治理脚本） | 拆文件，或**下调**预算记录值。2026-11-13 起后端第二梯队五条大文件已按语义拆分并登记显式预算，`backend/src` 无超过默认上限的文件 |
 | `test-publish-data-separation.ps1` / `test-data-migration.ps1` | 发布包与数据根分离；迁移是"暂存→校验→标记→原子切换" | 修实现，不要放宽断言：这两条对应的是现场数据丢失风险 |
 | `test-publish-runtime.sh` | Bash 发布路径与 Windows 路径同一安全契约 | 同上；无 bash 的主机会跳过并打印说明 |
 | `dotnet test`（Release，排除 Soak，收集覆盖率） | 宿主 + 引擎行为 | 修代码；确实需要改期望时在 CHANGELOG 里写清理由 |
-| `check-warning-baseline.ps1` | 编译器/分析器告警不新增（`scripts/warning-baseline.txt`） | 修掉告警；确属误报则显式加入基线，让下一次 review 看得到 |
+| `check-warning-baseline.ps1` | 编译器/分析器告警不新增（全方案 `VisionStudio.slnx` 按 `(相对路径, 告警码)` 多重集比对 `scripts/warning-baseline.txt`，重构移位不再误报；`-Update` 保留头部注释） | 修掉告警；确属误报则显式加入基线，让下一次 review 看得到 |
 | `check-coverage.py` | 合并行/分支覆盖率下限 | 行 84 / 分支 62 是棘轮：只升不降（2026-11-13 实测 85.0% / 62.5%，各留约 1 点余量），提升后同步上调脚本默认值与 workflow 的 `MIN_LINE_COVERAGE`/`MIN_BRANCH_COVERAGE` |
 | `static-audit.py` 的空 catch 规则（2026-11-12，2026-11-13 清零） | 未写忽略原因的空 `catch` 不得新增（`scripts/empty-catch-baseline.json` 存量已清零） | 写 `catch { } // 原因`（或 `/* */`），或补上真正的错误处理。新增即失败，不再有按文件锁定的存量额度 |
 | `static-audit.py` 自动备份断言（2026-11-23） | 自动调度服务/宿主注册/`/api/health` 新鲜度字段/`Storage:AutoBackup` 配置/恢复演练测试/文档声明必须同时存在；文档必须写明 `stale` 不参与 `degradedReasons` | 补齐服务、注册或健康字段；不要为了让 `stale=false` 而删掉披露字段——陈旧备份是告警，不是就绪条件 |
@@ -58,7 +59,7 @@
 |---|---|
 | `npm ci` | 锁文件与 package.json 一致（不允许"本地能装、CI 装不上"） |
 | `npm audit --audit-level=high`（2026-11-12） | 前端依赖已知漏洞（只拦 high/critical）。首次接入即发现 vite 8.3.2 与 undici 各带 high |
-| `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径。另运行 `check-hooks-deps.mjs`：`react/exhaustive-deps` 存量基线 65 处只许减（新代码新增即失败） |
+| `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径。另运行 `check-hooks-deps.mjs`：`react/exhaustive-deps` 存量基线 60 处只许减（新代码新增即失败） |
 | `npm run check:theme`（2026-11-13） | 主题令牌守卫：颜色只能出现在 `:root` / `[data-vs-theme='light']` 两个块里；语义 token 在深/浅主题下按 WCAG 校验对比度（文字 4.5:1、图形 3:1）。此前 62 行硬编码颜色在浅色主题下最低仅 2.2:1 |
 | `npm run test:coverage` | 单测 + 覆盖率阈值（写在 `vite.config.ts` 的 `test.coverage.thresholds`，棘轮同理）；其中 `apiUsage.test.ts` 另有静默失败棘轮：组件里禁止用 `if (!response.ok) return;` 把失败渲染成空数据，白名单仅保留附加信息路径与组件文档反例 |
 | `npm run build` | `tsc -b`（`strict: true`）+ 生产构建；类型不过不产出包 |
@@ -88,7 +89,7 @@ Vitest 5 的 `fsModuleCachePath` 也指到系统临时目录：默认 `node_modu
 React Compiler 系列规则（`set-state-in-effect` 82 处、`refs` 56 处，2026-11-12 首次启用时统计）暂未开启：
 这些是"重写渲染方式"级别的改造，一次性开启会让门禁长期变红而失去意义。
 `exhaustive-deps` 已先行接入（2026-11-13）：规则本体仍保持 `off`，由 `frontend/scripts/check-hooks-deps.mjs`
-用 `oxlint -D` 单独统计并与 `lint-hooks-baseline.json` 的存量基线（当前 63，2026-11-13 由 65 下调）比较——新代码新增违规直接失败，
+用 `oxlint -D` 单独统计并与 `lint-hooks-baseline.json` 的存量基线（当前 60，由 65→63→60 下调）比较——新代码新增违规直接失败，
 修掉一处则要求同步下调基线。这样不必一次性改写 26 个存量组件里的内联 `refresh/load`。
 
 `no-unused-vars` 对 `src/__tests__/**` 关闭：测试里 `const { result, rerender } = renderHook(...)`

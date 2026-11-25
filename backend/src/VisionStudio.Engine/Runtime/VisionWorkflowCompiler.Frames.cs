@@ -159,25 +159,33 @@ public sealed partial class VisionWorkflowCompiler
         if (frameRule?.Transform is { } framePolicy && framePolicy != NodeTransformFramePolicy.None)
         {
             var source = ResolveImageInputFrame(nodeId, frameRule.InputPort, workflow, byId);
+            var outputKey = framePolicy == NodeTransformFramePolicy.Spatial
+                ? NodeFrameSemantics.ImageFrameKey(
+                    nodeId,
+                    frameRule,
+                    port => ResolveImageInputFrame(nodeId, port, workflow, byId)?.Key,
+                    port => ResolveTransformTargetFrame(nodeId, port, workflow, byId)?.Key)
+                : null;
+            var resolvedEndpoints = NodeFrameSemantics.ResolveTransformFrames(
+                nodeId,
+                frameRule,
+                port => ResolveImageInputFrame(nodeId, port, workflow, byId)?.Key,
+                port => ResolveImageInputFrame(nodeId, port, workflow, byId)?.Key,
+                outputKey);
+            if (resolvedEndpoints is not { } endpoints) return null;
+
             switch (framePolicy)
             {
                 case NodeTransformFramePolicy.Spatial:
                 {
-                    var key = NodeFrameSemantics.ImageFrameKey(
-                        nodeId,
-                        frameRule,
-                        port => ResolveImageInputFrame(nodeId, port, workflow, byId)?.Key,
-                        port => ResolveTransformTargetFrame(nodeId, port, workflow, byId)?.Key);
-                    var target = key is null
-                        ? null
-                        : new CoordinateFrame(key, NodeFrameSemantics.FrameLabel(nodeId, frameRule, "spatial frame"));
-                    return new TransformFrames(source, target, target is null ? [] : [target]);
+                    var target = new CoordinateFrame(endpoints.TargetFrame, NodeFrameSemantics.FrameLabel(nodeId, frameRule, "spatial frame"));
+                    return new TransformFrames(source, target, [target]);
                 }
                 case NodeTransformFramePolicy.RoiReference:
                 {
                     var target = ResolveImageInputFrame(nodeId, frameRule.InputPort, workflow, byId);
                     return new TransformFrames(
-                        new CoordinateFrame($"roi:{nodeId}:reference", $"{nodeId} reference image", IsTraceable: false),
+                        new CoordinateFrame(endpoints.SourceFrame, $"{nodeId} reference image", IsTraceable: false),
                         target,
                         target is null ? [] : [target]);
                 }

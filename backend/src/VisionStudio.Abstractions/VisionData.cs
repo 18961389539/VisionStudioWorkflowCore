@@ -1,3 +1,6 @@
+using System.Collections.Immutable;
+using System.Text.Json.Serialization;
+
 namespace VisionStudio.Abstractions;
 
 /// <summary>
@@ -129,11 +132,41 @@ public sealed record VisionTransform2D(
 }
 
 /// <summary>Rigid row-major 4x4 homogeneous transform that maps coordinates from SourceFrame to TargetFrame.</summary>
-public sealed record VisionTransform3D(
-    string SourceFrame,
-    string TargetFrame,
-    string Unit,
-    double[] Matrix);
+public sealed record VisionTransform3D
+{
+    [JsonConstructor]
+    public VisionTransform3D(string sourceFrame, string targetFrame, string unit, ImmutableArray<double> matrix)
+    {
+        if (matrix.IsDefault)
+            throw new ArgumentNullException(nameof(matrix));
+        SourceFrame = sourceFrame;
+        TargetFrame = targetFrame;
+        Unit = unit;
+        Matrix = matrix;
+    }
+
+    public string SourceFrame { get; init; }
+    public string TargetFrame { get; init; }
+    public string Unit { get; init; }
+    public ImmutableArray<double> Matrix { get; init; }
+
+    public bool Equals(VisionTransform3D? other)
+        => other is not null
+        && string.Equals(SourceFrame, other.SourceFrame, StringComparison.Ordinal)
+        && string.Equals(TargetFrame, other.TargetFrame, StringComparison.Ordinal)
+        && string.Equals(Unit, other.Unit, StringComparison.Ordinal)
+        && Matrix.AsSpan().SequenceEqual(other.Matrix.AsSpan());
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(SourceFrame, StringComparer.Ordinal);
+        hash.Add(TargetFrame, StringComparer.Ordinal);
+        hash.Add(Unit, StringComparer.Ordinal);
+        foreach (var entry in Matrix) hash.Add(entry);
+        return hash.ToHashCode();
+    }
+}
 
 public readonly record struct VisionCoordinatePoint2D(double X, double Y, string Frame, string Unit);
 public readonly record struct VisionCoordinatePoint3D(double X, double Y, double Z, string Frame, string Unit);
@@ -192,8 +225,18 @@ public sealed record VisionTable(IReadOnlyList<string> Columns, IReadOnlyList<IR
 public sealed record VisionJson(string Text);
 
 /// <summary>Runtime payload tagged with its graph-visible type.</summary>
-public sealed record VisionValue(VisionDataType Type, object? Value)
+public sealed record VisionValue
 {
+    public VisionValue(VisionDataType type, object? value)
+    {
+        ValidateTagAndPayload(type, value);
+        Type = type;
+        Value = value;
+    }
+
+    public VisionDataType Type { get; init; }
+    public object? Value { get; init; }
+
     public static VisionValue Image(IVisionImage value) => new(VisionDataType.Image, value);
     public static VisionValue FrameSet(IVisionFrameSet value) => new(VisionDataType.FrameSet, value);
     public static VisionValue Double(double value) => new(VisionDataType.Double, value);
@@ -249,7 +292,95 @@ public sealed record VisionValue(VisionDataType Type, object? Value)
 
     public T Require<T>(string port)
     {
-        if (Value is T typed) return typed;
+        if (Value is T typed && IsTagCompatibleWithTarget<T>(Type)) return typed;
         throw new InvalidOperationException($"Value on '{port}' is {Type}/{Value?.GetType().Name ?? "null"}, expected {typeof(T).Name}.");
+    }
+
+    private static void ValidateTagAndPayload(VisionDataType type, object? value)
+    {
+        if (value is null || type == VisionDataType.Any) return;
+        var valid = type switch
+        {
+            VisionDataType.Control => value is bool,
+            VisionDataType.Image => value is IVisionImage,
+            VisionDataType.FrameSet => value is IVisionFrameSet,
+            VisionDataType.Double => value is double or float or decimal or long or int or short or byte,
+            VisionDataType.Integer => value is long or int or short or byte,
+            VisionDataType.Boolean => value is bool,
+            VisionDataType.String => value is string,
+            VisionDataType.Point2D => value is VisionPoint2D,
+            VisionDataType.Line2D => value is VisionLine2D,
+            VisionDataType.Pose2D => value is VisionPose2D,
+            VisionDataType.Rectangle2D => value is VisionRectangle2D,
+            VisionDataType.Circle => value is VisionCircle,
+            VisionDataType.Contour => value is IReadOnlyList<VisionContour>,
+            VisionDataType.ContourProperties => value is IReadOnlyList<VisionContourProperties>,
+            VisionDataType.DetectionList => value is IReadOnlyList<VisionDetection>,
+            VisionDataType.Transform2D => value is VisionTransform2D,
+            VisionDataType.Transform3D => value is VisionTransform3D,
+            VisionDataType.FrameTree2D => value is VisionFrameTree2D,
+            VisionDataType.CoordinatePoint2D => value is VisionCoordinatePoint2D,
+            VisionDataType.CoordinatePoint3D => value is VisionCoordinatePoint3D,
+            VisionDataType.CoordinateLine2D => value is VisionCoordinateLine2D,
+            VisionDataType.CoordinatePose2D => value is VisionCoordinatePose2D,
+            VisionDataType.RobotTarget2D => value is VisionRobotTarget2D,
+            VisionDataType.DeviceTagValue => value is VisionDeviceTagValue,
+            VisionDataType.Measurement => value is VisionMeasurement,
+            VisionDataType.MetrologyResults => value is IReadOnlyList<VisionMetrologyResult>,
+            VisionDataType.Roi => value is VisionRoi,
+            VisionDataType.Region => value is VisionRegion,
+            VisionDataType.DomainImage => value is IVisionDomainImage,
+            VisionDataType.NumberList => value is IReadOnlyList<double>,
+            VisionDataType.PointList => value is IReadOnlyList<VisionPoint2D>,
+            VisionDataType.StringList => value is IReadOnlyList<string>,
+            VisionDataType.Table => value is VisionTable,
+            VisionDataType.Json => value is VisionJson,
+            _ => false
+        };
+        if (!valid)
+            throw new ArgumentException($"VisionValue payload '{value.GetType().Name}' is incompatible with declared VisionDataType.{type}.", nameof(value));
+    }
+
+    private static bool IsTagCompatibleWithTarget<T>(VisionDataType type)
+    {
+        if (type == VisionDataType.Any || typeof(T) == typeof(object)) return true;
+        return type switch
+        {
+            VisionDataType.Control => typeof(T) == typeof(bool),
+            VisionDataType.Image => typeof(IVisionImage).IsAssignableFrom(typeof(T)),
+            VisionDataType.FrameSet => typeof(IVisionFrameSet).IsAssignableFrom(typeof(T)),
+            VisionDataType.Double => typeof(T) == typeof(double) || typeof(T) == typeof(float) || typeof(T) == typeof(decimal),
+            VisionDataType.Integer => typeof(T) == typeof(long) || typeof(T) == typeof(int) || typeof(T) == typeof(short) || typeof(T) == typeof(byte),
+            VisionDataType.Boolean => typeof(T) == typeof(bool),
+            VisionDataType.String => typeof(T) == typeof(string),
+            VisionDataType.Point2D => typeof(T) == typeof(VisionPoint2D),
+            VisionDataType.Line2D => typeof(T) == typeof(VisionLine2D),
+            VisionDataType.Pose2D => typeof(T) == typeof(VisionPose2D),
+            VisionDataType.Rectangle2D => typeof(T) == typeof(VisionRectangle2D),
+            VisionDataType.Circle => typeof(T) == typeof(VisionCircle),
+            VisionDataType.Contour => typeof(IReadOnlyList<VisionContour>).IsAssignableFrom(typeof(T)),
+            VisionDataType.ContourProperties => typeof(IReadOnlyList<VisionContourProperties>).IsAssignableFrom(typeof(T)),
+            VisionDataType.DetectionList => typeof(IReadOnlyList<VisionDetection>).IsAssignableFrom(typeof(T)),
+            VisionDataType.Transform2D => typeof(T) == typeof(VisionTransform2D),
+            VisionDataType.Transform3D => typeof(T) == typeof(VisionTransform3D),
+            VisionDataType.FrameTree2D => typeof(T) == typeof(VisionFrameTree2D),
+            VisionDataType.CoordinatePoint2D => typeof(T) == typeof(VisionCoordinatePoint2D),
+            VisionDataType.CoordinatePoint3D => typeof(T) == typeof(VisionCoordinatePoint3D),
+            VisionDataType.CoordinateLine2D => typeof(T) == typeof(VisionCoordinateLine2D),
+            VisionDataType.CoordinatePose2D => typeof(T) == typeof(VisionCoordinatePose2D),
+            VisionDataType.RobotTarget2D => typeof(T) == typeof(VisionRobotTarget2D),
+            VisionDataType.DeviceTagValue => typeof(T) == typeof(VisionDeviceTagValue),
+            VisionDataType.Measurement => typeof(T) == typeof(VisionMeasurement),
+            VisionDataType.MetrologyResults => typeof(IReadOnlyList<VisionMetrologyResult>).IsAssignableFrom(typeof(T)),
+            VisionDataType.Roi => typeof(T) == typeof(VisionRoi),
+            VisionDataType.Region => typeof(T) == typeof(VisionRegion),
+            VisionDataType.DomainImage => typeof(IVisionDomainImage).IsAssignableFrom(typeof(T)),
+            VisionDataType.NumberList => typeof(IReadOnlyList<double>).IsAssignableFrom(typeof(T)),
+            VisionDataType.PointList => typeof(IReadOnlyList<VisionPoint2D>).IsAssignableFrom(typeof(T)),
+            VisionDataType.StringList => typeof(IReadOnlyList<string>).IsAssignableFrom(typeof(T)),
+            VisionDataType.Table => typeof(T) == typeof(VisionTable),
+            VisionDataType.Json => typeof(T) == typeof(VisionJson),
+            _ => false
+        };
     }
 }

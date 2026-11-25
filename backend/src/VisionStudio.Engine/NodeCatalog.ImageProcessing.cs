@@ -241,7 +241,7 @@ public static partial class BuiltInNodeCatalog
                 ],
             "JLVision cached NCC pyramid matching (CreateNccModel / FindNccModel). Wire: scene image + template port or templatePath; optional templateRoi (ReduceDomain before create), searchRoi, ignoreRoi; outputs found/score/pose/detections for roi.transform or measurement. Key params: minScore, angle window (searchAngleStart/End or angleRangeDeg), pyramidLevels, maxTargets, duplicateOverlapThreshold, ignorePolarity; default hard NMS prefers FindNccModel MaxOverlap. algorithmBackend=jlvision. Explicit-only engine extras: soft ignoreMode (mean-lerp, not JL soft-NCC) and Soft-NMS; scale search is discrete resampled models; scoreMap is diagnostic OpenCV unit-scale planes, not a JLVision pyramid score cube. No clutter/deformation/continuous scaled NCC — use match.shape. angle is CCW template-to-image. found=false: low score, outside angle window, ignoreRoi blocks, or missing template.",
             "builtin",
-            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true, Deterministic: false)),
         new(
             "feature.edge",
             "Edge / Canny",

@@ -94,4 +94,13 @@ public sealed class WorkflowContractApiTests : IClassFixture<VisionStudioApiFact
         Assert.True(dsl.RootElement.TryGetProperty("Steps", out _));
         Assert.Equal("p", Assert.Single(body.GetProperty("warnings").EnumerateArray()).GetProperty("nodeId").GetString());
     }
+
+    [Fact]
+    public async Task Validate_CancelledRequest_DoesNotReturn400ValidationFailure()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _client.PostAsJsonAsync("/api/validate", ParallelWorkflow(), cts.Token));
+    }
 }

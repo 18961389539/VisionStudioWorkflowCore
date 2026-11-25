@@ -36,6 +36,9 @@ describe('离线目录校验', () => {
     expect(() => validateCatalog([item({ inputs: null } as never)])).toThrow('invalid ports/parameters');
     expect(() => validateCatalog([item({ outputs: null } as never)])).toThrow('invalid ports/parameters');
     expect(() => validateCatalog([item({ parameters: null } as never)])).toThrow('invalid ports/parameters');
+    expect(() => validateCatalog([item({ inputs: [{ name: 'image' }] } as never)])).toThrow('invalid input port descriptor');
+    expect(() => validateCatalog([item({ outputs: [{ dataType: 'Image' }] } as never)])).toThrow('invalid output port descriptor');
+    expect(() => validateCatalog([item({ parameters: [{ name: 'gain', label: 'Gain' }] } as never)])).toThrow('invalid parameter descriptor');
   });
 
   it('拒绝节点类型重名与参数重名（大小写不敏感）', () => {

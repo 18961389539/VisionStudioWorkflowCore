@@ -73,18 +73,19 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   }
 }
 
-/** 读取 JSON；非 2xx 抛出带 ProblemDetails 文案的 ApiError。 */
+/** 读取 JSON；非 2xx 抛出带 ProblemDetails 文案的 ApiError；传入 parse 时做运行时结构校验。 */
 export async function apiJson<T>(
   input: RequestInfo | URL,
-  options: ApiFetchOptions & { errorLabel?: string } = {}
+  options: ApiFetchOptions & { errorLabel?: string; parse?: (raw: unknown) => T } = {}
 ): Promise<T> {
-  const { errorLabel = 'Request failed', ...fetchOptions } = options;
+  const { errorLabel = 'Request failed', parse, ...fetchOptions } = options;
   const response = await apiFetch(input, fetchOptions);
   if (!response.ok) {
     const message = await responseErrorMessage(response, `${errorLabel} (HTTP ${response.status})`);
     throw new ApiError(message, response.status);
   }
-  return await response.json() as T;
+  const raw: unknown = await response.json();
+  return parse ? parse(raw) : raw as T;
 }
 
 /** 读取文本；非 2xx 抛出带 ProblemDetails 文案的 ApiError。 */

@@ -52,7 +52,8 @@ describe('endpoints', () => {
     expect(alarms.page(8, 8)).toBe('/api/alarms?skip=8&take=8');
     expect(alarms.page(0, 8, 'active')).toBe('/api/alarms?skip=0&take=8&activeOnly=true');
     expect(alarms.page(0, 8, 'pending')).toBe('/api/alarms?skip=0&take=8&pendingOnly=true');
-    expect(alarms.summary).toBe('/api/alarms/summary');
+    expect(alarms.summary()).toBe('/api/alarms/summary');
+    expect(alarms.summary('station-1')).toBe('/api/alarms/summary?stationId=station-1');
     expect(diagnostics.events).toBe('/api/diagnostics/events?take=250');
     expect(spc.datasets).toBe('/api/spc/datasets');
     expect(spc.series('dataset=a&subgroupSize=5')).toBe('/api/spc/series?dataset=a&subgroupSize=5');

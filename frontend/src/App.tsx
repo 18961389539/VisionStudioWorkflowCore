@@ -5,8 +5,6 @@ import {
 import { Button, message, Modal, type InputRef } from 'antd';
 import Toolbox from './components/Toolbox';
 import NodeConfigurationDialog, { type NodeConfigurationTab } from './components/NodeConfigurationDialog';
-import ProductionPanel from './components/ProductionPanel';
-import DiagnosticsPanel from './components/DiagnosticsPanel';
 import SplitHandle from './components/SplitHandle';
 import ErrorBoundary from './components/ErrorBoundary';
 import EditorHeader from './components/EditorHeader';
@@ -15,17 +13,13 @@ import EditorCanvasArea, { type EditorCanvasAreaProps } from './components/Edito
 import EditorPanels, { type EditorPanelsProps } from './components/EditorPanels';
 import EditorOverlays, { type EditorOverlaysProps } from './components/EditorOverlays';
 import type { PaletteCommand } from './components/CommandPalette';
-import {
-  HEADER_HEIGHT, LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, automaticResultHeight,
-  clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState
-} from './layout';
+import { HEADER_HEIGHT, LAYOUT_LIMITS } from './layout';
 import { useI18n } from './i18n/provider';
 import { useThemeMode } from './theme';
 import { SecurityAccountBadge } from './security';
 import { demos, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, type WorkflowDraft } from './draft';
-import { readStored, removeStored, writeStored, STORAGE_KEYS } from './storage';
 import type { WorkflowIssue } from './validation';
 import type { DocumentBaseline } from './documentSync';
 import { useWorkflowChanges } from './useWorkflowChanges';
@@ -36,6 +30,7 @@ import { useWorkflowPicker } from './useWorkflowPicker';
 import { useEditorShortcuts } from './useEditorShortcuts';
 import { useEditorGraphOperations } from './useEditorGraphOperations';
 import { useEditorPanels } from './useEditorPanels';
+import { useEditorWorkspaceLayout } from './useEditorWorkspaceLayout';
 import { useEditorWorkflowDocument } from './useEditorWorkflowDocument';
 import { useCatalogState } from './useCatalogState';
 import { onConfigureNode, onShowNodeDetails } from './uiBridge';
@@ -47,16 +42,18 @@ import type { PluginLoadInfo, WorkflowPayload } from './types';
 import { apiFetch } from './apiClient';
 import { apiUrl } from './endpoints';
 import {
-  CANVAS_FIT_PADDING, COLLAPSED_RESULT_BAR_HEIGHT, buildWorkflowPayload, createInitial, moduleCatalogFromNode,
+  CANVAS_FIT_PADDING, buildWorkflowPayload, createInitial, moduleCatalogFromNode,
   persistNodeCompact, readNodeCompact, readRecentNodeTypes, type ConnectionPicker
 } from './appEditorShared';
 import {
   buildDebugMenuItems, buildDeviceMenuItems, buildMoreMenu, buildNodeContextMenuItems, buildPaletteTargets,
-  buildProductionMenuItems, buildToolMenuItems, runPaletteCommand, type PanelOpeners
+  buildProductionMenuItems, buildToolMenuItems, runPaletteCommand
 } from './appEditorMenus';
 
-// `?view=spc` 独立页面（生产现场大屏/侧屏可用），与面板共用同一实现但单独分包。
+// `?view=spc` 与 `?view=operator` / runtimeOnly 独立页面按需分包，避免主编辑包体积膨胀。
 const SpcDashboard = lazy(() => import('./components/SpcDashboard'));
+const ProductionPanel = lazy(() => import('./components/ProductionPanel'));
+const DiagnosticsPanel = lazy(() => import('./components/DiagnosticsPanel'));
 
 function Editor() {
   // 语言（2026-10-25 接线）：catalog 保存后端英文原文，显示用的本地化目录按语言派生——
@@ -93,22 +90,16 @@ function Editor() {
   // 画布剪贴板：保存选中集合与集合内部连线；粘贴时生成新 id、整体偏移，并回填选中
   const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const pasteIndexRef = useRef(0);
-  const [layout, setLayout] = useState<LayoutState>(readLayout);
-  const [shellSize, setShellSize] = useState({ width: window.innerWidth, height: window.innerHeight });
-  const shellRef = useRef<HTMLDivElement>(null);
   const [demoKey, setDemoKey] = useState<DemoKey>('linear');
   // 模板入口 P0：顶栏下拉改为“从模板新建”弹窗——替换当前流程属于破坏性动作，必须显式确认。
   // 查询/分类/选中状态内聚于 TemplateGalleryModal（打开时重置），此处只保留开关。
   const [templateOpen, setTemplateOpen] = useState(false);
-  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const showTemplates = () => { setTemplateOpen(true); };
-  // 专注画布（P1）：一键收起全部面板，画布独占窗口；退出时还原进入前的布局
-  const [focusMode, setFocusMode] = useState(false);
-  const focusSnapshotRef = useRef<LayoutState | null>(null);
-  // 首次上手：只在没关过时出现；关掉写本地偏好，「工具」菜单可重新打开
-  const [onboardingOpen, setOnboardingOpen] = useState(() => readStored(STORAGE_KEYS.onboardingDone) !== '1');
-  const closeOnboarding = () => { writeStored(STORAGE_KEYS.onboardingDone, '1'); setOnboardingOpen(false); };
-  const reopenOnboarding = () => { removeStored(STORAGE_KEYS.onboardingDone); setOnboardingOpen(true); };
+  const {
+    shellRef, layout, updateLayout, applyLayoutPreset, focusMode, toggleFocusMode, exitFocusMode,
+    imagePreviewOpen, setImagePreviewOpen, onboardingOpen, closeOnboarding, reopenOnboarding,
+    previewVar, leftMax, bottomMax, shownLeft, shownBottomBase, shownBottom, presetSizes
+  } = useEditorWorkspaceLayout();
   // R07（2026-10-12 复审）/F05（2026-10-12 复核）：并发基线修订**必须绑定它所属的文档**——
   // 单一字符串在切换文档（模板/Job/模块/草稿）后会携带错误修订产生误报 409。
   // undefined = 未知基线（保存前先探测后端）；revision='' = 后端尚无修订记录。
@@ -128,7 +119,7 @@ function Editor() {
     validationOpen, setValidationOpen, modelPackagesOpen, setModelPackagesOpen, modelAssetsOpen, setModelAssetsOpen,
     tuningOpen, setTuningOpen, modulesOpen, setModulesOpen, calibrationOpen, setCalibrationOpen, framesOpen, setFramesOpen,
     productionOpen, setProductionOpen, spcOpen, setSpcOpen, diagnosticsOpen, setDiagnosticsOpen, hardwareProvenanceOpen, setHardwareProvenanceOpen,
-    aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen
+    aboutOpen, setAboutOpen, shortcutsOpen, setShortcutsOpen, anyOpen, openers
   } = useEditorPanels();
   const { mode: themeMode, toggle: toggleTheme } = useThemeMode();
   const [runtimeOnly, setRuntimeOnly] = useState(false);
@@ -290,53 +281,6 @@ function Editor() {
 
   // 本地草稿：启动时读取一次作为恢复入口；恢复/丢弃前冻结草稿存储，避免覆盖待恢复内容
   const [draftNotice, setDraftNotice] = useState<WorkflowDraft | undefined>(readDraft);
-
-  // 布局：三处分隔条 + 下栏最大化 + 两套预设。拖动中只写 CSS 变量，松手才落状态并持久化
-  useEffect(() => { persistLayout(layout); }, [layout]);
-
-  useEffect(() => {
-    const element = shellRef.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width;
-      const height = entry.contentRect.height;
-      setShellSize((current) => (Math.abs(current.width - width) < 1 && Math.abs(current.height - height) < 1 ? current : { width, height }));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  const updateLayout = (patch: Partial<LayoutState>) => setLayout((current) => ({ ...current, ...patch }));
-
-  // 退出专注的统一收口（P2）：restoreSnapshot=true 还原进入前的布局快照（“退出专注”按钮）；
-  // false 表示布局改由调用方接管（切换布局预设），快照直接丢弃，避免残留快照覆盖用户的新选择
-  const exitFocusMode = (restoreSnapshot: boolean) => {
-    const snapshot = focusSnapshotRef.current;
-    focusSnapshotRef.current = null;
-    setFocusMode(false);
-    if (restoreSnapshot && snapshot) updateLayout({ ...snapshot });
-  };
-
-  // 布局预设只调整面板；查看图像统一使用画布上的“查看图像”入口。
-  const applyLayoutPreset = (preset: LayoutPreset) => {
-    if (focusMode) exitFocusMode(false);
-    setLayout((current) => ({
-      ...current, preset, ...LAYOUT_PRESETS[preset], bottomSizing: 'auto',
-      leftCollapsed: false, bottomCollapsed: false, bottomMaximized: false
-    }));
-  };
-  const previewVar = (name: string, value: string) => shellRef.current?.style.setProperty(name, value);
-
-  // 工具箱与结果区遵循主工作区最小尺寸；图像预览在中心区域内响应式分栏。
-  const leftMax = Math.max(LAYOUT_LIMITS.left.min, shellSize.width - MIN_CENTER_WIDTH);
-  const shownLeftBase = clampNumber(layout.left, LAYOUT_LIMITS.left.min, leftMax);
-  const bottomMax = Math.max(LAYOUT_LIMITS.bottom.min, shellSize.height - HEADER_HEIGHT - MIN_WORKSPACE_HEIGHT);
-  const normalBottom = layout.bottomSizing === 'manual' ? layout.bottom : automaticResultHeight(shellSize.height);
-  const shownBottomBase = layout.bottomMaximized ? bottomMax : clampNumber(normalBottom, LAYOUT_LIMITS.bottom.min, bottomMax);
-  const shownLeft = layout.leftCollapsed ? 0 : shownLeftBase;
-  // 折叠态：保留细标签条（而非 0 高度）——运行/校验入口始终可见，点击标签即展开
-  const shownBottom = layout.bottomCollapsed ? COLLAPSED_RESULT_BAR_HEIGHT : shownBottomBase;
-  const presetSizes = LAYOUT_PRESETS[layout.preset === 'custom' ? 'edit' : layout.preset];
 
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
@@ -515,20 +459,6 @@ function Editor() {
     setSavedSnapshot((current) => current ?? workflowSnapshot);
   }, [workflowSnapshot]);
 
-  // 专注画布（P1）：一键收起全部面板让画布独占窗口；退出经 exitFocusMode 还原进入前的布局快照
-  const toggleFocusMode = () => {
-    if (focusMode) { exitFocusMode(true); return; }
-    focusSnapshotRef.current = layout;
-    setFocusMode(true);
-    updateLayout({ leftCollapsed: true, bottomCollapsed: true, bottomMaximized: false });
-  };
-
-  // 面板/弹窗开关集中成一份，供命令面板、顶栏菜单与收尾的挂载点复用。
-  const openers: PanelOpeners = {
-    setCalibrationOpen, setTracesOpen, setJobsOpen, setValidationOpen, setTuningOpen, setModulesOpen,
-    setCamerasOpen, setRobotsOpen, setDevicesOpen, setProductionOpen, setSpcOpen, setDiagnosticsOpen, setPluginsOpen,
-    setModelPackagesOpen, setModelAssetsOpen, setFramesOpen, setHardwareProvenanceOpen, setShortcutsOpen, setAboutOpen
-  };
   // 命令面板（Ctrl/Cmd+K，2026-10-25）：把散在顶栏菜单、工具箱和按钮上的入口收成一个键盘入口。
   const paletteTargets = useMemo<PaletteCommand[]>(() => buildPaletteTargets(focusMode), [focusMode]);
   const runCommand = (key: string) => runPaletteCommand(key, {
@@ -597,12 +527,7 @@ function Editor() {
   // 2026-10-25：任一功能面板/弹窗打开时，画布快捷键整体让位——此前在追溯/配方面板里按 Delete
   // 会删掉画布上选中的节点。打开状态在这里显式汇总：antd 关闭弹窗后 DOM 仍残留，
   // 用 document.querySelector 判断会让快捷键在第一次打开过面板之后永久失效。
-  const overlayOpen = Boolean(
-    pendingGuard || templateOpen || imagePreviewOpen || workflowPickerOpen || pluginsOpen || camerasOpen
-    || robotsOpen || devicesOpen || jobsOpen || tracesOpen || validationOpen || modelPackagesOpen || modelAssetsOpen
-    || tuningOpen || modulesOpen || calibrationOpen || framesOpen || productionOpen || spcOpen || diagnosticsOpen
-    || hardwareProvenanceOpen || aboutOpen || shortcutsOpen
-  );
+  const overlayOpen = Boolean(pendingGuard || templateOpen || imagePreviewOpen || workflowPickerOpen || anyOpen);
   useEditorShortcuts({
     nodeConfigurationId, overlayOpen, save, undo, redo, copySelection: graph.copySelection, deleteElements: graph.deleteElements, pushHistory,
     setNodes, setEdges, setSelectedId, messageApi, nodes, selectedNodeIds, selectedEdgeIds,
@@ -654,15 +579,19 @@ function Editor() {
   </ErrorBoundary>;
   if (runtimeOnly || productionView === 'operator' || productionView === 'stations') return <>
     <ErrorBoundary variant="panel" scope="生产运行">
-      <ProductionPanel open={true} onClose={() => undefined} embedded runtimeOnly={runtimeOnly} kiosk={kiosk}
-        stationId={operatorStationId}
-        initialView={productionView === 'stations' ? 'stations' : 'operator'} />
+      <Suspense fallback={<div className="panel-loading" role="status" aria-live="polite"><span className="panel-loading-label">正在加载生产工作台…</span></div>}>
+        <ProductionPanel open={true} onClose={() => undefined} embedded runtimeOnly={runtimeOnly} kiosk={kiosk}
+          stationId={operatorStationId}
+          initialView={productionView === 'stations' ? 'stations' : 'operator'} />
+      </Suspense>
     </ErrorBoundary>
     {!kiosk && <Button className="runtime-diagnostics-button" type="primary" ghost onClick={() => setDiagnosticsOpen(true)}>诊断</Button>}
     {/* 操作员页无顶栏：账号入口固定在「诊断」按钮下方 */}
     {!kiosk && <div className="runtime-account-slot"><SecurityAccountBadge /></div>}
-    {!kiosk && <ErrorBoundary variant="panel" scope="诊断" onDismiss={() => setDiagnosticsOpen(false)}>
-      <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
+    {!kiosk && diagnosticsOpen && <ErrorBoundary variant="panel" scope="诊断" onDismiss={() => setDiagnosticsOpen(false)}>
+      <Suspense fallback={<div className="panel-loading" role="status" aria-live="polite"><span className="panel-loading-label">正在加载诊断面板…</span></div>}>
+        <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
+      </Suspense>
     </ErrorBoundary>}
   </>;
 

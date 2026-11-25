@@ -41,4 +41,30 @@ public sealed class FrameMatPoolTests
     {
         FrameMatPool.Return(null);
     }
+
+    [Fact]
+    public void TrimAndClear_ReleasePooledBuffers()
+    {
+        FrameMatPool.Clear();
+        Assert.Equal(0, FrameMatPool.Pooled);
+        Assert.Equal(0L, FrameMatPool.PooledBytes);
+
+        var a = FrameMatPool.Rent(64, 32, MatType.CV_8UC1);
+        var b = FrameMatPool.Rent(64, 32, MatType.CV_8UC1);
+        FrameMatPool.Return(a);
+        FrameMatPool.Return(b);
+
+        Assert.Equal(2, FrameMatPool.Pooled);
+        Assert.Equal(2L * 64 * 32, FrameMatPool.PooledBytes);
+
+        var trimmed = FrameMatPool.Trim(64 * 32);
+        Assert.Equal(1, trimmed);
+        Assert.Equal(1, FrameMatPool.Pooled);
+        Assert.Equal(64L * 32, FrameMatPool.PooledBytes);
+
+        var cleared = FrameMatPool.Clear();
+        Assert.Equal(1, cleared);
+        Assert.Equal(0, FrameMatPool.Pooled);
+        Assert.Equal(0L, FrameMatPool.PooledBytes);
+    }
 }

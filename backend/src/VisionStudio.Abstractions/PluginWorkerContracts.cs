@@ -81,6 +81,7 @@ public sealed record PluginWorkerRequest
     /// <summary>Workflow plan identity of the execution; worker-side PerNode caches key by it like the host does.</summary>
     public string? WorkflowScope { get; init; }
     public string? RunId { get; init; }
+    public int? TimeoutMs { get; init; }
 }
 
 public sealed record PluginWorkerResponse

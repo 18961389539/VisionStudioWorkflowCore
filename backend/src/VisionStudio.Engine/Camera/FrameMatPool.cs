@@ -90,6 +90,38 @@ public static class FrameMatPool
         mat.Dispose();
     }
 
+    /// <summary>释放池内缓冲直到剩余字节不超过 <paramref name="maxRetainedBytes"/>；返回释放的 Mat 数量。</summary>
+    public static int Trim(long maxRetainedBytes = 0)
+    {
+        var limit = Math.Max(0L, maxRetainedBytes);
+        List<Mat> toDispose = [];
+        lock (Gate)
+        {
+            if (_pooledBytes <= limit) return 0;
+            foreach (var pair in Free.ToArray())
+            {
+                if (_pooledBytes <= limit) break;
+                var stack = pair.Value;
+                while (stack.Count > 0 && _pooledBytes > limit)
+                {
+                    var mat = stack.Pop();
+                    _pooled--;
+                    _pooledBytes -= checked((long)mat.Width * mat.Height * mat.ElemSize());
+                    toDispose.Add(mat);
+                }
+                if (stack.Count == 0) Free.Remove(pair.Key);
+            }
+        }
+        foreach (var mat in toDispose)
+        {
+            Interlocked.Increment(ref _dropped);
+            mat.Dispose();
+        }
+        return toDispose.Count;
+    }
+
+    public static int Clear() => Trim(0);
+
     /// <summary>健康接口用的单行摘要；没有它，池只会变成"看不见的第二套内存账本"。</summary>
     public static string Snapshot()
         => $"rented={Rented} reused={Reused} returned={Returned} dropped={Dropped} pooled={Pooled} bytes={PooledBytes}";

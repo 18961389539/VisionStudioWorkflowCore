@@ -216,6 +216,35 @@ VALUES($run,$started,'Test','job-a',1,'wf','WF','hash','Complete',$disp,2.0,1,0,
         return Convert.ToInt64(await command.ExecuteScalarAsync());
     }
 
+    [Fact]
+    public void OpenConnection_DoesNotDeadlockUnderSingleThreadedSynchronizationContext()
+    {
+        using var env = new TempWebHostEnvironment();
+        var db = new SqliteMetadataDatabase(env);
+        var previous = SynchronizationContext.Current;
+        var singleThreadContext = new SingleThreadRejectingSyncContext();
+        SynchronizationContext.SetSynchronizationContext(singleThreadContext);
+        try
+        {
+            using var connection = db.OpenConnection();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT version FROM schema_info WHERE id=1;";
+            Assert.Equal(SqliteSchemaMigrationRunner.CurrentVersion, Convert.ToInt32(cmd.ExecuteScalar()));
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+
+    private sealed class SingleThreadRejectingSyncContext : SynchronizationContext
+    {
+        // Any continuation posted back to this context while the caller is blocked would deadlock;
+        // throwing verifies OpenConnection does not rely on resuming on the caller's sync context.
+        public override void Post(SendOrPostCallback d, object? state)
+            => throw new InvalidOperationException("Sync-over-async posted back to caller SynchronizationContext.");
+    }
+
     private static WorkflowDefinition Workflow(int revision)
         => new("sqlite-test", "SQLite Test", [new NodeDefinition("n1", "test.sqlite", "Test", null, new Dictionary<string, JsonElement> { ["revision"] = JsonSerializer.SerializeToElement(revision) })], []);
 

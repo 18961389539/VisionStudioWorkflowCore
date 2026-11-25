@@ -16,21 +16,34 @@ public enum ScriptIsolationMode
     WorkerProcess = 1
 }
 
-public sealed class ScriptWorkerOptions
+public sealed class ScriptWorkerOptions : WorkerPoolOptionsBase
 {
+    public ScriptWorkerOptions()
+    {
+        ExecutionTimeoutMs = 15_000;
+        MaxWorkingSetMb = 1024;
+        SharedMemoryRootPath = "data/script-workers/shared-memory";
+        JobObjectMemoryLimitMb = 1024;
+    }
+
     public ScriptIsolationMode IsolationMode { get; set; } = ScriptIsolationMode.InProcess;
-    public string? WorkerAssemblyPath { get; set; }
-    public int StartupTimeoutMs { get; set; } = 10_000;
-    public int ExecutionTimeoutMs { get; set; } = 15_000;
-    public int MaxWorkingSetMb { get; set; } = 1024;
-    public int MaxRestartsPerMinute { get; set; } = 5;
     public int PoolSize { get; set; } = 1;
-    public bool SharedMemoryEnabled { get; set; } = true;
-    public int SharedMemoryThresholdBytes { get; set; } = 1_048_576;
-    public string SharedMemoryRootPath { get; set; } = "data/script-workers/shared-memory";
-    public int SharedMemoryStaleMinutes { get; set; } = 30;
-    public int JobObjectMemoryLimitMb { get; set; } = 1024;
-    public int JobObjectCpuRatePercent { get; set; }
+
+    internal PluginWorkerOptions ToPoolOptions(string resolvedSharedRoot) => new()
+    {
+        StartupTimeoutMs = StartupTimeoutMs,
+        ExecutionTimeoutMs = ExecutionTimeoutMs,
+        MaxWorkingSetMb = MaxWorkingSetMb,
+        MaxRestartsPerMinute = MaxRestartsPerMinute,
+        DefaultPoolSize = Math.Max(1, PoolSize),
+        MaxPoolSize = Math.Max(1, PoolSize),
+        SharedMemoryEnabled = SharedMemoryEnabled,
+        SharedMemoryThresholdBytes = SharedMemoryThresholdBytes,
+        SharedMemoryRootPath = resolvedSharedRoot,
+        SharedMemoryStaleMinutes = SharedMemoryStaleMinutes,
+        JobObjectMemoryLimitMb = JobObjectMemoryLimitMb,
+        JobObjectCpuRatePercent = JobObjectCpuRatePercent
+    };
 }
 
 /// <summary>
@@ -48,14 +61,8 @@ public sealed class ScriptWorkerSupervisor : IScriptExecutionBackend, IDisposabl
         ILogger<ScriptWorkerSupervisor> logger)
     {
         _options = options.Value;
-        var workerAssembly = Path.GetFullPath(string.IsNullOrWhiteSpace(_options.WorkerAssemblyPath)
-            ? Path.Combine(AppContext.BaseDirectory, "VisionStudio.Script.Worker.dll")
-            : Path.IsPathRooted(_options.WorkerAssemblyPath)
-                ? _options.WorkerAssemblyPath
-                : Path.Combine(environment.ContentRootPath, _options.WorkerAssemblyPath));
-        var sharedRoot = Path.GetFullPath(Path.IsPathRooted(_options.SharedMemoryRootPath)
-            ? _options.SharedMemoryRootPath
-            : Path.Combine(environment.ContentRootPath, _options.SharedMemoryRootPath));
+        var workerAssembly = _options.ResolveWorkerAssemblyPath(environment.ContentRootPath, "VisionStudio.Script.Worker.dll");
+        var sharedRoot = _options.ResolveSharedMemoryRoot(environment.ContentRootPath);
         var threshold = _options.SharedMemoryEnabled ? _options.SharedMemoryThresholdBytes : 0;
         if (threshold < 0) throw new InvalidOperationException("Script worker shared-memory threshold cannot be negative.");
         if (_options.IsolationMode == ScriptIsolationMode.WorkerProcess && !File.Exists(workerAssembly))
@@ -65,21 +72,6 @@ public sealed class ScriptWorkerSupervisor : IScriptExecutionBackend, IDisposabl
                 "Publish VisionStudio.Script.Worker.dll beside the API host or configure ScriptWorkers:WorkerAssemblyPath.");
         }
 
-        var poolOptions = new PluginWorkerOptions
-        {
-            StartupTimeoutMs = _options.StartupTimeoutMs,
-            ExecutionTimeoutMs = _options.ExecutionTimeoutMs,
-            MaxWorkingSetMb = _options.MaxWorkingSetMb,
-            MaxRestartsPerMinute = _options.MaxRestartsPerMinute,
-            DefaultPoolSize = Math.Max(1, _options.PoolSize),
-            MaxPoolSize = Math.Max(1, _options.PoolSize),
-            SharedMemoryEnabled = _options.SharedMemoryEnabled,
-            SharedMemoryThresholdBytes = _options.SharedMemoryThresholdBytes,
-            SharedMemoryRootPath = sharedRoot,
-            SharedMemoryStaleMinutes = _options.SharedMemoryStaleMinutes,
-            JobObjectMemoryLimitMb = _options.JobObjectMemoryLimitMb,
-            JobObjectCpuRatePercent = _options.JobObjectCpuRatePercent
-        };
         _pool = new WorkerPool(
             "builtin.script",
             workerAssembly,
@@ -87,7 +79,7 @@ public sealed class ScriptWorkerSupervisor : IScriptExecutionBackend, IDisposabl
             Math.Max(1, _options.PoolSize),
             threshold,
             sharedRoot,
-            poolOptions,
+            _options.ToPoolOptions(sharedRoot),
             logger);
     }
 

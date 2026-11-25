@@ -21,3 +21,22 @@ export function withRequestTimeout<T>(controller: AbortController, milliseconds:
     }
   });
 }
+
+/** Link a per-request AbortController to an optional lifecycle signal and enforce a request timeout. */
+export async function runTimedAbortable<T>(
+  parentSignal: AbortSignal | undefined,
+  milliseconds: number,
+  execute: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const request = new AbortController();
+  const forwardAbort = () => request.abort(parentSignal?.reason);
+  if (parentSignal) {
+    if (parentSignal.aborted) request.abort(parentSignal.reason);
+    else parentSignal.addEventListener('abort', forwardAbort, { once: true });
+  }
+  try {
+    return await withRequestTimeout(request, milliseconds, () => execute(request.signal));
+  } finally {
+    parentSignal?.removeEventListener('abort', forwardAbort);
+  }
+}

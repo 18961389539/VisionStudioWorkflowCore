@@ -34,7 +34,7 @@ type RelaxContractNullables<T> = T extends readonly (infer U)[] ? RelaxContractN
 
 export type ContractDto<K extends keyof components['schemas']> = RelaxContractNullables<NormalizeContractNumber<components['schemas'][K]>>;
 
-export type VisionRegionRun = { row: number; startColumn: number; endColumn: number };
+export type VisionRegionRun = ContractDto<'VisionRegionRun'>;
 export type VisionRegion = { width: number; height: number; components: { runs: VisionRegionRun[] }[] };
 
 /** UI 视图：required 允许缺省（目录夹具不必逐项声明），label 由 localizeCatalog 注入。 */
@@ -264,31 +264,17 @@ export type PluginLoadInfo = {
 
 
 export type PluginPackageVersionInfo = ContractDto<'PluginPackageVersionInfo'>;
-
 export type PluginPackagePreflightResult = ContractDto<'PluginPackagePreflightResult'>;
-
 export type TrustedPluginPublisher = ContractDto<'TrustedPluginPublisher'>;
-
 export type PluginSdkInfo = ContractDto<'PluginSdkInfo'>;
-
-
 export type PluginWorkerInstanceStatus = ContractDto<'PluginWorkerInstanceStatus'>;
-
 export type PluginWorkerStatus = ContractDto<'PluginWorkerStatus'>;
-
 export type PluginWorkerLatencyDistribution = ContractDto<'PluginWorkerLatencyDistribution'>;
-
 export type PluginWorkerToolPerformanceProfile = ContractDto<'PluginWorkerToolPerformanceProfile'>;
-
 export type PluginWorkerPerformanceProfile = ContractDto<'PluginWorkerPerformanceProfile'>;
-
-
 export type PluginBenchmarkRegressionPolicy = ContractDto<'PluginBenchmarkRegressionPolicy'>;
-
 export type PluginBenchmarkPoolResult = ContractDto<'PluginBenchmarkPoolResult'>;
-
 export type PluginBenchmarkRecommendation = ContractDto<'PluginBenchmarkRecommendation'>;
-
 export type PluginBenchmarkRegressionGate = ContractDto<'PluginBenchmarkRegressionGate'>;
 
 export type PluginBenchmarkRun =
@@ -957,17 +943,11 @@ export type ExtractWorkflowModuleResult = {
 };
 
 export type InvestigationCaseSummary = ContractDto<'InvestigationCaseSummary'>;
-
 export type InvestigationCaseRun = ContractDto<'InvestigationCaseRun'>;
-
 export type InvestigationVerificationEvidence = ContractDto<'InvestigationVerificationEvidence'>;
-
 export type InvestigationCaseDetail = ContractDto<'InvestigationCaseDetail'>;
-
 export type InvestigationTrendPoint = ContractDto<'InvestigationTrendPoint'>;
-
 export type InvestigationSignatureTrend = ContractDto<'InvestigationSignatureTrend'>;
-
 export type InvestigationTrendDashboard = ContractDto<'InvestigationTrendDashboard'>;
 
 /**

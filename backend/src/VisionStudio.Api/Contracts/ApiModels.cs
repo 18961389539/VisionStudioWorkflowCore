@@ -1,7 +1,3 @@
-using VisionStudio.Engine.Camera;
-using VisionStudio.Engine.Nodes;
-using VisionStudio.Engine.Runtime;
-
 namespace VisionStudio.Api.Contracts;
 
 public sealed record FileCameraRegistrationRequest(string Id, string? Name = null, string? Source = null, string? Path = null);

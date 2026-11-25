@@ -120,7 +120,7 @@ var pairsJson = context.TryGetValue("pairsJson", out var connected)
         if (sourceFrame.Equals(targetFrame, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("sourceFrame and targetFrame must name different cameras.");
         var unit = CoordinateValidation.RequireUnit(node.GetString("unit", "mm"), "unit");
-        var transform = new VisionTransform3D(sourceFrame, targetFrame, unit, mean);
+        var transform = new VisionTransform3D(sourceFrame, targetFrame, unit, [.. mean]);
         var matrixJson = JsonSerializer.Serialize(new
         {
             sourceFrame,

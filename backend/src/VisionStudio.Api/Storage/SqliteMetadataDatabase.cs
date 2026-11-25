@@ -16,6 +16,7 @@ public sealed class SqliteMetadataDatabase
     private readonly SemaphoreSlim _snapshotGate = new(1, 1);
     private readonly SqliteSchemaMigrationRunner _migrations = new();
     private volatile bool _initialized;
+    private int _restoring;
 
     public SqliteMetadataDatabase(IWebHostEnvironment env, IConfiguration? configuration = null)
     {
@@ -31,11 +32,14 @@ public sealed class SqliteMetadataDatabase
 
     /// <summary>
     /// 同步打开连接：仅供 <see cref="IModelAssetSource"/> 这类必须同步返回的读路径使用。
-    /// 本地 SQLite 打开是微秒级操作，这里用同步 ADO.NET 而不是 sync-over-async。
+    /// 若尚未初始化，在线程池执行迁移以免阻塞或死锁于调用方 SynchronizationContext。
     /// </summary>
     public SqliteConnection OpenConnection()
     {
-        EnsureInitializedAsync().GetAwaiter().GetResult();
+        EnsureNotRestoring();
+        if (!_initialized)
+            Task.Run(() => EnsureInitializedAsync()).GetAwaiter().GetResult();
+        EnsureNotRestoring();
         var connection = new SqliteConnection(_connectionString);
         connection.Open();
         using var pragma = connection.CreateCommand();
@@ -46,28 +50,36 @@ public sealed class SqliteMetadataDatabase
 
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken ct = default, bool strongDurability = false)
     {
-        await EnsureInitializedAsync(ct);
+        EnsureNotRestoring();
+        await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        EnsureNotRestoring();
         var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(ct);
-        await ConfigureConnectionAsync(connection, ct, strongDurability);
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await ConfigureConnectionAsync(connection, ct, strongDurability).ConfigureAwait(false);
         return connection;
     }
 
     public async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
         if (_initialized) return;
-        await _initializeGate.WaitAsync(ct);
+        await _initializeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             if (_initialized) return;
             await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(ct);
-            await ConfigureConnectionAsync(connection, ct);
-            await ConfigureWalAsync(connection, ct);
-            await _migrations.MigrateAsync(connection, ct);
+            await connection.OpenAsync(ct).ConfigureAwait(false);
+            await ConfigureConnectionAsync(connection, ct).ConfigureAwait(false);
+            await ConfigureWalAsync(connection, ct).ConfigureAwait(false);
+            await _migrations.MigrateAsync(connection, ct).ConfigureAwait(false);
             _initialized = true;
         }
         finally { _initializeGate.Release(); }
+    }
+
+    private void EnsureNotRestoring()
+    {
+        if (Volatile.Read(ref _restoring) != 0)
+            throw new InvalidOperationException("Database restore is in progress; retry after maintenance completes.");
     }
 
     public async Task<SchemaMigrationStatus> GetSchemaStatusAsync(CancellationToken ct = default)
@@ -111,20 +123,27 @@ public sealed class SqliteMetadataDatabase
     /// </summary>
     public async Task RestoreSnapshotAsync(string snapshotPath, CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        await _snapshotGate.WaitAsync(ct);
+        await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        await _snapshotGate.WaitAsync(ct).ConfigureAwait(false);
+        Volatile.Write(ref _restoring, 1);
         try
         {
+            SqliteConnection.ClearAllPools();
             await using var source = new SqliteConnection(BuildConnectionString(snapshotPath, SqliteOpenMode.ReadOnly, pooling: false));
-            await source.OpenAsync(ct);
+            await source.OpenAsync(ct).ConfigureAwait(false);
             await using var destination = new SqliteConnection(_connectionString);
-            await destination.OpenAsync(ct);
-            await ConfigureConnectionAsync(destination, ct);
+            await destination.OpenAsync(ct).ConfigureAwait(false);
+            await ConfigureConnectionAsync(destination, ct).ConfigureAwait(false);
             source.BackupDatabase(destination);
-            await ConfigureWalAsync(destination, ct);
-            await _migrations.MigrateAsync(destination, ct);
+            await ConfigureWalAsync(destination, ct).ConfigureAwait(false);
+            await _migrations.MigrateAsync(destination, ct).ConfigureAwait(false);
         }
-        finally { _snapshotGate.Release(); }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Volatile.Write(ref _restoring, 0);
+            _snapshotGate.Release();
+        }
     }
 
     /// <summary>Migrate an extracted backup in isolation before hashing or touching the live database.</summary>

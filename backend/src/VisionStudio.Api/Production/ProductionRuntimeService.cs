@@ -15,22 +15,9 @@ namespace VisionStudio.Api;
 /// </summary>
 public sealed class ProductionRuntimeService
 {
-    private readonly JobStore _jobs;
-    private readonly IVisionWorkflowRunner _runner;
-    private readonly TraceabilityStore _traces;
-    private readonly RunStore _runs;
-    private readonly AlarmStore _alarms;
-    private readonly RuntimeDependencyManifestService _dependencies;
-    private readonly StorageCapacityService _storageCapacity;
-    private readonly ProductionPtpDriftGuardService _ptpGuard;
-    private readonly ProductionSynchronizationHealthGuardService _synchronizationGuard;
+    private readonly ProductionStationSharedServices _shared;
     private readonly DeviceLeaseRegistry _leases;
     private readonly ILogger<ProductionRuntimeService> _logger;
-    private readonly IOptions<ProductionTraceOptions>? _traceOptions;
-    private readonly WorkflowModuleExpander? _moduleExpander;
-    private readonly DeviceActionAuthorizationService? _authorization;
-    private readonly VisionNodeRegistry? _nodes;
-    private readonly RuntimeWorkloadGate _workloads;
     private readonly IWebHostEnvironment? _env;
     private readonly IConfiguration? _configuration;
     private readonly ILogger<DeviceActionSafetyStore>? _safetyLogger;
@@ -66,38 +53,21 @@ public sealed class ProductionRuntimeService
         ILogger<DeviceActionSafetyStore>? safetyLogger = null,
         ProductionSafetyLedgerRegistry? safetyLedgers = null)
     {
-        _jobs = jobs;
-        _runner = runner;
-        _traces = traces;
-        _runs = runs;
-        _alarms = alarms;
-        _dependencies = dependencies;
-        _storageCapacity = storageCapacity;
-        _ptpGuard = ptpGuard;
-        _synchronizationGuard = synchronizationGuard;
         _leases = leases;
         _logger = logger;
-        _traceOptions = traceOptions;
-        _moduleExpander = moduleExpander;
-        _authorization = authorization;
-        _nodes = nodes;
-        _workloads = workloads ?? new RuntimeWorkloadGate();
         _env = env;
         _configuration = configuration;
         _safetyLogger = safetyLogger;
         _safetyLedgers = safetyLedgers ?? new ProductionSafetyLedgerRegistry();
-        _authorization?.AttachSafetyLedgers(_safetyLedgers);
+        authorization?.AttachSafetyLedgers(_safetyLedgers);
         var maxConcurrent = configuration?.GetValue<int?>("Production:MaxConcurrentCycles") ?? 0;
         if (maxConcurrent > 0) _executionSlotGate = new SemaphoreSlim(maxConcurrent, maxConcurrent);
         _fallbackRoot = Path.Combine(Path.GetTempPath(), "visionstudio-stations", Guid.NewGuid().ToString("N"));
-
-        _defaultStation = new ProductionStationRuntime(
-            ProductionRuntimeStationIds.DefaultStationId,
+        _shared = new ProductionStationSharedServices(
             jobs,
             runner,
             traces,
             runs,
-            configStore,
             alarms,
             dependencies,
             storageCapacity,
@@ -105,15 +75,20 @@ public sealed class ProductionRuntimeService
             synchronizationGuard,
             leases,
             logger,
-            traceOptions,
-            safetyStore,
+            traceOptions?.Value ?? new ProductionTraceOptions(),
             moduleExpander,
             authorization,
             nodes,
-            _workloads,
+            workloads ?? new RuntimeWorkloadGate(),
             _executionSlotGate,
             PublishStationResult,
-            _safetyLedgers,
+            _safetyLedgers);
+
+        _defaultStation = new ProductionStationRuntime(
+            ProductionRuntimeStationIds.DefaultStationId,
+            _shared,
+            configStore,
+            safetyStore,
             CreateTriggerQueue(ProductionRuntimeStationIds.DefaultStationId));
         _stations[ProductionRuntimeStationIds.DefaultStationId] = _defaultStation;
         if (safetyStore is not null) _safetyLedgers.Register(ProductionRuntimeStationIds.DefaultStationId, safetyStore);
@@ -311,27 +286,9 @@ public sealed class ProductionRuntimeService
 
         return new ProductionStationRuntime(
             stationId,
-            _jobs,
-            _runner,
-            _traces,
-            _runs,
+            _shared,
             configStore,
-            _alarms,
-            _dependencies,
-            _storageCapacity,
-            _ptpGuard,
-            _synchronizationGuard,
-            _leases,
-            _logger,
-            _traceOptions,
             safetyStore,
-            _moduleExpander,
-            _authorization,
-            _nodes,
-            _workloads,
-            _executionSlotGate,
-            PublishStationResult,
-            _safetyLedgers,
             CreateTriggerQueue(stationId));
     }
 

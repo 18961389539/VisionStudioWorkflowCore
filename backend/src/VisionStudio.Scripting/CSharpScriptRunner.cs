@@ -25,7 +25,9 @@ namespace VisionStudio.Scripting;
 internal static partial class CSharpScriptRunner
 {
     private const int MaxCachedScripts = 64;
-    private static readonly ConcurrentDictionary<string, Script<object>> Cache = new(StringComparer.Ordinal);
+    private static readonly object CacheGate = new();
+    private static readonly Dictionary<string, LinkedListNode<(string Hash, Lazy<Script<object>> Script)>> Cache = new(StringComparer.Ordinal);
+    private static readonly LinkedList<(string Hash, Lazy<Script<object>> Script)> CacheLru = new();
     private static readonly Regex ForbiddenDirective = new(@"^\s*#(r|load|line)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
     private static readonly ScriptOptions Options = BuildOptions();
 
@@ -253,8 +255,54 @@ internal static partial class CSharpScriptRunner
 
     private static Script<object> GetOrCompile(string source, string sourceHash, CancellationToken cancellationToken)
     {
-        if (Cache.TryGetValue(sourceHash, out var cached)) return cached;
+        cancellationToken.ThrowIfCancellationRequested();
+        LinkedListNode<(string Hash, Lazy<Script<object>> Script)> entry;
+        lock (CacheGate)
+        {
+            if (Cache.TryGetValue(sourceHash, out var existing))
+            {
+                CacheLru.Remove(existing);
+                CacheLru.AddFirst(existing);
+                entry = existing;
+            }
+            else
+            {
+                while (Cache.Count >= MaxCachedScripts && CacheLru.Last is { } oldest)
+                {
+                    CacheLru.RemoveLast();
+                    Cache.Remove(oldest.Value.Hash);
+                }
+                var lazy = new Lazy<Script<object>>(
+                    () => CompileScript(source),
+                    LazyThreadSafetyMode.ExecutionAndPublication);
+                entry = new LinkedListNode<(string Hash, Lazy<Script<object>> Script)>((sourceHash, lazy));
+                CacheLru.AddFirst(entry);
+                Cache[sourceHash] = entry;
+            }
+        }
 
+        try
+        {
+            var compiled = entry.Value.Script.Value;
+            cancellationToken.ThrowIfCancellationRequested();
+            return compiled;
+        }
+        catch
+        {
+            lock (CacheGate)
+            {
+                if (Cache.TryGetValue(sourceHash, out var current) && ReferenceEquals(current, entry))
+                {
+                    CacheLru.Remove(entry);
+                    Cache.Remove(sourceHash);
+                }
+            }
+            throw;
+        }
+    }
+
+    private static Script<object> CompileScript(string source)
+    {
         var parseOptions = CSharpParseOptions.Default
             .WithKind(SourceCodeKind.Script)
             .WithLanguageVersion(LanguageVersion.Preview);
@@ -264,23 +312,21 @@ internal static partial class CSharpScriptRunner
             throw new ScriptCompilationException(FormatDiagnostics(syntaxErrors));
 
         var validator = new ForbiddenApiWalker();
-        validator.Visit(tree.GetRoot(cancellationToken));
+        validator.Visit(tree.GetRoot(CancellationToken.None));
         if (validator.Errors.Count > 0)
             throw new ScriptCompilationException(validator.Errors);
 
         // 先插入原始行号标记，再插入循环预算 Tick；标记让运行时异常可以回指原始源码行，
         // 不依赖调试符号或被 Tick 改写后的行号。
-        var tracked = new LineTrackingRewriter().Visit(tree.GetRoot(cancellationToken))!;
+        var tracked = new LineTrackingRewriter().Visit(tree.GetRoot(CancellationToken.None))!;
         var rewritten = new LoopGuardRewriter().Visit(tracked)!.ToFullString();
         var script = CSharpScript.Create<object>(rewritten, Options, globalsType: typeof(ScriptGlobals));
-        var diagnostics = script.Compile(cancellationToken)
+        var diagnostics = script.Compile(CancellationToken.None)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .ToArray();
         if (diagnostics.Length > 0)
             throw new ScriptCompilationException(FormatDiagnostics(diagnostics));
 
-        if (Cache.Count >= MaxCachedScripts) Cache.Clear();
-        Cache[sourceHash] = script;
         return script;
     }
 
@@ -651,66 +697,6 @@ internal static partial class CSharpScriptRunner
         {
             var visited = (DoStatementSyntax)base.VisitDoStatement(node)!;
             return visited.WithStatement(MarkEmbedded(visited.Statement, node.Statement));
-        }
-    }
-
-    private sealed class LoopGuardRewriter : CSharpSyntaxRewriter
-    {
-        private static StatementSyntax Tick() =>
-            SyntaxFactory.ParseStatement("global::VisionStudio.Scripting.ScriptExecutionContext.Tick();");
-
-        private static BlockSyntax AddTick(BlockSyntax block) =>
-            block.WithStatements(block.Statements.Insert(0, Tick()));
-
-        private static StatementSyntax AddTick(StatementSyntax statement) =>
-            statement is BlockSyntax block ? AddTick(block) : SyntaxFactory.Block(Tick(), statement);
-
-        public override SyntaxNode? VisitWhileStatement(WhileStatementSyntax node)
-        {
-            var visited = (WhileStatementSyntax)base.VisitWhileStatement(node)!;
-            return visited.WithStatement(AddTick(visited.Statement));
-        }
-
-        public override SyntaxNode? VisitForStatement(ForStatementSyntax node)
-        {
-            var visited = (ForStatementSyntax)base.VisitForStatement(node)!;
-            return visited.WithStatement(AddTick(visited.Statement));
-        }
-
-        public override SyntaxNode? VisitForEachStatement(ForEachStatementSyntax node)
-        {
-            var visited = (ForEachStatementSyntax)base.VisitForEachStatement(node)!;
-            return visited.WithStatement(AddTick(visited.Statement));
-        }
-
-        public override SyntaxNode? VisitDoStatement(DoStatementSyntax node)
-        {
-            var visited = (DoStatementSyntax)base.VisitDoStatement(node)!;
-            return visited.WithStatement(AddTick(visited.Statement));
-        }
-
-        public override SyntaxNode? VisitLocalFunctionStatement(LocalFunctionStatementSyntax node)
-        {
-            var visited = (LocalFunctionStatementSyntax)base.VisitLocalFunctionStatement(node)!;
-            return visited.Body is null ? visited : visited.WithBody(AddTick(visited.Body));
-        }
-
-        public override SyntaxNode? VisitMethodDeclaration(MethodDeclarationSyntax node)
-        {
-            var visited = (MethodDeclarationSyntax)base.VisitMethodDeclaration(node)!;
-            return visited.Body is null ? visited : visited.WithBody(AddTick(visited.Body));
-        }
-
-        public override SyntaxNode? VisitConstructorDeclaration(ConstructorDeclarationSyntax node)
-        {
-            var visited = (ConstructorDeclarationSyntax)base.VisitConstructorDeclaration(node)!;
-            return visited.Body is null ? visited : visited.WithBody(AddTick(visited.Body));
-        }
-
-        public override SyntaxNode? VisitAccessorDeclaration(AccessorDeclarationSyntax node)
-        {
-            var visited = (AccessorDeclarationSyntax)base.VisitAccessorDeclaration(node)!;
-            return visited.Body is null ? visited : visited.WithBody(AddTick(visited.Body));
         }
     }
 }

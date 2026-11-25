@@ -10,6 +10,33 @@ namespace VisionStudio.Engine.Runtime;
 /// </summary>
 internal static class NodeFrameSemantics
 {
+    internal const string DefaultInputFrame = "CurrentImage";
+    internal const string DefaultReferenceFrame = "ReferenceImage";
+
+    internal static string RoiReferenceFrame(string nodeId) => $"roi:{nodeId}:reference";
+
+    internal readonly record struct TransformFrameEndpoints(string SourceFrame, string TargetFrame);
+
+    internal static TransformFrameEndpoints? ResolveTransformFrames(
+        string nodeId,
+        NodeFrameRule rule,
+        Func<string, string?> resolveInputFrame,
+        Func<string, string?> resolveReferenceFrame,
+        string? outputFrame)
+    {
+        var inputFrame = resolveInputFrame(rule.InputPort);
+        return rule.Transform switch
+        {
+            NodeTransformFramePolicy.Spatial when outputFrame is not null =>
+                new TransformFrameEndpoints(inputFrame ?? DefaultInputFrame, outputFrame),
+            NodeTransformFramePolicy.RoiReference =>
+                new TransformFrameEndpoints(RoiReferenceFrame(nodeId), inputFrame ?? DefaultInputFrame),
+            NodeTransformFramePolicy.ReferenceInput =>
+                new TransformFrameEndpoints(inputFrame ?? DefaultInputFrame, resolveReferenceFrame(rule.ReferencePort ?? "reference") ?? DefaultReferenceFrame),
+            _ => null
+        };
+    }
+
     /// <summary>First rule whose parameter condition matches, or null when the catalog declares no frames.</summary>
     internal static NodeFrameRule? Resolve(NodeDefinition node, NodeCatalogItem catalog)
     {

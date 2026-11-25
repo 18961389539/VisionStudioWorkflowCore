@@ -230,13 +230,13 @@ public sealed class DualCameraExtrinsicsTests
             new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, CancellationToken.None);
     }
 
-    private static void AssertNear(double[] expected, double[] actual, double translationTol, double rotationTolDeg)
+    private static void AssertNear(double[] expected, IReadOnlyList<double> actual, double translationTol, double rotationTolDeg)
     {
-        Assert.Equal(16, actual.Length);
+        Assert.Equal(16, actual.Count);
         for (var i = 0; i < 3; i++)
             Assert.InRange(actual[i * 4 + 3], expected[i * 4 + 3] - translationTol, expected[i * 4 + 3] + translationTol);
         // Rotation: compare angle of relative
-        var rel = Multiply(Inverse(expected), actual);
+        var rel = Multiply(Inverse(expected), [.. actual]);
         var angle = Math.Acos(Math.Clamp((rel[0] + rel[5] + rel[10] - 1) / 2, -1, 1)) * 180 / Math.PI;
         Assert.True(angle <= rotationTolDeg, $"rotation error {angle} deg exceeds {rotationTolDeg}");
     }

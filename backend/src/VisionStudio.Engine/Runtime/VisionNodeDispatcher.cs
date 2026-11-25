@@ -167,33 +167,25 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
                 image.SetCoordinateFrame(outputFrame);
         }
 
-        if (rule?.Transform is { } transformPolicy
-            && transformPolicy != NodeTransformFramePolicy.None
+        if (rule is not null
+            && rule.Transform != NodeTransformFramePolicy.None
             && result.Outputs.TryGetValue("transform", out var transformValue)
             && transformValue.Value is VisionTransform2D transform)
         {
-            var framedTransform = transformPolicy switch
-            {
-                NodeTransformFramePolicy.Spatial => transform with
-                {
-                    SourceFrame = inputFrame ?? "CurrentImage",
-                    TargetFrame = outputFrame
-                },
-                NodeTransformFramePolicy.RoiReference => transform with
-                {
-                    SourceFrame = $"roi:{node.Id}:reference",
-                    TargetFrame = inputFrame ?? "CurrentImage"
-                },
-                NodeTransformFramePolicy.ReferenceInput => transform with
-                {
-                    SourceFrame = inputFrame ?? "CurrentImage",
-                    TargetFrame = TryGetImageFrame(inputs, rule.ReferencePort ?? "reference") ?? "ReferenceImage"
-                },
-                _ => null
-            };
+            var resolved = NodeFrameSemantics.ResolveTransformFrames(
+                node.Id,
+                rule,
+                port => TryGetImageFrame(inputs, port),
+                port => TryGetImageFrame(inputs, port),
+                outputFrame);
 
-            if (framedTransform is not null)
+            if (resolved is { } endpoints)
             {
+                var framedTransform = transform with
+                {
+                    SourceFrame = endpoints.SourceFrame,
+                    TargetFrame = endpoints.TargetFrame
+                };
                 rewrittenOutputs = result.Outputs.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
                 rewrittenOutputs["transform"] = VisionValue.Transform(framedTransform);
             }

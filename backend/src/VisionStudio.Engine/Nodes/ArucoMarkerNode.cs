@@ -126,7 +126,7 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
                     })));
                     var first = poses[0];
                     outputs["pose"] = VisionValue.Transform3D(new VisionTransform3D(
-                        $"marker-{first.Id}", "Camera", poseUnit, first.Matrix));
+                        $"marker-{first.Id}", "Camera", poseUnit, [.. first.Matrix]));
                 }
                 return new NodeExecutorResult(outputs, new Dictionary<string, object?>
                 {

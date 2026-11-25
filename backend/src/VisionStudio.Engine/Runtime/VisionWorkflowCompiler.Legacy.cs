@@ -45,7 +45,7 @@ public sealed partial class VisionWorkflowCompiler
         return new CompileResult(steps, ordered.Select(x => x.Id).ToArray(), []);
     }
 
-    private IReadOnlyList<Dictionary<string, object?>> CreateExecutionSteps(
+    private IReadOnlyList<WorkflowDslStep> CreateExecutionSteps(
         IReadOnlyList<NodeDefinition> nodes,
         string? continuationStepId,
         CompileContext context)
@@ -70,7 +70,7 @@ public sealed partial class VisionWorkflowCompiler
             units.Add(new ExecutionUnit(PipelineStepId(segmentNodes[0].Id), segmentNodes, true));
         }
 
-        var steps = new List<Dictionary<string, object?>>(units.Count);
+        var steps = new List<WorkflowDslStep>(units.Count);
         for (var i = 0; i < units.Count; i++)
         {
             var next = i + 1 < units.Count ? units[i + 1].StepId : continuationStepId;
@@ -82,7 +82,7 @@ public sealed partial class VisionWorkflowCompiler
         return steps;
     }
 
-    private Dictionary<string, object?> CreatePipelineStep(
+    private WorkflowDslStep CreatePipelineStep(
         IReadOnlyList<NodeDefinition> nodes,
         string? nextStepId,
         CompileContext context,
@@ -90,38 +90,11 @@ public sealed partial class VisionWorkflowCompiler
     {
         var segmentId = stepIdOverride ?? PipelineStepId(nodes[0].Id);
         context.RegisterSegment(segmentId, nodes.Select(x => x.Id).ToArray());
-        var step = new Dictionary<string, object?>
-        {
-            ["Id"] = segmentId,
-            ["StepType"] = _pipelineStepType,
-            ["Inputs"] = new Dictionary<string, string>
-            {
-                ["SegmentId"] = JsonSerializer.Serialize(segmentId)
-            },
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (nextStepId is not null) step["NextStepId"] = nextStepId;
-        return step;
+        return WorkflowStepDsl.PipelineStep(_pipelineStepType, segmentId, nextStepId);
     }
 
-    private Dictionary<string, object?> CreateVisionStep(string nodeId, string? nextStepId, string? loopNodeId = null)
-    {
-        var inputs = new Dictionary<string, string>
-        {
-            ["NodeId"] = JsonSerializer.Serialize(nodeId)
-        };
-        if (!string.IsNullOrWhiteSpace(loopNodeId))
-            inputs["LoopNodeId"] = JsonSerializer.Serialize(loopNodeId);
-        var step = new Dictionary<string, object?>
-        {
-            ["Id"] = nodeId,
-            ["StepType"] = _visionStepType,
-            ["Inputs"] = inputs,
-            ["ErrorBehavior"] = "Terminate"
-        };
-        if (nextStepId is not null) step["NextStepId"] = nextStepId;
-        return step;
-    }
+    private WorkflowDslStep CreateVisionStep(string nodeId, string? nextStepId, string? loopNodeId = null)
+        => WorkflowStepDsl.VisionStep(_visionStepType, nodeId, nextStepId, loopNodeId);
 
     private bool IsPipelineEligible(NodeDefinition node)
         => VisionExecutionPolicy.IsPipelineEligible(registry.Require(node.Type).Catalog);
@@ -161,7 +134,7 @@ public sealed partial class VisionWorkflowCompiler
     }
 
     private sealed record CompileResult(
-        IReadOnlyList<Dictionary<string, object?>> Steps,
+        IReadOnlyList<WorkflowDslStep> Steps,
         IReadOnlyList<string> VisualOrder,
         IReadOnlyList<StructuredControlRegion> ControlRegions);
 }

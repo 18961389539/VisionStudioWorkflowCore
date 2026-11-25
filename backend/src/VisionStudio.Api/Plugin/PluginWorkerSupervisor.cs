@@ -9,27 +9,19 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Api;
 
-public sealed class PluginWorkerOptions
+public sealed class PluginWorkerOptions : WorkerPoolOptionsBase
 {
-    public int StartupTimeoutMs { get; set; } = 10_000;
-    public int ExecutionTimeoutMs { get; set; } = 30_000;
-    public int MaxWorkingSetMb { get; set; } = 2048;
-    public int MaxRestartsPerMinute { get; set; } = 5;
-    public string? WorkerAssemblyPath { get; set; }
+    public PluginWorkerOptions()
+    {
+        SharedMemoryRootPath = "data/plugin-workers/shared-memory";
+    }
+
     public int DefaultPoolSize { get; set; } = 1;
     public int MaxPoolSize { get; set; } = 4;
-    public bool SharedMemoryEnabled { get; set; } = true;
-    public int SharedMemoryThresholdBytes { get; set; } = 1_048_576;
-    public string SharedMemoryRootPath { get; set; } = "data/plugin-workers/shared-memory";
-    public int SharedMemoryStaleMinutes { get; set; } = 30;
     public int PerformanceWindowSize { get; set; } = 512;
     public int PerformanceMinimumSamples { get; set; } = 30;
     public double AdaptiveTargetUtilization { get; set; } = 0.70;
     public double AdaptiveQueuePressureRatio { get; set; } = 0.15;
-    /// <summary>Windows Job Object 进程私有内存上限；0 = 不启用（插件 Worker 默认保持历史行为）。</summary>
-    public int JobObjectMemoryLimitMb { get; set; }
-    /// <summary>Windows Job Object CPU 硬上限（百分比）；0 = 不启用。现场核数差异大，默认关闭。</summary>
-    public int JobObjectCpuRatePercent { get; set; }
 }
 
 public sealed record PluginWorkerInstanceStatus(
@@ -91,14 +83,8 @@ public sealed class PluginWorkerSupervisor : IDisposable
     {
         _options = options.Value;
         _logger = logger;
-        _workerAssemblyPath = Path.GetFullPath(string.IsNullOrWhiteSpace(_options.WorkerAssemblyPath)
-            ? Path.Combine(AppContext.BaseDirectory, "VisionStudio.Plugin.Worker.dll")
-            : Path.IsPathRooted(_options.WorkerAssemblyPath)
-                ? _options.WorkerAssemblyPath
-                : Path.Combine(environment.ContentRootPath, _options.WorkerAssemblyPath));
-        _sharedMemoryRoot = Path.GetFullPath(Path.IsPathRooted(_options.SharedMemoryRootPath)
-            ? _options.SharedMemoryRootPath
-            : Path.Combine(environment.ContentRootPath, _options.SharedMemoryRootPath));
+        _workerAssemblyPath = _options.ResolveWorkerAssemblyPath(environment.ContentRootPath, "VisionStudio.Plugin.Worker.dll");
+        _sharedMemoryRoot = _options.ResolveSharedMemoryRoot(environment.ContentRootPath);
         Directory.CreateDirectory(_sharedMemoryRoot);
     }
 

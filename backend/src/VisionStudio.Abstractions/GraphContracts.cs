@@ -33,6 +33,12 @@ public sealed record NodeDefinition(
 
 public sealed record NodePosition(double X, double Y);
 
+public static class EdgeKinds
+{
+    public const string Control = "control";
+    public const string Data = "data";
+}
+
 public sealed record EdgeDefinition(
     string Id,
     string SourceNodeId,
@@ -41,7 +47,7 @@ public sealed record EdgeDefinition(
     string TargetPort,
     string? Kind = null)
 {
-    public bool IsControl => string.Equals(Kind, "control", StringComparison.OrdinalIgnoreCase);
+    public bool IsControl => string.Equals(Kind, EdgeKinds.Control, StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record PortDescriptor(string Name, VisionDataType DataType, bool Required = true)
@@ -407,3 +413,24 @@ public sealed record NodeFrameRule(
     string? TransformPort = null,
     string? WhenParameter = null,
     IReadOnlyList<string>? WhenValues = null);
+
+public sealed record FrameTransformDefinition(
+    string SourceFrame,
+    string TargetFrame,
+    string Unit,
+    double X,
+    double Y,
+    double AngleDeg);
+
+public sealed record StructuredControlRegion(
+    string ControlNodeId,
+    string Kind,
+    string JoinNodeId,
+    int Depth,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> BranchNodeIds);
+
+/// <summary>
+/// 非致命编译提示：不改变流程结果，但用户需要知道编译产物与画布直觉不一致的地方
+/// （典型：flow.parallel 退化为顺序执行）。Warnings 是编译产物的披露，不是校验失败。
+/// </summary>
+public sealed record CompileWarning(string Code, string Message, string? NodeId = null);

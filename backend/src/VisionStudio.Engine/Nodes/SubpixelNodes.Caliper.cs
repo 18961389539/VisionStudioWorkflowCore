@@ -49,18 +49,19 @@ var sourceImage = context.RequireImage("image");
             throw new InvalidOperationException("Caliper line measurement requires a non-empty image.");
 
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
-        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 5, 1, 99));
-        var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
-        var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
-        var direction = SubpixelEdgeCore.ChoiceParameter(node, "direction", "strongest", "strongest", "firstfromstart", "firstfromend");
+        var common = CaliperSamplingSettings.Resolve(node, "direction", defaultSampleWidth: 5, defaultCaliperCount: 9, maxCaliperCount: 101);
+        var sampleWidth = common.SampleWidth;
+        var minContrast = common.MinContrast;
+        var polarity = common.Polarity;
+        var direction = common.Direction;
         var refine = SubpixelEdgeCore.ChoiceParameter(node, "refine", "parabolic", "parabolic", "none");
-        var sigma = SubpixelEdgeCore.SigmaParameter(node);
+        var sigma = common.Sigma;
         var edgeLength = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "edgeLength", 0), 0, 10000);
-        var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 9, 3, 101);
-        var minValidCalipers = SubpixelEdgeCore.ClampedIntParameter(node, "minValidCalipers", 3, 3, 101);
-        var maxFitOutliers = SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16);
-        var fitOutlierThreshold = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitOutlierThreshold", 2));
-        var maxFitError = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "maxFitError", 0));
+        var caliperCount = common.CaliperCount;
+        var minValidCalipers = common.MinValidCalipers;
+        var maxFitOutliers = common.MaxFitOutliers;
+        var fitOutlierThreshold = common.FitOutlierThreshold;
+        var maxFitError = common.MaxFitError;
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -376,19 +377,20 @@ var sourceImage = context.RequireImage("image");
             throw new InvalidOperationException("Caliper circle center after coordinate correction must be finite and within +/-10000000 pixels.");
         var samplingMode = SamplingMode(node);
         var angleStep = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "angleStepDeg", 5), 0.5, 45);
-        var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 72, 3, 361);
-        var minValidCalipers = SubpixelEdgeCore.ClampedIntParameter(node, "minValidCalipers", 3, 3, 361);
+        var common = CaliperSamplingSettings.Resolve(node, "searchDirection", defaultSampleWidth: 3, defaultCaliperCount: 72, maxCaliperCount: 361);
+        var caliperCount = common.CaliperCount;
+        var minValidCalipers = common.MinValidCalipers;
         var band = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "radialBand", 8), 1, 500);
-        var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
-        var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
-        var searchDirection = SubpixelEdgeCore.ChoiceParameter(node, "searchDirection", "strongest", "strongest", "firstfromstart", "firstfromend");
-        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 3, 1, 99));
-        var sigma = SubpixelEdgeCore.SigmaParameter(node);
+        var minContrast = common.MinContrast;
+        var polarity = common.Polarity;
+        var searchDirection = common.Direction;
+        var sampleWidth = common.SampleWidth;
+        var sigma = common.Sigma;
         var maxDeviation = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "maxRadiusDeviation", 0));
-        var maxFitOutliers = SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16);
-        var fitOutlierThreshold = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitOutlierThreshold", 2));
+        var maxFitOutliers = common.MaxFitOutliers;
+        var fitOutlierThreshold = common.FitOutlierThreshold;
         var fitRadiusTolerance = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitRadiusTolerance", 0));
-        var maxFitError = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "maxFitError", 0));
+        var maxFitError = common.MaxFitError;
         var innerRadius = Math.Max(0, nominalRadius - band);
         var outerRadius = nominalRadius + band;
         var roi = ContourNodesHelper.ResolveRoi(context, node);
@@ -759,5 +761,35 @@ var sourceImage = context.RequireImage("image");
         for (var i = 0; i < count; i++) angles[i] = normalizedStart + i * effectiveStep;
         return angles;
     }
+}
+
+internal readonly record struct CaliperSamplingSettings(
+    int SampleWidth,
+    double MinContrast,
+    string Polarity,
+    string Direction,
+    double Sigma,
+    int CaliperCount,
+    int MinValidCalipers,
+    int MaxFitOutliers,
+    double FitOutlierThreshold,
+    double MaxFitError)
+{
+    public static CaliperSamplingSettings Resolve(
+        NodeDefinition node,
+        string directionParameter,
+        int defaultSampleWidth,
+        int defaultCaliperCount,
+        int maxCaliperCount) => new(
+            SampleWidth: SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", defaultSampleWidth, 1, 99)),
+            MinContrast: Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8)),
+            Polarity: SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling"),
+            Direction: SubpixelEdgeCore.ChoiceParameter(node, directionParameter, "strongest", "strongest", "firstfromstart", "firstfromend"),
+            Sigma: SubpixelEdgeCore.SigmaParameter(node),
+            CaliperCount: SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", defaultCaliperCount, 3, maxCaliperCount),
+            MinValidCalipers: SubpixelEdgeCore.ClampedIntParameter(node, "minValidCalipers", 3, 3, maxCaliperCount),
+            MaxFitOutliers: SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16),
+            FitOutlierThreshold: Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitOutlierThreshold", 2)),
+            MaxFitError: Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "maxFitError", 0)));
 }
 

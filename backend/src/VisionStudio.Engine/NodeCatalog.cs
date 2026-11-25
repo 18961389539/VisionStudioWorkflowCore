@@ -24,9 +24,9 @@ public static partial class BuiltInNodeCatalog
 
     public static readonly IReadOnlyList<NodeCatalogItem> Items = RawItems
         .Select(NodeExecutionModeCatalog.Apply)
-        .Select(item => item.Type == "match.template"
-            ? item with { Capabilities = (item.Capabilities ?? new VisionToolCapabilities()) with { Deterministic = false } }
-            : item.Actions is null && Runtime.VisionExecutionPolicy.IsPipelineEligible(item)
+        .Select(item => item.Capabilities?.Deterministic != false
+            && item.Actions is null
+            && Runtime.VisionExecutionPolicy.IsPipelineEligible(item)
                 ? item with { Actions = [] }
                 : item)
         .Select(OperatorParameterForms.Apply)
@@ -34,6 +34,15 @@ public static partial class BuiltInNodeCatalog
         .Select(ParameterTierCatalog.Apply)
         .Select(NodeMaturityCatalog.Apply)
         .ToArray();
+
+    /// <summary>
+    /// 从目录中读取节点的本地 ROI 参数名（供编译期校验使用，内置与插件走同一声明路径）。
+    /// </summary>
+    public static IReadOnlyList<string> RoiParameterNames(NodeCatalogItem catalog)
+        => catalog.Parameters
+            .Where(parameter => parameter.Type.Equals("roi", StringComparison.OrdinalIgnoreCase))
+            .Select(parameter => parameter.Name)
+            .ToArray();
 
     /// <summary>
     /// 执行器通过 <c>NodeDefinition.GetRoi(parameterName)</c> 读取的本地 ROI 参数名。

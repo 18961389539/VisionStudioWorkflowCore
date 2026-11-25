@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
@@ -24,7 +23,7 @@ public sealed class RunStore
 {
     private readonly int _maxRetainedRuns;
     private readonly long _maxTotalBytes;
-    private readonly ConcurrentDictionary<string, Entry> _runs = new();
+    private readonly Dictionary<string, Entry> _runs = new();
     private readonly object _sync = new();
     /// <summary>
     /// 写入顺序的伪 LRU 链表（头部最旧），与缓存条目一一对应：覆盖同一 runId 时先摘除旧节点，
@@ -79,7 +78,7 @@ public sealed class RunStore
             {
                 if (_order.First is not { } oldest) break;
                 _order.RemoveFirst();
-                if (_runs.TryRemove(oldest.Value, out var removed))
+                if (_runs.Remove(oldest.Value, out var removed))
                     _totalBytes -= EstimateBytes(removed.Artifact);
             }
         }
@@ -87,10 +86,13 @@ public sealed class RunStore
 
     public bool TryGet(string runId, out RunArtifact artifact)
     {
-        if (_runs.TryGetValue(runId, out var entry))
+        lock (_sync)
         {
-            artifact = entry.Artifact;
-            return true;
+            if (_runs.TryGetValue(runId, out var entry))
+            {
+                artifact = entry.Artifact;
+                return true;
+            }
         }
         artifact = null!;
         return false;

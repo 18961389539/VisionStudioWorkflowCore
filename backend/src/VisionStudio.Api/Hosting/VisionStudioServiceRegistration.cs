@@ -114,6 +114,19 @@ public static class VisionStudioServiceRegistration
         IConfiguration configuration,
         IWebHostEnvironment environment)
     {
+        ValidateStartupSecurityBoundaries(configuration, environment);
+        var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration);
+        services.AddVisionInfrastructureAndSecurity(configuration, dataRoot);
+        services.AddVisionStorageAndMaintenance(configuration, environment, dataRoot);
+        services.AddVisionHardwareAndAdapters(configuration, dataRoot);
+        services.AddVisionExecutionRuntime(configuration);
+        services.AddVisionApplicationServices(configuration);
+        services.AddVisionHostedServices();
+        return services;
+    }
+
+    private static void ValidateStartupSecurityBoundaries(IConfiguration configuration, IWebHostEnvironment environment)
+    {
         // 生产环境禁止免密码管理员自动登录：开发便利开关（appsettings.json 默认 true）不得
         // 随配置继承进入现场。Production（含未显式设置 ASPNETCORE_ENVIRONMENT 的默认情形）
         // 下 AutoLoginAdmin=true 直接拒绝启动；本地开发请使用 Development 环境（run-dev.ps1）。
@@ -142,7 +155,13 @@ public static class VisionStudioServiceRegistration
                     "Remove conflicting sources instead of relying on which one would win.");
             }
         }
+    }
 
+    private static IServiceCollection AddVisionInfrastructureAndSecurity(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string dataRoot)
+    {
         services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -150,8 +169,7 @@ public static class VisionStudioServiceRegistration
 
         // 持久滚动文件日志（data/logs，按天、保留 14 天）：现场故障后可直接取日志导出，
         // 不依赖控制台留存。写入失败绝不影响主流程，但丢弃/失败计数经 /api/health 暴露（F10）。
-        var fileLogger = new RollingFileLoggerProvider(
-            Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "logs"));
+        var fileLogger = new RollingFileLoggerProvider(Path.Combine(dataRoot, "logs"));
         services.AddLogging(builder => builder.AddProvider(fileLogger));
         services.AddSingleton(fileLogger);
 
@@ -221,13 +239,29 @@ public static class VisionStudioServiceRegistration
             configuration.GetValue<long?>("MediaLibrary:MaxImportBytes") ?? 100L * 1024 * 1024);
         services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = mediaMaxBatchBytes + 1024 * 1024);
         services.Configure<KestrelServerOptions>(options => options.Limits.MaxRequestBodySize = mediaMaxBatchBytes + 1024 * 1024);
-        services.AddWorkflow();
-        services.AddWorkflowDSL();
         services.AddOpenApi(options => options
             .AddSchemaTransformer<JsonElementSchemaTransformer>()
             .AddSchemaTransformer<RequiredPropertiesSchemaTransformer>()
             .AddDocumentTransformer<StructSchemaRequiredDocumentTransformer>());
         services.AddSignalR();
+        services.AddCors(options =>
+        {
+            var origins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                ?? ["http://localhost:5173"];
+            options.AddDefaultPolicy(policy => policy
+                .WithOrigins(origins)
+                .AllowAnyHeader()
+                .AllowAnyMethod());
+        });
+        return services;
+    }
+
+    private static IServiceCollection AddVisionStorageAndMaintenance(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IWebHostEnvironment environment,
+        string dataRoot)
+    {
         services.Configure<TraceRetentionOptions>(configuration.GetSection("TraceRetention"));
         services.AddOptions<ProductionTraceOptions>().Bind(configuration.GetSection("ProductionTrace"))
             .Validate(o => o.QueueCapacity is >= 1 and <= 1024 && o.MaxRawArtifactBytesPerRun > 0, "Invalid production trace queue limits.")
@@ -259,7 +293,6 @@ public static class VisionStudioServiceRegistration
         // Q01（2026-10-13 审查）：同时识别旧版离线 CLI 的 .visionstudio-restore-intent.json
         // （现场可能残留；与 restore-transaction.json 同一判定语义），并登记跨进程维护活跃标记
         // maintenance-active.json（Q04：与离线 CLI 的维护互斥）。
-        var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration);
         var maintenanceDir = Path.Combine(dataRoot, ".storage-maintenance");
         services.AddSingleton(sp => new StorageMaintenanceCoordinator(
             Path.Combine(maintenanceDir, "failure-lock.json"),
@@ -269,8 +302,16 @@ public static class VisionStudioServiceRegistration
             Path.Combine(dataRoot, ".visionstudio-restore-intent.json"),
             Path.Combine(maintenanceDir, "maintenance-active.json")));
         services.AddSingleton<StorageCapacityService>();
+        services.AddSingleton<StorageBackupService>();
+        services.AddSingleton<AutoBackupService>();
+        return services;
+    }
 
-        services.AddSingleton<VisionNodeRegistry>();
+    private static IServiceCollection AddVisionHardwareAndAdapters(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string dataRoot)
+    {
         services.AddSingleton<CameraManager>();
         services.AddSingleton<CameraFeatureProfileStore>();
         var cameraAdapters = configuration.GetSection("CameraAdapters").Get<CameraAdapterOptions>() ?? new CameraAdapterOptions();
@@ -288,7 +329,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<GigENetworkDiagnosticsService>();
         services.AddSingleton<ISynchronizedFrameSetService>(sp => sp.GetRequiredService<CameraSynchronizationService>());
         services.AddSingleton<MediaLibraryService>();
-        services.AddSingleton(_ => new HardwareProvenanceStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "provenance")));
+        services.AddSingleton(_ => new HardwareProvenanceStore(Path.Combine(dataRoot, "provenance")));
         services.AddSingleton<VendorProvenanceProbeRegistry>();
         services.AddSingleton<HardwareProvenanceService>();
         services.Configure<RobotTraceRetentionOptions>(configuration.GetSection("RobotTraceRetention"));
@@ -302,7 +343,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<IAssetHealthProvider, RobotAssetHealthProvider>();
         services.AddSingleton<DiagnosticsCenterService>();
         services.AddSingleton<DiagnosticBundleService>();
-        services.AddSingleton(_ => new DeviceProfileStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration), "devices")));
+        services.AddSingleton(_ => new DeviceProfileStore(Path.Combine(dataRoot, "devices")));
 
         var tcpSimulatorPort = configuration.GetValue("RobotTcpSimulator:Port", 40501);
         services.AddSingleton(_ => new TcpRobotSimulatorServer(tcpSimulatorPort));
@@ -311,6 +352,26 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<IReplayInputResolver>(provider =>
             new ConfiguredReplayInputResolver(configuration, provider.GetRequiredService<IWebHostEnvironment>()));
 
+        // R02：租约接管必须由设备层活动状态判定（TTL 到期不是"设备可用"的证据）。
+        services.AddSingleton<IDeviceActivityProbe, DeviceActivityProbe>();
+        services.AddSingleton(sp => new DeviceLeaseRegistry(
+            timeProvider: null,
+            probe: sp.GetRequiredService<IDeviceActivityProbe>()));
+        // A02：设备/机器人/相机的真实命令派发边界共用租约注册表作为所有权闸门——
+        // 失去所有权（换代/撤销）的旧执行在派发前被拒绝。惰性解析打破
+        // "管理器 → 闸门 → 注册表 → 活动探针 → 管理器" 的构造环。
+        services.AddSingleton<IDeviceCommandOwnershipGate>(sp =>
+            new LazyDeviceCommandOwnershipGate(() => sp.GetRequiredService<DeviceLeaseRegistry>()));
+        return services;
+    }
+
+    private static IServiceCollection AddVisionExecutionRuntime(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.AddWorkflow();
+        services.AddWorkflowDSL();
+        services.AddSingleton<VisionNodeRegistry>();
         services.AddBuiltInNodeExecutors();
         services.Configure<PluginWorkerOptions>(configuration.GetSection("PluginWorkers"));
         services.AddSingleton<PluginWorkerSupervisor>();
@@ -379,17 +440,13 @@ public static class VisionStudioServiceRegistration
         services.AddTransient<IVisionWorkflowRunner>(sp => sp.GetRequiredService<ModuleAwareVisionWorkflowRunner>());
         services.AddSingleton<WorkflowDebugSessionService>();
         services.AddSingleton<DebugSessionService>();
-        // R02：租约接管必须由设备层活动状态判定（TTL 到期不是"设备可用"的证据）。
-        services.AddSingleton<IDeviceActivityProbe, DeviceActivityProbe>();
-        services.AddSingleton(sp => new DeviceLeaseRegistry(
-            timeProvider: null,
-            probe: sp.GetRequiredService<IDeviceActivityProbe>()));
-        // A02：设备/机器人/相机的真实命令派发边界共用租约注册表作为所有权闸门——
-        // 失去所有权（换代/撤销）的旧执行在派发前被拒绝。惰性解析打破
-        // "管理器 → 闸门 → 注册表 → 活动探针 → 管理器" 的构造环。
-        services.AddSingleton<IDeviceCommandOwnershipGate>(sp =>
-            new LazyDeviceCommandOwnershipGate(() => sp.GetRequiredService<DeviceLeaseRegistry>()));
+        return services;
+    }
 
+    private static IServiceCollection AddVisionApplicationServices(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
         services.AddSingleton<RunStore>();
         services.AddSingleton<WorkflowStore>();
         services.AddSingleton<RecipeParameterStore>();
@@ -431,8 +488,6 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ManualActionIntentStore>();
         services.AddSingleton<DeviceActionAuthorizationService>();
         services.AddSingleton<ProductionRuntimeService>();
-        services.AddSingleton<StorageBackupService>();
-        services.AddSingleton<AutoBackupService>();
         services.AddSingleton<CalibrationWorkspaceService>();
         services.AddSingleton<CameraIntrinsicAssetStore>();
         services.AddSingleton<HandEyeCalibrationAssetStore>();
@@ -449,17 +504,11 @@ public static class VisionStudioServiceRegistration
             sp.GetRequiredService<SqliteMetadataDatabase>(),
             sp.GetRequiredService<CalibrationWorkspaceService>()));
         services.AddSingleton<ICalibrationPointProvider, VirtualCalibrationPointProvider>();
+        return services;
+    }
 
-        services.AddCors(options =>
-        {
-            var origins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                ?? ["http://localhost:5173"];
-            options.AddDefaultPolicy(policy => policy
-                .WithOrigins(origins)
-                .AllowAnyHeader()
-                .AllowAnyMethod());
-        });
-
+    private static IServiceCollection AddVisionHostedServices(this IServiceCollection services)
+    {
         // Start order matters: migrate persisted metadata first, then retire runs left by a previous
         // process, then register runtime assets/plugins, start Diagnostics observation, then allow
         // Production AutoStart. Trace retention starts after the runtime is initialized.
@@ -480,7 +529,6 @@ public static class VisionStudioServiceRegistration
         // 先注册具体类型再转发到 IHostedService，诊断端点才能注入它读取落盘状态。
         services.AddSingleton<RunCounterPersistence>();
         services.AddHostedService(provider => provider.GetRequiredService<RunCounterPersistence>());
-
         return services;
     }
 

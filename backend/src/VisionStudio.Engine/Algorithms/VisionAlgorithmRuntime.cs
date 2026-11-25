@@ -58,29 +58,29 @@ public static class VisionAlgorithmRuntime
         string? domainKey = null;
         string? domainValue = null;
         if (type.StartsWith("inference.", StringComparison.OrdinalIgnoreCase))
-        { domainKey = "inferenceBackend"; domainValue = "onnx"; }
+        { domainKey = NodeSummaryKeys.InferenceBackend; domainValue = "onnx"; }
         else if (type.Equals("recognition.barcode", StringComparison.OrdinalIgnoreCase))
-        { domainKey = "recognitionBackend"; domainValue = "zxing"; }
+        { domainKey = NodeSummaryKeys.RecognitionBackend; domainValue = "zxing"; }
         else if (type.Equals("recognition.ocr", StringComparison.OrdinalIgnoreCase))
-        { domainKey = "recognitionBackend"; domainValue = "tesseract"; }
+        { domainKey = NodeSummaryKeys.RecognitionBackend; domainValue = "tesseract"; }
         else if (type.Equals("recognition.aruco", StringComparison.OrdinalIgnoreCase))
-        { domainKey = "recognitionBackend"; domainValue = "opencv"; }
+        { domainKey = NodeSummaryKeys.RecognitionBackend; domainValue = "opencv"; }
         else if (type.Equals("calibration.charuco", StringComparison.OrdinalIgnoreCase))
-        { domainKey = "calibrationBackend"; domainValue = "opencv"; }
+        { domainKey = NodeSummaryKeys.CalibrationBackend; domainValue = "opencv"; }
         else if (type.Equals("script.csharp", StringComparison.OrdinalIgnoreCase))
-        { domainKey = "scriptBackend"; domainValue = "csharp"; }
+        { domainKey = NodeSummaryKeys.ScriptBackend; domainValue = "csharp"; }
         else if (type.Equals("calibration.handEye3D", StringComparison.OrdinalIgnoreCase) ||
                  type.Equals("calibration.dualCameraExtrinsics", StringComparison.OrdinalIgnoreCase))
-        { domainKey = "calibrationBackend"; domainValue = "opencv"; }
+        { domainKey = NodeSummaryKeys.CalibrationBackend; domainValue = "opencv"; }
         else if (type.Equals("calibration.handEye2D", StringComparison.OrdinalIgnoreCase))
-        { domainKey = "calibrationBackend"; domainValue = "managed"; }
+        { domainKey = NodeSummaryKeys.CalibrationBackend; domainValue = "managed"; }
         else if (type.StartsWith("match.", StringComparison.OrdinalIgnoreCase))
         {
-            domainKey = "matchingBackend";
-            if (summary.TryGetValue("algorithmBackend", out var ab) && ab is string s &&
+            domainKey = NodeSummaryKeys.MatchingBackend;
+            if (summary.TryGetValue(NodeSummaryKeys.AlgorithmBackend, out var ab) && ab is string s &&
                 s.Equals("managed", StringComparison.OrdinalIgnoreCase))
                 domainValue = "managed";
-            else if (summary.TryGetValue("algorithmBackend", out var ob) && ob is string o &&
+            else if (summary.TryGetValue(NodeSummaryKeys.AlgorithmBackend, out var ob) && ob is string o &&
                 o.Equals("opencv", StringComparison.OrdinalIgnoreCase))
                 domainValue = "opencv";
             else

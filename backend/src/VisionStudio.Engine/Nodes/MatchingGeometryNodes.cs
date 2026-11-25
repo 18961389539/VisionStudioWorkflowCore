@@ -413,7 +413,7 @@ public sealed class PnpPoseNode : IVisionNodeExecutor
         var x = matrix[3];
         var y = matrix[7];
         var z = matrix[11];
-        var pose = new VisionTransform3D(objectFrame, cameraFrame, unit, matrix);
+        var pose = new VisionTransform3D(objectFrame, cameraFrame, unit, [.. matrix]);
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("solver", solverName), ("pointCount", objects.Length), ("unit", unit),

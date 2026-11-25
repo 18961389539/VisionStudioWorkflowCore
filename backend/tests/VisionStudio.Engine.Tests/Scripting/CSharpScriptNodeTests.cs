@@ -167,6 +167,26 @@ public sealed class CSharpScriptNodeTests
         Assert.Contains("pixels", image.Message);
     }
 
+    [Fact]
+    public async Task Script_ConcurrentSameSourceAndLruEvictionWorkReliably()
+    {
+        var sharedSource = "Output.Number = 42;";
+        var concurrentRuns = Enumerable.Range(0, 6).Select(_ => Run(sharedSource));
+        var results = await Task.WhenAll(concurrentRuns);
+        Assert.All(results, res => Assert.Equal(42d, res.Outputs["number"].Require<double>("number")));
+
+        // Compiling more than MaxCachedScripts (64) distinct scripts keeps recently used scripts valid.
+        for (var i = 0; i < 66; i++)
+        {
+            var res = await Run($"Output.Number = {i + 100};");
+            Assert.Equal((double)(i + 100), res.Outputs["number"].Require<double>("number"));
+        }
+
+        // Faulted compilation is never poisoned in the cache across retries.
+        await Assert.ThrowsAnyAsync<Exception>(() => Run("Output.Number = undefinedSymbol;"));
+        await Assert.ThrowsAnyAsync<Exception>(() => Run("Output.Number = undefinedSymbol;"));
+    }
+
     private static async Task<NodeExecutorResult> Run(
         string source,
         Dictionary<string, VisionValue>? inputs = null,

@@ -31,12 +31,12 @@ public sealed partial class VisionWorkflowCompiler
             {
                 if (sourcePort.DataType != VisionDataType.Control || targetPort.DataType != VisionDataType.Control)
                     throw new InvalidOperationException($"Control edge '{edge.Id}' must connect Control -> Control, got {sourcePort.DataType} -> {targetPort.DataType}.");
-                if (!WorkflowGraph.IsControlEdge(edge))
-                    throw new InvalidOperationException($"Edge '{edge.Id}' connects control ports but kind is not 'control'.");
+                if (string.Equals(edge.Kind, EdgeKinds.Data, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Edge '{edge.Id}' connects control ports but kind is '{edge.Kind}'.");
             }
             else
             {
-                if (WorkflowGraph.IsControlEdge(edge))
+                if (edge.IsControl)
                     throw new InvalidOperationException($"Edge '{edge.Id}' is marked control but connects {sourcePort.DataType} -> {targetPort.DataType}.");
                 if (!VisionNodeDispatcher.AreCompatible(sourcePort.DataType, targetPort.DataType))
                     throw new InvalidOperationException($"Data edge '{edge.Id}' type mismatch: {sourcePort.DataType} -> {targetPort.DataType}.");
@@ -87,7 +87,7 @@ public sealed partial class VisionWorkflowCompiler
             var registration = registry.Require(node.Type);
             var catalog = registration.Catalog;
             var connectedInputPorts = workflow.Edges
-                .Where(edge => !WorkflowGraph.IsControlEdge(edge)
+                .Where(edge => !WorkflowGraph.IsControlEdge(edge, byId, registry)
                     && edge.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase))
                 .Select(edge => edge.TargetPort)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -97,7 +97,7 @@ public sealed partial class VisionWorkflowCompiler
                     throw new InvalidOperationException($"Required input '{node.Id}.{required.Name}' ({required.DataType}) is not connected.");
             }
 
-            var roiParameterNames = BuiltInNodeCatalog.RoiParameterNames(catalog.Type, catalog.Capabilities);
+            var roiParameterNames = BuiltInNodeCatalog.RoiParameterNames(catalog);
             var roiInputConnected = catalog.Inputs.Any(input =>
                 input.Name.Equals("roi", StringComparison.OrdinalIgnoreCase)
                 && input.DataType == VisionDataType.Roi)

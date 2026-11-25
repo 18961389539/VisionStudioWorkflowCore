@@ -67,6 +67,19 @@ describe('apiClient', () => {
     await expect(apiJson<{ value: number }>('/api/value')).resolves.toEqual({ value: 7 });
   });
 
+  it('validates JSON payload with parse when provided', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ value: 'bad' }), { status: 200 })));
+
+    await expect(apiJson('/api/value', {
+      parse: (raw) => {
+        if (typeof raw !== 'object' || raw === null || typeof (raw as { value?: unknown }).value !== 'number') {
+          throw new Error('Invalid response shape');
+        }
+        return raw as { value: number };
+      }
+    })).rejects.toThrow('Invalid response shape');
+  });
+
   it('passes the caller signal through unchanged when no timeout is requested', async () => {
     let captured: AbortSignal | undefined;
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

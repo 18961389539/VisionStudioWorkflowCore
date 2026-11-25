@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isTimeoutError } from './apiClient';
+import { runTimedAbortable } from './requestTimeout';
 
 export function useProductionPoll<T>(read: (signal: AbortSignal) => Promise<T>, enabled = true, intervalMs = 5_000) {
   const [data, setData] = useState<T>();
@@ -18,34 +20,28 @@ export function useProductionPoll<T>(read: (signal: AbortSignal) => Promise<T>, 
     if (!enabled) return;
     const controller = new AbortController();
     lifecycle.current = controller;
-    let next: number | undefined;
+    let next: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
-      const request = new AbortController();
-      const abortRequest = () => request.abort();
-      controller.signal.addEventListener('abort', abortRequest, { once: true });
-      const timeout = window.setTimeout(abortRequest, 5_000);
       try {
-        const latest = await read(request.signal);
-        if (request.signal.aborted) throw new Error('读取超时');
+        const latest = await runTimedAbortable(controller.signal, 5_000, read);
+        if (controller.signal.aborted) return;
         setData(latest);
         setError(undefined);
       } catch (reason) {
         if (!controller.signal.aborted) {
-          setError(request.signal.aborted ? '读取超时' : reason instanceof Error ? reason.message : '读取失败');
+          setError(isTimeoutError(reason) ? '读取超时' : reason instanceof Error ? reason.message : '读取失败');
         }
       } finally {
-        window.clearTimeout(timeout);
-        controller.signal.removeEventListener('abort', abortRequest);
         if (!controller.signal.aborted) {
           setRefreshing(false);
-          next = window.setTimeout(() => void poll(), intervalMs);
+          next = setTimeout(() => void poll(), intervalMs);
         }
       }
     };
     void poll();
     return () => {
       controller.abort();
-      window.clearTimeout(next);
+      clearTimeout(next);
       if (lifecycle.current === controller) lifecycle.current = undefined;
     };
   }, [enabled, read, generation, intervalMs]);

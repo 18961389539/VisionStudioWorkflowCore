@@ -56,7 +56,7 @@ public static class WorkflowExecutionEndpoints
                     expanded.Workflow.Nodes.Count,
                     expanded.Workflow.Nodes.Select(x => x.Type).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException or ApiProblemException)
             {
                 return Results.BadRequest(new WorkflowValidationFailure(false, ex.Message));
             }

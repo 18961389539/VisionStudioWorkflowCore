@@ -12,6 +12,22 @@ public interface IVisionNodeDefinitionValidator
     void ValidateDefinition(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputs);
 }
 
+public static class NodeSummaryKeys
+{
+    public const string AlgorithmBackend = "algorithmBackend";
+    public const string InferenceBackend = "inferenceBackend";
+    public const string RecognitionBackend = "recognitionBackend";
+    public const string CalibrationBackend = "calibrationBackend";
+    public const string MatchingBackend = "matchingBackend";
+    public const string ScriptBackend = "scriptBackend";
+    public const string CaliperDiagnosticsAvailable = "caliperDiagnosticsAvailable";
+    public const string CaliperEdgeDiagnosticsAvailable = "caliperEdgeDiagnosticsAvailable";
+    public const string DispositionScope = "dispositionScope";
+    public const string BranchDisposition = "branchDisposition";
+    public const string ParallelDisposition = "parallelDisposition";
+    public const string BranchDispositions = "branchDispositions";
+}
+
 public sealed record NodeExecutorResult(
     IReadOnlyDictionary<string, VisionValue> Outputs,
     IReadOnlyDictionary<string, object?> Summary,

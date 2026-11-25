@@ -66,27 +66,50 @@ export const makeDefaultParameters = (item: NodeCatalogItem) =>
     .filter((parameter) => parameter.defaultValue !== undefined)
     .map((parameter) => [parameter.name, parameter.defaultValue]));
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertPortDescriptor(value: unknown, nodeType: string, direction: 'input' | 'output'): void {
+  if (!isRecord(value) || typeof value.name !== 'string' || typeof value.dataType !== 'string') {
+    throw new Error(`Catalog item '${nodeType}' has an invalid ${direction} port descriptor.`);
+  }
+}
+
+function assertParameterDescriptor(value: unknown, nodeType: string): string {
+  if (!isRecord(value) || typeof value.name !== 'string' || typeof value.label !== 'string' || typeof value.type !== 'string') {
+    throw new Error(`Catalog item '${nodeType}' has an invalid parameter descriptor.`);
+  }
+  return value.name;
+}
+
 export const validateCatalog = (value: unknown): NodeCatalogItem[] => {
   if (!Array.isArray(value) || value.length === 0) throw new Error('Catalog is empty or invalid.');
 
   const seen = new Set<string>();
-  for (const item of value as NodeCatalogItem[]) {
-    if (!item || typeof item.type !== 'string' || typeof item.displayName !== 'string' || typeof item.category !== 'string') {
+  const validated: NodeCatalogItem[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.type !== 'string' || typeof entry.displayName !== 'string' || typeof entry.category !== 'string') {
       throw new Error('Catalog item is missing identity metadata.');
     }
-    if (!Array.isArray(item.inputs) || !Array.isArray(item.outputs) || !Array.isArray(item.parameters)) {
-      throw new Error(`Catalog item '${item.type}' has invalid ports/parameters.`);
+    if (!Array.isArray(entry.inputs) || !Array.isArray(entry.outputs) || !Array.isArray(entry.parameters)) {
+      throw new Error(`Catalog item '${entry.type}' has invalid ports/parameters.`);
     }
-    const key = item.type.toLowerCase();
-    if (seen.has(key)) throw new Error(`Duplicate catalog node type '${item.type}'.`);
+    const key = entry.type.toLowerCase();
+    if (seen.has(key)) throw new Error(`Duplicate catalog node type '${entry.type}'.`);
     seen.add(key);
+
+    for (const port of entry.inputs) assertPortDescriptor(port, entry.type, 'input');
+    for (const port of entry.outputs) assertPortDescriptor(port, entry.type, 'output');
+
     const parameterNames = new Set<string>();
-    for (const parameter of item.parameters) {
-      const name = parameter.name.toLowerCase();
-      if (parameterNames.has(name)) throw new Error(`Catalog node '${item.type}' has duplicate parameter '${parameter.name}'.`);
+    for (const parameter of entry.parameters) {
+      const name = assertParameterDescriptor(parameter, entry.type).toLowerCase();
+      if (parameterNames.has(name)) throw new Error(`Catalog node '${entry.type}' has duplicate parameter '${(parameter as { name: string }).name}'.`);
       parameterNames.add(name);
     }
+    validated.push(entry as unknown as NodeCatalogItem);
   }
 
-  return value as NodeCatalogItem[];
+  return validated;
 };

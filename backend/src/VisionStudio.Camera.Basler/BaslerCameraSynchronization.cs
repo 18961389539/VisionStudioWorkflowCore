@@ -23,14 +23,11 @@ public sealed partial class BaslerPylonCameraDevice
 
             var enabled = ReadBoolAlias("PtpEnable", "GevIEEE1588") ?? false;
             var rawStatus = ReadText("PtpServoStatus") ?? ReadText("PtpStatus") ?? ReadText("GevIEEE1588StatusLatched") ?? ReadText("GevIEEE1588Status");
-            var state = MapPtpState(rawStatus, enabled);
+            var state = CameraPtpMapping.MapState(rawStatus, enabled);
             var offset = ReadLong("GevIEEE1588OffsetFromMaster") ?? ReadLong("PtpOffsetFromMaster");
             var rawTimestamp = ReadLong("TimestampLatchValue") ?? ReadLong("GevTimestampValue");
             var tickHz = ReadLong("GevTimestampTickFrequency");
-            long? timestampNs = rawTimestamp is > 0
-                ? tickHz is > 0 ? (long?)Math.Round(rawTimestamp.Value * (1_000_000_000d / tickHz.Value))
-                    : enabled ? rawTimestamp : null
-                : null;
+            var timestampNs = CameraPtpMapping.TicksToNanoseconds(rawTimestamp, tickHz, fallbackRawWhenEnabled: true, enabled: enabled);
             var master = ReadText("PtpGrandmasterClockID") ?? ReadText("GevIEEE1588ParentClockId");
             return new CameraTimeSynchronizationStatus(Id, Driver, true, enabled, state, offset, timestampNs, master, tickHz, CapturedAt: DateTimeOffset.UtcNow);
         }
@@ -39,22 +36,5 @@ public sealed partial class BaslerPylonCameraDevice
             return new CameraTimeSynchronizationStatus(Id, Driver, true, false, CameraPtpClockState.Faulted, Error: ex.Message, CapturedAt: DateTimeOffset.UtcNow);
         }
         finally { _gate.Release(); }
-    }
-
-    private static CameraPtpClockState MapPtpState(string? raw, bool enabled)
-    {
-        if (!enabled) return CameraPtpClockState.Disabled;
-        var text = raw?.Replace("_", string.Empty).Replace("-", string.Empty).Trim().ToLowerInvariant();
-        return text switch
-        {
-            "locked" => CameraPtpClockState.Locked,
-            "slave" => CameraPtpClockState.Slave,
-            "master" => CameraPtpClockState.Master,
-            "initializing" or "uncalibrated" or "premaster" => CameraPtpClockState.Initializing,
-            "listening" or "passive" => CameraPtpClockState.Listening,
-            "faulty" or "faulted" => CameraPtpClockState.Faulted,
-            "disabled" => CameraPtpClockState.Disabled,
-            _ => CameraPtpClockState.Unknown
-        };
     }
 }

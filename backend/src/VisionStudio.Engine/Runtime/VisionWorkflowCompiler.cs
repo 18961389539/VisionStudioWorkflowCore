@@ -90,19 +90,16 @@ public sealed partial class VisionWorkflowCompiler(VisionNodeRegistry registry)
         var hash = GetPlanCacheKey(workflow);
         var workflowCoreId = $"vision-{Sanitize(workflow.Id)}-{hash}";
         var context = new CompileContext(workflow.Edges);
+        var byId = workflow.Nodes.ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
 
-        var controlEdges = workflow.Edges.Where(WorkflowGraph.IsControlEdge).ToArray();
+        var controlEdges = workflow.Edges.Where(edge => WorkflowGraph.IsControlEdge(edge, byId, registry)).ToArray();
         var compiled = controlEdges.Length == 0
             ? CompileLegacyLinear(workflow, context)
             : CompileStructured(workflow, controlEdges, context);
 
-        var dsl = JsonSerializer.Serialize(new Dictionary<string, object?>
-        {
-            ["Id"] = workflowCoreId,
-            ["Version"] = 1,
-            ["DataType"] = _dataType,
-            ["Steps"] = compiled.Steps
-        }, DslJsonOptions);
+        var dsl = JsonSerializer.Serialize(
+            new WorkflowDslDocument(workflowCoreId, 1, _dataType, compiled.Steps),
+            DslJsonOptions);
 
         return new CompiledWorkflow(
             workflowCoreId,
@@ -123,9 +120,3 @@ public sealed record CompiledWorkflow(
     IReadOnlyDictionary<string, IReadOnlyList<string>> PipelineSegments,
     IReadOnlyList<StructuredControlRegion> ControlRegions,
     IReadOnlyList<CompileWarning> Warnings);
-
-/// <summary>
-/// 非致命编译提示：不改变流程结果，但用户需要知道编译产物与画布直觉不一致的地方
-/// （典型：flow.parallel 退化为顺序执行）。Warnings 是编译产物的披露，不是校验失败。
-/// </summary>
-public sealed record CompileWarning(string Code, string Message, string? NodeId = null);

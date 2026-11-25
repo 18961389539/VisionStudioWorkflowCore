@@ -97,6 +97,7 @@ export type Parity_RobotHandshakeSignals = BackendFitsFrontend<Frontend.RobotHan
 export type Parity_RobotRuntimeSettings = BackendFitsFrontend<Frontend.RobotRuntimeSettings, Normalize<Schema<'RobotRuntimeSettings'>>>;
 export type Parity_ValidationRunSummary = BackendFitsFrontend<Frontend.ValidationRunSummary, Normalize<Schema<'ValidationRunSummary'>>>;
 export type Parity_VisionOverlay = BackendFitsFrontend<Frontend.VisionOverlay, Normalize<Schema<'VisionOverlay'>>>;
+export type Parity_VisionRegionRun = BackendFitsFrontend<Frontend.VisionRegionRun, Normalize<Schema<'VisionRegionRun'>>>;
 export type Parity_VisionToolCapabilities = BackendFitsFrontend<Frontend.VisionToolCapabilities, Normalize<Schema<'VisionToolCapabilities'>>>;
 export type Parity_VisionValueSnapshot = BackendFitsFrontend<Frontend.VisionValueSnapshot, Normalize<Schema<'VisionValueSnapshot'>>>;
 export type Parity_CameraSettings = BackendFitsFrontend<Frontend.CameraSettings, Normalize<Schema<'CameraSettings'>>>;

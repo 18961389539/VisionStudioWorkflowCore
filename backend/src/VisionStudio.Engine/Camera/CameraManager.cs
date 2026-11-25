@@ -120,6 +120,8 @@ public sealed class CameraManager : IAsyncDisposable
             try { await runtime.Device.StopAsync(cancellationToken); } catch { /* 停止失败：继续关闭会话，关停路径尽力而为 */ }
             await runtime.Device.CloseAsync(cancellationToken);
             runtime.Hub.Clear();
+            if (_runtimes.Values.All(other => !other.Worker.IsRunning))
+                FrameMatPool.Trim(FrameMatPool.MaxPooledBytes / 2);
         }
         finally { runtime.LifecycleGate.Release(); }
     }

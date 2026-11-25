@@ -6,7 +6,7 @@
 没有预算就没有东西阻止它回弹。
 
 口径：
-- 扫描 `backend/src/**/*.cs` 与 `frontend/src/**/*.{ts,tsx}`；
+- 扫描 `backend/src/**/*.cs`、`frontend/src/**/*.{ts,tsx}` 以及治理脚本（`scripts/**/*.{py,ps1,sh}`、`frontend/scripts/**/*.mjs`）；
 - 跳过生成物、测试、i18n 词表（词表长度随节点数线性增长，按行数设限只会制造噪音）；
 - 未列入 budgets 的文件不得超过 `defaultMaxLines`；
 - 已列入 budgets 的文件不得超过记录值（只许降）；
@@ -30,7 +30,15 @@ SKIP_PARTS = {"obj", "bin", "node_modules", "generated", "i18n", "__tests__", "e
 
 def iter_sources() -> list[pathlib.Path]:
     files: list[pathlib.Path] = []
-    for pattern in ("backend/src/**/*.cs", "frontend/src/**/*.ts", "frontend/src/**/*.tsx"):
+    for pattern in (
+        "backend/src/**/*.cs",
+        "frontend/src/**/*.ts",
+        "frontend/src/**/*.tsx",
+        "scripts/**/*.py",
+        "scripts/**/*.ps1",
+        "scripts/**/*.sh",
+        "frontend/scripts/**/*.mjs",
+    ):
         for path in ROOT.glob(pattern):
             if not path.is_file():
                 continue

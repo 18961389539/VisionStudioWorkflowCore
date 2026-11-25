@@ -4,18 +4,17 @@
  */
 import { lazy } from 'react';
 import { message } from 'antd';
-import ErrorBoundary from './ErrorBoundary';
-import CameraPanel from './CameraPanel';
-import RobotPanel from './RobotPanel';
-import DevicePanel from './DevicePanel';
-import ProductionPanel from './ProductionPanel';
-import DiagnosticsPanel from './DiagnosticsPanel';
 import { LazyPanel } from '../appEditorShared';
 import type { NodeCatalogItem, RunResult, WorkflowModuleVersion, WorkflowPayload } from '../types';
 import type { useWorkflowChanges } from '../useWorkflowChanges';
 
 type MessageApi = ReturnType<typeof message.useMessage>[0];
 
+const CameraPanel = lazy(() => import('./CameraPanel'));
+const RobotPanel = lazy(() => import('./RobotPanel'));
+const DevicePanel = lazy(() => import('./DevicePanel'));
+const ProductionPanel = lazy(() => import('./ProductionPanel'));
+const DiagnosticsPanel = lazy(() => import('./DiagnosticsPanel'));
 const JobPanel = lazy(() => import('./JobPanel'));
 const TracePanel = lazy(() => import('./TracePanel'));
 const DatasetValidationPanel = lazy(() => import('./DatasetValidationPanel'));
@@ -96,15 +95,9 @@ export default function EditorPanels({
 }: EditorPanelsProps) {
   return (
     <>
-      <ErrorBoundary variant="panel" scope="相机" onDismiss={() => setCamerasOpen(false)}>
-        <CameraPanel open={camerasOpen} onClose={() => setCamerasOpen(false)} />
-      </ErrorBoundary>
-      <ErrorBoundary variant="panel" scope="机器人" onDismiss={() => setRobotsOpen(false)}>
-        <RobotPanel open={robotsOpen} onClose={() => setRobotsOpen(false)} />
-      </ErrorBoundary>
-      <ErrorBoundary variant="panel" scope="设备" onDismiss={() => setDevicesOpen(false)}>
-        <DevicePanel open={devicesOpen} onClose={() => setDevicesOpen(false)} />
-      </ErrorBoundary>
+      <LazyPanel open={camerasOpen} label="相机" onClose={() => setCamerasOpen(false)}><CameraPanel open onClose={() => setCamerasOpen(false)} /></LazyPanel>
+      <LazyPanel open={robotsOpen} label="机器人" onClose={() => setRobotsOpen(false)}><RobotPanel open onClose={() => setRobotsOpen(false)} /></LazyPanel>
+      <LazyPanel open={devicesOpen} label="设备" onClose={() => setDevicesOpen(false)}><DevicePanel open onClose={() => setDevicesOpen(false)} /></LazyPanel>
       <LazyPanel open={framesOpen} label="图像帧" onClose={() => setFramesOpen(false)}><FrameTreePanel open onClose={() => setFramesOpen(false)} /></LazyPanel>
       <LazyPanel open={calibrationOpen} label="标定" onClose={() => setCalibrationOpen(false)}><CalibrationPanel
         open
@@ -122,13 +115,9 @@ export default function EditorPanels({
       <LazyPanel open={validationOpen} label="数据集验证" onClose={() => setValidationOpen(false)}><DatasetValidationPanel open onClose={() => setValidationOpen(false)} currentWorkflow={workflowPayload} /></LazyPanel>
       <LazyPanel open={tuningOpen} label="参数调优" onClose={() => setTuningOpen(false)}><ParameterTuningPanel open onClose={() => setTuningOpen(false)} currentWorkflow={workflowPayload} catalog={catalog} initialNodeId={selectedId} prepareWorkflowChange={workflowChanges.prepare} onApplied={() => { setTuningOpen(false); messageApi.success('已将调优后的候选方案应用到设计器'); }} /></LazyPanel>
       <LazyPanel open={modulesOpen} label="流程模块" onClose={() => setModulesOpen(false)}><WorkflowModulePanel open onClose={() => setModulesOpen(false)} currentWorkflow={workflowPayload} selectedNodeId={selectedId} selectedNodeType={String(selectedNode?.data.typeKey ?? '')} prepareWorkflowChange={workflowChanges.prepare} onInsertModule={insertModule} onUpgradeSelected={upgradeSelectedModule} /></LazyPanel>
-      <ErrorBoundary variant="panel" scope="生产运行" onDismiss={() => setProductionOpen(false)}>
-        <ProductionPanel open={productionOpen} onClose={() => setProductionOpen(false)} />
-      </ErrorBoundary>
+      <LazyPanel open={productionOpen} label="生产运行" onClose={() => setProductionOpen(false)}><ProductionPanel open onClose={() => setProductionOpen(false)} /></LazyPanel>
       <LazyPanel open={spcOpen} label="SPC 看板" onClose={() => setSpcOpen(false)}><SpcDashboard open onClose={() => setSpcOpen(false)} /></LazyPanel>
-      <ErrorBoundary variant="panel" scope="诊断" onDismiss={() => setDiagnosticsOpen(false)}>
-        <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
-      </ErrorBoundary>
+      <LazyPanel open={diagnosticsOpen} label="诊断" onClose={() => setDiagnosticsOpen(false)}><DiagnosticsPanel open onClose={() => setDiagnosticsOpen(false)} /></LazyPanel>
       <LazyPanel open={aboutOpen} label="关于" onClose={() => setAboutOpen(false)}><AboutPanel open onClose={() => setAboutOpen(false)} /></LazyPanel>
       <LazyPanel open={hardwareProvenanceOpen} label="硬件溯源" onClose={() => setHardwareProvenanceOpen(false)}><HardwareProvenancePanel open onClose={() => setHardwareProvenanceOpen(false)} /></LazyPanel>
       <LazyPanel open={pluginsOpen} label="插件包" onClose={() => setPluginsOpen(false)}><PluginPackagePanel open onClose={() => setPluginsOpen(false)} onCatalogRefresh={refreshCatalog} /></LazyPanel>

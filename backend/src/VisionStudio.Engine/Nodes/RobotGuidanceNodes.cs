@@ -1,7 +1,6 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using VisionStudio.Engine.Runtime;
 namespace VisionStudio.Engine.Nodes;
-public sealed record FrameTransformDefinition(string SourceFrame,string TargetFrame,string Unit,double X,double Y,double AngleDeg);
 public sealed class ConstantTransformNode : IVisionNodeExecutor
 {
     public string Type => "coordinate.transformConstant";

@@ -346,6 +346,9 @@ public sealed class VisionNodeRegistry : IDisposable
         return released;
     }
 
+    public bool TryGet(string type, out VisionNodeRegistration registration) =>
+        _nodes.TryGetValue(type, out registration!);
+
     public VisionNodeRegistration Require(string type) =>
         _nodes.TryGetValue(type, out var value)
             ? value

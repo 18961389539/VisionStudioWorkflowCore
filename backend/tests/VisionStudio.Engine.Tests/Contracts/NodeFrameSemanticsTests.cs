@@ -149,6 +149,34 @@ public sealed class NodeFrameSemanticsTests
         return (result, source);
     }
 
+    [Fact]
+    public void ResolveTransformFrames_CoversSpatialRoiAndReferencePolicies()
+    {
+        var spatial = NodeFrameSemantics.ResolveTransformFrames(
+            "n1",
+            new NodeFrameRule(NodeImageFramePolicy.NewSpatialFrame, Transform: NodeTransformFramePolicy.Spatial),
+            _ => "cam-frame",
+            _ => null,
+            "image:n1:spatial");
+        Assert.Equal(new NodeFrameSemantics.TransformFrameEndpoints("cam-frame", "image:n1:spatial"), spatial);
+
+        var roiRef = NodeFrameSemantics.ResolveTransformFrames(
+            "n2",
+            new NodeFrameRule(NodeImageFramePolicy.PreserveInput, Transform: NodeTransformFramePolicy.RoiReference),
+            _ => null,
+            _ => null,
+            null);
+        Assert.Equal(new NodeFrameSemantics.TransformFrameEndpoints("roi:n2:reference", "CurrentImage"), roiRef);
+
+        var reference = NodeFrameSemantics.ResolveTransformFrames(
+            "n3",
+            new NodeFrameRule(NodeImageFramePolicy.PreserveInput, Transform: NodeTransformFramePolicy.ReferenceInput, ReferencePort: "ref"),
+            _ => "src-frame",
+            port => port == "ref" ? "ref-frame" : null,
+            null);
+        Assert.Equal(new NodeFrameSemantics.TransformFrameEndpoints("src-frame", "ref-frame"), reference);
+    }
+
     private static NodeCatalogItem SpatialCatalog(string type, IReadOnlyList<NodeFrameRule>? frames)
         => new(
             type,

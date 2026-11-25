@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AlarmRecord, ContractDto, ProductionRuntimeConfig, ProductionRuntimeStatus } from './types';
 import { responseErrorMessage } from './apiErrors';
 import { isProductionConfig, isProductionStatus } from './productionConfig';
-import { apiFetch } from './apiClient';
+import { apiFetch, isTimeoutError } from './apiClient';
+import { withRequestTimeout } from './requestTimeout';
 import { alarms as alarmsEndpoint, apiUrl, production, type AlarmFilter } from './endpoints';
 import { useMonitorSnapshot } from './useMonitorStream';
 
@@ -34,7 +35,7 @@ const endpoints: Record<Resource, { url: string; label: string }> = {
   pending: { url: apiUrl('production/device-actions/pending'), label: '待核对动作清单' },
 };
 const resources = Object.keys(endpoints) as Resource[];
-type Request = { controller: AbortController; timeout: ReturnType<typeof setTimeout>; refreshPending: boolean };
+type Request = { controller: AbortController; refreshPending: boolean };
 function endpointUrl(resource: Resource, scopedStationId?: string): string {
   if (!scopedStationId) return endpoints[resource].url;
   switch (resource) {
@@ -90,7 +91,6 @@ export function useProductionMonitor(open: boolean, canReadPending = true, stati
     const pending = requests.current.get(resource);
     if (!pending) return;
     requests.current.delete(resource);
-    clearTimeout(pending.timeout);
     pending.controller.abort();
   }, []);
 
@@ -135,53 +135,50 @@ export function useProductionMonitor(open: boolean, canReadPending = true, stati
       if (request.refreshPending) readResource(resource);
       else if (resource === 'alarms') setAlarmsLoading(false);
     };
-    const request: Request = {
-      controller,
-      refreshPending: false,
-      timeout: setTimeout(() => {
-        if (!owns()) return;
-        controller.abort();
-        if (mayReportError()) setErrors((previous) => ({ ...previous, [resource]: `${label}读取超时（5 秒），正在重试。` }));
-        finish();
-      }, 5000),
-    };
+    const request: Request = { controller, refreshPending: false };
     requests.current.set(resource, request);
     void (async () => {
       try {
-        const response = await apiFetch(resource === 'alarms'
-          ? alarmsEndpoint.page(skip, ALARM_PAGE_SIZE, filter, scopedStationId)
-          : url, { signal: controller.signal });
-        if (!owns() || controller.signal.aborted) return;
-        if (resource === 'pending' && response.status === 204) { accept(resource, undefined); return; }
-        if (!response.ok) throw new Error(await responseErrorMessage(response, `${label}读取失败（HTTP ${response.status}）`));
-        let data: unknown = await response.json();
-        if (!owns() || controller.signal.aborted) return;
-        if ((resource === 'config' && !isProductionConfig(data)) || (resource === 'status' && !isProductionStatus(data))
-          || ((resource === 'jobs' || resource === 'alarms') && !validList(data, resource))
-          || (resource === 'alarmSummary' && !validAlarmSummary(data))
-          || (resource === 'pending' && !validPending(data))) {
-          throw new Error(`${label}响应无效。`);
-        }
-        if (resource === 'alarms') {
-          const rawTotal = response.headers.get('X-Total-Count');
-          const total = rawTotal && /^\d+$/.test(rawTotal) ? Number(rawTotal) : NaN;
-          if (!isCount(total) || total < (data as AlarmRecord[]).length) throw new Error(`${label}分页总数无效。`);
-          const lastPage = Math.max(1, Math.ceil(total / ALARM_PAGE_SIZE));
-          if (page > lastPage) {
-            alarmQueryRef.current = { page: lastPage, filter };
-            setAlarmQuery(alarmQueryRef.current);
-            setAlarmsLoading(true);
-            request.refreshPending = true;
+        await withRequestTimeout(controller, 5_000, async () => {
+          const response = await apiFetch(resource === 'alarms'
+            ? alarmsEndpoint.page(skip, ALARM_PAGE_SIZE, filter, scopedStationId)
+            : url, { signal: controller.signal });
+          if (!owns() || controller.signal.aborted) return;
+          if (resource === 'pending' && response.status === 204) { accept(resource, undefined); return; }
+          if (!response.ok) throw new Error(await responseErrorMessage(response, `${label}读取失败（HTTP ${response.status}）`));
+          let data: unknown = await response.json();
+          if (!owns() || controller.signal.aborted) return;
+          if ((resource === 'config' && !isProductionConfig(data)) || (resource === 'status' && !isProductionStatus(data))
+            || ((resource === 'jobs' || resource === 'alarms') && !validList(data, resource))
+            || (resource === 'alarmSummary' && !validAlarmSummary(data))
+            || (resource === 'pending' && !validPending(data))) {
+            throw new Error(`${label}响应无效。`);
           }
-          data = { items: data, total };
-        }
-        const revision = resource === 'config' ? response.headers.get('ETag') : undefined;
-        if (resource === 'config' && !revision) throw new Error('生产配置响应缺少修订号。');
-        accept(resource, data, revision ?? undefined);
+          if (resource === 'alarms') {
+            const rawTotal = response.headers.get('X-Total-Count');
+            const total = rawTotal && /^\d+$/.test(rawTotal) ? Number(rawTotal) : NaN;
+            if (!isCount(total) || total < (data as AlarmRecord[]).length) throw new Error(`${label}分页总数无效。`);
+            const lastPage = Math.max(1, Math.ceil(total / ALARM_PAGE_SIZE));
+            if (page > lastPage) {
+              alarmQueryRef.current = { page: lastPage, filter };
+              setAlarmQuery(alarmQueryRef.current);
+              setAlarmsLoading(true);
+              request.refreshPending = true;
+            }
+            data = { items: data, total };
+          }
+          const revision = resource === 'config' ? response.headers.get('ETag') : undefined;
+          if (resource === 'config' && !revision) throw new Error('生产配置响应缺少修订号。');
+          accept(resource, data, revision ?? undefined);
+        });
       } catch (reason) {
-        if (owns() && mayReportError()) setErrors((previous) => ({ ...previous, [resource]: reason instanceof Error ? reason.message : `${label}读取失败` }));
+        if (owns() && mayReportError()) {
+          const errorMessage = isTimeoutError(reason)
+            ? `${label}读取超时（5 秒），正在重试。`
+            : reason instanceof Error ? reason.message : `${label}读取失败`;
+          setErrors((previous) => ({ ...previous, [resource]: errorMessage }));
+        }
       } finally {
-        clearTimeout(request.timeout);
         // 关闭/重开和写入确认会让旧请求失效；旧 finally 不能释放新请求的所有权。
         finish();
       }
@@ -234,7 +231,7 @@ export function useProductionMonitor(open: boolean, canReadPending = true, stati
     return () => {
       active.current = false;
       clearInterval(timer);
-      for (const request of requests.current.values()) { clearTimeout(request.timeout); request.controller.abort(); }
+      for (const request of requests.current.values()) { request.controller.abort(); }
       requests.current.clear();
     };
   }, [open, refresh]);

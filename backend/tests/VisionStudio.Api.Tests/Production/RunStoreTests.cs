@@ -105,6 +105,34 @@ public sealed class RunStoreTests
         Assert.Equal(0, OrderEntryCount(store));
     }
 
+    [Fact]
+    public async Task ConcurrentPutAndTryGet_RemainConsistent()
+    {
+        var store = new RunStore(maxRetainedRuns: 16, maxTotalBytes: 64 * 1024);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var writers = Enumerable.Range(0, 4).Select(w => Task.Run(() =>
+        {
+            for (var i = 0; i < 200; i++)
+            {
+                var id = $"run-{(w * 200 + i) % 32}";
+                store.Put(Result(id, 512));
+            }
+        }, cts.Token));
+
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            for (var i = 0; i < 400; i++)
+            {
+                if (store.TryGet($"run-{i % 32}", out var artifact))
+                    Assert.NotNull(artifact);
+            }
+        }, cts.Token));
+
+        await Task.WhenAll(writers.Concat(readers));
+        Assert.InRange(OrderEntryCount(store), 1, 16);
+    }
+
     /// <summary>顺序队列长度（内部实现细节）：应恒等于缓存条数，覆盖/驱逐后不得有残留过期项。</summary>
     private static int OrderEntryCount(RunStore store)
     {

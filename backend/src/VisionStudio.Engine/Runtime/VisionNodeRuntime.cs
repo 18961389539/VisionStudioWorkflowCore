@@ -65,21 +65,21 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             // Prefer the executor's own algorithmBackend (e.g. managed chamfer, opencv fisheye, hybrid).
             // Only fill from BackendFor when the node left it unset. Also stamp domain backend keys when missing.
             var reportSummary = result.Summary;
-            if (!reportSummary.ContainsKey("algorithmBackend") &&
+            if (!reportSummary.ContainsKey(NodeSummaryKeys.AlgorithmBackend) &&
                 Algorithms.VisionAlgorithmRuntime.BackendFor(node.Type) is { } algorithmBackend)
             {
-                reportSummary = new Dictionary<string, object?>(reportSummary) { ["algorithmBackend"] = algorithmBackend };
+                reportSummary = new Dictionary<string, object?>(reportSummary) { [NodeSummaryKeys.AlgorithmBackend] = algorithmBackend };
             }
             reportSummary = Algorithms.VisionAlgorithmRuntime.EnsureDomainBackendLabels(node.Type, reportSummary);
             if (caliperDiagnostic is not null)
                 reportSummary = new Dictionary<string, object?>(reportSummary)
                 {
-                    ["caliperDiagnosticsAvailable"] = data.CaptureCaliperDiagnostic(node.Id, observation.Sequence, caliperDiagnostic)
+                    [NodeSummaryKeys.CaliperDiagnosticsAvailable] = data.CaptureCaliperDiagnostic(node.Id, observation.Sequence, caliperDiagnostic)
                 };
             if (caliperEdgeDiagnostic is not null)
                 reportSummary = new Dictionary<string, object?>(reportSummary)
                 {
-                    ["caliperEdgeDiagnosticsAvailable"] = data.CaptureCaliperEdgeDiagnostic(node.Id, observation.Sequence, caliperEdgeDiagnostic)
+                    [NodeSummaryKeys.CaliperEdgeDiagnosticsAvailable] = data.CaptureCaliperEdgeDiagnostic(node.Id, observation.Sequence, caliperEdgeDiagnostic)
                 };
 
             if (FlowSemantics.IsConditional(node.Type) &&
@@ -119,10 +119,10 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
                 var contribution = data.RecordDisposition(node.Id, qualityDisposition);
                 if (contribution.ScopedToBranch)
                 {
-                    reportSummary = new Dictionary<string, object?>(result.Summary)
+                    reportSummary = new Dictionary<string, object?>(reportSummary)
                     {
-                        ["dispositionScope"] = $"{contribution.RegionId}.{contribution.BranchName}",
-                        ["branchDisposition"] = contribution.BranchDisposition
+                        [NodeSummaryKeys.DispositionScope] = $"{contribution.RegionId}.{contribution.BranchName}",
+                        [NodeSummaryKeys.BranchDisposition] = contribution.BranchDisposition
                     };
                 }
             }
@@ -132,10 +132,10 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
                 var aggregation = data.ApplyParallelJoin(node.Id);
                 if (aggregation?.Aggregate is { } parallelDisposition)
                 {
-                    reportSummary = new Dictionary<string, object?>(result.Summary)
+                    reportSummary = new Dictionary<string, object?>(reportSummary)
                     {
-                        ["parallelDisposition"] = parallelDisposition,
-                        ["branchDispositions"] = aggregation.BranchDispositions
+                        [NodeSummaryKeys.ParallelDisposition] = parallelDisposition,
+                        [NodeSummaryKeys.BranchDispositions] = aggregation.BranchDispositions
                     };
                 }
             }

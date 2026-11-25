@@ -109,13 +109,6 @@ internal sealed record StructuredSequenceIr(IReadOnlyList<StructuredIrItem> Item
     public IReadOnlyList<string> NodeIds => Items.SelectMany(x => x.NodeIds).ToArray();
 }
 
-public sealed record StructuredControlRegion(
-    string ControlNodeId,
-    string Kind,
-    string JoinNodeId,
-    int Depth,
-    IReadOnlyDictionary<string, IReadOnlyList<string>> BranchNodeIds);
-
 internal sealed record StructuredWorkflowIr(
     StructuredSequenceIr Root,
     IReadOnlyList<string> VisualOrder,

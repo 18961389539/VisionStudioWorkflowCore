@@ -24,7 +24,7 @@ internal sealed partial class ProductionStationRuntime
     private readonly DeviceLeaseRegistry _leases;
     private readonly ILogger _logger;
     private readonly ProductionTraceOptions _traceOptions;
-    private readonly DeviceActionSafetyStore? _safetyStore;
+    private readonly ProductionStationSafetyCoordinator _safetyCoordinator;
     private readonly ProductionSafetyLedgerRegistry? _safetyLedgers;
     /// <summary>R01：统一动作授权——生产启动必须同时检查其它入口（手动/临时运行）登记的意图。</summary>
     private readonly DeviceActionAuthorizationService? _authorization;
@@ -69,26 +69,6 @@ internal sealed partial class ProductionStationRuntime
     private int _recoveryAttempts;
     /// <summary>锁定快照的工作流是否含设备（PLC/机器人）副作用：含副作用时禁止自动恢复重跑。</summary>
     private bool _hasDeviceSideEffects;
-    /// <summary>
-    /// 副作用流程运行期间保留的动作意图：只有动作完成被协议确认且对应追溯已持久提交，或管理员
-    /// 提交可审计的现场核对证据后才清除。该标记独立于 Faulted 状态与循环生命周期——Stop 不会清除它，因此
-    /// "Stop → Start" 无法绕过核对，重启后的自动启动同样受其约束。
-    /// </summary>
-    private bool _deviceActionStateUnknown;
-    /// <summary>置位未知标记时锁定的依赖清单哈希，用于重启后仍能核对同一批设备。</summary>
-    private string? _unknownActionManifestHash;
-    private string? _unknownActionRunId;
-    private DeviceActionSafetyPhase _unknownActionPhase = DeviceActionSafetyPhase.Unknown;
-    /// <summary>F02：故障时锁定的设备/机器人 ID 清单——核对必须针对它，而不是新发布流程的清单。</summary>
-    private string[] _unknownActionDeviceIds = [];
-    private string[] _unknownActionRobotIds = [];
-    /// <summary>R02（2026-10-11 复审）：动作时锁定的相机 ID 清单——相机动作纳入同一核对契约。</summary>
-    private string[] _unknownActionCameraIds = [];
-    /// <summary>Q02：登记动作时的设备身份指纹（driver|protocol|endpoint），核对时检测设备替换漂移。</summary>
-    private IReadOnlyDictionary<string, string> _unknownActionDeviceFingerprints =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    /// <summary>F01：持久化状态不可读（损坏）——无法核对，必须人工处理后才能启动。</summary>
-    private bool _unknownActionUnverifiable;
     private ProductionPtpGuardSnapshot _ptpGuardStatus = ProductionPtpGuardSnapshot.Disabled;
     private ProductionSynchronizationGuardSnapshot _synchronizationGuardStatus = ProductionSynchronizationGuardSnapshot.Disabled;
     private int _synchronizationGuardUnhealthyChecks;
@@ -96,75 +76,38 @@ internal sealed partial class ProductionStationRuntime
 
     public ProductionStationRuntime(
         string stationId,
-        JobStore jobs,
-        IVisionWorkflowRunner runner,
-        TraceabilityStore traces,
-        RunStore runs,
+        ProductionStationSharedServices shared,
         ProductionRuntimeConfigStore configStore,
-        AlarmStore alarms,
-        RuntimeDependencyManifestService dependencies,
-        StorageCapacityService storageCapacity,
-        ProductionPtpDriftGuardService ptpGuard,
-        ProductionSynchronizationHealthGuardService synchronizationGuard,
-        DeviceLeaseRegistry leases,
-        ILogger logger,
-        Microsoft.Extensions.Options.IOptions<ProductionTraceOptions>? traceOptions = null,
         DeviceActionSafetyStore? safetyStore = null,
-        WorkflowModuleExpander? moduleExpander = null,
-        DeviceActionAuthorizationService? authorization = null,
-        VisionNodeRegistry? nodes = null,
-        RuntimeWorkloadGate? workloads = null,
-        SemaphoreSlim? executionSlotGate = null,
-        Action<ProductionStationResultSnapshot>? onCycleCompleted = null,
-        ProductionSafetyLedgerRegistry? safetyLedgers = null,
         ProductionTriggerQueue? triggerQueue = null)
     {
         _stationId = ProductionRuntimeStationIds.Normalize(stationId);
         var isDefault = ProductionRuntimeStationIds.IsDefault(_stationId);
         _alarmSource = isDefault ? "ProductionRuntime" : $"ProductionRuntime:{_stationId}";
         _traceSource = isDefault ? "ProductionRuntime" : $"ProductionRuntime:{_stationId}";
-        _jobs = jobs;
-        _runner = runner;
-        _traces = traces;
-        _runs = runs;
+        _jobs = shared.Jobs;
+        _runner = shared.Runner;
+        _traces = shared.Traces;
+        _runs = shared.Runs;
         _configStore = configStore;
-        _alarms = alarms;
-        _dependencies = dependencies;
-        _storageCapacity = storageCapacity;
-        _ptpGuard = ptpGuard;
-        _synchronizationGuard = synchronizationGuard;
-        _leases = leases;
-        _logger = logger;
-        _traceOptions = traceOptions?.Value ?? new ProductionTraceOptions();
-        _safetyStore = safetyStore;
-        _safetyLedgers = safetyLedgers;
-        _authorization = authorization;
-        _moduleExpander = moduleExpander;
-        _nodes = nodes;
-        _workloads = workloads ?? new RuntimeWorkloadGate();
-        _executionSlotGate = executionSlotGate;
-        _onCycleCompleted = onCycleCompleted;
+        _alarms = shared.Alarms;
+        _dependencies = shared.Dependencies;
+        _storageCapacity = shared.StorageCapacity;
+        _ptpGuard = shared.PtpGuard;
+        _synchronizationGuard = shared.SynchronizationGuard;
+        _leases = shared.Leases;
+        _logger = shared.Logger;
+        _traceOptions = shared.TraceOptions;
+        _safetyCoordinator = new ProductionStationSafetyCoordinator(safetyStore, _dependencies, _logger);
+        _safetyLedgers = shared.SafetyLedgers;
+        _authorization = shared.Authorization;
+        _moduleExpander = shared.ModuleExpander;
+        _nodes = shared.Nodes;
+        _workloads = shared.Workloads;
+        _executionSlotGate = shared.ExecutionSlotGate;
+        _onCycleCompleted = shared.OnCycleCompleted;
         _triggerQueue = triggerQueue;
-        if (safetyStore is not null) safetyLedgers?.Register(_stationId, safetyStore);
-
-        // F01：加载持久化的"设备动作不确定"状态——重启后标记与锁定清单必须复现，
-        // 否则自动/人工启动都会跳过设备核对。文件损坏时按"不可核对"处理（保守拒绝启动）。
-        if (safetyStore?.Load() is { } persisted)
-        {
-            _deviceActionStateUnknown = true;
-            _unknownActionManifestHash = persisted.ManifestHash;
-            _unknownActionRunId = persisted.RunId;
-            _unknownActionPhase = persisted.Phase;
-            _unknownActionDeviceIds = persisted.DeviceIds.ToArray();
-            _unknownActionRobotIds = persisted.RobotIds.ToArray();
-            _unknownActionCameraIds = persisted.CameraIds?.ToArray() ?? [];
-            _unknownActionDeviceFingerprints = persisted.DeviceFingerprints ??
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            _unknownActionUnverifiable = persisted.Unreadable;
-            _logger.LogWarning(
-                "Persisted device-action safety state loaded (set {SetAt}, phase {Phase}, unreadable={Unreadable}): {Reason}. Production start requires device verification.",
-                persisted.SetAt, persisted.Phase, persisted.Unreadable, persisted.Reason);
-        }
+        if (safetyStore is not null) _safetyLedgers?.Register(_stationId, safetyStore);
     }
 
     public ProductionRuntimeStatus Status
@@ -211,27 +154,7 @@ internal sealed partial class ProductionStationRuntime
     public Task<ProductionRuntimeConfig> GetConfigAsync(CancellationToken ct) => _configStore.GetAsync(ct);
 
     public ProductionDeviceActionPendingState? DeviceActionResolutionState
-    {
-        get
-        {
-            lock (_stateSync)
-            {
-                if (!_deviceActionStateUnknown) return null;
-                var persisted = _safetyStore?.Load();
-                return new ProductionDeviceActionPendingState(
-                    _unknownActionRunId,
-                    _unknownActionManifestHash,
-                    _unknownActionDeviceIds,
-                    _unknownActionRobotIds,
-                    _unknownActionDeviceFingerprints,
-                    _unknownActionPhase,
-                    persisted?.SetAt,
-                    persisted?.Reason,
-                    _unknownActionUnverifiable || persisted?.Unreadable == true,
-                    _unknownActionCameraIds);
-            }
-        }
-    }
+        => _safetyCoordinator.ResolutionState;
 
     public async Task<ProductionRuntimeConfig> UpdateConfigAsync(ProductionRuntimeConfig config, CancellationToken ct, string? expectedRevision = null)
     {
@@ -408,11 +331,8 @@ internal sealed partial class ProductionStationRuntime
         {
             if (Status.State != ProductionRuntimeState.Stopped || _loopTask is { IsCompleted: false })
                 throw new ApiConflictException($"Stop station '{_stationId}' before removing it.");
-            lock (_stateSync)
-            {
-                if (_deviceActionStateUnknown)
-                    throw new ApiConflictException($"Station '{_stationId}' has unresolved device actions; resolve them before removing the station.");
-            }
+            if (_safetyCoordinator.HasUnresolvedActions)
+                throw new ApiConflictException($"Station '{_stationId}' has unresolved device actions; resolve them before removing the station.");
             await _configStore.DeleteAsync(ct);
         }
         finally
