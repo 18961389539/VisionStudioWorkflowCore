@@ -153,36 +153,15 @@ internal static partial class CSharpScriptRunner
             diagnostics.Add(new ScriptDiagnostic(1, 1, "Warning", "SC003",
                 "Script does not set Output, return a value, or call Fail; executing it will fail with E_OUTPUT."));
 
+        if (!diagnostics.Any(item => item.Severity.Equals("Error", StringComparison.OrdinalIgnoreCase)))
+            AddMatDisposalWarnings(tree.GetRoot(cancellationToken), diagnostics);
+
         return new ScriptValidationResult(diagnostics
             .GroupBy(item => (item.Line, item.Column, item.Code, item.Message))
             .Select(group => group.First())
             .OrderBy(item => item.Line).ThenBy(item => item.Column)
             .ToArray());
     }
-
-    private static ScriptDiagnostic ParseForbiddenDiagnostic(string error)
-    {
-        var split = error.IndexOf(' ');
-        var location = split > 0 ? error[..split] : "1:1";
-        var message = split > 0 ? error[(split + 1)..] : error;
-        var parts = location.Split(':');
-        var line = parts.Length > 0 && int.TryParse(parts[0], out var parsedLine) ? parsedLine : 1;
-        var column = parts.Length > 1 && int.TryParse(parts[1], out var parsedColumn) ? parsedColumn : 1;
-        return new ScriptDiagnostic(line, column, "Error", "SC004", message);
-    }
-
-    private static void AddDiagnostic(List<ScriptDiagnostic> diagnostics, Diagnostic diagnostic)
-    {
-        if (diagnostic.Severity is not (DiagnosticSeverity.Error or DiagnosticSeverity.Warning)) return;
-        var span = diagnostic.Location.GetLineSpan();
-        diagnostics.Add(new ScriptDiagnostic(
-            span.StartLinePosition.Line + 1,
-            span.StartLinePosition.Character + 1,
-            diagnostic.Severity.ToString(),
-            diagnostic.Id,
-            diagnostic.GetMessage()));
-    }
-
 
     private static ScriptExecutionResult BuildResult(
         object? result,

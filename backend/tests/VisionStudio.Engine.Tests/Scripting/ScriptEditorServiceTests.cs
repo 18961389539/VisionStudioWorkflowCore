@@ -223,4 +223,16 @@ public sealed class ScriptEditorServiceTests
             }
         }
     }
+
+    [Fact]
+    public void Validate_WarnsOnUndisposedMat_AndAcceptsUsingStatement()
+    {
+        var leaked = ScriptEditorService.Validate("var leak = new Mat();\nOutput.Image = leak;");
+        Assert.True(leaked.Valid);
+        Assert.Contains(leaked.Diagnostics, item => item.Code == "SC005" && item.Severity == "Warning" && item.Message.Contains("leak"));
+
+        var safe = ScriptEditorService.Validate("using (var gray = new Mat())\n{\n    Output.Image = gray;\n}");
+        Assert.True(safe.Valid);
+        Assert.DoesNotContain(safe.Diagnostics, item => item.Code == "SC005");
+    }
 }
