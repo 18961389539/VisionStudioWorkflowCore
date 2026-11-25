@@ -45,6 +45,9 @@ public sealed class VisionLoopStep : StepBodyAsync
         {
             case "begin":
                 data.PublishLoopIteration(LoopNodeId, data.GetLoopCounter(LoopNodeId), data.GetLoopTotal(LoopNodeId));
+                if (Kind.Equals("while", StringComparison.OrdinalIgnoreCase) &&
+                    data.RequireNode(LoopNodeId).GetBool("requireFreshCondition", false))
+                    data.BeginLoopConditionSample(LoopNodeId, SourceNodeId);
                 return Task.FromResult(ExecutionResult.Next());
 
             case "break":
@@ -55,15 +58,48 @@ public sealed class VisionLoopStep : StepBodyAsync
                 var iterations = data.IncrementLoopCounter(LoopNodeId);
                 var budget = data.GetLoopTotal(LoopNodeId);
                 bool condition;
+                string? exitReason = null;
+                var broken = data.IsLoopBroken(LoopNodeId);
                 if (Kind.Equals("repeat", StringComparison.OrdinalIgnoreCase))
                 {
                     condition = iterations < budget;
+                    if (broken) exitReason = "break";
+                    else if (!condition) exitReason = "completed";
                 }
                 else
                 {
-                    condition = SampleCondition(data) && (budget <= 0 || iterations < budget);
+                    var requireFresh = data.RequireNode(LoopNodeId).GetBool("requireFreshCondition", false);
+                    if (broken && requireFresh)
+                    {
+                        condition = false;
+                        exitReason = "break";
+                    }
+                    else
+                    {
+                        if (requireFresh && !data.WasLoopConditionSourceExecuted(LoopNodeId, SourceNodeId))
+                        {
+                            var error = new InvalidOperationException(
+                                $"flow.while '{LoopNodeId}' condition source '{SourceNodeId}.{SourcePort}' did not execute in this iteration.");
+                            data.Error = $"{LoopNodeId}: {error.Message}";
+                            data.LastFaultedNodeId = LoopNodeId;
+                            data.FaultedNodeId ??= LoopNodeId;
+                            data.FaultedException ??= error;
+                            var observation = data.BeginNodeObservation();
+                            data.AddReport(new NodeRunReport(LoopNodeId, "flow.while", false, 0,
+                                new Dictionary<string, object?> { ["iteration"] = iterations }, error.Message,
+                                data.CurrentPhase, ExecutionSequence: observation.Sequence,
+                                StartOffsetMs: observation.StartOffsetMs, EndOffsetMs: observation.StartOffsetMs));
+                            throw error;
+                        }
+                        var sampledCondition = SampleCondition(data);
+                        condition = sampledCondition && (budget <= 0 || iterations < budget);
+                        if (broken) exitReason = "break";
+                        else if (!sampledCondition) exitReason = "conditionFalse";
+                        else if (!condition) exitReason = "iterationLimit";
+                    }
                 }
                 data.SetLoopCondition(LoopNodeId, condition);
+                if (exitReason is not null) data.PublishLoopExit(LoopNodeId, iterations, exitReason);
                 return Task.FromResult(ExecutionResult.Next());
 
             default:

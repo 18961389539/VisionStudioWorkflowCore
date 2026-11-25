@@ -62,6 +62,6 @@ public static class RegionCatalog
         new("region.fromMask", "Region From Mask", "Region", [Exec, new("image", VisionDataType.Image)],
             [new("region", VisionDataType.Region), new("image", VisionDataType.Image), new("count", VisionDataType.Integer), new("area", VisionDataType.Integer), new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
             MaskParameters,
-            "Convert an 8-bit mask or a float probability map into 8-connected regions. The image output echoes a binary 0/255 mask and area counts its foreground pixels. found is false when the mask has no foreground.", Capabilities: new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: [])
+            "Convert an 8-bit mask or a float probability map into 8-connected regions. The image output echoes a binary 0/255 mask and area counts its foreground pixels. found is false when the mask has no foreground. The region budget is 10000 components and 1000000 total runs; exceeding either fails instead of truncating.", Capabilities: new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: [])
     ];
 }

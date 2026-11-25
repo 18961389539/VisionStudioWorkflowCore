@@ -18,7 +18,11 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root 'backend/src/VisionStudio.Api/VisionStudio.Api.csproj'
 $output = Join-Path $root 'frontend/src/generated/openapi.json'
-$url = 'http://127.0.0.1:5399'
+$portProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+$portProbe.Start()
+$port = $portProbe.LocalEndpoint.Port
+$portProbe.Stop()
+$url = "http://127.0.0.1:$port"
 
 $previousEnvironment = $env:ASPNETCORE_ENVIRONMENT
 $env:ASPNETCORE_ENVIRONMENT = 'Development'

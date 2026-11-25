@@ -232,7 +232,7 @@ public sealed partial class VisionWorkflowCompiler
         // begin 必须显式指向循环体第一步：Workflow Core 的容器从 Do 的第一个步骤开始，
         // 之后只沿 NextStepId 前进，缺少链路的步骤会被直接跳过（body 永不执行）。
         var firstBodyStepId = bodySteps.Count > 0 ? bodySteps[0]["Id"] as string : null;
-        bodySteps.Insert(0, CreateLoopStep(beginId, loopId, "begin", loop.Kind, source: null, nextStepId: firstBodyStepId ?? endId));
+        bodySteps.Insert(0, CreateLoopStep(beginId, loopId, "begin", loop.Kind, loop.ConditionSource, nextStepId: firstBodyStepId ?? endId));
         bodySteps.Add(CreateLoopStep(endId, loopId, "end", loop.Kind, loop.ConditionSource));
 
         var whilePrimitive = new Dictionary<string, object?>

@@ -1,6 +1,8 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using VisionStudio.Api;
 using VisionStudio.Api.Infrastructure;
 
@@ -116,5 +118,64 @@ public sealed class AutoBackupTests
         Assert.False(auto.Enabled);
         Assert.Empty(await factory.Services.GetRequiredService<StorageBackupService>().ListAsync(default));
         Assert.Null(await auto.RunOnceAsync(force: true, default));
+    }
+
+    [Fact]
+    public async Task SecondaryBackupCopy_IsVerifiedAndCanRestoreWhenPrimaryCopyIsMissing()
+    {
+        using var factory = new StorageVisionStudioApiFactory();
+        var secondaryRoot = Path.Combine(factory.ContentRoot, "independent-backup-volume");
+        var siteConfig = Path.Combine(factory.ContentRoot, "data", VisionStudioSiteConfig.FolderName);
+        Directory.CreateDirectory(siteConfig);
+        File.WriteAllText(Path.Combine(siteConfig, VisionStudioSiteConfig.FileName),
+            JsonSerializer.Serialize(new { Storage = new { BackupSecondaryRoot = secondaryRoot } }), Encoding.UTF8);
+        using var client = factory.CreateClient();
+        _ = await client.GetAsync("/api/health");
+        var backups = factory.Services.GetRequiredService<StorageBackupService>();
+
+        var autoBackups = factory.Services.GetRequiredService<AutoBackupService>();
+        var created = await autoBackups.RunOnceAsync(force: true, default)
+                      ?? throw new InvalidOperationException("Forced automatic backup did not create an archive.");
+        var primary = Path.Combine(factory.ContentRoot, "data", "backups", created.BackupId + ".vsbackup");
+        var secondary = Path.Combine(secondaryRoot, created.BackupId + ".vsbackup");
+        Assert.True(File.Exists(primary));
+        Assert.True(File.Exists(secondary));
+        Assert.Equal(created.ArchiveBytes, new FileInfo(secondary).Length);
+        var freshness = await factory.Services.GetRequiredService<AutoBackupService>().GetStatusAsync(default);
+        Assert.True(factory.Services.GetRequiredService<AutoBackupService>().SecondaryBackupConfigured);
+        Assert.Equal(created.BackupId, freshness.LatestSecondaryBackupId);
+
+        File.Delete(primary);
+        Assert.Contains(await backups.ListAsync(default), backup => backup.BackupId == created.BackupId);
+        var restored = await backups.RestoreAsync(new StorageRestoreRequest(created.BackupId, false), default);
+        Assert.Equal(created.BackupId, restored.BackupId);
+    }
+
+    [Fact]
+    public async Task RestoreFromOlderBackup_PreservesCurrentNamedStationSafetyAndTriggerFacts()
+    {
+        using var factory = new StorageVisionStudioApiFactory();
+        using var client = factory.CreateClient();
+        _ = await client.GetAsync("/api/health");
+        var backups = factory.Services.GetRequiredService<StorageBackupService>();
+        var production = factory.Services.GetRequiredService<ProductionRuntimeService>();
+        var oldBackup = await backups.CreateAsync(false, default);
+
+        _ = production.GetStatus("line-a");
+        var productionRoot = Path.Combine(factory.ContentRoot, "data", "production");
+        var safetyPath = Path.Combine(productionRoot, "device-action-safety.line-a.json");
+        new DeviceActionSafetyStore(safetyPath, NullLogger<DeviceActionSafetyStore>.Instance).Save(
+            new DeviceActionSafetyState("manifest-a", ["plc-a"], [], DateTimeOffset.UtcNow, "unresolved", Phase: DeviceActionSafetyPhase.Unknown));
+        var triggerPath = Path.Combine(productionRoot, "trigger-queue.line-a.json");
+        _ = new ProductionTriggerQueue(triggerPath).Enqueue("event-a");
+
+        await backups.RestoreAsync(new StorageRestoreRequest(oldBackup.BackupId, false), default);
+
+        var restoredSafety = new DeviceActionSafetyStore(safetyPath, NullLogger<DeviceActionSafetyStore>.Instance).Load();
+        Assert.NotNull(restoredSafety);
+        Assert.Equal("manifest-a", restoredSafety.ManifestHash);
+        var restoredTrigger = Assert.Single(new ProductionTriggerQueue(triggerPath).List());
+        Assert.Equal("event-a", restoredTrigger.EventId);
+        Assert.Equal(ProductionTriggerState.Pending, restoredTrigger.State);
     }
 }

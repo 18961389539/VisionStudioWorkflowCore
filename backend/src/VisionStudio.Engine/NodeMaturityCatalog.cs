@@ -89,7 +89,7 @@ public static class NodeMaturityCatalog
                 "支持 8 位掩码和浮点概率图。连通域数和行程量仍受 VisionRegion 预算约束（docs/mask-to-region-contour.md）。"),
 
             ["script.csharp"] = new(NodeMaturity.Preview,
-                "进程内 trusted-code 运行时：语法树 denylist 是纵深防御，不是 OS 沙箱；脚本可调用未列入禁用表的 BCL/OpenCV API。发布含脚本的流程必须显式确认，导入的第三方流程按代码审批（目录长描述与 CSharpScriptRunner.cs 同步声明）。"),
+                "trusted-code 运行时：宿主可配置进程内或 WorkerProcess，生产配置默认 WorkerProcess；两者均不是 OS 沙箱，语法树 denylist 不会阻止所有 BCL/OpenCV API。发布含脚本的流程必须显式确认，导入的第三方流程按代码审批。"),
 
             ["tolerance.stackup"] = new(NodeMaturity.Preview,
                 "RSS 按各环独立 ±3σ 假设，不处理相关环；增减环靠 sign 显式给出（docs/measurement-gap-nodes.md）。"),

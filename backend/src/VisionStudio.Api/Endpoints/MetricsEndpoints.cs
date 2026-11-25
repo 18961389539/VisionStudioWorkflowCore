@@ -40,6 +40,7 @@ public static class MetricsEndpoints
                 durations.Snapshot(),
                 production.Status,
                 production.ListStatuses(),
+                production.AnyStationProductionLocked,
                 audits.PersistFailures,
                 logs,
                 scriptWorkers.Status,
@@ -56,6 +57,7 @@ public static class MetricsEndpoints
         IReadOnlyList<NodeDurationStatistic> statistics,
         ProductionRuntimeStatus production,
         IReadOnlyList<ProductionStationRuntimeStatus> runtimes,
+        bool anyStationLocked,
         long auditPersistFailures,
         RollingFileLoggerProvider logs,
         PluginWorkerStatus scriptWorker,
@@ -115,7 +117,7 @@ public static class MetricsEndpoints
 
         builder.AppendLine("# HELP visionstudio_production_locked Whether production is locked after a failure (1 = locked).");
         builder.AppendLine("# TYPE visionstudio_production_locked gauge");
-        builder.Append("visionstudio_production_locked ").AppendLine(production.ProductionLocked ? "1" : "0");
+        builder.Append("visionstudio_production_locked ").AppendLine(anyStationLocked ? "1" : "0");
 
         builder.AppendLine("# HELP visionstudio_station_production_state Per-station production runtime state (one-hot).");
         builder.AppendLine("# TYPE visionstudio_station_production_state gauge");

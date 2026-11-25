@@ -122,7 +122,7 @@ FROM alarms;
     /// 待确认筛选只包含仍在活动且尚未确认的报警。
     /// take 会被夹在 [1, MaxPageSize]，skip 负数按 0 处理。
     /// </summary>
-    public async Task<AlarmPage> ListAsync(bool activeOnly, int skip, int take, CancellationToken ct, bool pendingOnly = false)
+    public async Task<AlarmPage> ListAsync(bool activeOnly, int skip, int take, CancellationToken ct, bool pendingOnly = false, string? source = null)
     {
         await EnsureLegacyImportedAsync(ct);
         var effectiveSkip = Math.Max(0, skip);
@@ -133,10 +133,14 @@ FROM alarms;
             (_, true) => " WHERE active = 1",
             _ => string.Empty
         };
+        if (source is not null)
+            filter += filter.Length == 0 ? " WHERE source = $source" : " AND source = $source";
 
         await using var connection = await _database.OpenConnectionAsync(ct);
         await using var tx = connection.BeginTransaction(deferred: true);
-        var total = await ScalarIntAsync(connection, tx, $"SELECT COUNT(*) FROM alarms{filter};", ct);
+        var total = source is null
+            ? await ScalarIntAsync(connection, tx, $"SELECT COUNT(*) FROM alarms{filter};", ct)
+            : await ScalarIntAsync(connection, tx, $"SELECT COUNT(*) FROM alarms{filter};", ct, ("$source", source));
 
         await using var command = connection.CreateCommand();
         command.Transaction = tx;
@@ -148,6 +152,7 @@ LIMIT $take OFFSET $skip;
 """;
         command.Parameters.AddWithValue("$take", effectiveTake);
         command.Parameters.AddWithValue("$skip", effectiveSkip);
+        if (source is not null) command.Parameters.AddWithValue("$source", source);
 
         var items = new List<AlarmRecord>(Math.Min(effectiveTake, 128));
         await using (var reader = await command.ExecuteReaderAsync(ct))
@@ -158,20 +163,22 @@ LIMIT $take OFFSET $skip;
         return new AlarmPage(items, total);
     }
 
-    public async Task<AlarmSummary> GetSummaryAsync(CancellationToken ct)
+    public async Task<AlarmSummary> GetSummaryAsync(CancellationToken ct, string? source = null)
     {
         await EnsureLegacyImportedAsync(ct);
         await using var connection = await _database.OpenConnectionAsync(ct);
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        var sourceFilter = source is null ? string.Empty : " AND source = $source";
+        command.CommandText = $"""
 SELECT COUNT(*),
        COUNT(CASE WHEN severity = $critical THEN 1 END),
-       (SELECT message FROM alarms WHERE active = 1 ORDER BY COALESCE(last_raised_at, raised_at) DESC, id DESC LIMIT 1),
+       (SELECT message FROM alarms WHERE active = 1{sourceFilter} ORDER BY COALESCE(last_raised_at, raised_at) DESC, id DESC LIMIT 1),
        COUNT(CASE WHEN acknowledged = 0 THEN 1 END)
 FROM alarms
-WHERE active = 1;
+WHERE active = 1{sourceFilter};
 """;
         command.Parameters.AddWithValue("$critical", nameof(AlarmSeverity.Critical));
+        if (source is not null) command.Parameters.AddWithValue("$source", source);
         await using var reader = await command.ExecuteReaderAsync(ct);
         await reader.ReadAsync(ct);
         return new AlarmSummary(reader.GetInt32(0), reader.GetInt32(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt32(3));

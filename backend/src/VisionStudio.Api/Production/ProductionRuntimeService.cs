@@ -34,7 +34,9 @@ public sealed class ProductionRuntimeService
     private readonly IWebHostEnvironment? _env;
     private readonly IConfiguration? _configuration;
     private readonly ILogger<DeviceActionSafetyStore>? _safetyLogger;
+    private readonly ProductionSafetyLedgerRegistry _safetyLedgers;
     private readonly ConcurrentDictionary<string, ProductionStationRuntime> _stations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ProductionTriggerQueue> _triggerQueues = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ProductionStationResultSnapshot> _latestResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim? _executionSlotGate;
     private readonly ProductionStationRuntime _defaultStation;
@@ -61,7 +63,8 @@ public sealed class ProductionRuntimeService
         RuntimeWorkloadGate? workloads = null,
         IWebHostEnvironment? env = null,
         IConfiguration? configuration = null,
-        ILogger<DeviceActionSafetyStore>? safetyLogger = null)
+        ILogger<DeviceActionSafetyStore>? safetyLogger = null,
+        ProductionSafetyLedgerRegistry? safetyLedgers = null)
     {
         _jobs = jobs;
         _runner = runner;
@@ -82,6 +85,8 @@ public sealed class ProductionRuntimeService
         _env = env;
         _configuration = configuration;
         _safetyLogger = safetyLogger;
+        _safetyLedgers = safetyLedgers ?? new ProductionSafetyLedgerRegistry();
+        _authorization?.AttachSafetyLedgers(_safetyLedgers);
         var maxConcurrent = configuration?.GetValue<int?>("Production:MaxConcurrentCycles") ?? 0;
         if (maxConcurrent > 0) _executionSlotGate = new SemaphoreSlim(maxConcurrent, maxConcurrent);
         _fallbackRoot = Path.Combine(Path.GetTempPath(), "visionstudio-stations", Guid.NewGuid().ToString("N"));
@@ -107,8 +112,11 @@ public sealed class ProductionRuntimeService
             nodes,
             _workloads,
             _executionSlotGate,
-            PublishStationResult);
+            PublishStationResult,
+            _safetyLedgers,
+            CreateTriggerQueue(ProductionRuntimeStationIds.DefaultStationId));
         _stations[ProductionRuntimeStationIds.DefaultStationId] = _defaultStation;
+        if (safetyStore is not null) _safetyLedgers.Register(ProductionRuntimeStationIds.DefaultStationId, safetyStore);
 
         if (_env is not null)
         {
@@ -120,6 +128,14 @@ public sealed class ProductionRuntimeService
     // --- 默认工位兼容门面 ---
 
     public ProductionRuntimeStatus Status => _defaultStation.Status;
+
+    public ProductionSafetyLedgerRegistry SafetyLedgers => _safetyLedgers;
+
+    public IReadOnlyList<string> TriggerQueuePaths => _triggerQueues.Values.Select(queue => queue.StatePath).ToArray();
+
+    public bool AnyStationProductionLocked => _stations.Values.Any(station => station.Status.ProductionLocked);
+
+    public bool AnyStationFaulted => _stations.Values.Any(station => station.Status.State == ProductionRuntimeState.Faulted);
 
     public ProductionDeviceActionPendingState? DeviceActionResolutionState => _defaultStation.DeviceActionResolutionState;
 
@@ -222,12 +238,14 @@ public sealed class ProductionRuntimeService
         _latestResults.TryRemove(normalized, out _);
     }
 
-    public ProductionStationRuntimeStatus Trigger(string stationId)
+    public ProductionTriggerEnqueueResult? Trigger(string stationId, string? eventId = null)
     {
         var station = GetExistingOrThrow(stationId);
-        station.TriggerOnce();
-        return station.StationStatus;
+        return station.TriggerOnce(eventId);
     }
+
+    public IReadOnlyList<ProductionTriggerEvent> ListTriggers(string stationId)
+        => GetExistingOrThrow(stationId).ListTriggers();
 
     public ProductionStationResultSnapshot? GetLatestResult(string stationId)
     {
@@ -312,7 +330,24 @@ public sealed class ProductionRuntimeService
             _nodes,
             _workloads,
             _executionSlotGate,
-            PublishStationResult);
+            PublishStationResult,
+            _safetyLedgers,
+            CreateTriggerQueue(stationId));
+    }
+
+    private ProductionTriggerQueue CreateTriggerQueue(string stationId)
+    {
+        var normalized = ProductionRuntimeStationIds.Normalize(stationId);
+        return _triggerQueues.GetOrAdd(normalized, id =>
+        {
+            var root = _env is not null
+                ? Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath, _configuration ?? new ConfigurationBuilder().Build()), "production")
+                : Path.Combine(_fallbackRoot, id, "production");
+            var fileName = ProductionRuntimeStationIds.IsDefault(id)
+                ? "trigger-queue.json"
+                : $"trigger-queue.{id}.json";
+            return new ProductionTriggerQueue(Path.Combine(root, fileName));
+        });
     }
 
     private sealed class FallbackStationEnvironment(string root) : IWebHostEnvironment

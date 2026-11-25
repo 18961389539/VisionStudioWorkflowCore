@@ -9,8 +9,8 @@ import { useProductionPoll } from '../useProductionPoll';
 const queueSize = 3;
 const severity: Record<string, string> = { Critical: '严重', Error: '错误', Warning: '警告', Info: '信息' };
 
-async function readPendingAlarms(signal: AbortSignal) {
-  const response = await apiFetch(alarms.page(0, queueSize, 'pending'), { signal });
+async function readPendingAlarms(signal: AbortSignal, stationId?: string) {
+  const response = await apiFetch(alarms.page(0, queueSize, 'pending', stationId), { signal });
   if (!response.ok) throw new Error(await responseErrorMessage(response, '待确认告警读取失败'));
   const data: unknown = await response.json();
   if (!Array.isArray(data) || !data.every((record) => record && typeof record.id === 'string'
@@ -21,11 +21,12 @@ async function readPendingAlarms(signal: AbortSignal) {
   return (data as AlarmRecord[]).slice(0, queueSize);
 }
 
-export default function OperatorAlarmQueue({ onAcknowledge, busy }: {
+export default function OperatorAlarmQueue({ onAcknowledge, busy, stationId }: {
   onAcknowledge: (alarmId: string) => Promise<{ ok: boolean }>;
   busy: ReadonlySet<string>;
+  stationId?: string;
 }) {
-  const { data, error, refreshing, refresh } = useProductionPoll(readPendingAlarms);
+  const { data, error, refreshing, refresh } = useProductionPoll((signal) => readPendingAlarms(signal, stationId));
   const [hidden, setHidden] = useState<string[]>([]);
   const visible = data?.filter((alarm) => (!refreshing && !error) || !hidden.includes(alarm.id)) ?? [];
   if (visible.length === 0 && !error) return null;

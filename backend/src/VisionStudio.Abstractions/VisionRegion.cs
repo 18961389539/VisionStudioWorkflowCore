@@ -25,6 +25,7 @@ public sealed class VisionRegionComponent
 
 public sealed class VisionRegion
 {
+    public const int MaxComponents = 10_000;
     public const int MaxRuns = 1_000_000;
     public int Width { get; }
     public int Height { get; }
@@ -33,7 +34,7 @@ public sealed class VisionRegion
     {
         if (width is < 1 or > 32768 || height is < 1 or > 32768) throw new ArgumentException("Invalid region image dimensions.");
         ArgumentNullException.ThrowIfNull(components);
-        if (components.Count > 10000) throw new ArgumentException("Region component budget exceeded.");
+        if (components.Count > MaxComponents) throw new ArgumentException("Region component budget exceeded.");
         long runCount = 0;
         foreach (var component in components)
         {

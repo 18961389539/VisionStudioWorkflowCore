@@ -6,7 +6,7 @@
   },
   "servers": [
     {
-      "url": "http://127.0.0.1:5398/"
+      "url": "http://127.0.0.1:50365/"
     }
   ],
   "paths": {
@@ -7650,6 +7650,13 @@
         ],
         "parameters": [
           {
+            "name": "stationId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "activeOnly",
             "in": "query",
             "schema": {
@@ -7709,6 +7716,15 @@
       "get": {
         "tags": [
           "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -8027,6 +8043,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8046,6 +8069,38 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/production/runtimes/{stationId}/triggers": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "stationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductionTriggerEvent"
+                  }
                 }
               }
             }
@@ -26606,12 +26661,67 @@
           }
         }
       },
+      "ProductionTriggerEvent": {
+        "required": [
+          "eventId",
+          "acceptedAt",
+          "state"
+        ],
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "acceptedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProductionTriggerState"
+          },
+          "startedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "runId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "ProductionTriggerMode": {
         "enum": [
           "Continuous",
           "ExternalSignal"
         ],
         "default": "Continuous"
+      },
+      "ProductionTriggerState": {
+        "enum": [
+          "Pending",
+          "Processing",
+          "Completed",
+          "Failed",
+          "NeedsReview"
+        ]
       },
       "PublicationEvent": {
         "required": [
@@ -30680,7 +30790,8 @@
           "minimumAccuracy",
           "maximumFalseOkRate",
           "maximumFalseNgRate",
-          "maximumErrors"
+          "maximumErrors",
+          "minimumSamplesPerDisposition"
         ],
         "type": "object",
         "properties": {
@@ -30719,6 +30830,15 @@
             ],
             "format": "int32",
             "default": 0
+          },
+          "minimumSamplesPerDisposition": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 5
           }
         }
       },
@@ -31188,6 +31308,7 @@
           "falseOkRate": {
             "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
             "type": [
+              "null",
               "number",
               "string"
             ],
@@ -31196,6 +31317,7 @@
           "falseNgRate": {
             "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
             "type": [
+              "null",
               "number",
               "string"
             ],

@@ -55,6 +55,54 @@ public sealed class MaskToVisionNodesTests
         result.Outputs["image"].Require<VisionImage>("image").Dispose();
     }
 
+    [Theory]
+    [InlineData(100, false)]
+    [InlineData(101, true)]
+    public async Task RegionFromMaskEnforcesComponentBudget(int columns, bool overLimit)
+    {
+        using var mask = VisionImage.Own(new Mat(199, 2 * columns - 1, MatType.CV_8UC1, Scalar.All(0)));
+        for (var y = 0; y < 100; y++)
+            for (var x = 0; x < columns; x++)
+                mask.Mat.Set(2 * y, 2 * x, (byte)255);
+
+        if (overLimit)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RegionFromMaskNode(), mask, Node()));
+            Assert.Contains("10100 components", error.Message);
+            Assert.Contains("10000", error.Message);
+        }
+        else
+        {
+            var result = await Run(new RegionFromMaskNode(), mask, Node());
+            using var image = result.Outputs["image"].Require<VisionImage>("image");
+            Assert.Equal(10_000L, result.Outputs["count"].Require<long>("count"));
+            Assert.Equal(10_000L, result.Outputs["area"].Require<long>("area"));
+        }
+    }
+
+    [Theory]
+    [InlineData(1000, false)]
+    [InlineData(1001, true)]
+    public async Task RegionFromMaskEnforcesTotalRunBudget(int height, bool overLimit)
+    {
+        using var mask = VisionImage.Own(new Mat(height, 1999, MatType.CV_8UC1, Scalar.All(0)));
+        for (var x = 0; x < 1000; x++)
+            Cv2.Line(mask.Mat, new Point(2 * x, 0), new Point(2 * x, height - 1), Scalar.All(255));
+
+        if (overLimit)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RegionFromMaskNode(), mask, Node()));
+            Assert.Contains("1000000 run limit", error.Message);
+        }
+        else
+        {
+            var result = await Run(new RegionFromMaskNode(), mask, Node());
+            using var image = result.Outputs["image"].Require<VisionImage>("image");
+            Assert.Equal(1_000L, result.Outputs["count"].Require<long>("count"));
+            Assert.Equal(1_000_000L, result.Outputs["area"].Require<long>("area"));
+        }
+    }
+
     [Fact]
     public async Task ContourFromMaskExtractsOneContourPerBlob()
     {
@@ -102,6 +150,25 @@ public sealed class MaskToVisionNodesTests
         var contours = withHoles.Outputs["contours"].Require<IReadOnlyList<VisionContour>>("contours");
         var hole = contours.Single(contour => contour.IsHole);
         Assert.Equal(0, hole.ParentIndex);
+    }
+
+    [Fact]
+    public async Task ContourFromMaskClassifiesNestedIslandsByHierarchyDepth()
+    {
+        using var mask = VisionImage.Own(new Mat(80, 80, MatType.CV_8UC1, Scalar.All(0)));
+        Cv2.Circle(mask.Mat, new Point(40, 40), 30, Scalar.All(255), -1);
+        Cv2.Circle(mask.Mat, new Point(40, 40), 20, Scalar.All(0), -1);
+        Cv2.Circle(mask.Mat, new Point(40, 40), 10, Scalar.All(255), -1);
+
+        var result = await Run(new ContourFromMaskNode(), mask, Node(("retrieval", "all")));
+        var contours = result.Outputs["contours"].Require<IReadOnlyList<VisionContour>>("contours");
+        Assert.Equal(3, contours.Count);
+        var outer = Assert.Single(contours, contour => contour.ParentIndex == -1);
+        var hole = Assert.Single(contours, contour => contour.ParentIndex == outer.Index);
+        var island = Assert.Single(contours, contour => contour.ParentIndex == hole.Index);
+        Assert.False(outer.IsHole);
+        Assert.True(hole.IsHole);
+        Assert.False(island.IsHole);
     }
 
     [Fact]

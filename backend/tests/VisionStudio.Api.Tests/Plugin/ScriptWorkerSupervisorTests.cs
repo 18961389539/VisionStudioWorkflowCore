@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 using VisionStudio.Engine.Scripting;
 using VisionStudio.Scripting;
 
@@ -50,6 +51,65 @@ public sealed class ScriptWorkerSupervisorTests
         Assert.Equal(inProcess.Json, worker.Json);
         Assert.Equal(inProcess.Logs, worker.Logs);
         Assert.Equal(inProcess.SourceHash, worker.SourceHash);
+    }
+
+    [Fact]
+    public async Task WorkerBackend_RestartsAfterUnexpectedProcessExit()
+    {
+        using var supervisor = CreateSupervisor();
+        using (var first = await supervisor.RunAsync("Output.Number = 1;", ExecutionOptions(5_000),
+                   new Dictionary<string, object?>(), null, CancellationToken.None))
+            Assert.Equal(1d, first.Number);
+
+        var pid = Assert.IsType<int>(supervisor.Status.ProcessId);
+        using (var process = Process.GetProcessById(pid))
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+        }
+
+        using var recovered = await supervisor.RunAsync("Output.Number = 2;", ExecutionOptions(5_000),
+            new Dictionary<string, object?>(), null, CancellationToken.None);
+        Assert.Equal(2d, recovered.Number);
+        Assert.NotEqual(pid, supervisor.Status.ProcessId);
+    }
+
+    [Fact]
+    public async Task WorkerBackend_CancellationOfActiveRequestAllowsNextRequest()
+    {
+        using var supervisor = CreateSupervisor();
+        using (var warmup = await supervisor.RunAsync("Output.Number = 1;", ExecutionOptions(5_000),
+                   new Dictionary<string, object?>(), null, CancellationToken.None))
+            Assert.Equal(1d, warmup.Number);
+        var pid = Assert.IsType<int>(supervisor.Status.ProcessId);
+        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await supervisor.RunAsync("while (true) { }",
+                new ScriptExecutionOptions(10_000, 100_000_000, 65_536, 16_777_216),
+                new Dictionary<string, object?>(), null, cancel.Token));
+
+        using var recovered = await supervisor.RunAsync("Output.Number = 3;", ExecutionOptions(5_000),
+            new Dictionary<string, object?>(), null, CancellationToken.None);
+        Assert.Equal(3d, recovered.Number);
+        Assert.NotEqual(pid, supervisor.Status.ProcessId);
+    }
+
+    [Theory]
+    [InlineData(5_000, 100, "tick budget")]
+    [InlineData(10, 100_000_000, "timeout")]
+    public async Task WorkerBackend_EnforcesBudgetsAndAcceptsNextRequest(int timeoutMs, long maxTicks, string expected)
+    {
+        using var supervisor = CreateSupervisor();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await supervisor.RunAsync("while (true) { }",
+                new ScriptExecutionOptions(timeoutMs, maxTicks, 65_536, 16_777_216),
+                new Dictionary<string, object?>(), null, CancellationToken.None));
+        Assert.Contains(expected, error.Message, StringComparison.OrdinalIgnoreCase);
+
+        using var recovered = await supervisor.RunAsync("Output.Number = 4;", ExecutionOptions(5_000),
+            new Dictionary<string, object?>(), null, CancellationToken.None);
+        Assert.Equal(4d, recovered.Number);
     }
 
     [Fact]

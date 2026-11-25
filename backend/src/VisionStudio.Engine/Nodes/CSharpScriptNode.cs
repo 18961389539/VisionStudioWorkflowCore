@@ -8,7 +8,8 @@ namespace VisionStudio.Engine.Nodes;
 /// <summary>
 /// Built-in C# script node (script.csharp, 2026-10-27).
 ///
-/// Scripts are compiled in-process with Roslyn against a minimal reference set. The runner rejects
+/// Scripts are compiled with Roslyn against a minimal reference set, either in the host or in a
+/// configured worker process. The runner rejects
 /// file/network/reflection/process/threading APIs with a syntax-tree denylist (unlisted APIs are allowed),
 /// injects a cooperative loop budget, and exposes only typed inputs, an optional Mat image and a typed output object.
 /// This is a trusted-engineer runtime; it is not a hard OS sandbox.

@@ -642,6 +642,7 @@ function Editor() {
 
   const searchParams = new URLSearchParams(window.location.search);
   const productionView = searchParams.get('view');
+  const operatorStationId = productionView === 'operator' ? searchParams.get('stationId') ?? undefined : undefined;
   // 车间大屏形态：`?view=operator&kiosk=1` 只留操作员工作台，隐藏诊断入口、账号徽标与标签栏，
   // 字号按视口短边放大。只对操作员视图生效——工位总览是管理视角，不应进 kiosk。
   const kiosk = productionView === 'operator' && ['1', 'true'].includes(searchParams.get('kiosk') ?? '');
@@ -654,6 +655,7 @@ function Editor() {
   if (runtimeOnly || productionView === 'operator' || productionView === 'stations') return <>
     <ErrorBoundary variant="panel" scope="生产运行">
       <ProductionPanel open={true} onClose={() => undefined} embedded runtimeOnly={runtimeOnly} kiosk={kiosk}
+        stationId={operatorStationId}
         initialView={productionView === 'stations' ? 'stations' : 'operator'} />
     </ErrorBoundary>
     {!kiosk && <Button className="runtime-diagnostics-button" type="primary" ghost onClick={() => setDiagnosticsOpen(true)}>诊断</Button>}

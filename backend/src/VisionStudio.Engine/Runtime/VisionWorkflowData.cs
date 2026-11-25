@@ -27,6 +27,8 @@ public sealed class VisionWorkflowData : IDisposable
     private readonly ConcurrentDictionary<string, int> _loopCounters = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, int> _loopTotals = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _loopKinds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _nodeExecutionCounts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _loopConditionStartCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _trySucceeded = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _tryRegionGate = new();
     private readonly object _tryAttemptGate = new();
@@ -179,11 +181,27 @@ public sealed class VisionWorkflowData : IDisposable
         _loopBreaks[nodeId] = false;
         _loopCounters[nodeId] = 0;
         _loopTotals[nodeId] = total;
+        _loopConditionStartCounts.TryRemove(nodeId, out _);
     }
 
     public void SetLoopCondition(string nodeId, bool condition) => _loopConditions[nodeId] = condition;
 
     public void RequestLoopBreak(string nodeId) => _loopBreaks[nodeId] = true;
+
+    public void RecordNodeExecution(string nodeId)
+    {
+        if (_nodeExecutionCounts.ContainsKey(nodeId))
+            _nodeExecutionCounts.AddOrUpdate(nodeId, 1, (_, value) => value + 1);
+    }
+
+    public void BeginLoopConditionSample(string loopNodeId, string sourceNodeId) =>
+        _loopConditionStartCounts[loopNodeId] = _nodeExecutionCounts.GetOrAdd(sourceNodeId, 0);
+
+    public bool WasLoopConditionSourceExecuted(string loopNodeId, string sourceNodeId) =>
+        _loopConditionStartCounts.TryGetValue(loopNodeId, out var start) && GetNodeExecutionCount(sourceNodeId) > start;
+
+    private long GetNodeExecutionCount(string nodeId) =>
+        _nodeExecutionCounts.TryGetValue(nodeId, out var value) ? value : 0;
 
     public int IncrementLoopCounter(string nodeId) => _loopCounters.AddOrUpdate(nodeId, 1, (_, value) => value + 1);
 
@@ -192,6 +210,18 @@ public sealed class VisionWorkflowData : IDisposable
     public int GetLoopTotal(string nodeId) => _loopTotals.TryGetValue(nodeId, out var value) ? value : 0;
 
     public bool IsLoopBroken(string nodeId) => _loopBreaks.TryGetValue(nodeId, out var value) && value;
+
+    public void PublishLoopExit(string nodeId, int iterations, string reason)
+    {
+        if (!OutputsByNode.TryGetValue(nodeId, out var existing))
+            throw new InvalidOperationException($"Loop node '{nodeId}' has no outputs.");
+        var outputs = new Dictionary<string, VisionValue>(existing, StringComparer.OrdinalIgnoreCase)
+        {
+            ["iterations"] = VisionValue.Integer(iterations),
+            ["exitReason"] = VisionValue.String(reason)
+        };
+        OutputsByNode[nodeId] = outputs;
+    }
 
     /// <summary>
     /// 把本轮序号写入循环节点的输出，供循环体内的节点通过 index/total/isLast 端口读取。

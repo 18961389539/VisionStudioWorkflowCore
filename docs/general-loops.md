@@ -35,13 +35,19 @@ exec → [flow.while] body → 循环体 ... → [flow.loopEnd] repeat → 回�
 2. **条件在循环体之后采样。** 条件来源必须每轮都执行；若它位于未命中的 `If` 分支内，会沿用上一轮的值（不是缺失）。
 3. **迭代预算硬兜底。** `flow.while.maxIterations`（默认 100，上限 10000）与 `flow.repeat.count`（上限 100000）
    都会转成运行时的硬上限：条件恒真时循环会退出，而不是把运行时挂死。
-4. **break 只跳过"本轮剩余"再退出。** 置位中断标志 → 本轮剩余步骤被 `If(!broken)` 守卫跳过 → 末尾仍会刷新条件 →
-   下一轮条件求值失败 → 走 done。所以 break 之后的结束步、trace、条件刷新都还会执行一次，这是有意为之。
+4. **break 只跳过"本轮剩余"再退出。** 置位中断标志 → 本轮剩余步骤被 `If(!broken)` 守卫跳过 →
+   循环结束步仍会执行，随后走 done。默认兼容模式下末尾仍会采样条件；启用 `requireFreshCondition` 时，
+   break 无需采样条件，避免被已经跳过的条件来源阻止退出。
 5. **break 的位置受编译期约束。** 只允许直接写在 while/repeat 的循环体主序列里：
    - `If`/`Switch`/`Try`/`Parallel` 分支内的 break 会被拒绝 —— 分支结束后外层还有步骤会继续跑，语义不成立；
    - `flow.forEach` 内的 break 会被拒绝 —— forEach 没有提前退出语义，跳过本轮却继续下一轮容易误读。
 6. **条件输入是"回边"，因此可选端口在源节点尚未执行时按未接线处理。** 这条改动在 `VisionNodeDispatcher`：
    必填端口仍然照旧报错，可选端口缺失不再抛 `Source node 'x' has not executed`。
+
+`flow.while` 可选开启 `requireFreshCondition`：每轮条件来源节点必须在本轮执行，否则报错；显式
+`flow.break` 不要求采样条件。默认关闭，旧配方继续保留上一轮值。`flow.while` 和 `flow.repeat`
+退出后提供 `iterations` 和 `exitReason`，仅在 done 路径使用：while 的原因是 `conditionFalse`、
+`iterationLimit` 或 `break`；repeat 的原因是 `completed` 或 `break`。这些输出在循环体内尚不可用。
 
 ## 实现要点（给后续维护者）
 

@@ -57,6 +57,24 @@ public sealed class CustomProtocolNodeTests
         Assert.Contains("may already have reached", error.Message);
     }
 
+    [Theory]
+    [InlineData("fixedLength", "readLength=4")]
+    [InlineData("untilTerminator", "configured terminator")]
+    public async Task Tcp_FailsWhenPeerClosesBeforeCompleteResponse(string readMode, string expectedMessage)
+    {
+        await using var server = new LoopbackTcpServer(reply: Encoding.UTF8.GetBytes("OK"));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new TcpRequestNode(),
+            Def(new()
+            {
+                ["host"] = "127.0.0.1", ["port"] = server.Port, ["payload"] = "PING",
+                ["readMode"] = readMode, ["readLength"] = 4, ["timeoutMs"] = 5000
+            })));
+
+        Assert.Contains(expectedMessage, error.Message);
+        Assert.Contains("may already have reached", error.Message);
+        Assert.Equal("PING", Encoding.UTF8.GetString(server.LastRequest!));
+    }
+
     [Fact]
     public async Task Tcp_RejectsOversizedReply()
     {
@@ -81,6 +99,7 @@ public sealed class CustomProtocolNodeTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new TcpRequestNode(),
             Def(new() { ["host"] = "127.0.0.1", ["port"] = strictServer.Port, ["payload"] = "PING", ["expectPattern"] = "^OK$", ["requireMatch"] = true })));
         Assert.Contains("did not match expectPattern", error.Message);
+        Assert.Contains("may already have reached the peer", error.Message);
     }
 
     [Fact]

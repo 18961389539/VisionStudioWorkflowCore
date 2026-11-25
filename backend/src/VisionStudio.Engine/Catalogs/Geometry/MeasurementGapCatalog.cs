@@ -167,7 +167,7 @@ public static class MeasurementGapCatalog
                 new("maxRa", "Max Ra (0=off)", "number", 0, 0, 1000000, .001, Unit: "px", Group: "Limits",
                     Description: "Optional gate: withinTolerance reports ra <= limit. 0 disables it."),
             ],
-            "Estimates roughness trends in pixels from a nominally straight sampled image edge. Reports the evaluated sample span and Gaussian end handling. Rz averages five segments when enough samples are available. In a shorter window it reports the whole-window range with rzSamplingLengths=0.", "builtin",
+            "Estimates roughness trends in pixels from a nominally straight sampled image edge. This image-based estimate does not replace a calibrated contact profilometer or a certified roughness measurement. Reports the evaluated sample span and Gaussian end handling. Rz averages five segments when enough samples are available. In a shorter window it reports the whole-window range with rzSamplingLengths=0.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：轮廓间距 ──────────────────────────────────────────────
@@ -218,7 +218,7 @@ public static class MeasurementGapCatalog
                 new("sampleStep", "Sample Step", "number", 1, .01, 10000, .1, Unit: "px", Group: "Thread",
                     Description: "Arc-length resampling along the profile before crest detection."),
             ],
-            "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. pitchDiameter is an estimate in pixels. pitchDiameterMethod identifies the arithmetic mean of the major and minor diameters. The tolerance flag applies to pitch consistency.", "builtin",
+            "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. The silhouette does not measure the pitch diameter directly: pitchDiameter is an estimate in pixels, and pitchDiameterMethod identifies the arithmetic mean of the major and minor diameters. It must not be used as a certified pitch-diameter measurement. The tolerance flag applies only to pitch consistency.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：齿轮（纯算量） ─────────────────────────────────────────

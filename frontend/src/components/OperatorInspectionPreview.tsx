@@ -10,9 +10,10 @@ import { demoInspectionPreviews } from '../productionDemoData';
 type Preview = ContractDto<'ProductionOperatorPreview'>;
 type View = 'latest' | 'ng';
 
-export default function OperatorInspectionPreview({ status, simulation = false }: {
+export default function OperatorInspectionPreview({ status, simulation = false, stationId }: {
   status?: ProductionRuntimeStatus;
   simulation?: boolean;
+  stationId?: string;
 }) {
   const [view, setView] = useState<View>('latest');
   const [selectedDemo, setSelectedDemo] = useState(0);
@@ -51,14 +52,14 @@ export default function OperatorInspectionPreview({ status, simulation = false }
       <Radio.Button value="latest">最近留图</Radio.Button>
       <Radio.Button value="ng">最近不合格</Radio.Button>
     </Radio.Group>
-    <InspectionImage key={key} version={version} sessionStart={status.startedAt} ngOnly={view === 'ng'} />
+    <InspectionImage key={key} version={version} sessionStart={status.startedAt} ngOnly={view === 'ng'} stationId={stationId} />
   </>;
 }
 
-function InspectionImage({ version, sessionStart, ngOnly }: { version: number; sessionStart: string; ngOnly: boolean }) {
+function InspectionImage({ version, sessionStart, ngOnly, stationId }: { version: number; sessionStart: string; ngOnly: boolean; stationId?: string }) {
   const [unavailableImage, setUnavailableImage] = useState<string>();
   const read = useCallback(async (signal: AbortSignal) => {
-    const response = await apiFetch(production.operatorPreview(ngOnly), { signal });
+    const response = await apiFetch(production.operatorPreview(ngOnly, stationId), { signal });
     if (!response.ok) throw new Error('读取检验留图失败');
     if (response.status === 204) return null;
     const latest: Preview | null = await response.json();
@@ -67,7 +68,7 @@ function InspectionImage({ version, sessionStart, ngOnly }: { version: number; s
       throw new Error('检验留图与当前会话或筛选条件不符');
     }
     return latest;
-  }, [ngOnly, sessionStart, version]);
+  }, [ngOnly, sessionStart, stationId, version]);
   const { data: preview, error, refreshing } = useProductionPoll(read, true, 4_000);
 
   if (!preview) return <span role="status">{error ? '检验留图暂不可用' : refreshing ? '正在读取检验留图…'

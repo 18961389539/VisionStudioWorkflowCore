@@ -9229,6 +9229,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    stationId?: string;
                     activeOnly?: boolean;
                     pendingOnly?: boolean;
                     skip?: number | string;
@@ -9268,7 +9269,9 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    stationId?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -9630,7 +9633,9 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    "Idempotency-Key"?: string;
+                };
                 path: {
                     stationId: string;
                 };
@@ -9658,6 +9663,43 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/production/runtimes/{stationId}/triggers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    stationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductionTriggerEvent"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -16769,11 +16811,25 @@ export interface components {
             /** Format: double */
             averageThroughputMbps: null | number | string;
         };
+        ProductionTriggerEvent: {
+            eventId: string;
+            /** Format: date-time */
+            acceptedAt: string;
+            state: components["schemas"]["ProductionTriggerState"];
+            /** Format: date-time */
+            startedAt?: null | string;
+            /** Format: date-time */
+            completedAt?: null | string;
+            runId?: null | string;
+            detail?: null | string;
+        };
         /**
          * @default Continuous
          * @enum {unknown}
          */
         ProductionTriggerMode: "Continuous" | "ExternalSignal";
+        /** @enum {unknown} */
+        ProductionTriggerState: "Pending" | "Processing" | "Completed" | "Failed" | "NeedsReview";
         PublicationEvent: {
             /** Format: int32 */
             version: number | string;
@@ -17807,6 +17863,11 @@ export interface components {
              * @default 0
              */
             maximumErrors: number | string;
+            /**
+             * Format: int32
+             * @default 5
+             */
+            minimumSamplesPerDisposition: number | string;
         };
         ValidationCandidateInfo: {
             validationRunId: string;
@@ -17915,9 +17976,9 @@ export interface components {
             /** Format: double */
             accuracy: number | string;
             /** Format: double */
-            falseOkRate: number | string;
+            falseOkRate: null | number | string;
             /** Format: double */
-            falseNgRate: number | string;
+            falseNgRate: null | number | string;
             /** Format: double */
             p50DurationMs: number | string;
             /** Format: double */

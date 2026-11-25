@@ -36,7 +36,7 @@
 
 | 参数 | 说明 |
 |---|---|
-| `retrieval` | `external` 只取外轮廓（测量常用）；`all` 保留孔洞层级，`ParentIndex` 指向**已输出**的父轮廓（被 minArea 滤掉的父轮廓会让子轮廓的 parent 回到 -1） |
+| `retrieval` | `external` 只取外轮廓（测量常用）；`all` 保留孔洞层级，奇数嵌套深度为孔洞，孔洞内的前景岛不是孔洞。`ParentIndex` 指向**已输出**的父轮廓（被 minArea 滤掉的父轮廓会让子轮廓的 parent 回到 -1；孔洞判定仍依据原始层级） |
 | `approximation` | `simple` 压缩共线点；`none` 保留每个边界像素 |
 | `minArea` | 滤掉分割噪点 |
 | `maxContours` / `maxPoints` | 硬预算，**超限失败**而不是静默截断 |
@@ -44,7 +44,7 @@
 ## 一个容易踩的尺寸认知
 
 OpenCV 的 `ContourArea` 沿**像素中心**描边：10×10 的实心块面积为 `(10−1)² = 81`，不是 100。
-所以 `contour.fromMask` 的 `area` 会比 `region.fromMask` 的 `area`（前景像素数 = 100）略小。
+所以 `contour.fromMask` 所生成的轮廓几何面积与 `region.fromMask` 的 `area`（前景像素数 = 100）不同。
 两处面积口径不同是刻意的：区域给你们"多少个像素"，轮廓给你们 OpenCV/HALCON 系的几何面积。
 需要严格一致时，用 `region.fromMask` 的 `area` 判定，用轮廓做几何拟合。
 
@@ -76,4 +76,4 @@ inference.segmentation ─┬─ mask ─→ region.fromMask ─→ region.filte
 
 - 概率模式要求上游输出 0 到 1 的概率。模型的原始 logits 和多通道张量需要在上游转成单通道概率图。
 - 没有 ROI 参数：掩码本身就是 ROI 语义的产物；需要局部时先 `image.crop`。
-- `region.fromMask` 的 component 数量上限沿用 `VisionRegion` 的 10000 与行程总量 100 万预算，超限由区域构造直接拒绝。
+- `region.fromMask` 的 component 数量上限沿用 `VisionRegion` 的 10000 与行程总量 100 万预算，组件标记后检查数量，扫描行程时逐条检查预算，超限明确报错。

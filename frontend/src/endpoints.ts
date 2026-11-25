@@ -365,8 +365,11 @@ const alarmFilterQuery: Record<AlarmFilter, string> = {
 
 export const alarms = {
   list: apiUrl('alarms'),
-  page: (skip: number, take: number, filter: AlarmFilter = 'all') => apiUrl(`alarms?skip=${skip}&take=${take}${alarmFilterQuery[filter]}`),
-  summary: apiUrl('alarms/summary'),
+  page: (skip: number, take: number, filter: AlarmFilter = 'all', stationId?: string) => {
+    const station = stationId ? `&stationId=${encodeURIComponent(stationId)}` : '';
+    return apiUrl(`alarms?skip=${skip}&take=${take}${alarmFilterQuery[filter]}${station}`);
+  },
+  summary: (stationId?: string) => apiUrl(`alarms/summary${stationId ? `?stationId=${encodeURIComponent(stationId)}` : ''}`),
   ack: (id: string) => apiUrl(`alarms/${encodeURIComponent(id)}/ack`)
 } as const;
 

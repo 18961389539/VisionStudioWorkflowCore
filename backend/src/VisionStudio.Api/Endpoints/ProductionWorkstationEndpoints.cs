@@ -62,7 +62,10 @@ public static class ProductionWorkstationEndpoints
                 state.StartedAt is not { } startedAt)
                 return Results.NoContent();
 
-            var preview = await traces.GetOperatorPreviewAsync(jobId, version, startedAt, ct, ngOnly == true);
+            var source = string.IsNullOrWhiteSpace(stationId)
+                ? "ProductionRuntime"
+                : $"ProductionRuntime:{ProductionRuntimeStationIds.Normalize(stationId)}";
+            var preview = await traces.GetOperatorPreviewAsync(jobId, version, startedAt, ct, ngOnly == true, source);
             var current = string.IsNullOrWhiteSpace(stationId) ? production.Status : ToRuntimeStatus(production.GetStatus(stationId));
             if (preview is null || !current.ProductionLocked || current.StartedAt != startedAt || current.JobId != jobId || current.LockedJobVersion != version)
                 return Results.NoContent();

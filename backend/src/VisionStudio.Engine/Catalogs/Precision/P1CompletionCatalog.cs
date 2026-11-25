@@ -84,7 +84,7 @@ internal static class P1CompletionCatalog
                 new("maxPixels", "Maximum Input Pixels", "number", 16000000, 1000, 200000000, 1000000, Group: "Limits",
                     Description: "Hard cap on the input area. Median holds every input plus the output in memory, so a full-resolution stack multiplies quickly."),
             ],
-            "Fuse registered images pixel by pixel using mean, median, min or max. Images must share size, channel count and depth. Connect two to eight individual image inputs or one synchronized FrameSet. For raw camera images, extract each frame, register and warp it to a shared reference grid, then connect the aligned images to the individual inputs. The default alignment policy checks known coordinate frame metadata, and FrameSet diagnostics list the camera IDs. Mean accumulates in float32 and converts back to the source depth with saturation. Median supports 8-bit inputs.",
+            "Fuse registered images pixel by pixel using mean, median, min or max. Images must share size, channel count and depth. Connect two to eight individual image inputs or one synchronized FrameSet. For raw camera images, extract each frame, register and warp it to a shared reference grid, then connect the aligned images to the individual inputs. The default alignment policy checks known coordinate frame metadata, and FrameSet diagnostics list the camera IDs. Mean uses float64 for 32-bit integer, float32 and float64 inputs, float32 for other depths, then converts back to the source depth with saturation. Median supports 8-bit inputs.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
             Actions: []),
 

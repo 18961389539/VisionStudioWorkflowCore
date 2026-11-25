@@ -263,8 +263,14 @@ public sealed class DeviceActionAuthorizationService(
     DeviceActionSafetyStore safety,
     ManualActionIntentStore manualIntents,
     RuntimeDependencyManifestService dependencies,
-    ILogger<DeviceActionAuthorizationService> logger)
+    ILogger<DeviceActionAuthorizationService> logger,
+    ProductionSafetyLedgerRegistry? safetyLedgers = null)
 {
+    private ProductionSafetyLedgerRegistry? _safetyLedgers = safetyLedgers;
+
+    public void AttachSafetyLedgers(ProductionSafetyLedgerRegistry registry)
+        => _safetyLedgers = registry;
+
     /// <summary>
     /// A01：故障锁**逐意图独立登记**（RunId → 故障）。旧实现只保留第一个故障：两个动作同时
     /// 提交失败时，核对第一个后唯一锁清空，第二个仍为本进程 Issued 被过滤出待核对清单——
@@ -385,7 +391,11 @@ public sealed class DeviceActionAuthorizationService(
            !string.Equals(intent.ProcessId, DeviceActionSafetyStore.CurrentProcessId, StringComparison.Ordinal);
 
     /// <summary>手动/临时/调试/作业运行入口的闸门：存在未闭合意图时抛出 409。安全停止/只读路径不得调用。</summary>
-    public void EnsureActionsAllowed(string action)
+    public void EnsureActionsAllowed(
+        string action,
+        IReadOnlyCollection<string>? deviceIds = null,
+        IReadOnlyCollection<string>? robotIds = null,
+        IReadOnlyCollection<string>? cameraIds = null)
     {
         ApplyDurableResolutions();
         // Fix1/A01：同进程故障锁优先（逐意图独立登记）——意图台账不可信时绝不继续下发动作；
@@ -393,8 +403,15 @@ public sealed class DeviceActionAuthorizationService(
         if (_stateTransitionFailures.Values.OrderBy(x => x.At).FirstOrDefault() is { } processFailure)
             Block(action, $"an in-process safety-state failure lock is engaged ({processFailure}); reconcile the device state or restart the host");
 
-        if (UnresolvedProductionState() is { } state)
+        if (_safetyLedgers is { } ledgers)
+        {
+            try { ledgers.EnsureNoConflictingUnresolvedState(action, deviceIds, robotIds, cameraIds); }
+            catch (ApiConflictException ex) { Block(action, ex.Message); }
+        }
+        else if (UnresolvedProductionState() is { } state)
+        {
             Block(action, $"an unresolved production device-action intent exists ({state.Phase}: {state.Reason})");
+        }
 
         IReadOnlyList<ManualActionIntent> unresolved;
         try { unresolved = UnresolvedManualIntents(); }
@@ -406,9 +423,15 @@ public sealed class DeviceActionAuthorizationService(
     }
 
     /// <summary>生产 Start/Recover 的附加闸门：任何手动意图（含本进程活跃）都阻断启动。</summary>
-    public void EnsureProductionStartAllowed()
+    public void EnsureProductionStartAllowed(
+        IReadOnlyCollection<string>? deviceIds = null,
+        IReadOnlyCollection<string>? robotIds = null,
+        IReadOnlyCollection<string>? cameraIds = null,
+        bool allowEmptyTarget = false)
     {
         ApplyDurableResolutions();
+        _safetyLedgers?.EnsureNoConflictingUnresolvedState(
+            "production start", deviceIds, robotIds, cameraIds, allowEmptyTarget);
         if (_stateTransitionFailures.Values.OrderBy(x => x.At).FirstOrDefault() is { } processFailure)
             throw new ApiConflictException(
                 $"Production start blocked: an in-process safety-state failure lock is engaged ({processFailure}); reconcile the device state or restart the host.");
@@ -435,15 +458,18 @@ public sealed class DeviceActionAuthorizationService(
         IReadOnlyList<string> robotIds,
         IReadOnlyList<string>? cameraIds = null)
     {
-        EnsureActionsAllowed(action);
+        EnsureActionsAllowed(action, deviceIds, robotIds, cameraIds ?? []);
         return RecordIntent(action, deviceIds, robotIds, cameraIds ?? []);
     }
 
     /// <summary>F02：临时/调试/作业运行的意图——资源清单来自工作流的运行依赖捕获。</summary>
     public async Task<DeviceActionHandle> BeginWorkflowIntentAsync(string action, WorkflowDefinition workflow, string? relatedRunId, CancellationToken ct)
     {
-        EnsureActionsAllowed(action);
         var manifest = await dependencies.CaptureAsync(workflow, ct);
+        EnsureActionsAllowed(action,
+            manifest.Devices.Select(x => x.Id).ToArray(),
+            manifest.Robots.Select(x => x.Id).ToArray(),
+            manifest.Cameras.Select(x => x.Id).ToArray());
         return RecordIntent(
             action,
             manifest.Devices.Select(x => x.Id).ToArray(),

@@ -9,7 +9,7 @@ import { isProductionConfig, isProductionStatus } from '../productionConfig';
 import { ALARM_PAGE_SIZE, useProductionMonitor, type DeviceActionPendingState } from '../useProductionMonitor';
 import { useProductionConfigDraft, type ProductionConfigMerge } from '../useProductionConfigDraft';
 import { useProductionActions } from '../useProductionActions';
-import { apiUrl, alarms as alarmEndpoints } from '../endpoints';
+import { alarms as alarmEndpoints, production } from '../endpoints';
 import { useSecurityAccount } from '../security';
 import { OperatorDashboard } from './OperatorDashboard';
 import './ProductionWorkstation.css';
@@ -23,6 +23,7 @@ const RecipeDeliveryInbox = lazy(() => import('./ProductionRecipeRollouts').then
 export type { DeviceActionPendingState } from '../useProductionMonitor';
 
 type Props = { open: boolean; onClose: () => void; embedded?: boolean; runtimeOnly?: boolean; initialView?: 'operator' | 'stations';
+  stationId?: string;
   /** 车间大屏形态：只渲染操作员工作台，隐藏标签栏与工程师入口（`?view=operator&kiosk=1`）。 */
   kiosk?: boolean };
 
@@ -76,13 +77,13 @@ function ProductionConfigConflict({ merge, disabled, onStale }: {
   } />;
 }
 
-export default function ProductionPanel({ open, onClose, embedded = false, runtimeOnly = false, initialView, kiosk = false }: Props) {
+export default function ProductionPanel({ open, onClose, embedded = false, runtimeOnly = false, initialView, kiosk = false, stationId }: Props) {
   const [messageApi, contextHolder] = message.useMessage();
   const { enabled: securityEnabled, user } = useSecurityAccount();
   const canReconcile = !securityEnabled || user?.role === 'Administrator';
   const canEngineer = !securityEnabled || user?.role === 'Engineer' || user?.role === 'Administrator';
   const canConfigure = !runtimeOnly && canEngineer;
-  const monitor = useProductionMonitor(open, canReconcile);
+  const monitor = useProductionMonitor(open, canReconcile, stationId);
   const { status, jobs, alarms, alarmSummary, alarmTotal, alarmPage, alarmFilter, alarmsLoading, setAlarmPage, setAlarmFilter,
     pending: pendingActions, errors, lastUpdatedAt, statusFresh, configReady } = monitor;
   const { config, dirty, conflict, merge, changeConfig, beginSave, acceptSaved, discard, readCurrent } = useProductionConfigDraft(monitor.config, open);
@@ -97,6 +98,15 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
   const resolveRequest = useRef<object | undefined>(undefined);
   const [resolveForm] = Form.useForm<{ evidence: string; identityEvidence: string; reason?: string }>();
+  const stationScoped = Boolean(stationId && stationId.toLowerCase() !== 'default');
+  const actionStationId = stationId ?? 'default';
+  const stationActionUrl = {
+    start: stationScoped ? production.runtimeStart(actionStationId) : production.start,
+    stop: stationScoped ? production.runtimeStop(actionStationId) : production.stop,
+    recover: stationScoped ? production.runtimeRecover(actionStationId) : production.recover,
+    config: stationScoped ? production.runtimeConfig(actionStationId) : production.config,
+    resolve: stationScoped ? production.runtimeResolveAction(actionStationId) : production.resolveAction,
+  };
   useEffect(() => {
     if (!open) { setResolveOpen(false); setResolveSubmitting(false); setLayoutEditorOpen(false); }
     return () => { resolveRequest.current = undefined; };
@@ -110,7 +120,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   const acceptStatus = (data: unknown) => { applyStatus(data); };
   const stopProduction = () => {
     void call({
-      url: apiUrl('production/stop'), action: 'stop', timeoutMs: maxStopTimeoutMs + 10_000, successMessage: '生产已停止',
+      url: stationActionUrl.stop, action: 'stop', timeoutMs: maxStopTimeoutMs + 10_000, successMessage: '生产已停止',
       onSuccess: (data) => {
         const next = applyStatus(data);
         if (next.state === 'Stopped' && !next.productionLocked) return;
@@ -122,7 +132,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   const startProduction = () => {
     const current = readCurrent();
     if (!statusFresh || !configReady || locked || current.dirty || current.conflict || !current.config?.jobId) return;
-    void call({ url: apiUrl('production/start'), body: { jobId: current.config.jobId }, successMessage: '生产已启动', action: 'start', onSuccess: acceptStatus });
+    void call({ url: stationActionUrl.start, body: { jobId: current.config.jobId }, successMessage: '生产已启动', action: 'start', onSuccess: acceptStatus });
   };
   const saveConfig = async () => {
     const current = readCurrent();
@@ -131,7 +141,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
     const finishSave = beginSave();
     if (!finishSave) return;
     try {
-      await call({ url: apiUrl('production/config'), method: 'PUT', body: submitted, headers: { 'If-Match': monitor.configRevision },
+      await call({ url: stationActionUrl.config, method: 'PUT', body: submitted, headers: { 'If-Match': monitor.configRevision },
         successMessage: '生产配置已保存', action: 'save', onSuccess: (data, response) => {
         if (!isProductionConfig(data)) throw new Error('响应未包含有效的生产配置');
         const revision = response.headers.get('ETag');
@@ -203,7 +213,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
         disabled={!locked && statusFresh}>
         <Button danger disabled={!locked && statusFresh} loading={busy.has('stop')}>停止</Button>
       </Popconfirm>
-      <Button disabled={state !== 'Faulted' || !statusFresh || dirty || !configReady || busy.size > 0} loading={busy.has('recover')} onClick={() => void call({ url: apiUrl('production/recover'), successMessage: '已发送恢复请求', action: 'recover', onSuccess: acceptStatus })}>恢复</Button>
+      <Button disabled={state !== 'Faulted' || !statusFresh || dirty || !configReady || busy.size > 0} loading={busy.has('recover')} onClick={() => void call({ url: stationActionUrl.recover, successMessage: '已发送恢复请求', action: 'recover', onSuccess: acceptStatus })}>恢复</Button>
       {startBlockedReason && <span className="production-actions-hint">{startBlockedReason}</span>}
     </div>
   );
@@ -473,7 +483,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
           try {
             const values = await resolveForm.validateFields();
             if (!owns()) return;
-            const result = await call({ url: apiUrl('production/device-actions/resolve'), action: 'resolve', successMessage: '核对证据已提交并写入审计', body: {
+            const result = await call({ url: stationActionUrl.resolve, action: 'resolve', successMessage: '核对证据已提交并写入审计', body: {
               runId: resolveTarget.kind === 'production' ? (resolveTarget.pending.runId ?? '') : '',
               manifestHash: resolveTarget.kind === 'production' ? (resolveTarget.pending.manifestHash ?? '') : '',
               deviceIds: resolveTarget.kind === 'production' ? (resolveTarget.pending.deviceIds ?? []) : [],
@@ -546,10 +556,11 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
 
   const operatorTab = open && <div className="operator-workspace-content">
     {pendingAlarmCount > 0 && <Suspense fallback={<span role="status">正在读取待确认告警…</span>}>
-      <OperatorAlarmQueue busy={busy} onAcknowledge={acknowledgeAlarm} />
+      <OperatorAlarmQueue busy={busy} onAcknowledge={acknowledgeAlarm} stationId={stationScoped ? stationId : undefined} />
     </Suspense>}
-    <OperatorDashboard key={`${selectedJobId ?? ''}-${layoutRevision}`} jobId={selectedJobId} status={status} statusFresh={statusFresh}
+    <OperatorDashboard key={`${stationId ?? 'default'}-${selectedJobId ?? ''}-${layoutRevision}`} jobId={selectedJobId} status={status} statusFresh={statusFresh}
       alarmSummary={alarmSummary} alarmFresh={!errors.alarmSummary && Boolean(alarmSummary)} kiosk={kiosk} lastUpdatedAt={lastUpdatedAt}
+      stationId={stationScoped ? stationId : undefined}
       onEdit={canConfigure && !kiosk && jobs.length > 0 ? () => setLayoutEditorOpen(true) : undefined} />
   </div>;
 

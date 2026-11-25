@@ -180,7 +180,7 @@ if (options.WorkerKind == "script")
 | Worker 程序集缺失 | 启动阶段失败（host 不启动） | 启动日志 + 发布资产检查 |
 | Worker 启动超时 | 节点失败，错误含 worker 索引与超时值 | `scriptWorker` 状态 `Stopped` |
 | 脚本抛异常 | 节点失败，保留行号与脚本错误文本 | diagnostics `scriptBackend=worker` |
-| 脚本超时 | 节点失败，worker 被杀并重启 | `Ticks` / `timeoutMs` 写入 summary |
+| 脚本预算超限 | 节点失败；协作式 tick/墙钟预算由脚本运行器报告，IPC 兜底超时才终止 worker | 错误包含预算原因；下一请求可继续 |
 | 宿主取消 | `OperationCanceledException` | worker 终止原因进日志 |
 | 连续崩溃 | 熔断打开 | `/api/script-workers` 显示 `CircuitOpen` |
 | 共享内存不可用 | 自动回落 PNG，节点继续 | diagnostics 标记 `png-fallback` |
@@ -222,6 +222,9 @@ if (options.WorkerKind == "script")
 | 集成 | 内存超限拒绝、worker 不可用时不静默回落 |
 | E2E | 编辑器“运行此节点”在 Worker 模式下成功；断开 worker 后有可读错误 |
 | 长稳 | 连续执行 N 轮无句柄/共享内存泄漏，worker 重启计数稳定 |
+
+`ScriptWorkerSupervisorTests` 已覆盖脚本 tick 和墙钟预算失败后的后续请求、执行中取消后重启，
+以及已有 worker 意外退出后的下一次请求恢复。这些测试不验证受限令牌、网络 ACL 或不可信代码隔离。
 
 门禁补强：
 

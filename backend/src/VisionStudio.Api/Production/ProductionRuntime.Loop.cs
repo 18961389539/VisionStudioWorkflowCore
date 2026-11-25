@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VisionStudio.Engine;
@@ -17,11 +18,22 @@ internal sealed partial class ProductionStationRuntime
             ProductionRuntimeConfig config;
             lock (_stateSync) config = _config;
 
+            ProductionTriggerEvent? triggerEvent = null;
             if (config.TriggerMode == ProductionTriggerMode.ExternalSignal)
             {
-                var triggered = await _triggerSignal.WaitAsync(config.TriggerTimeoutMs, ct);
-                if (!triggered) continue;
+                triggerEvent = _triggerQueue?.TryBeginNext();
+                if (triggerEvent is null)
+                {
+                    var triggered = await _triggerSignal.WaitAsync(config.TriggerTimeoutMs, ct);
+                    if (!triggered) continue;
+                    triggerEvent = _triggerQueue?.TryBeginNext();
+                    if (_triggerQueue is not null && triggerEvent is null) continue;
+                }
             }
+
+            var cycleClock = Stopwatch.StartNew();
+            using var cycleBudget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cycleBudget.CancelAfter(config.MaxCycleMs);
 
             // 周期开始即分配 RunId 并耐久写入起始记录：执行中/排队中进程被杀或断电时，重启后
             // 能列出"已接受未完成"的周期，而不是整条记录缺失（内存队列只承载大图编码，关键
@@ -50,54 +62,69 @@ internal sealed partial class ProductionStationRuntime
             }
             else
             {
-                // Q01：副作用流程在**执行任何设备动作之前**耐久登记意图（RunId + 锁定清单 + 指纹）。
-                // 进程被杀/断电/追溯队列故障都不会跳过这一步；意图未清除时启动会被闸门阻断，
-                // 因此"设备已执行而软件无结果"不可能被当成可开始的新周期。
-                bool sideEffectsAtStart;
-                lock (_stateSync) sideEffectsAtStart = _hasDeviceSideEffects;
-                var intentRecorded = true;
-                if (sideEffectsAtStart) intentRecorded = RecordDeviceActionIntent(locked.DependencyManifest, runId);
-
-                if (!intentRecorded)
+                var executionSlotAcquired = false;
+                try
                 {
-                    // 安全状态无法持久化 ⇒ 绝不执行设备动作（宁可不跑，不可无记录地跑）。
-                    result = new WorkflowRunResult(runId, false, 0, false, 0, 0, [], [], null,
-                        "Refused to execute device side effects: the device-action intent could not be persisted. " +
-                        "Resolve the storage problem before resuming production.", "Error")
+                    if (_executionSlotGate is not null)
                     {
-                        ErrorCode = VisionRunErrorCodes.RuntimeError
-                    };
-                }
-                else
-                {
-                    try
-                    {
-                        if (_executionSlotGate is not null) await _executionSlotGate.WaitAsync(ct);
-                        try
-                        {
-                            // A02：生产循环的真实派发携带生产租约令牌——令牌被换代/撤销后，
-                            // 旧周期的后续设备命令在派发边界被拒绝。
-                            using var commandScope = DeviceCommandOwnership.Enter(_lease);
-                            result = await _runner.RunAsync(
-                                locked.Workflow,
-                                new VisionRunOptions(DebugRunMode.Full, TimeoutMs: config.MaxCycleMs, Artifacts: writer.ArtifactOptions),
-                                runId: runId,
-                                cancellationToken: ct);
-                        }
-                        finally
-                        {
-                            _executionSlotGate?.Release();
-                        }
+                        await _executionSlotGate.WaitAsync(cycleBudget.Token);
+                        executionSlotAcquired = true;
                     }
-                    catch (Exception ex)
+
+                    // Q01：副作用流程在**执行任何设备动作之前**耐久登记意图（RunId + 锁定清单 + 指纹）。
+                    // 先获得执行槽，避免排队超时产生一个从未派发到硬件的未决动作标记。
+                    bool sideEffectsAtStart;
+                    lock (_stateSync) sideEffectsAtStart = _hasDeviceSideEffects;
+                    var intentRecorded = !sideEffectsAtStart || RecordDeviceActionIntent(locked.DependencyManifest, runId);
+                    if (!intentRecorded)
                     {
-                        result = new WorkflowRunResult(runId, false, 0, false, 0, 0, [], [], null, ex.Message, "Error")
+                        // 安全状态无法持久化 ⇒ 绝不执行设备动作（宁可不跑，不可无记录地跑）。
+                        result = new WorkflowRunResult(runId, false, 0, false, 0, 0, [], [], null,
+                            "Refused to execute device side effects: the device-action intent could not be persisted. " +
+                            "Resolve the storage problem before resuming production.", "Error")
                         {
-                            ErrorCode = ct.IsCancellationRequested ? VisionRunErrorCodes.Cancelled : VisionRunErrorCodes.RuntimeError
+                            ErrorCode = VisionRunErrorCodes.RuntimeError
                         };
                     }
+                    else
+                    {
+                        var remainingMs = config.MaxCycleMs - (int)Math.Ceiling(cycleClock.Elapsed.TotalMilliseconds);
+                        if (remainingMs <= 0)
+                            throw new OperationCanceledException("Production cycle budget expired before workflow dispatch.", cycleBudget.Token);
+
+                        // A02：生产循环的真实派发携带生产租约令牌——令牌被换代/撤销后，
+                        // 旧周期的后续设备命令在派发边界被拒绝。
+                        using var commandScope = DeviceCommandOwnership.Enter(_lease);
+                        result = await _runner.RunAsync(
+                            locked.Workflow,
+                            new VisionRunOptions(DebugRunMode.Full, TimeoutMs: remainingMs, Artifacts: writer.ArtifactOptions),
+                            runId: runId,
+                            cancellationToken: cycleBudget.Token);
+                    }
+                }
+                catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+                {
+                    result = new WorkflowRunResult(runId, false, cycleClock.Elapsed.TotalMilliseconds, false, 0, 0, [], [], null,
+                        $"Production cycle exceeded its {config.MaxCycleMs} ms end-to-end execution budget: {ex.Message}", "Error")
+                    {
+                        ErrorCode = VisionRunErrorCodes.Timeout
+                    };
+                }
+                catch (Exception ex)
+                {
+                    result = new WorkflowRunResult(runId, false, cycleClock.Elapsed.TotalMilliseconds, false, 0, 0, [], [], null, ex.Message, "Error")
+                    {
+                        ErrorCode = ct.IsCancellationRequested ? VisionRunErrorCodes.Cancelled : VisionRunErrorCodes.RuntimeError
+                    };
+                }
+                finally
+                {
+                    if (executionSlotAcquired) _executionSlotGate!.Release();
                 }
             }
+
+            // 保留真实周期墙钟耗时，包含安全登记、执行槽排队与执行，不使用执行器内部耗时冒充整周期。
+            result = result with { TotalDurationMs = Math.Max(result.TotalDurationMs, cycleClock.Elapsed.TotalMilliseconds) };
 
             // Q01：安全判定与置位必须发生在追溯证据落地之前——追溯 writer 故障（队列满/磁盘问题）
             // 绝不能阻断"设备动作不确定"的标记；此前的顺序让 EnqueueAsync 先抛错时置位被整体跳过，
@@ -139,6 +166,9 @@ internal sealed partial class ProductionStationRuntime
             {
                 // 提交预算耗尽：后台提交可能仍未收尾（writer 记入在途闸门，Drain 也会再有界等待一次）。
                 _drainingTraceWriter = writer;
+                if (triggerEvent is not null)
+                    _triggerQueue!.MarkNeedsReview(triggerEvent.EventId, result.RunId,
+                        "The cycle trace exceeded its persistence budget; automatic replay is disabled until an operator reviews the event.");
                 var message = $"Trace evidence for run '{result.RunId}' was not committed within the {_traceOptions.CommitBudgetMs} ms budget; " +
                               "the loop stops in Faulted until the pending record drains. The device-action intent remains in force.";
                 _logger.LogError(ex, "Production trace commit budget exhausted for run {RunId}.", result.RunId);
@@ -164,6 +194,19 @@ internal sealed partial class ProductionStationRuntime
                     _logger.LogError(ex, "Run {RunId} trace was committed, but clearing its safety intent failed; the runtime remains gated.", result.RunId);
                     result = result with { Success = false, Error = $"Device-action safety state could not be cleared: {ex.Message}", ErrorCode = VisionRunErrorCodes.RuntimeError, QualityDisposition = "ERROR" };
                 }
+            }
+            if (triggerEvent is not null)
+            {
+                if (!tracePersisted)
+                    _triggerQueue!.MarkNeedsReview(triggerEvent.EventId, result.RunId,
+                        "Cycle trace was not durably committed; automatic replay is disabled until an operator reviews the event.");
+                else if (result.Success)
+                    _triggerQueue!.Complete(triggerEvent.EventId, result.RunId);
+                else if (sideEffects)
+                    _triggerQueue!.MarkNeedsReview(triggerEvent.EventId, result.RunId,
+                        result.Error ?? "A side-effect cycle failed; inspect actual hardware state before retrying.");
+                else
+                    _triggerQueue!.Fail(triggerEvent.EventId, result.RunId, result.Error ?? "The cycle failed.");
             }
             if (ct.IsCancellationRequested)
             {
@@ -364,7 +407,7 @@ internal sealed partial class ProductionStationRuntime
             _state = ProductionRuntimeState.Recovering;
             _lastError = "Synchronization transport is unhealthy; waiting for stable camera reconnect/recovery.";
         }
-        await _alarms.RaiseAsync("PROD-SYNC-RECOVERING", AlarmSeverity.Warning, "ProductionSynchronizationGuard",
+        await _alarms.RaiseAsync("PROD-SYNC-RECOVERING", AlarmSeverity.Warning, _alarmSource,
             "Synchronization transport fault is live-recoverable. Production is paused until the configured healthy-check hysteresis is satisfied.", runId, CancellationToken.None);
 
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(config.SynchronizationGuardRecoveryTimeoutMs);
@@ -407,7 +450,7 @@ internal sealed partial class ProductionStationRuntime
     private async Task RaiseSynchronizationGuardIssuesAsync(ProductionSynchronizationGuardSnapshot guard, string? runId, AlarmSeverity severity, CancellationToken ct)
     {
         foreach (var issue in guard.Issues.GroupBy(x => x.Code, StringComparer.OrdinalIgnoreCase).Select(x => x.First()))
-            await _alarms.RaiseAsync(issue.Code, severity, "ProductionSynchronizationGuard", issue.Message, runId, ct);
+            await _alarms.RaiseAsync(issue.Code, severity, _alarmSource, issue.Message, runId, ct);
     }
 
     private async Task RecoverSynchronizationGuardAlarmsAsync(CancellationToken ct)
@@ -423,19 +466,19 @@ internal sealed partial class ProductionStationRuntime
             "PROD-SYNC-TRANSPORT",
             "PROD-SYNC-RECOVERING"
         })
-            await _alarms.RecoverAsync(code, "ProductionSynchronizationGuard", ct);
+            await _alarms.RecoverAsync(code, _alarmSource, ct);
     }
 
     private async Task RaisePtpGuardIssuesAsync(ProductionPtpGuardSnapshot guard, string? runId, CancellationToken ct)
     {
         foreach (var issue in guard.Issues.GroupBy(x => x.Code, StringComparer.OrdinalIgnoreCase).Select(x => x.First()))
-            await _alarms.RaiseAsync(issue.Code, AlarmSeverity.Critical, "ProductionPtpGuard", issue.Message, runId, ct);
+            await _alarms.RaiseAsync(issue.Code, AlarmSeverity.Critical, _alarmSource, issue.Message, runId, ct);
     }
 
     private async Task RecoverPtpGuardAlarmsAsync(CancellationToken ct)
     {
-        await _alarms.RecoverAsync("PROD-PTP-NOT-READY", "ProductionPtpGuard", ct);
-        await _alarms.RecoverAsync("PROD-PTP-DRIFT", "ProductionPtpGuard", ct);
-        await _alarms.RecoverAsync("PROD-PTP-MASTER-CLOCK", "ProductionPtpGuard", ct);
+        await _alarms.RecoverAsync("PROD-PTP-NOT-READY", _alarmSource, ct);
+        await _alarms.RecoverAsync("PROD-PTP-DRIFT", _alarmSource, ct);
+        await _alarms.RecoverAsync("PROD-PTP-MASTER-CLOCK", _alarmSource, ct);
     }
 }

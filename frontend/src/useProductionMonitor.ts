@@ -3,7 +3,7 @@ import type { AlarmRecord, ContractDto, ProductionRuntimeConfig, ProductionRunti
 import { responseErrorMessage } from './apiErrors';
 import { isProductionConfig, isProductionStatus } from './productionConfig';
 import { apiFetch } from './apiClient';
-import { alarms as alarmsEndpoint, apiUrl, type AlarmFilter } from './endpoints';
+import { alarms as alarmsEndpoint, apiUrl, production, type AlarmFilter } from './endpoints';
 import { useMonitorSnapshot } from './useMonitorStream';
 
 export type ProductionJobItem = { id: string; name: string; publishedVersion?: number | null };
@@ -30,11 +30,22 @@ const endpoints: Record<Resource, { url: string; label: string }> = {
   config: { url: apiUrl('production/config'), label: '生产配置' },
   jobs: { url: apiUrl('jobs'), label: '配方列表' },
   alarms: { url: alarmsEndpoint.list, label: '告警记录' },
-  alarmSummary: { url: alarmsEndpoint.summary, label: '活动告警统计' },
+  alarmSummary: { url: alarmsEndpoint.summary(), label: '活动告警统计' },
   pending: { url: apiUrl('production/device-actions/pending'), label: '待核对动作清单' },
 };
 const resources = Object.keys(endpoints) as Resource[];
 type Request = { controller: AbortController; timeout: ReturnType<typeof setTimeout>; refreshPending: boolean };
+function endpointUrl(resource: Resource, scopedStationId?: string): string {
+  if (!scopedStationId) return endpoints[resource].url;
+  switch (resource) {
+    case 'status': return production.runtimeStatus(scopedStationId);
+    case 'config': return production.runtimeConfig(scopedStationId);
+    case 'alarms': return alarmsEndpoint.page(0, ALARM_PAGE_SIZE, 'all', scopedStationId);
+    case 'alarmSummary': return alarmsEndpoint.summary(scopedStationId);
+    case 'pending': return production.runtimePendingActions(scopedStationId);
+    case 'jobs': return endpoints.jobs.url;
+  }
+}
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const stringList = (value: unknown): boolean => Array.isArray(value) && value.every((item) => typeof item === 'string');
 function validPending(value: unknown): boolean {
@@ -60,7 +71,8 @@ function validAlarmSummary(value: unknown): boolean {
 }
 
 /** 每个资源独立限时、独立提交；慢配置与失败正文不能阻断现场清单和状态刷新。 */
-export function useProductionMonitor(open: boolean, canReadPending = true) {
+export function useProductionMonitor(open: boolean, canReadPending = true, stationId?: string) {
+  const scopedStationId = stationId && stationId.toLowerCase() !== 'default' ? stationId : undefined;
   const [snapshot, setSnapshot] = useState<Snapshot>({ jobs: [], alarms: emptyAlarmHistory });
   const [errors, setErrors] = useState<Partial<Record<Resource, string>>>({});
   const [confirmed, setConfirmed] = useState<Partial<Record<Resource, boolean>>>({});
@@ -109,7 +121,8 @@ export function useProductionMonitor(open: boolean, canReadPending = true) {
       if (queueIfBusy) inFlight.refreshPending = true;
       return;
     }
-    const { url, label } = endpoints[resource];
+    const { label } = endpoints[resource];
+    const url = endpointUrl(resource, scopedStationId);
     const { page, filter } = alarmQueryRef.current;
     const skip = (page - 1) * ALARM_PAGE_SIZE;
     const statusAtStart = statusClock.current;
@@ -135,7 +148,9 @@ export function useProductionMonitor(open: boolean, canReadPending = true) {
     requests.current.set(resource, request);
     void (async () => {
       try {
-        const response = await apiFetch(resource === 'alarms' ? alarmsEndpoint.page(skip, ALARM_PAGE_SIZE, filter) : url, { signal: controller.signal });
+        const response = await apiFetch(resource === 'alarms'
+          ? alarmsEndpoint.page(skip, ALARM_PAGE_SIZE, filter, scopedStationId)
+          : url, { signal: controller.signal });
         if (!owns() || controller.signal.aborted) return;
         if (resource === 'pending' && response.status === 204) { accept(resource, undefined); return; }
         if (!response.ok) throw new Error(await responseErrorMessage(response, `${label}读取失败（HTTP ${response.status}）`));
@@ -171,7 +186,7 @@ export function useProductionMonitor(open: boolean, canReadPending = true) {
         finish();
       }
     })();
-  }, [accept]);
+  }, [accept, scopedStationId]);
 
   const refresh = useCallback(() => {
     resources.forEach((resource) => {
@@ -200,13 +215,13 @@ export function useProductionMonitor(open: boolean, canReadPending = true) {
   useEffect(() => {
     // 面板重新打开时，监视钩子可能仍留有上一次订阅的快照。
     if (!open || !monitorSnapshot || !active.current) return;
-    if (isProductionStatus(monitorSnapshot.production)) accept('status', monitorSnapshot.production);
+    if (!scopedStationId && isProductionStatus(monitorSnapshot.production)) accept('status', monitorSnapshot.production);
     if (monitorSnapshot.alarmRevision !== alarmRevisionRef.current) {
       alarmRevisionRef.current = monitorSnapshot.alarmRevision;
       read('alarms', true);
       read('alarmSummary', true);
     }
-  }, [monitorSnapshot, open, accept, read]);
+  }, [monitorSnapshot, open, accept, read, scopedStationId]);
 
   useEffect(() => {
     active.current = open;

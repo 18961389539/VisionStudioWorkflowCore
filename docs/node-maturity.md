@@ -37,9 +37,9 @@
 前端在发布对话框里把门禁渲染成"可继续的一步"：列出节点与理由 + 必勾选确认，而不是退化成
 "配方或发布条件已变化，请重新核对"——后者只会训练出"看到红字就再点一次"的习惯。
 
-> 2026-11-13：`script.csharp` 纳入 Preview。它是**进程内 trusted-code 运行时**——语法树 denylist
-> 只是纵深防御，不是 OS 沙箱；保存/运行/脚本编辑器接口已经限定工程师，发布时还必须显式确认。
-> 真正的强隔离（脚本下沉到 plugin worker 进程）是后续架构项，不在本次边界内。
+> `script.csharp` 是 trusted-code 运行时。宿主支持进程内和 WorkerProcess 两种模式，随仓库提供的
+> 生产配置默认 WorkerProcess，部署配置可以覆盖；两者都不是 OS 沙箱。语法树 denylist 只是纵深防御，
+> 受限令牌和网络 ACL 等尚未实现；保存/运行/脚本编辑器接口限定工程师，发布时还必须显式确认。
 
 已知边界：`module.call` 引用的模块内部节点不在当前工作流的 `Nodes` 里，门禁不递归展开。模块自身
 发布走同一条 publish 路径，因此模块发布时已覆盖；门禁保证的是"这份工作流里写着的节点"。
@@ -64,13 +64,13 @@
 `measure.thread`（silhouette，中径是估计）、`tolerance.stackup`（RSS ±3σ 独立假设）、
 `recognition.barcodeQuality`（MOD 近似，不能出合规报告）、
 `output.database`（只追加、单条事务）、`value.counter`（默认周期快照，按事件持久化需要有效业务 ID）、
-`script.csharp`（进程内 trusted-code 运行时：语法树 denylist 是纵深防御，不是 OS 沙箱；发布含脚本的流程必须显式确认，导入的第三方流程按代码审批）
+`script.csharp`（进程内或 WorkerProcess 的 trusted-code 运行时；两者均不是 OS 沙箱，发布含脚本的流程必须显式确认，导入的第三方流程按代码审批）
 
 ## 界面
 
 - 工具箱条目右侧、节点配置对话框标题：`预览` / `实验` 徽标，悬停给出原因（不是重复标签）；
 - `Stable` 不画徽标，也不写进目录 JSON（`JsonIgnore(WhenWritingDefault)`）——
-  其余 224 个节点的序列化形状与哈希不受影响；
+  其余 223 个节点的序列化形状与哈希不受影响；
 - 后端枚举以 PascalCase 字符串下发（全局 `JsonStringEnumConverter`），前端 `nodeMaturity.ts` 负责归一化，
   **字段缺失必须按 Stable 处理**。
 

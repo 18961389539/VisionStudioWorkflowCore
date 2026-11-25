@@ -132,6 +132,39 @@ public sealed class P1CompletionNodeTests
     }
 
     [Theory]
+    [InlineData(1e100)]
+    [InlineData(1e-200)]
+    [InlineData(1e308)]
+    public async Task Fuse_MeanPreservesDoubleRange(double value)
+    {
+        using var first = VisionImage.Own(new Mat(8, 8, MatType.CV_64FC1, Scalar.All(value)));
+        using var second = VisionImage.Own(new Mat(8, 8, MatType.CV_64FC1, Scalar.All(value)));
+        var result = await Run(new ImageFuseNode(), "image.fuse", ImagePorts(first, second), """{"mode":"mean"}""");
+        using var image = Result(result);
+        Assert.InRange(image.Mat.At<double>(0, 0) / value, 1 - 1e-14, 1 + 1e-14);
+    }
+
+    [Fact]
+    public async Task Fuse_MeanPreservesThirtyTwoBitIntegerPrecision()
+    {
+        using var first = VisionImage.Own(new Mat(8, 8, MatType.CV_32SC1, Scalar.All(2_000_000_000)));
+        using var second = VisionImage.Own(new Mat(8, 8, MatType.CV_32SC1, Scalar.All(2_000_000_064)));
+        var result = await Run(new ImageFuseNode(), "image.fuse", ImagePorts(first, second), """{"mode":"mean"}""");
+        using var image = Result(result);
+        Assert.Equal(2_000_000_032, image.Mat.At<int>(0, 0));
+    }
+
+    [Fact]
+    public async Task Fuse_MeanAvoidsFloatAccumulationOverflow()
+    {
+        using var first = VisionImage.Own(new Mat(8, 8, MatType.CV_32FC1, Scalar.All(3e38)));
+        using var second = VisionImage.Own(new Mat(8, 8, MatType.CV_32FC1, Scalar.All(3e38)));
+        var result = await Run(new ImageFuseNode(), "image.fuse", ImagePorts(first, second), """{"mode":"mean"}""");
+        using var image = Result(result);
+        Assert.Equal(first.Mat.At<float>(0, 0), image.Mat.At<float>(0, 0));
+    }
+
+    [Theory]
     [InlineData("""{"sourceMode":"frameSet","mode":"mean"}""", "legacy", "unchecked")]
     [InlineData("""{"sourceMode":"frameSet","mode":"mean","alignmentPolicy":"prealigned"}""", "prealigned", "operatorConfirmed")]
     public async Task Fuse_ReportsCamerasAndAlignmentForASynchronizedFrameSet(string parameters, string policy, string status)

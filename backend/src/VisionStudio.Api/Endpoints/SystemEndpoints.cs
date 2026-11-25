@@ -73,6 +73,10 @@ public static class SystemEndpoints
                         ? Math.Round((backupNow - at).TotalHours, 1)
                         : (double?)null,
                     lastBackupIncludesArtifacts = backup.LatestBackupIncludesArtifacts,
+                    secondaryDestinationConfigured = autoBackups.SecondaryBackupConfigured,
+                    latestSecondaryBackupId = backup.LatestSecondaryBackupId,
+                    latestSecondaryBackupAt = backup.LatestSecondaryBackupAt,
+                    secondaryListError = backup.SecondaryListError,
                     stale = AutoBackupService.IsStale(backupNow, backup.LatestBackupAt, TimeSpan.FromHours(autoBackups.StaleAfterHours)),
                     lastAttemptAt = backup.LastAttemptAt,
                     nextCheckAt = backup.NextCheckAt,
@@ -224,9 +228,8 @@ public static class SystemEndpoints
             productionBlockers.Add($"in-process device-action failure lock engaged: {processFailure}");
         if (maintenance.IsMaintenanceActive) productionBlockers.Add($"storage maintenance is active: {maintenance.Reason ?? "unspecified"}");
         if (maintenance.IsRestartPending) productionBlockers.Add("restart required after storage restore");
-        var productionStatus = production.Status;
-        if (productionStatus.State == ProductionRuntimeState.Faulted)
-            productionBlockers.Add($"production runtime is Faulted: {productionStatus.LastError ?? "unspecified"}");
+        foreach (var station in production.ListStatuses().Where(x => x.State == ProductionRuntimeState.Faulted))
+            productionBlockers.Add($"production runtime station '{station.StationId}' is Faulted: {station.LastError ?? "unspecified"}");
 
         // 依赖可见性（信息性，不计入 blocker）：未连接的设备/机器人是标称待机状态，
         // 不应把"设备未接线"笼统算作服务故障；真正影响动作就绪的是上面的阻断项。

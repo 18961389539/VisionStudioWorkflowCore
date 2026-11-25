@@ -442,6 +442,7 @@ export const parameterLabels: Record<string, string> = {
   'flow.try.maxRetries': '最大重试次数',
   'flow.try.retryDelayMs': '重试间隔',
   'flow.while.maxIterations': '最大迭代次数',
+  'flow.while.requireFreshCondition': '要求每轮更新条件',
   'frameset.image.cameraId': '相机 ID',
   'geometry.distance.metric': '距离度量',
   'geometry.fitFromPoints.operation': '运算',

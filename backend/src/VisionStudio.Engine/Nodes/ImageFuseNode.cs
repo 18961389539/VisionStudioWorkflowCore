@@ -171,10 +171,23 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
             && !name.Equals("ReferenceImage", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>均值：先在 float32 里累加再除，避免 8 位累加溢出。</summary>
     private static Mat Mean(List<VisionImage> images)
     {
         using var accumulator = new Mat();
+        if (images[0].Mat.Depth() == MatType.CV_64F || images[0].Mat.Depth() == MatType.CV_32F ||
+            images[0].Mat.Depth() == MatType.CV_32S)
+        {
+            var weight = 1.0 / images.Count;
+            images[0].Mat.ConvertTo(accumulator, MatType.CV_64F, weight);
+            for (var index = 1; index < images.Count; index++)
+            {
+                using var weighted = new Mat();
+                images[index].Mat.ConvertTo(weighted, MatType.CV_64F, weight);
+                Cv2.Add(accumulator, weighted, accumulator);
+            }
+            return accumulator.Clone();
+        }
+
         images[0].Mat.ConvertTo(accumulator, MatType.CV_32F);
         for (var index = 1; index < images.Count; index++)
         {

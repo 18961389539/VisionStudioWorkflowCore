@@ -117,6 +117,23 @@ public sealed class AlarmRetentionTests
     }
 
     [Fact]
+    public async Task StationScopedAlarmHistoryAndSummary_OnlyIncludeThatStation()
+    {
+        using var env = new TempWebHostEnvironment();
+        var store = new AlarmStore(env);
+        await store.RaiseAsync("A", AlarmSeverity.Critical, "ProductionRuntime:line-a", "line a alarm", null, default);
+        await store.RaiseAsync("B", AlarmSeverity.Warning, "ProductionRuntime:line-b", "line b alarm", null, default);
+
+        var page = await store.ListAsync(false, 0, 10, default, source: "ProductionRuntime:line-a");
+        var summary = await store.GetSummaryAsync(default, "ProductionRuntime:line-a");
+
+        Assert.Single(page.Items);
+        Assert.Equal("line a alarm", page.Items[0].Message);
+        Assert.Equal(1, page.Total);
+        Assert.Equal(new AlarmSummary(1, 1, "line a alarm", 1), summary);
+    }
+
+    [Fact]
     public async Task RevisionStamp_ChangesOnRaiseAcknowledgeAndRecover()
     {
         using var env = new TempWebHostEnvironment();

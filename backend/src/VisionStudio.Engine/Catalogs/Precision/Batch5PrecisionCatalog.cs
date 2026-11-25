@@ -158,7 +158,7 @@ public static class Batch5PrecisionCatalog
                 ], Group: "Selection", Description: "Which contour the scalar outputs describe: largest/smallest area, first/last in the list, or an explicit index."),
                 new("index", "Index", "number", 0, 0, 100000, 1, Group: "Selection", VisibleWhen: new("selectBy", ["index"]), Description: "Zero-based position in the input list, used only when Select = by index; out of range fails.")
             ],
-            "Compute derived contour geometry (centroid, min-area rotated rectangle, solidity, extent, aspect ratio, equivalent diameter) with strict selectBy/index checks, scalar ports for the selected contour, overlays and diagnostics. Empty input or contours with fewer than 3 points fail.",
+            "Compute derived contour geometry (centroid, min-area rotated rectangle, solidity, extent, aspect ratio, equivalent diameter) with strict selectBy/index checks, scalar ports for the selected contour, overlays and diagnostics. Area is geometric contour area, not the foreground pixel count returned by region.fromMask. Empty input or contours with fewer than 3 points fail.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
 
@@ -586,6 +586,6 @@ public static class Batch5PrecisionCatalog
              new("minArea", "Minimum Area", "number", 0, 0, 1000000000, 1, Group: "Filter", Description: "Drop contours whose area is below this value; filters segmentation speckle."),
              new("maxContours", "Max Contours", "number", 512, 1, 4096, 1, Group: "Limits", Description: "Hard budget; exceeding it fails instead of silently truncating the list.") { Integer = true },
              new("maxPoints", "Max Points Per Contour", "number", 5000, 3, 200000, 1, Group: "Limits", Description: "Hard budget per contour; exceeding it fails so a noisy mask cannot blow up downstream measurement.") { Integer = true }],
-            "Extract contours from an 8-bit mask or a float probability map. Threshold and inversion use the same rules as region.fromMask. External retrieval drops holes. With holes keeps parent links between retained contours. minArea removes speckle, and exceeding the configured contour or point limit fails the node.", Capabilities: new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: [])
+            "Extract contours from an 8-bit mask or a float probability map. Threshold and inversion use the same rules as region.fromMask. Contour area is geometric and differs from the foreground pixel count reported by region.fromMask. External retrieval drops holes. With holes keeps parent links between retained contours; odd hierarchy depths are holes, and foreground islands inside holes are not. minArea removes speckle, and exceeding the configured contour or point limit fails the node.", Capabilities: new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: [])
     ];
 }

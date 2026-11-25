@@ -28,6 +28,27 @@ public sealed class DatasetValidationTests
     }
 
     [Fact]
+    public void SummaryAndAcceptance_RequireBothClassesAndMinimumSampleCounts()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var okOnly = Enumerable.Range(1, 5)
+            .Select(index => new ValidationResultRecord("run", index.ToString(), "TRACE", $"source-{index}", "OK", "OK",
+                "TRUE_OK", null, true, 1, [], null, now))
+            .ToArray();
+        var summary = DatasetValidationStore.BuildSummary(okOnly);
+        Assert.Null(summary.FalseOkRate);
+        Assert.Equal(0, summary.FalseNgRate);
+
+        var blockers = ProductRecipeStore.Evaluate(summary,
+            new ValidationAcceptancePolicy(MinimumSamplesPerDisposition: 5));
+        Assert.Contains(blockers, reason => reason.Contains("expected NG samples", StringComparison.Ordinal));
+
+        var balanced = new ValidationRunSummary(10, 10, 5, 5, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1);
+        Assert.Empty(ProductRecipeStore.Evaluate(balanced,
+            new ValidationAcceptancePolicy(MinimumSamplesPerDisposition: 5)));
+    }
+
+    [Fact]
     public async Task V048Schema12_CreatesDatasetBatchValidationTables()
     {
         using var env = new TempWebHostEnvironment();

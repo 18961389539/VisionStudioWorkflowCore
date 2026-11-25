@@ -1,6 +1,7 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductionPanel from '../ProductionPanel';
+import { defaultProductionConfig } from '../../productionConfig';
 
 // 生产状态由 /hubs/monitor 推送；本文件只验证轮询兜底与失败降级（2026-11-13 起 10 s）。
 vi.mock('../../useMonitorStream', () => ({ useMonitorSnapshot: () => undefined }));
@@ -124,5 +125,33 @@ describe('ProductionPanel polling (R04)', () => {
     const text = document.body.textContent ?? '';
     expect(text).toContain('数据已过期');
     expect(text).not.toContain('数据更新于');
+  });
+
+  it('reads and controls the station selected by the operator URL', async () => {
+    const urls: string[] = [];
+    const running = { ...statusBody, state: 'Running', productionLocked: true };
+    const stopped = { ...statusBody, state: 'Stopped', productionLocked: false };
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      urls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url.includes('/api/production/runtimes/station-b/status')) return Promise.resolve(okResponse(running));
+      if (url.includes('/api/production/runtimes/station-b/config')) return Promise.resolve(okResponse(defaultProductionConfig));
+      if (url.includes('/api/production/runtimes/station-b/device-actions/pending')) return Promise.resolve(failedResponse(204));
+      if (url.includes('/api/alarms/summary?stationId=station-b')) return Promise.resolve(okResponse(emptyAlarmSummary));
+      if (url.includes('/api/alarms?') && url.includes('stationId=station-b')) return Promise.resolve(okResponse([]));
+      if (url.includes('/api/jobs')) return Promise.resolve(okResponse([]));
+      if (url.includes('/api/production/runtimes/station-b/stop')) return Promise.resolve(okResponse(stopped));
+      return Promise.resolve(okResponse({}));
+    }));
+
+    render(<ProductionPanel open onClose={() => undefined} embedded stationId="station-b" />);
+    await waitFor(() => expect(urls.some(url => url.includes('/api/production/runtimes/station-b/status'))).toBe(true));
+    expect(urls.some(url => url.includes('/api/production/runtimes/station-b/config'))).toBe(true);
+    expect(urls.some(url => url.includes('/api/alarms/summary?stationId=station-b'))).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /停.*止/ }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /停.*止/ })).toHaveLength(2));
+    fireEvent.click(screen.getAllByRole('button', { name: /停.*止/ })[1]!);
+    await waitFor(() => expect(urls.some(url => url.startsWith('POST /api/production/runtimes/station-b/stop'))).toBe(true));
   });
 });

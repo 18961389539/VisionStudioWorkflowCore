@@ -362,7 +362,7 @@ public sealed partial class StorageBackupService
     {
         if (string.IsNullOrWhiteSpace(id) || id.Length > 96 || id.Any(c => !(char.IsLetterOrDigit(c) || c is '-' or '_')))
             throw new ApiValidationException("Backup id is invalid.");
-        return Path.Combine(_backupRoot, id + ".vsbackup");
+        return ResolveBackupPath(id);
     }
 
     private static StorageBackupDescriptor ToDescriptor(StorageBackupManifest manifest, long archiveBytes)
@@ -500,10 +500,25 @@ public sealed partial class StorageBackupService
     /// <summary>R01：设备动作安全账本的完整路径集合（含两个 store 的核对证据目录）。</summary>
     private IEnumerable<string> SafetyLedgerPaths()
     {
-        yield return _safetyStore.StatePath;
-        yield return _safetyStore.ResolutionDirectory;
-        yield return _intentStore.StatePath;
-        yield return _intentStore.ResolutionDirectory;
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            _safetyStore.StatePath,
+            _safetyStore.ResolutionDirectory,
+            _intentStore.StatePath,
+            _intentStore.ResolutionDirectory
+        };
+        paths.UnionWith(_production.SafetyLedgers.LedgerPaths());
+        paths.UnionWith(_production.TriggerQueuePaths);
+        if (Directory.Exists(_productionConfigRoot))
+        {
+            foreach (var statePath in Directory.EnumerateFiles(_productionConfigRoot, "device-action-safety*.json", SearchOption.TopDirectoryOnly))
+            {
+                paths.Add(statePath);
+                paths.Add(statePath + ".resolutions");
+            }
+            paths.UnionWith(Directory.EnumerateFiles(_productionConfigRoot, "trigger-queue*.json", SearchOption.TopDirectoryOnly));
+        }
+        return paths;
     }
 
     private static bool IsSafetyLedgerPath(string fullPath, IReadOnlyList<string> ledgerPaths)

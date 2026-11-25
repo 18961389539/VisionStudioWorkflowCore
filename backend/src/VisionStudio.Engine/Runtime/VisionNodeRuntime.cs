@@ -57,6 +57,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             sw.Stop();
 
             data.OutputsByNode[node.Id] = result.Outputs;
+            data.RecordNodeExecution(node.Id);
             data.TrackOutputs(result.Outputs);
             data.AddOverlays(node.Id, result.Overlays);
             if (data.CaptureNodeImages) data.CaptureNodeImage(node.Id, result.Outputs);

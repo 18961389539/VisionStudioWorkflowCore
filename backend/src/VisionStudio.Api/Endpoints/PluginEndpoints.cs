@@ -15,7 +15,7 @@ public static class PluginEndpoints
 
         app.MapPost("/api/plugins/rescan", (PluginManager plugins, ProductionRuntimeService production) =>
         {
-            if (production.Status.ProductionLocked)
+            if (production.AnyStationProductionLocked)
                 throw new ApiConflictException("Stop Production Runtime before rescanning plugin packages. V0.59 can discover new packages at runtime but never mutates the active plugin registry while Production is locked.");
             return Results.Ok(plugins.Rescan());
         }).RequireEngineer("plugin.rescan", "plugin-registry").Produces<PluginRescanResult>();

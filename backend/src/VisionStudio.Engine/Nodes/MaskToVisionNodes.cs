@@ -74,9 +74,23 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
     {
         using var labels = new Mat();
         var labelCount = Cv2.ConnectedComponents(binary, labels, PixelConnectivity.Connectivity8, MatType.CV_32S);
+        if (labelCount - 1 > VisionRegion.MaxComponents)
+            throw new InvalidOperationException($"region.fromMask found {labelCount - 1} components; the limit is {VisionRegion.MaxComponents}. Reduce mask noise before conversion.");
         var runsByLabel = new Dictionary<int, List<VisionRegionRun>>(labelCount);
         var indexer = labels.GetGenericIndexer<int>();
         long pixelCount = 0;
+        var runCount = 0;
+
+        void AddRun(int label, int row, int start, int end)
+        {
+            if (++runCount > VisionRegion.MaxRuns)
+                throw new InvalidOperationException($"region.fromMask exceeded the {VisionRegion.MaxRuns} run limit. Simplify the mask before conversion.");
+            if (!runsByLabel.TryGetValue(label, out var runs))
+                runsByLabel[label] = runs = [];
+            runs.Add(new VisionRegionRun(row, start, end));
+            pixelCount += end - start + 1;
+        }
+
         for (var y = 0; y < labels.Height; y++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -93,23 +107,13 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
 
                 // 标签切换：先收束上一段行程。
                 if (runLabel != 0 && runStart >= 0)
-                {
-                    if (!runsByLabel.TryGetValue(runLabel, out var closed))
-                        runsByLabel[runLabel] = closed = [];
-                    closed.Add(new VisionRegionRun(y, runStart, x - 1));
-                    pixelCount += x - runStart;
-                }
+                    AddRun(runLabel, y, runStart, x - 1);
                 runLabel = label;
                 runStart = label == 0 ? -1 : x;
             }
 
             if (runLabel != 0 && runStart >= 0)
-            {
-                if (!runsByLabel.TryGetValue(runLabel, out var tail))
-                    runsByLabel[runLabel] = tail = [];
-                tail.Add(new VisionRegionRun(y, runStart, labels.Width - 1));
-                pixelCount += labels.Width - runStart;
-            }
+                AddRun(runLabel, y, runStart, labels.Width - 1);
         }
 
         // 按标签顺序输出，保证同一掩码两次运行得到相同的 component 顺序。
@@ -179,6 +183,21 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
         var outputIndexByOriginal = kept
             .Select((item, position) => (item.Original, position))
             .ToDictionary(pair => pair.Original, pair => pair.position);
+        var depths = Enumerable.Repeat(-1, hierarchy.Length).ToArray();
+        int Depth(int index)
+        {
+            var pending = new Stack<int>();
+            var current = index;
+            while (current >= 0 && depths[current] < 0)
+            {
+                pending.Push(current);
+                current = hierarchy[current].Parent;
+            }
+            var depth = current < 0 ? -1 : depths[current];
+            while (pending.TryPop(out var item)) depths[item] = ++depth;
+            return depths[index];
+        }
+
         var results = new List<VisionContour>(kept.Count);
         foreach (var (original, _) in kept)
         {
@@ -187,7 +206,8 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
                 throw new InvalidOperationException($"contour.fromMask contour {original} has {points.Length} points which exceeds maxPoints={maxPoints}.");
             var parent = hierarchy.Length > original ? hierarchy[original].Parent : -1;
             var parentIndex = parent >= 0 && outputIndexByOriginal.TryGetValue(parent, out var mapped) ? mapped : -1;
-            results.Add(ContourNodesHelper.ToContour(points, results.Count, parentIndex, parent >= 0, maxPoints));
+            var isHole = hierarchy.Length > original && Depth(original) % 2 == 1;
+            results.Add(ContourNodesHelper.ToContour(points, results.Count, parentIndex, isHole, maxPoints));
         }
 
         var diagnostics = CoordinateValidation.Diagnostics(

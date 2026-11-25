@@ -25,6 +25,7 @@ internal sealed partial class ProductionStationRuntime
     private readonly ILogger _logger;
     private readonly ProductionTraceOptions _traceOptions;
     private readonly DeviceActionSafetyStore? _safetyStore;
+    private readonly ProductionSafetyLedgerRegistry? _safetyLedgers;
     /// <summary>R01：统一动作授权——生产启动必须同时检查其它入口（手动/临时运行）登记的意图。</summary>
     private readonly DeviceActionAuthorizationService? _authorization;
     private readonly WorkflowModuleExpander? _moduleExpander;
@@ -33,6 +34,7 @@ internal sealed partial class ProductionStationRuntime
     private readonly RuntimeWorkloadGate _workloads;
     private readonly SemaphoreSlim? _executionSlotGate;
     private readonly Action<ProductionStationResultSnapshot>? _onCycleCompleted;
+    private readonly ProductionTriggerQueue? _triggerQueue;
     private SemaphoreSlim _triggerSignal = new(0);
     private IDisposable? _workloadLease;
     private ProductionTraceWriter? _traceWriter;
@@ -113,7 +115,9 @@ internal sealed partial class ProductionStationRuntime
         VisionNodeRegistry? nodes = null,
         RuntimeWorkloadGate? workloads = null,
         SemaphoreSlim? executionSlotGate = null,
-        Action<ProductionStationResultSnapshot>? onCycleCompleted = null)
+        Action<ProductionStationResultSnapshot>? onCycleCompleted = null,
+        ProductionSafetyLedgerRegistry? safetyLedgers = null,
+        ProductionTriggerQueue? triggerQueue = null)
     {
         _stationId = ProductionRuntimeStationIds.Normalize(stationId);
         var isDefault = ProductionRuntimeStationIds.IsDefault(_stationId);
@@ -133,12 +137,15 @@ internal sealed partial class ProductionStationRuntime
         _logger = logger;
         _traceOptions = traceOptions?.Value ?? new ProductionTraceOptions();
         _safetyStore = safetyStore;
+        _safetyLedgers = safetyLedgers;
         _authorization = authorization;
         _moduleExpander = moduleExpander;
         _nodes = nodes;
         _workloads = workloads ?? new RuntimeWorkloadGate();
         _executionSlotGate = executionSlotGate;
         _onCycleCompleted = onCycleCompleted;
+        _triggerQueue = triggerQueue;
+        if (safetyStore is not null) safetyLedgers?.Register(_stationId, safetyStore);
 
         // F01：加载持久化的"设备动作不确定"状态——重启后标记与锁定清单必须复现，
         // 否则自动/人工启动都会跳过设备核对。文件损坏时按"不可核对"处理（保守拒绝启动）。
@@ -286,7 +293,15 @@ internal sealed partial class ProductionStationRuntime
             await _alarms.RecoverAsync("PROD-DEPENDENCY-DRIFT", _alarmSource, ct);
 
             // R01：手动/临时运行登记的动作意图（含本进程正在进行的动作）同样阻断生产启动。
-            _authorization?.EnsureProductionStartAllowed();
+            var deviceIds = snapshot.DependencyManifest.Devices.Select(x => x.Id).ToArray();
+            var robotIds = snapshot.DependencyManifest.Robots.Select(x => x.Id).ToArray();
+            var cameraIds = snapshot.DependencyManifest.Cameras.Select(x => x.Id).ToArray();
+            var workflowHasSideEffects = snapshot.Workflow.Nodes.Any(IsDeviceSideEffectNode);
+            if (_authorization is not null)
+                _authorization.EnsureProductionStartAllowed(deviceIds, robotIds, cameraIds, allowEmptyTarget: !workflowHasSideEffects);
+            else
+                _safetyLedgers?.EnsureNoConflictingUnresolvedState(
+                    "production start", deviceIds, robotIds, cameraIds, allowEmptyTarget: !workflowHasSideEffects);
             // R05：上一循环若有在途追溯提交未收尾（存储挂起），禁止启动新周期。
             EnsureNoDrainingTraceWriter();
             // 统一安全闸门：只要上一次副作用故障留下的"设备动作未知"标记仍在，任何启动路径
@@ -373,13 +388,18 @@ internal sealed partial class ProductionStationRuntime
         }
     }
 
-    public void TriggerOnce()
+    public ProductionTriggerEnqueueResult? TriggerOnce(string? eventId = null)
     {
         var state = Status.State;
         if (state != ProductionRuntimeState.Running)
             throw new ApiConflictException($"Cannot trigger station '{_stationId}' because its state is {state} (must be Running).");
-        _triggerSignal.Release();
+        var accepted = _triggerQueue?.Enqueue(eventId);
+        if (accepted?.IsNew != false) _triggerSignal.Release();
+        return accepted;
     }
+
+    public IReadOnlyList<ProductionTriggerEvent> ListTriggers()
+        => _triggerQueue?.List() ?? [];
 
     public async Task DeleteConfigAsync(CancellationToken ct)
     {

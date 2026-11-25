@@ -25,6 +25,9 @@ public sealed record AutoBackupStatus(
     DateTimeOffset? LatestBackupAt,
     string? LatestBackupId,
     bool? LatestBackupIncludesArtifacts,
+    string? LatestSecondaryBackupId,
+    DateTimeOffset? LatestSecondaryBackupAt,
+    string? SecondaryListError,
     DateTimeOffset? LastAttemptAt,
     DateTimeOffset? NextCheckAt,
     string? LastError,
@@ -43,7 +46,7 @@ public sealed class AutoBackupService : BackgroundService
     private readonly TimeSpan _staleAfter;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly object _sync = new();
-    private AutoBackupStatus _status = new(null, null, null, null, null, null, null, DateTimeOffset.MinValue);
+    private AutoBackupStatus _status = new(null, null, null, null, null, null, null, null, null, null, DateTimeOffset.MinValue);
 
     public AutoBackupService(
         StorageBackupService backups,
@@ -62,6 +65,7 @@ public sealed class AutoBackupService : BackgroundService
     public bool Enabled => _options.Enabled;
     public int IntervalHours => (int)_interval.TotalHours;
     public int StaleAfterHours => (int)_staleAfter.TotalHours;
+    public bool SecondaryBackupConfigured => _backups.SecondaryBackupConfigured;
     public AutoBackupStatus Status => Volatile.Read(ref _status);
 
     /// <summary>
@@ -148,6 +152,9 @@ public sealed class AutoBackupService : BackgroundService
                 LatestBackupAt = created.CreatedAt,
                 LatestBackupId = created.BackupId,
                 LatestBackupIncludesArtifacts = created.IncludesArtifacts,
+                LatestSecondaryBackupAt = _backups.SecondaryBackupConfigured ? created.CreatedAt : null,
+                LatestSecondaryBackupId = _backups.SecondaryBackupConfigured ? created.BackupId : null,
+                SecondaryListError = null,
                 LastError = null,
                 RefreshedAt = DateTimeOffset.UtcNow
             });
@@ -167,14 +174,28 @@ public sealed class AutoBackupService : BackgroundService
 
     private async Task<AutoBackupStatus> RefreshLatestAsync(CancellationToken ct)
     {
+        string? secondaryError = null;
+        StorageBackupDescriptor? latestSecondary = null;
         try
         {
             var latest = (await _backups.ListAsync(ct)).FirstOrDefault();
+            if (_backups.SecondaryBackupConfigured)
+            {
+                try { latestSecondary = (await _backups.ListSecondaryAsync(ct)).FirstOrDefault(); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    secondaryError = ex.Message;
+                    _logger.LogWarning(ex, "Secondary backup copies could not be listed.");
+                }
+            }
             return Update(s => s with
             {
                 LatestBackupAt = latest?.CreatedAt,
                 LatestBackupId = latest?.BackupId,
                 LatestBackupIncludesArtifacts = latest?.IncludesArtifacts,
+                LatestSecondaryBackupAt = latestSecondary?.CreatedAt,
+                LatestSecondaryBackupId = latestSecondary?.BackupId,
+                SecondaryListError = secondaryError,
                 ListError = null,
                 RefreshedAt = DateTimeOffset.UtcNow
             });
@@ -183,7 +204,7 @@ public sealed class AutoBackupService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Existing backups could not be listed for freshness reporting.");
-            return Update(s => s with { ListError = ex.Message, RefreshedAt = DateTimeOffset.UtcNow });
+            return Update(s => s with { ListError = ex.Message, SecondaryListError = secondaryError, RefreshedAt = DateTimeOffset.UtcNow });
         }
     }
 

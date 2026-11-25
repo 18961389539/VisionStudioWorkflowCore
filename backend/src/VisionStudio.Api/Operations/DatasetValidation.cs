@@ -32,7 +32,7 @@ public sealed record ValidationRunRequest(string? SourceWorkflowRunId = null, Wo
 
 public sealed record ValidationRunSummary(
     int Total, int Completed, int TrueOk, int TrueNg, int FalseOk, int FalseNg, int Errors,
-    double Accuracy, double FalseOkRate, double FalseNgRate,
+    double Accuracy, double? FalseOkRate, double? FalseNgRate,
     double P50DurationMs, double P95DurationMs, double P99DurationMs, double MaxDurationMs);
 
 public sealed record ValidationResultRecord(
@@ -428,8 +428,8 @@ VALUES($run,$item,$kind,$ref,$expected,$actual,$classification,$replay,$success,
         return new ValidationRunSummary(
             completed, completed, trueOk, trueNg, falseOk, falseNg, errors,
             classified == 0 ? 0 : (trueOk + trueNg) / (double)classified,
-            expectedNg == 0 ? 0 : falseOk / (double)expectedNg,
-            expectedOk == 0 ? 0 : falseNg / (double)expectedOk,
+            expectedNg == 0 ? null : falseOk / (double)expectedNg,
+            expectedOk == 0 ? null : falseNg / (double)expectedOk,
             Percentile(durations, .50), Percentile(durations, .95), Percentile(durations, .99), durations.Length == 0 ? 0 : durations[^1]);
     }
 

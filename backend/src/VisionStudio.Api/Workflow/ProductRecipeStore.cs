@@ -31,7 +31,8 @@ public sealed record ValidationAcceptancePolicy(
     double MinimumAccuracy = 0.99,
     double MaximumFalseOkRate = 0,
     double MaximumFalseNgRate = 0.01,
-    int MaximumErrors = 0);
+    int MaximumErrors = 0,
+    int MinimumSamplesPerDisposition = 5);
 
 public sealed record LinkRecipeValidationRequest(string ValidationRunId, ValidationAcceptancePolicy? Policy = null);
 
@@ -218,12 +219,24 @@ ON CONFLICT(job_id,version) DO UPDATE SET validation_run_id=excluded.validation_
         return changes;
     }
 
-    private static List<string> Evaluate(ValidationRunSummary s, ValidationAcceptancePolicy p)
+    public static List<string> Evaluate(ValidationRunSummary s, ValidationAcceptancePolicy p)
     {
         var reasons=new List<string>();
         if(s.Accuracy < p.MinimumAccuracy) reasons.Add($"Accuracy {s.Accuracy:P2} < {p.MinimumAccuracy:P2}");
-        if(s.FalseOkRate > p.MaximumFalseOkRate) reasons.Add($"False OK {s.FalseOkRate:P2} > {p.MaximumFalseOkRate:P2}");
-        if(s.FalseNgRate > p.MaximumFalseNgRate) reasons.Add($"False NG {s.FalseNgRate:P2} > {p.MaximumFalseNgRate:P2}");
+        var expectedNg = s.TrueNg + s.FalseOk;
+        var expectedOk = s.TrueOk + s.FalseNg;
+        if (expectedNg < p.MinimumSamplesPerDisposition)
+            reasons.Add($"Validation has {expectedNg} expected NG samples; at least {p.MinimumSamplesPerDisposition} are required to evaluate false-OK rate");
+        else if (s.FalseOkRate is not { } falseOkRate)
+            reasons.Add("False-OK rate is not evaluable");
+        else if(falseOkRate > p.MaximumFalseOkRate)
+            reasons.Add($"False OK {falseOkRate:P2} > {p.MaximumFalseOkRate:P2}");
+        if (expectedOk < p.MinimumSamplesPerDisposition)
+            reasons.Add($"Validation has {expectedOk} expected OK samples; at least {p.MinimumSamplesPerDisposition} are required to evaluate false-NG rate");
+        else if (s.FalseNgRate is not { } falseNgRate)
+            reasons.Add("False-NG rate is not evaluable");
+        else if(falseNgRate > p.MaximumFalseNgRate)
+            reasons.Add($"False NG {falseNgRate:P2} > {p.MaximumFalseNgRate:P2}");
         if(s.Errors > p.MaximumErrors) reasons.Add($"Errors {s.Errors} > {p.MaximumErrors}");
         if(s.Completed == 0) reasons.Add("Validation contains no completed samples");
         return reasons;
@@ -262,8 +275,9 @@ FROM jobs j WHERE j.product_id=$product ORDER BY j.recipe_code,j.name;
     }
     private static void ValidatePolicy(ValidationAcceptancePolicy p)
     {
-        if(p.MinimumAccuracy is <0 or >1 || p.MaximumFalseOkRate is <0 or >1 || p.MaximumFalseNgRate is <0 or >1 || p.MaximumErrors<0)
-            throw new ApiValidationException("Validation policy rates must be 0..1 and MaximumErrors must be >= 0.");
+        if(p.MinimumAccuracy is <0 or >1 || p.MaximumFalseOkRate is <0 or >1 || p.MaximumFalseNgRate is <0 or >1 ||
+           p.MaximumErrors < 0 || p.MinimumSamplesPerDisposition is < 1 or > 100_000)
+            throw new ApiValidationException("Validation policy rates must be 0..1, MaximumErrors must be >= 0, and MinimumSamplesPerDisposition must be 1..100000.");
     }
     private static void ValidateRecipeCode(string code){ if(string.IsNullOrWhiteSpace(code)||code.Length>64) throw new ApiValidationException("Recipe code is required and must be <= 64 characters."); }
     private static void ValidateId(string id,string kind){ if(string.IsNullOrWhiteSpace(id)||id.Any(c=>!(char.IsLetterOrDigit(c)||c is '-' or '_'))) throw new ApiValidationException($"{kind} id may contain only letters, digits, '-' and '_'."); }

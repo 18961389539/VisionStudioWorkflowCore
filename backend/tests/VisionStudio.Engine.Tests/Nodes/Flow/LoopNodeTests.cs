@@ -58,6 +58,165 @@ public sealed class LoopNodeTests
         Assert.Contains(result.NodeReports, r => r.NodeId == "after");
     }
 
+    [Theory]
+    [InlineData(2, 10, "conditionFalse", 3)]
+    [InlineData(999, 4, "iterationLimit", 4)]
+    [InlineData(0, 1, "conditionFalse", 1)]
+    public async Task WhilePublishesExitReasonAndCompletedIterations(int stopAfter, int maxIterations, string reason, int iterations)
+    {
+        await using var provider = Provider();
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(
+            WithExitReader(WhileWorkflow(stopAfter, maxIterations)));
+        Assert.True(result.Success, result.Error);
+        var after = Assert.Single(result.NodeReports, r => r.NodeId == "after");
+        Assert.Equal(reason, after.Summary["reason"]);
+        Assert.Equal((long)iterations, after.Summary["iterations"]);
+    }
+
+    [Theory]
+    [InlineData("flow.while")]
+    [InlineData("flow.repeat")]
+    public async Task BreakPublishesExitReason(string loopType)
+    {
+        await using var provider = Provider();
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(WithExitReader(BreakWorkflow(loopType)));
+        Assert.True(result.Success, result.Error);
+        var after = Assert.Single(result.NodeReports, r => r.NodeId == "after");
+        Assert.Equal("break", after.Summary["reason"]);
+        Assert.Equal(1L, after.Summary["iterations"]);
+    }
+
+    [Fact]
+    public async Task RepeatPublishesCompletedExitReason()
+    {
+        await using var provider = Provider();
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(WithExitReader(RepeatWorkflow(3)));
+        Assert.True(result.Success, result.Error);
+        var after = Assert.Single(result.NodeReports, r => r.NodeId == "after");
+        Assert.Equal("completed", after.Summary["reason"]);
+        Assert.Equal(3L, after.Summary["iterations"]);
+    }
+
+    [Fact]
+    public async Task WhileWithFreshConditionAcceptsSourceExecutedEveryIteration()
+    {
+        await using var provider = Provider();
+        var workflow = WithFreshCondition(WhileWorkflow(stopAfter: 2, maxIterations: 10));
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(WithExitReader(workflow));
+        Assert.True(result.Success, result.Error);
+        Assert.Equal("conditionFalse", Assert.Single(result.NodeReports, r => r.NodeId == "after").Summary["reason"]);
+    }
+
+    [Fact]
+    public async Task NestedWhileResetsExitAndFreshnessForEachOuterIteration()
+    {
+        await using var provider = Provider();
+        var workflow = new WorkflowDefinition("nested-loops", "Nested Loops",
+            [Node("start", "test.mark"), Node("loop", "flow.repeat", "{\"count\":2}"),
+             Node("inner", "flow.while", "{\"maxIterations\":3,\"requireFreshCondition\":true}"),
+             Node("source", "test.counter", "{\"stopAfter\":0}"), Node("innerEnd", "flow.loopEnd"),
+             Node("innerAfter", "test.loopExit"), Node("outerEnd", "flow.loopEnd"), Node("after", "test.mark")],
+            [C("s-o", "start", "next", "loop", "exec"), C("o-i", "loop", "body", "inner", "exec"),
+             C("i-s", "inner", "body", "source", "exec"), D("cond", "source", "pass", "inner", "condition"),
+             C("s-ie", "source", "next", "innerEnd", "exec"), C("ie-i", "innerEnd", "repeat", "inner", "repeat"),
+             C("i-a", "inner", "done", "innerAfter", "exec"),
+             D("inner-reason", "inner", "exitReason", "innerAfter", "reason"),
+             D("inner-iterations", "inner", "iterations", "innerAfter", "iterations"),
+             C("ia-oe", "innerAfter", "next", "outerEnd", "exec"), C("oe-o", "outerEnd", "repeat", "loop", "repeat"),
+             C("o-a", "loop", "done", "after", "exec")]);
+
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(WithExitReader(workflow));
+
+        Assert.True(result.Success, result.Error);
+        var innerExits = result.NodeReports.Where(report => report.NodeId == "innerAfter").ToArray();
+        Assert.Equal(2, innerExits.Length);
+        Assert.All(innerExits, report =>
+        {
+            Assert.Equal("conditionFalse", report.Summary["reason"]);
+            Assert.Equal(1L, report.Summary["iterations"]);
+        });
+        var outerExit = Assert.Single(result.NodeReports, report => report.NodeId == "after");
+        Assert.Equal("completed", outerExit.Summary["reason"]);
+        Assert.Equal(2L, outerExit.Summary["iterations"]);
+    }
+
+    [Fact]
+    public async Task FreshConditionAcceptsSourceInParallelBranchAfterJoin()
+    {
+        await using var provider = Provider();
+        var workflow = new WorkflowDefinition("parallel-condition", "Parallel Condition",
+            [Node("start", "test.mark"), Node("loop", "flow.while", "{\"maxIterations\":5,\"requireFreshCondition\":true}"),
+             Node("parallel", "flow.parallel"), Node("source", "test.counter", "{\"stopAfter\":2}"),
+             Node("other", "test.mark"), Node("join", "flow.join"), Node("loopEnd", "flow.loopEnd"),
+             Node("after", "test.mark")],
+            [C("s-l", "start", "next", "loop", "exec"), C("l-p", "loop", "body", "parallel", "exec"),
+             C("p-s", "parallel", "branch1", "source", "exec"), C("p-o", "parallel", "branch2", "other", "exec"),
+             C("s-j", "source", "next", "join", "branch1"), C("o-j", "other", "next", "join", "branch2"),
+             D("cond", "source", "pass", "loop", "condition"), C("j-e", "join", "next", "loopEnd", "exec"),
+             C("e-l", "loopEnd", "repeat", "loop", "repeat"), C("l-a", "loop", "done", "after", "exec")]);
+
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(WithExitReader(workflow));
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(3, result.NodeReports.Count(report => report.NodeId == "source"));
+        var after = Assert.Single(result.NodeReports, report => report.NodeId == "after");
+        Assert.Equal("conditionFalse", after.Summary["reason"]);
+        Assert.Equal(3L, after.Summary["iterations"]);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task WhileFreshConditionRejectsSkippedSourceWithoutChangingLegacyBehavior(bool requireFresh, bool success)
+    {
+        await using var provider = Provider();
+        var workflow = SkippedConditionWorkflow();
+        if (requireFresh) workflow = WithFreshCondition(workflow);
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(workflow);
+        Assert.Equal(success, result.Success);
+        if (!success)
+        {
+            Assert.Contains("did not execute in this iteration", result.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(VisionRunErrorCodes.NodeFailure, result.ErrorCode);
+            Assert.Contains(result.NodeReports, report => report.NodeId == "loop" && !report.Success);
+        }
+        else Assert.Equal(2, result.NodeReports.Count(r => r.NodeId == "gate"));
+    }
+
+    [Fact]
+    public async Task FreshConditionRejectsSourceOutsideLoopOnFirstIteration()
+    {
+        await using var provider = Provider();
+        var workflow = WhileWorkflow(stopAfter: 999, maxIterations: 2);
+        var nodes = workflow.Nodes.Select(node => node.Id switch
+        {
+            "start" => Node("start", "test.counter", "{\"stopAfter\":999}"),
+            "body" => Node("body", "test.mark"),
+            _ => node
+        }).ToArray();
+        var edges = workflow.Edges.Select(edge => edge.Id == "cond" ? edge with { SourceNodeId = "start" } : edge).ToArray();
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(
+            WithFreshCondition(workflow with { Nodes = nodes, Edges = edges }));
+        Assert.False(result.Success);
+        Assert.Contains("did not execute in this iteration", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, result.NodeReports.Count(report => report.NodeId == "body"));
+    }
+
+    [Fact]
+    public async Task FreshConditionDoesNotBlockBreakBeforeConditionSource()
+    {
+        await using var provider = Provider();
+        var workflow = BreakWorkflow("flow.while");
+        var edges = workflow.Edges.Select(edge => edge.Id == "cond" ? edge with { SourceNodeId = "condition" } : edge).ToArray();
+        var nodes = workflow.Nodes.Select(node => node.Id == "afterBreak" ? Node("condition", "test.counter") : node).ToArray();
+        edges = edges.Select(edge => edge.SourceNodeId == "afterBreak" ? edge with { SourceNodeId = "condition" }
+            : edge.TargetNodeId == "afterBreak" ? edge with { TargetNodeId = "condition" } : edge).ToArray();
+        workflow = WithFreshCondition(workflow with { Nodes = nodes, Edges = edges });
+        var result = await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(WithExitReader(workflow));
+        Assert.True(result.Success, result.Error);
+        Assert.Equal("break", Assert.Single(result.NodeReports, r => r.NodeId == "after").Summary["reason"]);
+    }
+
     [Fact]
     public async Task BreakSkipsRemainingBodyAndExitsLoop()
     {
@@ -168,6 +327,32 @@ public sealed class LoopNodeTests
             edges.ToArray());
     }
 
+    private static WorkflowDefinition WithFreshCondition(WorkflowDefinition workflow) => workflow with
+    {
+        Nodes = workflow.Nodes.Select(node => node.Id == "loop"
+            ? node with { Parameters = new Dictionary<string, JsonElement>(node.Parameters ?? [])
+                { ["requireFreshCondition"] = JsonSerializer.SerializeToElement(true) } } : node).ToArray()
+    };
+
+    private static WorkflowDefinition WithExitReader(WorkflowDefinition workflow) => workflow with
+    {
+        Nodes = workflow.Nodes.Select(node => node.Id == "after" ? Node("after", "test.loopExit") : node).ToArray(),
+        Edges = [.. workflow.Edges, D("exit-reason", "loop", "exitReason", "after", "reason"),
+            D("exit-iterations", "loop", "iterations", "after", "iterations")]
+    };
+
+    private static WorkflowDefinition SkippedConditionWorkflow() => new("while-skipped", "While Skipped Condition",
+        [Node("start", "test.mark"), Node("loop", "flow.while", "{\"maxIterations\":2}"),
+         Node("gate", "test.counter", "{\"stopAfter\":1}"), Node("if", "flow.ifBoolean"),
+         Node("source", "test.counter", "{\"stopAfter\":999}"), Node("skipped", "test.mark"),
+         Node("join", "flow.join"), Node("loopEnd", "flow.loopEnd"), Node("after", "test.mark")],
+        [C("s-l", "start", "next", "loop", "exec"), C("l-g", "loop", "body", "gate", "exec"),
+         C("g-i", "gate", "next", "if", "exec"), D("gate-cond", "gate", "pass", "if", "condition"),
+         C("i-t", "if", "true", "source", "exec"), C("i-f", "if", "false", "skipped", "exec"),
+         C("t-j", "source", "next", "join", "branch1"), C("f-j", "skipped", "next", "join", "branch2"),
+         D("cond", "source", "pass", "loop", "condition"), C("j-e", "join", "next", "loopEnd", "exec"),
+         C("e-l", "loopEnd", "repeat", "loop", "repeat"), C("l-a", "loop", "done", "after", "exec")]);
+
     // ===== 测试基础设施 =====
 
     private static ServiceProvider Provider()
@@ -198,10 +383,14 @@ public sealed class LoopNodeTests
         registry.Register(Catalog("flow.break"), new BreakLoopNode(), "builtin");
         registry.Register(Catalog("flow.forEach"), new DetectionForEachNode(), "builtin");
         registry.Register(Catalog("flow.loopEnd"), new LoopEndNode(), "builtin");
+        registry.Register(Batch2UtilityCatalog.Items.Single(x => x.Type == "flow.ifBoolean"), new BooleanIfConditionNode(), "builtin");
+        registry.Register(BuiltInNodeCatalog.Require("flow.join"), new JoinNode(), "builtin");
+        registry.Register(BuiltInNodeCatalog.Require("flow.parallel"), new ParallelMarkerNode(), "builtin");
         registry.Register(CounterCatalog, new CounterNode(), "test");
         registry.Register(EchoIndexCatalog, new EchoIndexNode(), "test");
         registry.Register(SourceCatalog, new DetectionSource(), "test");
         registry.Register(MarkCatalog, new MarkNode(), "test");
+        registry.Register(LoopExitCatalog, new LoopExitNode(), "test");
         return registry;
     }
 
@@ -228,6 +417,23 @@ public sealed class LoopNodeTests
         [new("exec", VisionDataType.Control)],
         [new("next", VisionDataType.Control), new("value", VisionDataType.Integer)], [],
         Capabilities: new VisionToolCapabilities(ExecutionMode: VisionExecutionMode.WorkflowCore));
+
+    private static NodeCatalogItem LoopExitCatalog { get; } = new("test.loopExit", "Loop Exit", "Test",
+        [new("exec", VisionDataType.Control), new("reason", VisionDataType.String), new("iterations", VisionDataType.Integer)],
+        [new("next", VisionDataType.Control)], [],
+        Capabilities: new VisionToolCapabilities(ExecutionMode: VisionExecutionMode.WorkflowCore));
+
+    private sealed class LoopExitNode : IVisionNodeExecutor
+    {
+        public string Type => "test.loopExit";
+        public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>(),
+                new Dictionary<string, object?>
+                {
+                    ["reason"] = context.Require<string>("reason"),
+                    ["iterations"] = context.Require<long>("iterations")
+                }));
+    }
 
     private sealed class CounterNode : IVisionNodeExecutor
     {

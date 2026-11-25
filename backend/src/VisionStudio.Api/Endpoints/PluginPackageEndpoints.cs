@@ -20,7 +20,7 @@ public static class PluginPackageEndpoints
 
         app.MapPost("/api/plugin-packages/install", async (HttpRequest request, PluginPackageService packages, PluginManager plugins, ProductionRuntimeService production, CancellationToken ct) =>
         {
-            if (production.Status.ProductionLocked)
+            if (production.AnyStationProductionLocked)
                 throw new ApiConflictException("Stop Production Runtime before installing or activating plugin packages.");
             var (bytes, fileName) = await ReadSingleFileAsync(request, packages, ct);
             var result = packages.Install(bytes, fileName);
@@ -30,7 +30,7 @@ public static class PluginPackageEndpoints
 
         app.MapPost("/api/plugin-packages/{id}/versions/{version}/select", (string id, string version, PluginPackageService packages, PluginManager plugins, ProductionRuntimeService production) =>
         {
-            if (production.Status.ProductionLocked)
+            if (production.AnyStationProductionLocked)
                 throw new ApiConflictException("Stop Production Runtime before selecting a plugin package version.");
             var result = packages.SelectVersion(id, version);
             if (!result.RestartRequired) plugins.Rescan();
@@ -39,14 +39,14 @@ public static class PluginPackageEndpoints
 
         app.MapPost("/api/plugin-packages/{id}/rollback", (string id, PluginRollbackRequest request, PluginPackageService packages, ProductionRuntimeService production) =>
         {
-            if (production.Status.ProductionLocked)
+            if (production.AnyStationProductionLocked)
                 throw new ApiConflictException("Stop Production Runtime before staging a plugin rollback.");
             return Results.Ok(packages.Rollback(id, request.TargetVersion));
         }).Produces<PluginPackageSelectionResult>().RequireAdministrator("plugin.package.rollback", "plugin-package");
 
         app.MapDelete("/api/plugin-packages/{id}/versions/{version}", (string id, string version, PluginPackageService packages, ProductionRuntimeService production) =>
         {
-            if (production.Status.ProductionLocked)
+            if (production.AnyStationProductionLocked)
                 throw new ApiConflictException("Stop Production Runtime before removing an installed plugin version.");
             packages.RemoveVersion(id, version);
             return Results.NoContent();

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "5d44847ce0ec21d609421209c660496189b55517464fcf0d075f7aeb1a04ce59",
+  "hash": "6a6d610b032a8926e3889ff853986f8a3f7bfd17ad3c2750a0cc8946523f7a48",
   "items": [
     {
       "type": "image.acquire",
@@ -4165,7 +4165,7 @@
           "integer": true
         }
       ],
-      "description": "Sort a DetectionList by up to three fields and refresh result indices. Missing confidence or classId sorts last in either direction. Keep First limits the list after sorting. Emits count and JSON diagnostics.",
+      "description": "Sort a DetectionList by up to three fields and refresh result indices. Equal keys retain input order. Missing confidence or classId sorts last in either direction. Keep First limits the list after sorting. inputCount and truncated describe this node's input and limit only; connect upstream truncation indicators separately when completeness matters.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4899,7 +4899,7 @@
           "integer": true
         }
       ],
-      "description": "Extract contours from an 8-bit mask or a float probability map. Threshold and inversion use the same rules as region.fromMask. External retrieval drops holes. With holes keeps parent links between retained contours. minArea removes speckle, and exceeding the configured contour or point limit fails the node.",
+      "description": "Extract contours from an 8-bit mask or a float probability map. Threshold and inversion use the same rules as region.fromMask. Contour area is geometric and differs from the foreground pixel count reported by region.fromMask. External retrieval drops holes. With holes keeps parent links between retained contours; odd hierarchy depths are holes, and foreground islands inside holes are not. minArea removes speckle, and exceeding the configured contour or point limit fails the node.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -6033,7 +6033,7 @@
           }
         }
       ],
-      "description": "Compute derived contour geometry (centroid, min-area rotated rectangle, solidity, extent, aspect ratio, equivalent diameter) with strict selectBy/index checks, scalar ports for the selected contour, overlays and diagnostics. Empty input or contours with fewer than 3 points fail.",
+      "description": "Compute derived contour geometry (centroid, min-area rotated rectangle, solidity, extent, aspect ratio, equivalent diameter) with strict selectBy/index checks, scalar ports for the selected contour, overlays and diagnostics. Area is geometric contour area, not the foreground pixel count returned by region.fromMask. Empty input or contours with fewer than 3 points fail.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -15958,6 +15958,16 @@
           "required": false
         },
         {
+          "name": "iterations",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "exitReason",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -15977,7 +15987,7 @@
           "integer": true
         }
       ],
-      "description": "Fixed-count loop: run the body exactly count times. Wire: exec in, body out to the body sequence, done to the continuation, optional count input overrides the parameter; the body must end at flow.loopEnd wired back to the repeat input. Inside the body, index (0-based), iteration (1-based), total and isLast are available as ordinary data ports. flow.break inside the body exits early; a count of 0 or a negative count fails instead of silently skipping.",
+      "description": "Fixed-count loop: run the body exactly count times. Wire: exec in, body out to the body sequence, done to the continuation, optional count input overrides the parameter; the body must end at flow.loopEnd wired back to the repeat input. Inside the body, index (0-based), iteration (1-based), total and isLast are available as ordinary data ports. After done, iterations and exitReason distinguish completed and break. A count of 0 or a negative count fails instead of silently skipping.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -16448,6 +16458,16 @@
           "required": false
         },
         {
+          "name": "iterations",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "exitReason",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -16465,9 +16485,17 @@
           "group": "Limits",
           "description": "Hard iteration budget (1-10000). The loop exits once it is reached even if the condition stays true, so a mis-wired condition cannot hang the runtime.",
           "integer": true
+        },
+        {
+          "name": "requireFreshCondition",
+          "label": "Require Fresh Condition",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Limits",
+          "description": "Require the condition source to execute during every iteration; skipped or external sources fail rather than reuse an earlier value. A break does not require a condition sample."
         }
       ],
-      "description": "Do-while condition loop: run the body once, then re-check the connected condition at the end of each iteration and repeat while it stays true. Wire: exec in, body out to the body sequence, done to the continuation, and the condition input to a Boolean produced inside the body (for example flow.result.pass) so it is re-sampled every iteration; the body must end at flow.loopEnd wired back to the repeat input. The condition is sampled after the body, so the first iteration always runs; a condition wired before the loop is constant and only the iteration budget can end it. A condition source that is skipped by an If branch keeps its previous value. flow.break inside the body exits early; diagnostics report kind, budget and condition wiring.",
+      "description": "Do-while condition loop: run the body once, then re-check the connected condition at the end of each iteration and repeat while it stays true. Wire: exec in, body out to the body sequence, done to the continuation, and the condition input to a Boolean produced inside the body (for example flow.result.pass) so it is re-sampled every iteration; the body must end at flow.loopEnd wired back to the repeat input. The condition is sampled after the body, so the first iteration always runs; a condition wired before the loop is constant and only the iteration budget can end it. A condition source that is skipped by an If branch keeps its previous value unless Require Fresh Condition is enabled. After done, iterations and exitReason distinguish conditionFalse, iterationLimit and break.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -32374,7 +32402,7 @@
           "description": "Optional gate: withinTolerance reports ra <= limit. 0 disables it."
         }
       ],
-      "description": "Estimates roughness trends in pixels from a nominally straight sampled image edge. Reports the evaluated sample span and Gaussian end handling. Rz averages five segments when enough samples are available. In a shorter window it reports the whole-window range with rzSamplingLengths=0.",
+      "description": "Estimates roughness trends in pixels from a nominally straight sampled image edge. This image-based estimate does not replace a calibrated contact profilometer or a certified roughness measurement. Reports the evaluated sample span and Gaussian end handling. Rz averages five segments when enough samples are available. In a shorter window it reports the whole-window range with rzSamplingLengths=0.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -34472,7 +34500,7 @@
           "description": "Arc-length resampling along the profile before crest detection."
         }
       ],
-      "description": "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. pitchDiameter is an estimate in pixels. pitchDiameterMethod identifies the arithmetic mean of the major and minor diameters. The tolerance flag applies to pitch consistency.",
+      "description": "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. The silhouette does not measure the pitch diameter directly: pitchDiameter is an estimate in pixels, and pitchDiameterMethod identifies the arithmetic mean of the major and minor diameters. It must not be used as a certified pitch-diameter measurement. The tolerance flag applies only to pitch consistency.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -38078,7 +38106,7 @@
           "description": "Hard cap on the input area. Median holds every input plus the output in memory, so a full-resolution stack multiplies quickly."
         }
       ],
-      "description": "Fuse registered images pixel by pixel using mean, median, min or max. Images must share size, channel count and depth. Connect two to eight individual image inputs or one synchronized FrameSet. For raw camera images, extract each frame, register and warp it to a shared reference grid, then connect the aligned images to the individual inputs. The default alignment policy checks known coordinate frame metadata, and FrameSet diagnostics list the camera IDs. Mean accumulates in float32 and converts back to the source depth with saturation. Median supports 8-bit inputs.",
+      "description": "Fuse registered images pixel by pixel using mean, median, min or max. Images must share size, channel count and depth. Connect two to eight individual image inputs or one synchronized FrameSet. For raw camera images, extract each frame, register and warp it to a shared reference grid, then connect the aligned images to the individual inputs. The default alignment policy checks known coordinate frame metadata, and FrameSet diagnostics list the camera IDs. Mean uses float64 for 32-bit integer, float32 and float64 inputs, float32 for other depths, then converts back to the source depth with saturation. Median supports 8-bit inputs.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -47502,7 +47530,7 @@
           "description": "Swap foreground and background after thresholding."
         }
       ],
-      "description": "Convert an 8-bit mask or a float probability map into 8-connected regions. The image output echoes a binary 0/255 mask and area counts its foreground pixels. found is false when the mask has no foreground.",
+      "description": "Convert an 8-bit mask or a float probability map into 8-connected regions. The image output echoes a binary 0/255 mask and area counts its foreground pixels. found is false when the mask has no foreground. The region budget is 10000 components and 1000000 total runs; exceeding either fails instead of truncating.",
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,
@@ -51490,7 +51518,7 @@
           "step": 10,
           "unit": "ms",
           "group": "Limits",
-          "description": "Wall-clock budget checked at injected loop/function ticks. Native OpenCV calls and BCL calls that do not yield cannot be interrupted."
+          "description": "Wall-clock budget checked at injected loop/function ticks. InProcess cannot interrupt native or BCL calls that do not yield. WorkerProcess also has a separate IPC timeout that can terminate the worker."
         },
         {
           "name": "maxTicks",
@@ -51528,7 +51556,7 @@
           "description": "Maximum input/output image pixel count. Reject oversized Mat objects before they can exhaust the host."
         }
       ],
-      "description": "Run trusted C# code with typed inputs and an optional OpenCV Mat image. Image input is cloned; image output is owned by the result. The runtime references only a minimal BCL surface plus OpenCvSharp and VisionStudio.Scripting; file/network/reflection/process/threading APIs and #r/#load directives are rejected by a syntax-tree denylist (unlisted APIs are allowed). Loops and function entries receive a cooperative tick budget. Set Output.Result/Number/Text/Boolean/Json/Image or return a primitive value; at least one output is required. This is a trusted-engineer runtime, not a hard OS sandbox; imported workflows containing scripts require approval. algorithmBackend=roslyn.",
+      "description": "Run trusted C# code with typed inputs and an optional OpenCV Mat image. Image input is cloned; image output is owned by the result. The runtime references only a minimal BCL surface plus OpenCvSharp and VisionStudio.Scripting; file/network/reflection/process/threading APIs and #r/#load directives are rejected by a syntax-tree denylist (unlisted APIs are allowed). Loops and function entries receive a cooperative tick budget. Set Output.Result/Number/Text/Boolean/Json/Image or return a primitive value; at least one output is required. The host can run scripts in-process or in a worker process; the supplied production configuration defaults to WorkerProcess, but deployments may override it. Neither mode is a hard OS sandbox; imported workflows containing scripts require approval. algorithmBackend=roslyn.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

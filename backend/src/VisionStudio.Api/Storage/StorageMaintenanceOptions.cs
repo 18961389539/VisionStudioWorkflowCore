@@ -14,6 +14,7 @@ public sealed class StorageMaintenanceOptions
     public long MaxArtifactBytes { get; set; } = 20L * 1024 * 1024 * 1024;
     public long MaxBackupBytes { get; set; } = 10L * 1024 * 1024 * 1024;
     public int BackupRetentionCount { get; set; } = 10;
+    public string? BackupSecondaryRoot { get; set; }
     public int MonitorIntervalSeconds { get; set; } = 30;
     public bool AutoCleanupOnCritical { get; set; } = true;
     public bool IncludeArtifactsInBackup { get; set; } = true;

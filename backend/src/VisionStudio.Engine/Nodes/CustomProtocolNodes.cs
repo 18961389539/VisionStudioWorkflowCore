@@ -96,7 +96,7 @@ internal static class ProtocolFraming
         if (readMode.Equals("untilTerminator", StringComparison.OrdinalIgnoreCase) && readTerminator.Length > 0)
         {
             if (!result.AsSpan().EndsWith(readTerminator))
-                throw new InvalidOperationException($"protocol response did not end with the configured terminator ({ToHex(readTerminator)}) within the timeout; got {result.Length} bytes.");
+                throw new InvalidOperationException($"protocol response did not end with the configured terminator ({ToHex(readTerminator)}) before the connection closed; got {result.Length} bytes.");
             result = result[..^readTerminator.Length];
         }
         if (readMode.Equals("fixedLength", StringComparison.OrdinalIgnoreCase) && result.Length < readLength)
@@ -214,6 +214,8 @@ public sealed class TcpRequestNode(IDeviceCommandOwnershipGate? ownershipGate = 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
         byte[] response;
+        bool matched;
+        var transmissionAttempted = false;
         // 派发边界：所有权失效（租约被释放/换代）时闸门抛错，请求根本不会发出。
         using var permit = (ownershipGate ?? AllowAllDeviceCommandOwnershipGate.Instance)
             .AcquireCommandPermit(DeviceCommandResourceKinds.Device, deviceId);
@@ -222,9 +224,19 @@ public sealed class TcpRequestNode(IDeviceCommandOwnershipGate? ownershipGate = 
             using var client = new TcpClient { NoDelay = true };
             await client.ConnectAsync(host, port, timeout.Token).ConfigureAwait(false);
             var stream = client.GetStream();
-            if (frame.Length > 0) await stream.WriteAsync(frame, timeout.Token).ConfigureAwait(false);
+            if (frame.Length > 0)
+            {
+                transmissionAttempted = true;
+                await stream.WriteAsync(frame, timeout.Token).ConfigureAwait(false);
+            }
             await stream.FlushAsync(timeout.Token).ConfigureAwait(false);
             response = await ProtocolFraming.ReadResponseAsync(stream, readMode, readTerminator, readLength, maxResponse, timeout.Token).ConfigureAwait(false);
+            stopwatch.Stop();
+            var text = Encoding.UTF8.GetString(response);
+            matched = ProtocolFraming.Matches(text, node.GetString("expectPattern", string.Empty), node.GetBool("ignoreCase", false), cancellationToken);
+            if (!matched && node.GetBool("requireMatch", false))
+                throw new InvalidOperationException(
+                    $"device.tcpRequest '{deviceId}' response from {endpoint} did not match expectPattern '{node.GetString("expectPattern", string.Empty)}'; got '{Clip(text)}'.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -234,16 +246,21 @@ public sealed class TcpRequestNode(IDeviceCommandOwnershipGate? ownershipGate = 
         }
         catch (SocketException ex)
         {
-            throw new InvalidOperationException($"device.tcpRequest '{deviceId}' failed talking to {endpoint}: {ex.SocketErrorCode} {ex.Message}", ex);
+            var warning = transmissionAttempted ? " The request may already have reached the peer; verify device state before retrying." : string.Empty;
+            throw new InvalidOperationException($"device.tcpRequest '{deviceId}' failed talking to {endpoint}: {ex.SocketErrorCode} {ex.Message}{warning}", ex);
         }
-        stopwatch.Stop();
-
-        var text = Encoding.UTF8.GetString(response);
-        var matched = ProtocolFraming.Matches(text, node.GetString("expectPattern", string.Empty), node.GetBool("ignoreCase", false), cancellationToken);
-        if (!matched && node.GetBool("requireMatch", false))
+        catch (IOException ex) when (transmissionAttempted)
+        {
             throw new InvalidOperationException(
-                $"device.tcpRequest '{deviceId}' response from {endpoint} did not match expectPattern '{node.GetString("expectPattern", string.Empty)}'; got '{Clip(text)}'.");
-
+                $"device.tcpRequest '{deviceId}' failed talking to {endpoint}: {ex.Message} " +
+                "The request may already have reached the peer; verify device state before retrying.", ex);
+        }
+        catch (InvalidOperationException ex) when (transmissionAttempted)
+        {
+            throw new InvalidOperationException(
+                $"device.tcpRequest '{deviceId}' failed talking to {endpoint}: {ex.Message} " +
+                "The request may already have reached the peer; verify device state before retrying.", ex);
+        }
         return ProtocolFraming.Result(Type, deviceId, endpoint, "tcp", response, matched, stopwatch.Elapsed.TotalMilliseconds,
             new Dictionary<string, object?> { ["requestBytes"] = frame.Length, ["readMode"] = readMode });
     }

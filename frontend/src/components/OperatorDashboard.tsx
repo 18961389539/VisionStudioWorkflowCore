@@ -58,6 +58,7 @@ export function useOperatorLayout(jobId?: string) {
 
 type DashboardProps = {
   jobId?: string;
+  stationId?: string;
   status?: ProductionRuntimeStatus;
   statusFresh: boolean;
   alarmSummary?: ContractDto<'AlarmSummary'>;
@@ -69,7 +70,7 @@ type DashboardProps = {
   lastUpdatedAt?: Date;
 };
 
-export function OperatorDashboard({ jobId, status, statusFresh, alarmSummary, alarmFresh, onEdit, kiosk = false, lastUpdatedAt }: DashboardProps) {
+export function OperatorDashboard({ jobId, stationId, status, statusFresh, alarmSummary, alarmFresh, onEdit, kiosk = false, lastUpdatedAt }: DashboardProps) {
   const { snapshot, error, reload } = useOperatorLayout(jobId);
   const simulation = productionDemoEnabled && !jobId;
   const layout = snapshot?.layout ?? (simulation ? demoLayout : defaultLayout);
@@ -118,7 +119,7 @@ export function OperatorDashboard({ jobId, status, statusFresh, alarmSummary, al
           <span>{live?.lastCycleAt ? new Date(live.lastCycleAt).toLocaleTimeString('zh-CN') : '暂无已完成周期'}</span>
         </>}
         {widget === 'Preview' && <Suspense fallback={<span role="status">正在加载检验留图…</span>}>
-          <OperatorInspectionPreview status={live} simulation={simulation} />
+          <OperatorInspectionPreview status={live} simulation={simulation} stationId={stationId} />
         </Suspense>}
         {widget === 'Alarms' && <>
           <strong>{alarmActive ?? '—'} <small>条活动告警</small></strong>

@@ -18,7 +18,7 @@ public static class PluginWorkerEndpoints
             ProductionRuntimeService production,
             CancellationToken cancellationToken) =>
         {
-            if (production.Status.ProductionLocked)
+            if (production.AnyStationProductionLocked)
                 throw new ApiConflictException("Stop Production Runtime before restarting a plugin worker.");
             try { return Results.Ok(await workers.RestartAsync(pluginId, cancellationToken)); }
             catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }

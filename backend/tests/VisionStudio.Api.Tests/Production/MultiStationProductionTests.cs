@@ -133,6 +133,11 @@ public sealed class MultiStationProductionTests
         Assert.NotNull(service.GetDeviceActionResolutionState("station-dev"));
         Assert.True(File.Exists(Path.Combine(env.ContentRootPath, "data", "production", "device-action-safety.station-dev.json")));
 
+        // 另一工位不能对同一 PLC 再启动副作用工作流；冲突检查使用持久化的设备资产清单。
+        var sameDevice = await Assert.ThrowsAsync<ApiConflictException>(() =>
+            service.StartAsync("station-same-device", "job-dev", default));
+        Assert.Contains("station-dev", sameDevice.Message, StringComparison.OrdinalIgnoreCase);
+
         // station-ok 仍正常运行且没有任何未决设备动作
         Assert.Equal(ProductionRuntimeState.Running, service.GetStatus("station-ok").State);
         Assert.Null(service.GetDeviceActionResolutionState("station-ok"));
@@ -148,6 +153,28 @@ public sealed class MultiStationProductionTests
         var okAfterRestart = await restarted.StartAsync("station-ok", "job-ok", default);
         Assert.Equal(ProductionRuntimeState.Running, okAfterRestart.State);
         await restarted.StopAllAsync(default);
+    }
+
+    [Fact]
+    public void SafetyLedgerRegistry_BlocksOverlappingOrUnknownAssetsButAllowsDisjointAssets()
+    {
+        using var env = new TempWebHostEnvironment();
+        var path = Path.Combine(env.ContentRootPath, "safety.json");
+        var store = new DeviceActionSafetyStore(path, NullLogger<DeviceActionSafetyStore>.Instance);
+        store.Save(new DeviceActionSafetyState(
+            "manifest",
+            ["plc-1"],
+            [],
+            DateTimeOffset.UtcNow,
+            "cycle outcome unknown"));
+        var registry = new ProductionSafetyLedgerRegistry();
+        registry.Register("line-a", store);
+
+        Assert.Throws<ApiConflictException>(() =>
+            registry.EnsureNoConflictingUnresolvedState("production start", ["PLC-1"]));
+        Assert.Throws<ApiConflictException>(() =>
+            registry.EnsureNoConflictingUnresolvedState("manual action", []));
+        registry.EnsureNoConflictingUnresolvedState("production start", ["plc-2"]);
     }
 
     [Fact]
@@ -323,8 +350,12 @@ public sealed class MultiStationProductionTests
         await Task.Delay(120);
         Assert.Equal(0, service.GetStatus("trig-1").CycleCount);
 
-        service.Trigger("trig-1");
+        var accepted = service.Trigger("trig-1", "signal-1");
+        Assert.True(accepted!.IsNew);
+        Assert.False(service.Trigger("trig-1", "signal-1")!.IsNew);
         await WaitUntilAsync(() => service.GetStatus("trig-1").CycleCount == 1, TimeSpan.FromSeconds(3));
+        Assert.Equal(ProductionTriggerState.Completed,
+            Assert.Single(service.ListTriggers("trig-1"), item => item.EventId == "signal-1").State);
         await Task.Delay(80);
         Assert.Equal(1, service.GetStatus("trig-1").CycleCount);
 
@@ -338,6 +369,9 @@ public sealed class MultiStationProductionTests
         Assert.Equal("OK", latest.Disposition);
 
         await service.StopAllAsync(default);
+        var restarted = CreateService(env, jobs, new ParallelRecordingRunner(), deps);
+        Assert.Equal(2, restarted.ListTriggers("trig-1").Count(item => item.State == ProductionTriggerState.Completed));
+        await restarted.StopAllAsync(default);
     }
 
     [Fact]

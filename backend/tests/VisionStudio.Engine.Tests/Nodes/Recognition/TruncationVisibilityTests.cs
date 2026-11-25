@@ -111,6 +111,26 @@ public sealed class TruncationVisibilityTests
     }
 
     [Fact]
+    public async Task DetectionSort_PreservesEqualKeyOrderThroughTruncationAndFiltering()
+    {
+        static VisionDetection Item(double x) => new(0, x, 0, 10, 10, 100, 40, 0.8,
+            new VisionCircle(x + 5, 5, 5), new VisionRectangle2D(x, 0, 10, 10), 0.9, 0);
+        var sorted = await new DetectionSortNode().ExecuteAsync(
+            Ctx(new() { ["detections"] = VisionValue.Detections([Item(30), Item(10), Item(20)]) }),
+            Def("collection.detections.sort", """{"sortBy":"area","topN":2}"""), CancellationToken.None);
+        Assert.True(sorted.Outputs["truncated"].Require<bool>("truncated"));
+        Assert.Equal(3L, sorted.Outputs["inputCount"].Require<long>("inputCount"));
+
+        var filtered = await new DetectionFilterNode().ExecuteAsync(
+            Ctx(new() { ["detections"] = sorted.Outputs["detections"] }),
+            Def("collection.detections.filter", "{}"), CancellationToken.None);
+        var result = filtered.Outputs["detections"].Require<IReadOnlyList<VisionDetection>>("detections");
+        Assert.Equal(new[] { 30d, 10d }, result.Select(item => item.X));
+        Assert.Equal(new[] { 0, 1 }, result.Select(item => item.Index));
+        Assert.Equal(2L, filtered.Outputs["count"].Require<long>("count"));
+    }
+
+    [Fact]
     public void InferenceNmsCap_ReportsTruncationOnlyWhenASurvivorWasDropped()
     {
         // 上限之下：全部保留，不算截断。
