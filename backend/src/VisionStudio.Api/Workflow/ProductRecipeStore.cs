@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
@@ -58,23 +61,20 @@ public sealed record JobVersionDiff(string JobId, int FromVersion, int ToVersion
     public bool Changed => Changes.Count > 0;
 }
 
-public sealed class ProductRecipeStore(SqliteMetadataDatabase db, JobStore jobs)
+public sealed class ProductRecipeStore(IVisionStudioDbFactory dbFactory, JobStore jobs)
 {
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
+    public ProductRecipeStore(SqliteMetadataDatabase db, JobStore jobs)
+        : this(new VisionStudioDbFactory(db), jobs) { }
+
     public async Task<IReadOnlyList<ProductDescriptor>> ListProductsAsync(CancellationToken ct)
     {
-        var products = new List<ProductDescriptor>();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,name,description,created_at,updated_at FROM products ORDER BY updated_at DESC;";
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        var rows = new List<(string Id,string Name,string Description,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt)>();
-        while (await reader.ReadAsync(ct))
-            rows.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2), DateTimeOffset.Parse(reader.GetString(3)), DateTimeOffset.Parse(reader.GetString(4))));
-        await reader.DisposeAsync();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.Products.OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
+        var products = new List<ProductDescriptor>(rows.Count);
         foreach (var row in rows)
-            products.Add(new ProductDescriptor(row.Id,row.Name,row.Description,row.CreatedAt,row.UpdatedAt,await ListRecipesAsync(connection,row.Id,ct)));
+            products.Add(new ProductDescriptor(row.Id, row.Name, row.Description, row.CreatedAt, row.UpdatedAt, await ListRecipesAsync(db, row.Id, ct)));
         return products;
     }
 
@@ -85,20 +85,21 @@ public sealed class ProductRecipeStore(SqliteMetadataDatabase db, JobStore jobs)
         var now = DateTimeOffset.UtcNow;
         try
         {
-            await using var connection = await db.OpenConnectionAsync(ct);
-            await using var command = connection.CreateCommand();
-            command.CommandText = "INSERT INTO products(id,name,description,created_at,updated_at) VALUES($id,$name,$description,$created,$updated);";
-            command.Parameters.AddWithValue("$id", request.Id);
-            command.Parameters.AddWithValue("$name", request.Name.Trim());
-            command.Parameters.AddWithValue("$description", request.Description?.Trim() ?? string.Empty);
-            command.Parameters.AddWithValue("$created", Iso(now));
-            command.Parameters.AddWithValue("$updated", Iso(now));
-            await command.ExecuteNonQueryAsync(ct);
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            db.Products.Add(new ProductEntity
+            {
+                Id = request.Id,
+                Name = request.Name.Trim(),
+                Description = request.Description?.Trim() ?? string.Empty,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync(ct);
             return (await ListProductsAsync(ct)).Single(x => x.Id == request.Id);
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: 19 } sqliteEx)
         {
-            throw new ApiConflictException($"Product '{request.Id}' already exists.", ex);
+            throw new ApiConflictException($"Product '{request.Id}' already exists.", sqliteEx);
         }
     }
 
@@ -130,22 +131,19 @@ public sealed class ProductRecipeStore(SqliteMetadataDatabase db, JobStore jobs)
     public async Task<IReadOnlyList<ValidationCandidateInfo>> ValidationCandidatesAsync(string jobId, int version, CancellationToken ct)
     {
         var snapshot = await jobs.GetVersionAsync(jobId, version, ct) ?? throw new ApiNotFoundException($"Recipe '{jobId}' V{version} does not exist.");
-        var result = new List<ValidationCandidateInfo>();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT run_id,dataset_id,started_at,completed_at,summary_json
-FROM validation_runs
-WHERE status='Completed' AND workflow_hash=$hash AND summary_json IS NOT NULL
-ORDER BY completed_at DESC, started_at DESC LIMIT 50;
-""";
-        command.Parameters.AddWithValue("$hash", snapshot.WorkflowHash);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.ValidationRuns
+            .Where(x => x.Status == "Completed" && x.WorkflowHash == snapshot.WorkflowHash && x.SummaryJson != null)
+            .OrderByDescending(x => x.CompletedAt)
+            .ThenByDescending(x => x.StartedAt)
+            .Take(50)
+            .ToListAsync(ct);
+        var result = new List<ValidationCandidateInfo>(rows.Count);
+        foreach (var r in rows)
         {
-            var summary = JsonSerializer.Deserialize<ValidationRunSummary>(reader.GetString(4), _json);
+            var summary = JsonSerializer.Deserialize<ValidationRunSummary>(r.SummaryJson!, _json);
             if (summary is not null)
-                result.Add(new ValidationCandidateInfo(reader.GetString(0),reader.GetString(1),DateTimeOffset.Parse(reader.GetString(2)),reader.IsDBNull(3)?null:DateTimeOffset.Parse(reader.GetString(3)),summary));
+                result.Add(new ValidationCandidateInfo(r.RunId, r.DatasetId, r.StartedAt, r.CompletedAt, summary));
         }
         return result;
     }
@@ -155,37 +153,58 @@ ORDER BY completed_at DESC, started_at DESC LIMIT 50;
         var snapshot = await jobs.GetVersionAsync(jobId, version, ct) ?? throw new ApiNotFoundException($"Recipe '{jobId}' V{version} does not exist.");
         var policy = request.Policy ?? new ValidationAcceptancePolicy();
         ValidatePolicy(policy);
-        await using var connection = await db.OpenConnectionAsync(ct);
-        string datasetId, hash, status, summaryJson;
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT dataset_id,workflow_hash,status,summary_json FROM validation_runs WHERE run_id=$run;";
-            command.Parameters.AddWithValue("$run", request.ValidationRunId);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            if (!await reader.ReadAsync(ct)) throw new ApiNotFoundException($"Validation run '{request.ValidationRunId}' does not exist.");
-            datasetId=reader.GetString(0); hash=reader.GetString(1); status=reader.GetString(2); summaryJson=reader.IsDBNull(3)?string.Empty:reader.GetString(3);
-        }
-        if (!string.Equals(status,"Completed",StringComparison.OrdinalIgnoreCase)) throw new ApiConflictException("Only completed Validation runs can approve a Recipe version.");
-        if (!string.Equals(hash,snapshot.WorkflowHash,StringComparison.OrdinalIgnoreCase)) throw new ApiConflictException("Validation workflow hash does not match the immutable Recipe version.");
-        var summary = string.IsNullOrWhiteSpace(summaryJson) ? null : JsonSerializer.Deserialize<ValidationRunSummary>(summaryJson,_json);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var validationRun = await db.ValidationRuns
+            .Where(x => x.RunId == request.ValidationRunId)
+            .Select(x => new { x.DatasetId, x.WorkflowHash, x.Status, x.SummaryJson })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new ApiNotFoundException($"Validation run '{request.ValidationRunId}' does not exist.");
+
+        if (!string.Equals(validationRun.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+            throw new ApiConflictException("Only completed Validation runs can approve a Recipe version.");
+        if (!string.Equals(validationRun.WorkflowHash, snapshot.WorkflowHash, StringComparison.OrdinalIgnoreCase))
+            throw new ApiConflictException("Validation workflow hash does not match the immutable Recipe version.");
+        var summaryJson = validationRun.SummaryJson ?? string.Empty;
+        var summary = string.IsNullOrWhiteSpace(summaryJson) ? null : JsonSerializer.Deserialize<ValidationRunSummary>(summaryJson, _json);
         if (summary is null) throw new ApiConflictException("Validation run has no completed summary.");
-        var reasons = Evaluate(summary,policy);
+        var reasons = Evaluate(summary, policy);
         var accepted = reasons.Count == 0;
         var reason = accepted ? "Accepted" : string.Join("; ", reasons);
-        var linkedAt=DateTimeOffset.UtcNow;
-        await using (var command = connection.CreateCommand())
+        var linkedAt = DateTimeOffset.UtcNow;
+        var policyJson = JsonSerializer.Serialize(policy, _json);
+
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        var entity = await db.JobVersionValidations.AsTracking().FirstOrDefaultAsync(x => x.JobId == jobId && x.Version == version, ct);
+        if (entity is null)
         {
-            command.CommandText = """
-INSERT INTO job_version_validations(job_id,version,validation_run_id,dataset_id,workflow_hash,accepted,policy_json,summary_json,reason,linked_at)
-VALUES($job,$version,$run,$dataset,$hash,$accepted,$policy,$summary,$reason,$linked)
-ON CONFLICT(job_id,version) DO UPDATE SET validation_run_id=excluded.validation_run_id,dataset_id=excluded.dataset_id,workflow_hash=excluded.workflow_hash,accepted=excluded.accepted,policy_json=excluded.policy_json,summary_json=excluded.summary_json,reason=excluded.reason,linked_at=excluded.linked_at;
-""";
-            command.Parameters.AddWithValue("$job",jobId); command.Parameters.AddWithValue("$version",version); command.Parameters.AddWithValue("$run",request.ValidationRunId);
-            command.Parameters.AddWithValue("$dataset",datasetId); command.Parameters.AddWithValue("$hash",hash); command.Parameters.AddWithValue("$accepted",accepted?1:0);
-            command.Parameters.AddWithValue("$policy",JsonSerializer.Serialize(policy,_json)); command.Parameters.AddWithValue("$summary",summaryJson); command.Parameters.AddWithValue("$reason",reason); command.Parameters.AddWithValue("$linked",Iso(linkedAt));
-            await command.ExecuteNonQueryAsync(ct);
+            db.JobVersionValidations.Add(new JobVersionValidationEntity
+            {
+                JobId = jobId,
+                Version = version,
+                ValidationRunId = request.ValidationRunId,
+                DatasetId = validationRun.DatasetId,
+                WorkflowHash = validationRun.WorkflowHash,
+                Accepted = accepted,
+                PolicyJson = policyJson,
+                SummaryJson = summaryJson,
+                Reason = reason,
+                LinkedAt = linkedAt
+            });
         }
-        return new JobVersionValidationInfo(request.ValidationRunId,datasetId,accepted,linkedAt,reason,summary,policy);
+        else
+        {
+            entity.ValidationRunId = request.ValidationRunId;
+            entity.DatasetId = validationRun.DatasetId;
+            entity.WorkflowHash = validationRun.WorkflowHash;
+            entity.Accepted = accepted;
+            entity.PolicyJson = policyJson;
+            entity.SummaryJson = summaryJson;
+            entity.Reason = reason;
+            entity.LinkedAt = linkedAt;
+        }
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new JobVersionValidationInfo(request.ValidationRunId, validationRun.DatasetId, accepted, linkedAt, reason, summary, policy);
     }
 
     public async Task<JobVersionDiff> DiffAsync(string jobId, int fromVersion, int toVersion, CancellationToken ct)
@@ -242,36 +261,46 @@ ON CONFLICT(job_id,version) DO UPDATE SET validation_run_id=excluded.validation_
         return reasons;
     }
 
-    private async Task<IReadOnlyList<ProductRecipeSummary>> ListRecipesAsync(SqliteConnection connection,string productId,CancellationToken ct)
+    private async Task<IReadOnlyList<ProductRecipeSummary>> ListRecipesAsync(VisionStudioDbContext db, string productId, CancellationToken ct)
     {
-        var result=new List<ProductRecipeSummary>();
-        await using var command=connection.CreateCommand();
-        command.CommandText="""
-SELECT j.id,j.recipe_code,j.name,j.description,j.latest_version,j.published_version,j.updated_at,
-       (SELECT accepted FROM job_version_validations v WHERE v.job_id=j.id AND v.version=j.latest_version)
-FROM jobs j WHERE j.product_id=$product ORDER BY j.recipe_code,j.name;
-""";
-        command.Parameters.AddWithValue("$product",productId);
-        await using var reader=await command.ExecuteReaderAsync(ct);
-        while(await reader.ReadAsync(ct))
+        var rows = await (
+            from j in db.Jobs
+            where j.ProductId == productId
+            join v in db.JobVersionValidations on new { JobId = j.Id, Version = j.LatestVersion } equals new { v.JobId, v.Version } into vg
+            from v in vg.DefaultIfEmpty()
+            orderby j.RecipeCode, j.Name
+            select new
+            {
+                j.Id,
+                j.RecipeCode,
+                j.Name,
+                j.Description,
+                j.LatestVersion,
+                j.PublishedVersion,
+                j.UpdatedAt,
+                Accepted = v != null && v.Accepted
+            })
+            .ToListAsync(ct);
+
+        return rows.Select(r =>
         {
-            var published=reader.IsDBNull(5)?(int?)null:reader.GetInt32(5); var accepted=!reader.IsDBNull(7)&&reader.GetInt32(7)!=0;
-            var state=published==reader.GetInt32(4)?"Published":accepted?"Validated":"Draft";
-            result.Add(new(reader.GetString(0),reader.IsDBNull(1)?reader.GetString(0):reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetInt32(4),published,state,DateTimeOffset.Parse(reader.GetString(6))));
-        }
-        return result;
+            var state = r.PublishedVersion == r.LatestVersion ? "Published" : r.Accepted ? "Validated" : "Draft";
+            return new ProductRecipeSummary(r.Id, r.RecipeCode ?? r.Id, r.Name, r.Description, r.LatestVersion, r.PublishedVersion, state, r.UpdatedAt);
+        }).ToList();
     }
 
-    private async Task EnsureProductAsync(string id,CancellationToken ct)
+    private async Task EnsureProductAsync(string id, CancellationToken ct)
     {
-        await using var connection=await db.OpenConnectionAsync(ct); await using var command=connection.CreateCommand();
-        command.CommandText="SELECT 1 FROM products WHERE id=$id;"; command.Parameters.AddWithValue("$id",id);
-        if(await command.ExecuteScalarAsync(ct) is null) throw new ApiNotFoundException($"Product '{id}' does not exist.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        if (!await db.Products.AnyAsync(x => x.Id == id, ct))
+            throw new ApiNotFoundException($"Product '{id}' does not exist.");
     }
-    private async Task TouchProductAsync(string id,CancellationToken ct)
+
+    private async Task TouchProductAsync(string id, CancellationToken ct)
     {
-        await using var connection=await db.OpenConnectionAsync(ct); await using var command=connection.CreateCommand();
-        command.CommandText="UPDATE products SET updated_at=$at WHERE id=$id;"; command.Parameters.AddWithValue("$at",Iso(DateTimeOffset.UtcNow)); command.Parameters.AddWithValue("$id",id); await command.ExecuteNonQueryAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await db.Products.Where(x => x.Id == id).ExecuteUpdateAsync(s => s.SetProperty(x => x.UpdatedAt, now), ct);
     }
     private static void ValidatePolicy(ValidationAcceptancePolicy p)
     {

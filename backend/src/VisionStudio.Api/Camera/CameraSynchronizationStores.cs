@@ -3,39 +3,36 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Data.Sqlite;
-using VisionStudio.Engine.Camera;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Abstractions;
 
 namespace VisionStudio.Api;
 
-public sealed class CameraSynchronizationGroupStore(SqliteMetadataDatabase database)
+public sealed class CameraSynchronizationGroupStore(IVisionStudioDbFactory dbFactory)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() }
     };
 
+    public CameraSynchronizationGroupStore(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
+
     public async Task<IReadOnlyList<CameraSynchronizationGroup>> ListAsync(CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT id,name,driver,camera_ids_json,device_key,group_key,group_mask,broadcast_address,require_ptp_locked,max_ptp_offset_ns,max_trigger_skew_us,scheduled_lead_time_ms,config_hash,created_at,updated_at FROM camera_sync_groups ORDER BY name,id;";
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        var output = new List<CameraSynchronizationGroup>();
-        while (await reader.ReadAsync(ct)) output.Add(Read(reader));
-        return output;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entities = await db.CameraSyncGroups.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
+        return entities.Select(ToModel).ToList();
     }
 
     public async Task<CameraSynchronizationGroup> GetAsync(string id, CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT id,name,driver,camera_ids_json,device_key,group_key,group_mask,broadcast_address,require_ptp_locked,max_ptp_offset_ns,max_trigger_skew_us,scheduled_lead_time_ms,config_hash,created_at,updated_at FROM camera_sync_groups WHERE id=$id;";
-        cmd.Parameters.AddWithValue("$id", id);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) throw new KeyNotFoundException($"Camera synchronization group '{id}' does not exist.");
-        return Read(reader);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.CameraSyncGroups.FirstOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw new KeyNotFoundException($"Camera synchronization group '{id}' does not exist.");
+        return ToModel(entity);
     }
 
     public async Task<CameraSynchronizationGroup> UpsertAsync(CameraSynchronizationGroupRequest request, CancellationToken ct = default)
@@ -43,54 +40,66 @@ public sealed class CameraSynchronizationGroupStore(SqliteMetadataDatabase datab
         var normalized = Normalize(request);
         var hash = ComputeHash(normalized);
         var now = DateTimeOffset.UtcNow;
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var tx = connection.BeginTransaction(deferred: false);
-        var created = now;
-        await using (var existing = connection.CreateCommand())
+        var camerasJson = JsonSerializer.Serialize(normalized.CameraIds, Json);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        try
         {
-            existing.Transaction = tx;
-            existing.CommandText = "SELECT created_at FROM camera_sync_groups WHERE id=$id;";
-            existing.Parameters.AddWithValue("$id", normalized.Id);
-            var raw = await existing.ExecuteScalarAsync(ct) as string;
-            if (!string.IsNullOrWhiteSpace(raw)) created = DateTimeOffset.Parse(raw);
+            var entity = await db.CameraSyncGroups.AsTracking().FirstOrDefaultAsync(x => x.Id == normalized.Id, ct);
+            if (entity is null)
+            {
+                entity = new CameraSyncGroupEntity
+                {
+                    Id = normalized.Id,
+                    Name = normalized.Name,
+                    Driver = normalized.Driver,
+                    CameraIdsJson = camerasJson,
+                    DeviceKey = normalized.DeviceKey,
+                    GroupKey = normalized.GroupKey,
+                    GroupMask = normalized.GroupMask,
+                    BroadcastAddress = normalized.BroadcastAddress,
+                    RequirePtpLocked = normalized.RequirePtpLocked,
+                    MaxPtpOffsetNs = normalized.MaxPtpOffsetNs,
+                    MaxTriggerSkewUs = normalized.MaxTriggerSkewUs,
+                    ScheduledLeadTimeMs = normalized.ScheduledLeadTimeMs,
+                    ConfigHash = hash,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+                db.CameraSyncGroups.Add(entity);
+            }
+            else
+            {
+                entity.Name = normalized.Name;
+                entity.Driver = normalized.Driver;
+                entity.CameraIdsJson = camerasJson;
+                entity.DeviceKey = normalized.DeviceKey;
+                entity.GroupKey = normalized.GroupKey;
+                entity.GroupMask = normalized.GroupMask;
+                entity.BroadcastAddress = normalized.BroadcastAddress;
+                entity.RequirePtpLocked = normalized.RequirePtpLocked;
+                entity.MaxPtpOffsetNs = normalized.MaxPtpOffsetNs;
+                entity.MaxTriggerSkewUs = normalized.MaxTriggerSkewUs;
+                entity.ScheduledLeadTimeMs = normalized.ScheduledLeadTimeMs;
+                entity.ConfigHash = hash;
+                entity.UpdatedAt = now;
+            }
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return new CameraSynchronizationGroup(normalized.Id, normalized.Name, normalized.Driver, normalized.CameraIds, normalized.DeviceKey, normalized.GroupKey, normalized.GroupMask, normalized.BroadcastAddress, normalized.RequirePtpLocked, normalized.MaxPtpOffsetNs, normalized.MaxTriggerSkewUs, normalized.ScheduledLeadTimeMs, hash, entity.CreatedAt, now);
         }
-        await using (var cmd = connection.CreateCommand())
+        catch
         {
-            cmd.Transaction = tx;
-            cmd.CommandText = """
-INSERT INTO camera_sync_groups(id,name,driver,camera_ids_json,device_key,group_key,group_mask,broadcast_address,require_ptp_locked,max_ptp_offset_ns,max_trigger_skew_us,scheduled_lead_time_ms,config_hash,created_at,updated_at)
-VALUES($id,$name,$driver,$cameras,$device,$group,$mask,$broadcast,$requirePtp,$offset,$skew,$lead,$hash,$created,$updated)
-ON CONFLICT(id) DO UPDATE SET
-name=excluded.name,driver=excluded.driver,camera_ids_json=excluded.camera_ids_json,device_key=excluded.device_key,group_key=excluded.group_key,group_mask=excluded.group_mask,broadcast_address=excluded.broadcast_address,require_ptp_locked=excluded.require_ptp_locked,max_ptp_offset_ns=excluded.max_ptp_offset_ns,max_trigger_skew_us=excluded.max_trigger_skew_us,scheduled_lead_time_ms=excluded.scheduled_lead_time_ms,config_hash=excluded.config_hash,updated_at=excluded.updated_at;
-""";
-            cmd.Parameters.AddWithValue("$id", normalized.Id);
-            cmd.Parameters.AddWithValue("$name", normalized.Name);
-            cmd.Parameters.AddWithValue("$driver", normalized.Driver);
-            cmd.Parameters.AddWithValue("$cameras", JsonSerializer.Serialize(normalized.CameraIds, Json));
-            cmd.Parameters.AddWithValue("$device", normalized.DeviceKey);
-            cmd.Parameters.AddWithValue("$group", normalized.GroupKey);
-            cmd.Parameters.AddWithValue("$mask", normalized.GroupMask);
-            cmd.Parameters.AddWithValue("$broadcast", normalized.BroadcastAddress);
-            cmd.Parameters.AddWithValue("$requirePtp", normalized.RequirePtpLocked ? 1 : 0);
-            cmd.Parameters.AddWithValue("$offset", normalized.MaxPtpOffsetNs);
-            cmd.Parameters.AddWithValue("$skew", normalized.MaxTriggerSkewUs);
-            cmd.Parameters.AddWithValue("$lead", normalized.ScheduledLeadTimeMs);
-            cmd.Parameters.AddWithValue("$hash", hash);
-            cmd.Parameters.AddWithValue("$created", created.ToString("O"));
-            cmd.Parameters.AddWithValue("$updated", now.ToString("O"));
-            await cmd.ExecuteNonQueryAsync(ct);
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
         }
-        await tx.CommitAsync(ct);
-        return new CameraSynchronizationGroup(normalized.Id, normalized.Name, normalized.Driver, normalized.CameraIds, normalized.DeviceKey, normalized.GroupKey, normalized.GroupMask, normalized.BroadcastAddress, normalized.RequirePtpLocked, normalized.MaxPtpOffsetNs, normalized.MaxTriggerSkewUs, normalized.ScheduledLeadTimeMs, hash, created, now);
     }
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM camera_sync_groups WHERE id=$id;";
-        cmd.Parameters.AddWithValue("$id", id);
-        if (await cmd.ExecuteNonQueryAsync(ct) == 0) throw new KeyNotFoundException($"Camera synchronization group '{id}' does not exist.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.CameraSyncGroups.Where(x => x.Id == id).ExecuteDeleteAsync(ct);
+        if (affected == 0) throw new KeyNotFoundException($"Camera synchronization group '{id}' does not exist.");
     }
 
     public async Task<IReadOnlyList<string>> GetConfigurationHashesForCameraAsync(string cameraId, CancellationToken ct = default)
@@ -133,11 +142,11 @@ name=excluded.name,driver=excluded.driver,camera_ids_json=excluded.camera_ids_js
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
-    private static CameraSynchronizationGroup Read(SqliteDataReader r) => new(
-        r.GetString(0), r.GetString(1), r.GetString(2),
-        JsonSerializer.Deserialize<string[]>(r.GetString(3), Json) ?? [],
-        r.GetInt32(4), r.GetInt32(5), r.GetInt32(6), r.GetString(7), r.GetInt32(8) != 0,
-        r.GetInt64(9), r.GetDouble(10), r.GetInt32(11), r.GetString(12), DateTimeOffset.Parse(r.GetString(13)), DateTimeOffset.Parse(r.GetString(14)));
+    private static CameraSynchronizationGroup ToModel(CameraSyncGroupEntity e) => new(
+        e.Id, e.Name, e.Driver,
+        JsonSerializer.Deserialize<string[]>(e.CameraIdsJson, Json) ?? [],
+        (int)e.DeviceKey, (int)e.GroupKey, (int)e.GroupMask, e.BroadcastAddress, e.RequirePtpLocked,
+        e.MaxPtpOffsetNs, e.MaxTriggerSkewUs, e.ScheduledLeadTimeMs, e.ConfigHash, e.CreatedAt, e.UpdatedAt);
 }
 
 
@@ -231,75 +240,73 @@ public sealed record CameraSynchronizationStatistics(
     DateTimeOffset? LastCompletedAt,
     CameraSynchronizationCommissioningAssessment Commissioning);
 
-public sealed class CameraSynchronizationRunStore(SqliteMetadataDatabase database)
+public sealed class CameraSynchronizationRunStore(IVisionStudioDbFactory dbFactory)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 
+    public CameraSynchronizationRunStore(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
+
     public async Task RecordAsync(CameraSynchronizationRunRecord run, CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-INSERT INTO camera_sync_runs(run_id,group_id,group_config_hash,source,scheduled,requested_at,completed_at,duration_ms,scheduled_device_time_ns,timestamp_basis,trigger_skew_us,max_allowed_skew_us,within_tolerance,outcome,error,command_json,frames_json,ptp_json,transport_json)
-VALUES($run,$group,$hash,$source,$scheduled,$requested,$completed,$duration,$scheduledTime,$basis,$skew,$maxSkew,$within,$outcome,$error,$command,$frames,$ptp,$transport);
-""";
-        cmd.Parameters.AddWithValue("$run", run.RunId);
-        cmd.Parameters.AddWithValue("$group", run.GroupId);
-        cmd.Parameters.AddWithValue("$hash", run.GroupConfigurationHash);
-        cmd.Parameters.AddWithValue("$source", run.Source);
-        cmd.Parameters.AddWithValue("$scheduled", run.Scheduled ? 1 : 0);
-        cmd.Parameters.AddWithValue("$requested", run.RequestedAt.ToString("O"));
-        cmd.Parameters.AddWithValue("$completed", run.CompletedAt.ToString("O"));
-        cmd.Parameters.AddWithValue("$duration", run.DurationMs);
-        cmd.Parameters.AddWithValue("$scheduledTime", (object?)run.ScheduledDeviceTimeNs ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$basis", run.TimestampBasis);
-        cmd.Parameters.AddWithValue("$skew", (object?)run.TriggerSkewUs ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$maxSkew", run.MaxAllowedSkewUs);
-        cmd.Parameters.AddWithValue("$within", run.WithinTolerance is null ? DBNull.Value : run.WithinTolerance.Value ? 1 : 0);
-        cmd.Parameters.AddWithValue("$outcome", run.Outcome);
-        cmd.Parameters.AddWithValue("$error", (object?)run.Error ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$command", run.Command is null ? DBNull.Value : JsonSerializer.Serialize(run.Command, Json));
-        cmd.Parameters.AddWithValue("$frames", JsonSerializer.Serialize(run.Frames, Json));
-        cmd.Parameters.AddWithValue("$ptp", JsonSerializer.Serialize(run.PtpSnapshots, Json));
-        cmd.Parameters.AddWithValue("$transport", JsonSerializer.Serialize(run.TransportSnapshots ?? [], Json));
-        await cmd.ExecuteNonQueryAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        db.CameraSyncRuns.Add(new CameraSyncRunEntity
+        {
+            RunId = run.RunId,
+            GroupId = run.GroupId,
+            GroupConfigHash = run.GroupConfigurationHash,
+            Source = run.Source,
+            Scheduled = run.Scheduled,
+            RequestedAt = run.RequestedAt,
+            CompletedAt = run.CompletedAt,
+            DurationMs = run.DurationMs,
+            ScheduledDeviceTimeNs = run.ScheduledDeviceTimeNs,
+            TimestampBasis = run.TimestampBasis,
+            TriggerSkewUs = run.TriggerSkewUs,
+            MaxAllowedSkewUs = run.MaxAllowedSkewUs,
+            WithinTolerance = run.WithinTolerance,
+            Outcome = run.Outcome,
+            Error = run.Error,
+            CommandJson = run.Command is null ? null : JsonSerializer.Serialize(run.Command, Json),
+            FramesJson = JsonSerializer.Serialize(run.Frames, Json),
+            PtpJson = JsonSerializer.Serialize(run.PtpSnapshots, Json),
+            TransportJson = JsonSerializer.Serialize(run.TransportSnapshots ?? [], Json)
+        });
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<CameraSynchronizationRunRecord>> ListAsync(string? groupId = null, int limit = 50, CancellationToken ct = default)
     {
         limit = Math.Clamp(limit, 1, 500);
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = string.IsNullOrWhiteSpace(groupId)
-            ? "SELECT run_id,group_id,group_config_hash,source,scheduled,requested_at,completed_at,duration_ms,scheduled_device_time_ns,timestamp_basis,trigger_skew_us,max_allowed_skew_us,within_tolerance,outcome,error,command_json,frames_json,ptp_json,transport_json FROM camera_sync_runs ORDER BY completed_at DESC LIMIT $limit;"
-            : "SELECT run_id,group_id,group_config_hash,source,scheduled,requested_at,completed_at,duration_ms,scheduled_device_time_ns,timestamp_basis,trigger_skew_us,max_allowed_skew_us,within_tolerance,outcome,error,command_json,frames_json,ptp_json,transport_json FROM camera_sync_runs WHERE group_id=$group ORDER BY completed_at DESC LIMIT $limit;";
-        if (!string.IsNullOrWhiteSpace(groupId)) cmd.Parameters.AddWithValue("$group", groupId.Trim());
-        cmd.Parameters.AddWithValue("$limit", limit);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        var list = new List<CameraSynchronizationRunRecord>();
-        while (await reader.ReadAsync(ct)) list.Add(Read(reader));
-        return list;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        IQueryable<CameraSyncRunEntity> query = db.CameraSyncRuns;
+        if (!string.IsNullOrWhiteSpace(groupId))
+        {
+            var trimmed = groupId.Trim();
+            query = query.Where(x => x.GroupId == trimmed);
+        }
+        var entities = await query
+            .OrderByDescending(x => x.CompletedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+        return entities.Select(ToModel).ToList();
     }
 
     public async Task<CameraSynchronizationRunRecord> GetAsync(string runId, CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT run_id,group_id,group_config_hash,source,scheduled,requested_at,completed_at,duration_ms,scheduled_device_time_ns,timestamp_basis,trigger_skew_us,max_allowed_skew_us,within_tolerance,outcome,error,command_json,frames_json,ptp_json,transport_json FROM camera_sync_runs WHERE run_id=$run;";
-        cmd.Parameters.AddWithValue("$run", runId);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) throw new KeyNotFoundException($"Camera synchronization run '{runId}' does not exist.");
-        return Read(reader);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.CameraSyncRuns.FirstOrDefaultAsync(x => x.RunId == runId, ct)
+            ?? throw new KeyNotFoundException($"Camera synchronization run '{runId}' does not exist.");
+        return ToModel(entity);
     }
 
-    private static CameraSynchronizationRunRecord Read(SqliteDataReader r) => new(
-        r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetInt32(4) != 0,
-        DateTimeOffset.Parse(r.GetString(5)), DateTimeOffset.Parse(r.GetString(6)), r.GetInt64(7), r.IsDBNull(8) ? null : r.GetInt64(8),
-        r.GetString(9), r.IsDBNull(10) ? null : r.GetDouble(10), r.GetDouble(11), r.IsDBNull(12) ? null : r.GetInt32(12) != 0,
-        r.GetString(13), r.IsDBNull(14) ? null : r.GetString(14),
-        r.IsDBNull(15) ? null : JsonSerializer.Deserialize<CameraActionCommandResult>(r.GetString(15), Json),
-        JsonSerializer.Deserialize<CameraSynchronizationFrameResult[]>(r.GetString(16), Json) ?? [],
-        r.IsDBNull(17) ? [] : JsonSerializer.Deserialize<CameraTimeSynchronizationStatus[]>(r.GetString(17), Json) ?? [],
-        r.IsDBNull(18) ? [] : JsonSerializer.Deserialize<CameraTransportTelemetry[]>(r.GetString(18), Json) ?? []);
+    private static CameraSynchronizationRunRecord ToModel(CameraSyncRunEntity e) => new(
+        e.RunId, e.GroupId, e.GroupConfigHash, e.Source, e.Scheduled,
+        e.RequestedAt, e.CompletedAt, e.DurationMs, e.ScheduledDeviceTimeNs,
+        e.TimestampBasis, e.TriggerSkewUs, e.MaxAllowedSkewUs, e.WithinTolerance,
+        e.Outcome, e.Error,
+        e.CommandJson is null ? null : JsonSerializer.Deserialize<CameraActionCommandResult>(e.CommandJson, Json),
+        JsonSerializer.Deserialize<CameraSynchronizationFrameResult[]>(e.FramesJson, Json) ?? [],
+        string.IsNullOrWhiteSpace(e.PtpJson) ? [] : JsonSerializer.Deserialize<CameraTimeSynchronizationStatus[]>(e.PtpJson, Json) ?? [],
+        string.IsNullOrWhiteSpace(e.TransportJson) ? [] : JsonSerializer.Deserialize<CameraTransportTelemetry[]>(e.TransportJson, Json) ?? []);
 }
 

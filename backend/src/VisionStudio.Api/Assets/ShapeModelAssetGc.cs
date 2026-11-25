@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Abstractions;
+using VisionStudio.Api.Storage.EfCore;
 using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Api;
@@ -33,27 +35,20 @@ public sealed record ShapeModelAssetGcPlan(
 /// 字节是内容寻址的：版本行删除后，只有"没有任何版本再引用"的 blob 才会被删。
 /// 预览与执行分离，执行必须显式 confirm。
 /// </remarks>
-public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore workflows)
+public sealed class ShapeModelAssetGc(IVisionStudioDbFactory dbFactory, WorkflowStore workflows)
 {
+    public ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore workflows)
+        : this(new VisionStudioDbFactory(db), workflows) { }
+
     public async Task<ShapeModelAssetGcPlan> PlanAsync(CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        var versions = new List<ShapeModelGcCandidate>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT asset_id, version, sha256, size_bytes FROM asset_versions;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-                versions.Add(new ShapeModelGcCandidate(reader.GetString(0), reader.GetInt32(1), reader.GetString(2), reader.GetInt64(3)));
-        }
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var versions = await db.AssetVersions
+            .Select(x => new ShapeModelGcCandidate(x.AssetId, x.Version, x.Sha256, x.SizeBytes))
+            .ToListAsync(ct);
 
-        var latest = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT id, latest_version FROM assets;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) latest[reader.GetString(0)] = reader.GetInt32(1);
-        }
+        var latest = (await db.Assets.Select(x => new { x.Id, x.LatestVersion }).ToListAsync(ct))
+            .ToDictionary(x => x.Id, x => x.LatestVersion, StringComparer.OrdinalIgnoreCase);
 
         var references = new HashSet<(string AssetId, int Version)>(new RefComparer());
         foreach (var summary in await workflows.ListAsync(ct))
@@ -62,33 +57,23 @@ public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore w
             if (workflow is not null) Collect(workflow, references);
         }
 
-        await using (var command = connection.CreateCommand())
+        // 配方每个版本都可以被回滚重新发布：它们的引用同样受保护。
+        foreach (var workflowJson in await db.JobVersions.Select(x => x.WorkflowJson).ToListAsync(ct))
         {
-            // 配方每个版本都可以被回滚重新发布：它们的引用同样受保护。
-            command.CommandText = "SELECT workflow_json FROM job_versions;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                WorkflowDefinition? workflow = null;
-                try { workflow = JsonSerializer.Deserialize<WorkflowDefinition>(reader.GetString(0), Json); }
-                catch (JsonException) { /* 损坏的历史版本不参与保护，也不会阻止回收 */ }
-                if (workflow is not null) Collect(workflow, references);
-            }
+            WorkflowDefinition? workflow = null;
+            try { workflow = JsonSerializer.Deserialize<WorkflowDefinition>(workflowJson, Json); }
+            catch (JsonException) { /* 损坏的历史版本不参与保护，也不会阻止回收 */ }
+            if (workflow is not null) Collect(workflow, references);
         }
 
-        await using (var command = connection.CreateCommand())
+        // 历史发布清单锁定的具体版本（含发布时由 0 解析出的 latest）必须保留。
+        foreach (var manifestJson in await db.RuntimeDependencyManifests.Select(x => x.ManifestJson).ToListAsync(ct))
         {
-            // 历史发布清单锁定的具体版本（含发布时由 0 解析出的 latest）必须保留。
-            command.CommandText = "SELECT manifest_json FROM runtime_dependency_manifests;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                RuntimeDependencyManifest? manifest = null;
-                try { manifest = JsonSerializer.Deserialize<RuntimeDependencyManifest>(reader.GetString(0), Json); }
-                catch (JsonException) { /* 同上 */ }
-                foreach (var pin in manifest?.ModelAssets ?? [])
-                    references.Add((pin.AssetId, pin.Version));
-            }
+            RuntimeDependencyManifest? manifest = null;
+            try { manifest = JsonSerializer.Deserialize<RuntimeDependencyManifest>(manifestJson, Json); }
+            catch (JsonException) { /* 同上 */ }
+            foreach (var pin in manifest?.ModelAssets ?? [])
+                references.Add((pin.AssetId, pin.Version));
         }
 
         var candidates = new List<ShapeModelGcCandidate>();
@@ -122,24 +107,19 @@ public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore w
         var plan = await PlanAsync(ct);
         if (plan.Candidates.Count == 0) return plan;
 
-        await using var connection = await db.OpenConnectionAsync(ct, strongDurability: true);
-        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var db = await dbFactory.CreateDbContextAsync(ct, strongDurability: true);
+        await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
         foreach (var candidate in plan.Candidates)
         {
-            await using var deleteVersion = connection.CreateCommand();
-            deleteVersion.Transaction = transaction;
-            deleteVersion.CommandText = "DELETE FROM asset_versions WHERE asset_id=$id AND version=$version;";
-            deleteVersion.Parameters.AddWithValue("$id", candidate.AssetId);
-            deleteVersion.Parameters.AddWithValue("$version", candidate.Version);
-            await deleteVersion.ExecuteNonQueryAsync(ct);
+            await db.AssetVersions
+                .Where(x => x.AssetId == candidate.AssetId && x.Version == candidate.Version)
+                .ExecuteDeleteAsync(ct);
         }
         // 内容寻址回收：版本行都删掉后，没人引用的字节才清。
-        await using (var deleteBlobs = connection.CreateCommand())
-        {
-            deleteBlobs.Transaction = transaction;
-            deleteBlobs.CommandText = "DELETE FROM asset_blobs WHERE sha256 NOT IN (SELECT sha256 FROM asset_versions);";
-            await deleteBlobs.ExecuteNonQueryAsync(ct);
-        }
+        var referencedShas = db.AssetVersions.Select(v => v.Sha256);
+        await db.AssetBlobs
+            .Where(b => !referencedShas.Contains(b.Sha256))
+            .ExecuteDeleteAsync(ct);
         await transaction.CommitAsync(ct);
         return plan;
     }

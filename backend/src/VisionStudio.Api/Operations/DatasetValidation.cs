@@ -2,9 +2,11 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Media;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
@@ -65,24 +67,26 @@ public sealed record ValidationRunRecord(
     ValidationRunSummary? Summary,
     IReadOnlyList<ValidationResultRecord>? Results = null);
 
-public sealed class DatasetValidationStore(SqliteMetadataDatabase db, TraceabilityStore traces, MediaLibraryService media)
+public sealed class DatasetValidationStore(IVisionStudioDbFactory dbFactory, TraceabilityStore traces, MediaLibraryService media)
 {
+    public DatasetValidationStore(SqliteMetadataDatabase db, TraceabilityStore traces, MediaLibraryService media)
+        : this(new VisionStudioDbFactory(db), traces, media) { }
+
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
     public async Task<IReadOnlyList<ValidationDatasetSummary>> ListDatasetsAsync(CancellationToken ct)
     {
-        var result = new List<ValidationDatasetSummary>();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT d.id,d.name,d.description,d.topology_hash,d.created_at,d.updated_at,COUNT(i.item_id)
-FROM validation_datasets d LEFT JOIN validation_dataset_items i ON i.dataset_id=d.id
-GROUP BY d.id,d.name,d.description,d.topology_hash,d.created_at,d.updated_at ORDER BY d.updated_at DESC;
-""";
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-            result.Add(new ValidationDatasetSummary(reader.GetString(0), reader.GetString(1), reader.GetString(2), DbString(reader, 3), Convert.ToInt32(reader.GetInt64(6)), DateTimeOffset.Parse(reader.GetString(4)), DateTimeOffset.Parse(reader.GetString(5))));
-        return result;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var datasets = await db.ValidationDatasets.OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
+        var counts = await db.ValidationDatasetItems
+            .GroupBy(x => x.DatasetId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+
+        return datasets.Select(d => new ValidationDatasetSummary(
+            d.Id, d.Name, d.Description, d.TopologyHash,
+            counts.TryGetValue(d.Id, out var c) ? c : 0,
+            d.CreatedAt, d.UpdatedAt)).ToList();
     }
 
     public async Task<ValidationDatasetDetail> CreateDatasetAsync(CreateValidationDatasetRequest request, CancellationToken ct)
@@ -91,63 +95,50 @@ GROUP BY d.id,d.name,d.description,d.topology_hash,d.created_at,d.updated_at ORD
         if (name.Length is < 1 or > 120) throw new ApiValidationException("Dataset name must be 1-120 characters.");
         var id = $"dataset-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO validation_datasets(id,name,description,topology_hash,created_at,updated_at) VALUES($id,$name,$description,NULL,$created,$updated);";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$name", name);
-        command.Parameters.AddWithValue("$description", request.Description?.Trim() ?? string.Empty);
-        command.Parameters.AddWithValue("$created", Iso(now));
-        command.Parameters.AddWithValue("$updated", Iso(now));
-        await command.ExecuteNonQueryAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        db.ValidationDatasets.Add(new ValidationDatasetEntity
+        {
+            Id = id,
+            Name = name,
+            Description = request.Description?.Trim() ?? string.Empty,
+            TopologyHash = null,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await db.SaveChangesAsync(ct);
         return await GetDatasetAsync(id, ct);
     }
 
     public async Task<ValidationDatasetDetail> GetDatasetAsync(string datasetId, CancellationToken ct)
     {
-        ValidationDatasetSummary? dataset = null;
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = """
-SELECT d.id,d.name,d.description,d.topology_hash,d.created_at,d.updated_at,COUNT(i.item_id)
-FROM validation_datasets d LEFT JOIN validation_dataset_items i ON i.dataset_id=d.id
-WHERE d.id=$id GROUP BY d.id,d.name,d.description,d.topology_hash,d.created_at,d.updated_at;
-""";
-            command.Parameters.AddWithValue("$id", datasetId);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            if (await reader.ReadAsync(ct))
-                dataset = new ValidationDatasetSummary(reader.GetString(0), reader.GetString(1), reader.GetString(2), DbString(reader, 3), Convert.ToInt32(reader.GetInt64(6)), DateTimeOffset.Parse(reader.GetString(4)), DateTimeOffset.Parse(reader.GetString(5)));
-        }
-        if (dataset is null) throw new ApiNotFoundException($"Dataset '{datasetId}' was not found.");
-
-        var raw = new List<(string ItemId, string Kind, string Ref, string Expected, string? Note, int Sort, DateTimeOffset Added)>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT item_id,source_kind,source_ref,expected_disposition,note,sort_order,added_at FROM validation_dataset_items WHERE dataset_id=$id ORDER BY sort_order,item_id;";
-            command.Parameters.AddWithValue("$id", datasetId);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) raw.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), DbString(reader, 4), reader.GetInt32(5), DateTimeOffset.Parse(reader.GetString(6))));
-        }
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var d = await db.ValidationDatasets.FirstOrDefaultAsync(x => x.Id == datasetId, ct)
+            ?? throw new ApiNotFoundException($"Dataset '{datasetId}' was not found.");
+        var raw = await db.ValidationDatasetItems
+            .Where(x => x.DatasetId == datasetId)
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.ItemId)
+            .ToListAsync(ct);
+        var dataset = new ValidationDatasetSummary(d.Id, d.Name, d.Description, d.TopologyHash, raw.Count, d.CreatedAt, d.UpdatedAt);
 
         var items = new List<ValidationDatasetItem>(raw.Count);
         foreach (var row in raw)
         {
-            if (row.Kind == "TRACE")
+            if (row.SourceKind == "TRACE")
             {
-                var trace = await traces.GetAsync(row.Ref, ct);
-                items.Add(new ValidationDatasetItem(row.ItemId, datasetId, row.Kind, row.Ref, row.Ref, row.Expected, row.Note, row.Sort, row.Added, trace?.Disposition ?? "MISSING", trace?.WorkflowName ?? "Missing trace", trace?.HasReplayInput ?? false));
+                var trace = await traces.GetAsync(row.SourceRef, ct);
+                items.Add(new ValidationDatasetItem(row.ItemId, datasetId, row.SourceKind, row.SourceRef, row.SourceRef, row.ExpectedDisposition, row.Note, row.SortOrder, row.AddedAt, trace?.Disposition ?? "MISSING", trace?.WorkflowName ?? "Missing trace", trace?.HasReplayInput ?? false));
             }
             else
             {
                 try
                 {
-                    var path = media.ResolveItemPath(row.Ref);
-                    items.Add(new ValidationDatasetItem(row.ItemId, datasetId, row.Kind, row.Ref, null, row.Expected, row.Note, row.Sort, row.Added, row.Expected, Path.GetFileName(path), true));
+                    var path = media.ResolveItemPath(row.SourceRef);
+                    items.Add(new ValidationDatasetItem(row.ItemId, datasetId, row.SourceKind, row.SourceRef, null, row.ExpectedDisposition, row.Note, row.SortOrder, row.AddedAt, row.ExpectedDisposition, Path.GetFileName(path), true));
                 }
                 catch
                 {
-                    items.Add(new ValidationDatasetItem(row.ItemId, datasetId, row.Kind, row.Ref, null, row.Expected, row.Note, row.Sort, row.Added, "MISSING", row.Ref, false));
+                    items.Add(new ValidationDatasetItem(row.ItemId, datasetId, row.SourceKind, row.SourceRef, null, row.ExpectedDisposition, row.Note, row.SortOrder, row.AddedAt, "MISSING", row.SourceRef, false));
                 }
             }
         }
@@ -160,8 +151,15 @@ WHERE d.id=$id GROUP BY d.id,d.name,d.description,d.topology_hash,d.created_at,d
         var detail = await GetDatasetAsync(datasetId, ct);
         var topology = detail.Dataset.TopologyHash;
         var nextSort = detail.Items.Count == 0 ? 0 : detail.Items.Max(x => x.SortOrder) + 1;
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+
+        var existingRefs = (await db.ValidationDatasetItems
+            .Where(x => x.DatasetId == datasetId)
+            .Select(x => new { x.SourceKind, x.SourceRef })
+            .ToListAsync(ct))
+            .Select(x => (x.SourceKind, x.SourceRef))
+            .ToHashSet();
 
         foreach (var input in request.Items)
         {
@@ -184,99 +182,82 @@ WHERE d.id=$id GROUP BY d.id,d.name,d.description,d.topology_hash,d.created_at,d
                 _ = media.ResolveItemPath(sourceRef); // validates Media Library ownership and supported image type
             }
 
-            await using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = """
-INSERT OR IGNORE INTO validation_dataset_items(dataset_id,item_id,source_kind,source_ref,expected_disposition,note,sort_order,added_at)
-VALUES($dataset,$item,$kind,$ref,$expected,$note,$sort,$added);
-""";
-            insert.Parameters.AddWithValue("$dataset", datasetId);
-            insert.Parameters.AddWithValue("$item", $"item-{Guid.NewGuid():N}");
-            insert.Parameters.AddWithValue("$kind", kind);
-            insert.Parameters.AddWithValue("$ref", sourceRef);
-            insert.Parameters.AddWithValue("$expected", expected);
-            insert.Parameters.AddWithValue("$note", (object?)input.Note?.Trim() ?? DBNull.Value);
-            insert.Parameters.AddWithValue("$sort", nextSort++);
-            insert.Parameters.AddWithValue("$added", Iso(DateTimeOffset.UtcNow));
-            await insert.ExecuteNonQueryAsync(ct);
+            if (existingRefs.Add((kind, sourceRef)))
+            {
+                db.ValidationDatasetItems.Add(new ValidationDatasetItemEntity
+                {
+                    DatasetId = datasetId,
+                    ItemId = $"item-{Guid.NewGuid():N}",
+                    SourceKind = kind,
+                    SourceRef = sourceRef,
+                    ExpectedDisposition = expected,
+                    Note = input.Note?.Trim(),
+                    SortOrder = nextSort++,
+                    AddedAt = DateTimeOffset.UtcNow
+                });
+            }
         }
-        await using (var update = connection.CreateCommand())
-        {
-            update.Transaction = transaction;
-            update.CommandText = "UPDATE validation_datasets SET topology_hash=$topology,updated_at=$updated WHERE id=$id;";
-            update.Parameters.AddWithValue("$topology", (object?)topology ?? DBNull.Value);
-            update.Parameters.AddWithValue("$updated", Iso(DateTimeOffset.UtcNow));
-            update.Parameters.AddWithValue("$id", datasetId);
-            if (await update.ExecuteNonQueryAsync(ct) == 0) throw new ApiNotFoundException($"Dataset '{datasetId}' was not found.");
-        }
+
+        var now = DateTimeOffset.UtcNow;
+        var affected = await db.ValidationDatasets
+            .Where(x => x.Id == datasetId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.TopologyHash, topology)
+                .SetProperty(x => x.UpdatedAt, now), ct);
+        if (affected == 0) throw new ApiNotFoundException($"Dataset '{datasetId}' was not found.");
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return await GetDatasetAsync(datasetId, ct);
     }
 
     public async Task EnsureTopologyAsync(string datasetId, string topologyHash, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE validation_datasets SET topology_hash=COALESCE(topology_hash,$topology),updated_at=$updated WHERE id=$id AND (topology_hash IS NULL OR topology_hash=$topology);";
-        command.Parameters.AddWithValue("$topology", topologyHash);
-        command.Parameters.AddWithValue("$updated", Iso(DateTimeOffset.UtcNow));
-        command.Parameters.AddWithValue("$id", datasetId);
-        if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiConflictException("Candidate workflow topology does not match the dataset topology.");
+        var now = DateTimeOffset.UtcNow;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.ValidationDatasets
+            .Where(x => x.Id == datasetId && (x.TopologyHash == null || x.TopologyHash == topologyHash))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.TopologyHash, x => x.TopologyHash ?? topologyHash)
+                .SetProperty(x => x.UpdatedAt, now), ct);
+        if (affected == 0) throw new ApiConflictException("Candidate workflow topology does not match the dataset topology.");
     }
 
     public async Task<ValidationDatasetDetail> UpdateItemAsync(string datasetId, string itemId, UpdateValidationDatasetItemRequest request, CancellationToken ct)
     {
         var expected = NormalizeExpected(request.ExpectedDisposition);
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE validation_dataset_items SET expected_disposition=$expected,note=$note WHERE dataset_id=$dataset AND item_id=$item;";
-        command.Parameters.AddWithValue("$expected", expected);
-        command.Parameters.AddWithValue("$note", (object?)request.Note?.Trim() ?? DBNull.Value);
-        command.Parameters.AddWithValue("$dataset", datasetId);
-        command.Parameters.AddWithValue("$item", itemId);
-        if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiNotFoundException($"Dataset item '{itemId}' was not found.");
-        await TouchAsync(connection, datasetId, ct);
+        var note = request.Note?.Trim();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.ValidationDatasetItems
+            .Where(x => x.DatasetId == datasetId && x.ItemId == itemId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.ExpectedDisposition, expected)
+                .SetProperty(x => x.Note, note), ct);
+        if (affected == 0) throw new ApiNotFoundException($"Dataset item '{itemId}' was not found.");
+        await TouchAsync(db, datasetId, ct);
         return await GetDatasetAsync(datasetId, ct);
     }
 
     public async Task DeleteItemAsync(string datasetId, string itemId, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM validation_dataset_items WHERE dataset_id=$dataset AND item_id=$item;";
-        command.Parameters.AddWithValue("$dataset", datasetId);
-        command.Parameters.AddWithValue("$item", itemId);
-        if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiNotFoundException($"Dataset item '{itemId}' was not found.");
-        await TouchAsync(connection, datasetId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.ValidationDatasetItems
+            .Where(x => x.DatasetId == datasetId && x.ItemId == itemId)
+            .ExecuteDeleteAsync(ct);
+        if (affected == 0) throw new ApiNotFoundException($"Dataset item '{itemId}' was not found.");
+        await TouchAsync(db, datasetId, ct);
     }
 
     public async Task DeleteDatasetAsync(string datasetId, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using (var check = connection.CreateCommand())
-        {
-            check.CommandText = "SELECT COUNT(*) FROM validation_runs WHERE dataset_id=$id AND status='Running';";
-            check.Parameters.AddWithValue("$id", datasetId);
-            if (Convert.ToInt32(await check.ExecuteScalarAsync(ct)) > 0) throw new ApiConflictException("Cannot delete a dataset while validation is running.");
-        }
-        await using (var linked = connection.CreateCommand())
-        {
-            linked.CommandText = "SELECT COUNT(*) FROM job_version_validations WHERE dataset_id=$id;";
-            linked.Parameters.AddWithValue("$id", datasetId);
-            if (Convert.ToInt32(await linked.ExecuteScalarAsync(ct)) > 0)
-                throw new ApiConflictException("Cannot delete a dataset referenced by Product/Recipe validation evidence.");
-        }
-        await using (var investigation = connection.CreateCommand())
-        {
-            investigation.CommandText = "SELECT COUNT(*) FROM investigation_case_verifications WHERE dataset_id=$id;";
-            investigation.Parameters.AddWithValue("$id", datasetId);
-            if (Convert.ToInt32(await investigation.ExecuteScalarAsync(ct)) > 0)
-                throw new ApiConflictException("Cannot delete a dataset referenced by Investigation verification evidence.");
-        }
-        await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM validation_datasets WHERE id=$id;";
-        command.Parameters.AddWithValue("$id", datasetId);
-        if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiNotFoundException($"Dataset '{datasetId}' was not found.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        if (await db.ValidationRuns.AnyAsync(x => x.DatasetId == datasetId && x.Status == "Running", ct))
+            throw new ApiConflictException("Cannot delete a dataset while validation is running.");
+        if (await db.JobVersionValidations.AnyAsync(x => x.DatasetId == datasetId, ct))
+            throw new ApiConflictException("Cannot delete a dataset referenced by Product/Recipe validation evidence.");
+        if (await db.InvestigationCaseVerifications.AnyAsync(x => x.DatasetId == datasetId, ct))
+            throw new ApiConflictException("Cannot delete a dataset referenced by Investigation verification evidence.");
+        var affected = await db.ValidationDatasets.Where(x => x.Id == datasetId).ExecuteDeleteAsync(ct);
+        if (affected == 0) throw new ApiNotFoundException($"Dataset '{datasetId}' was not found.");
     }
 
     public async Task<ValidationRunRecord> CreateRunAsync(string datasetId, string sourceWorkflowRunId, WorkflowDefinition candidate, int requestedCount, CancellationToken ct)
@@ -284,56 +265,47 @@ VALUES($dataset,$item,$kind,$ref,$expected,$note,$sort,$added);
         var runId = $"validation-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
         var hash = WorkflowFingerprint.Compute(candidate);
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-INSERT INTO validation_runs(run_id,dataset_id,status,source_workflow_run_id,workflow_hash,candidate_workflow_json,requested_count,completed_count,started_at,completed_at,cancel_requested,error,summary_json)
-VALUES($run,$dataset,'Running',$source,$hash,$workflow,$requested,0,$started,NULL,0,NULL,NULL);
-""";
-        command.Parameters.AddWithValue("$run", runId);
-        command.Parameters.AddWithValue("$dataset", datasetId);
-        command.Parameters.AddWithValue("$source", sourceWorkflowRunId);
-        command.Parameters.AddWithValue("$hash", hash);
-        command.Parameters.AddWithValue("$workflow", JsonSerializer.Serialize(candidate, _json));
-        command.Parameters.AddWithValue("$requested", requestedCount);
-        command.Parameters.AddWithValue("$started", Iso(now));
-        await command.ExecuteNonQueryAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        db.ValidationRuns.Add(new ValidationRunEntity
+        {
+            RunId = runId,
+            DatasetId = datasetId,
+            Status = "Running",
+            SourceWorkflowRunId = sourceWorkflowRunId,
+            WorkflowHash = hash,
+            CandidateWorkflowJson = JsonSerializer.Serialize(candidate, _json),
+            RequestedCount = requestedCount,
+            CompletedCount = 0,
+            StartedAt = now
+        });
+        await db.SaveChangesAsync(ct);
         return new ValidationRunRecord(runId, datasetId, "Running", sourceWorkflowRunId, hash, requestedCount, 0, now, null, false, null, null);
     }
 
     public async Task AddResultAsync(ValidationResultRecord result, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        await using (var command = connection.CreateCommand())
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        db.ValidationResults.Add(new ValidationResultEntity
         {
-            command.Transaction = transaction;
-            command.CommandText = """
-INSERT INTO validation_results(run_id,item_id,source_kind,source_ref,expected_disposition,actual_disposition,classification,replay_run_id,success,duration_ms,failed_nodes_json,error,completed_at)
-VALUES($run,$item,$kind,$ref,$expected,$actual,$classification,$replay,$success,$duration,$nodes,$error,$completed);
-""";
-            command.Parameters.AddWithValue("$run", result.RunId);
-            command.Parameters.AddWithValue("$item", result.ItemId);
-            command.Parameters.AddWithValue("$kind", result.SourceKind);
-            command.Parameters.AddWithValue("$ref", result.SourceRef);
-            command.Parameters.AddWithValue("$expected", result.ExpectedDisposition);
-            command.Parameters.AddWithValue("$actual", result.ActualDisposition);
-            command.Parameters.AddWithValue("$classification", result.Classification);
-            command.Parameters.AddWithValue("$replay", (object?)result.ReplayRunId ?? DBNull.Value);
-            command.Parameters.AddWithValue("$success", result.Success ? 1 : 0);
-            command.Parameters.AddWithValue("$duration", result.DurationMs);
-            command.Parameters.AddWithValue("$nodes", JsonSerializer.Serialize(result.FailedNodeIds, _json));
-            command.Parameters.AddWithValue("$error", (object?)result.Error ?? DBNull.Value);
-            command.Parameters.AddWithValue("$completed", Iso(result.CompletedAt));
-            await command.ExecuteNonQueryAsync(ct);
-        }
-        await using (var update = connection.CreateCommand())
-        {
-            update.Transaction = transaction;
-            update.CommandText = "UPDATE validation_runs SET completed_count=completed_count+1 WHERE run_id=$run;";
-            update.Parameters.AddWithValue("$run", result.RunId);
-            await update.ExecuteNonQueryAsync(ct);
-        }
+            RunId = result.RunId,
+            ItemId = result.ItemId,
+            SourceKind = result.SourceKind,
+            SourceRef = result.SourceRef,
+            ExpectedDisposition = result.ExpectedDisposition,
+            ActualDisposition = result.ActualDisposition,
+            Classification = result.Classification,
+            ReplayRunId = result.ReplayRunId,
+            Success = result.Success,
+            DurationMs = result.DurationMs,
+            FailedNodesJson = JsonSerializer.Serialize(result.FailedNodeIds, _json),
+            Error = result.Error,
+            CompletedAt = result.CompletedAt
+        });
+        await db.SaveChangesAsync(ct);
+        await db.ValidationRuns
+            .Where(x => x.RunId == result.RunId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.CompletedCount, x => x.CompletedCount + 1), ct);
         await transaction.CommitAsync(ct);
     }
 
@@ -341,76 +313,72 @@ VALUES($run,$item,$kind,$ref,$expected,$actual,$classification,$replay,$success,
     {
         var results = await GetResultsAsync(runId, ct);
         var summary = BuildSummary(results);
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE validation_runs SET status=$status,completed_at=$completed,error=$error,summary_json=$summary WHERE run_id=$run;";
-        command.Parameters.AddWithValue("$status", status);
-        command.Parameters.AddWithValue("$completed", Iso(DateTimeOffset.UtcNow));
-        command.Parameters.AddWithValue("$error", (object?)error ?? DBNull.Value);
-        command.Parameters.AddWithValue("$summary", JsonSerializer.Serialize(summary, _json));
-        command.Parameters.AddWithValue("$run", runId);
-        await command.ExecuteNonQueryAsync(ct);
+        var summaryJson = JsonSerializer.Serialize(summary, _json);
+        var completedAt = DateTimeOffset.UtcNow;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await db.ValidationRuns
+            .Where(x => x.RunId == runId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Status, status)
+                .SetProperty(x => x.CompletedAt, completedAt)
+                .SetProperty(x => x.Error, error)
+                .SetProperty(x => x.SummaryJson, summaryJson), ct);
     }
 
     public async Task RequestCancelAsync(string runId, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE validation_runs SET cancel_requested=1 WHERE run_id=$run AND status='Running';";
-        command.Parameters.AddWithValue("$run", runId);
-        if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiConflictException("Validation run is not running or does not exist.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.ValidationRuns
+            .Where(x => x.RunId == runId && x.Status == "Running")
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.CancelRequested, true), ct);
+        if (affected == 0) throw new ApiConflictException("Validation run is not running or does not exist.");
     }
 
     public async Task<IReadOnlyList<ValidationRunRecord>> ListRunsAsync(string datasetId, CancellationToken ct)
     {
-        var result = new List<ValidationRunRecord>();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT run_id,dataset_id,status,source_workflow_run_id,workflow_hash,requested_count,completed_count,started_at,completed_at,cancel_requested,error,summary_json FROM validation_runs WHERE dataset_id=$dataset ORDER BY started_at DESC LIMIT 100;";
-        command.Parameters.AddWithValue("$dataset", datasetId);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(ReadRun(reader));
-        return result;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.ValidationRuns
+            .Where(x => x.DatasetId == datasetId)
+            .OrderByDescending(x => x.StartedAt)
+            .Take(100)
+            .ToListAsync(ct);
+        return rows.Select(ToRunRecord).ToList();
     }
 
     public async Task<WorkflowDefinition> GetRunWorkflowAsync(string runId, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT candidate_workflow_json FROM validation_runs WHERE run_id=$run;";
-        command.Parameters.AddWithValue("$run", runId);
-        var json = await command.ExecuteScalarAsync(ct) as string;
-        if (json is null) throw new ApiNotFoundException($"Validation run '{runId}' was not found.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var json = await db.ValidationRuns
+            .Where(x => x.RunId == runId)
+            .Select(x => x.CandidateWorkflowJson)
+            .FirstOrDefaultAsync(ct)
+            ?? throw new ApiNotFoundException($"Validation run '{runId}' was not found.");
         return JsonSerializer.Deserialize<WorkflowDefinition>(json, _json)
             ?? throw new ApiConflictException($"Validation run '{runId}' has an invalid candidate workflow snapshot.");
     }
 
     public async Task<ValidationRunRecord> GetRunAsync(string runId, bool includeResults, CancellationToken ct)
     {
-        ValidationRunRecord? run = null;
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT run_id,dataset_id,status,source_workflow_run_id,workflow_hash,requested_count,completed_count,started_at,completed_at,cancel_requested,error,summary_json FROM validation_runs WHERE run_id=$run;";
-            command.Parameters.AddWithValue("$run", runId);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            if (await reader.ReadAsync(ct)) run = ReadRun(reader);
-        }
-        if (run is null) throw new ApiNotFoundException($"Validation run '{runId}' was not found.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.ValidationRuns.FirstOrDefaultAsync(x => x.RunId == runId, ct)
+            ?? throw new ApiNotFoundException($"Validation run '{runId}' was not found.");
+        var run = ToRunRecord(entity);
         return includeResults ? run with { Results = await GetResultsAsync(runId, ct) } : run;
     }
 
     public async Task<IReadOnlyList<ValidationResultRecord>> GetResultsAsync(string runId, CancellationToken ct)
     {
-        var result = new List<ValidationResultRecord>();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT run_id,item_id,source_kind,source_ref,expected_disposition,actual_disposition,classification,replay_run_id,success,duration_ms,failed_nodes_json,error,completed_at FROM validation_results WHERE run_id=$run ORDER BY completed_at,item_id;";
-        command.Parameters.AddWithValue("$run", runId);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-            result.Add(new ValidationResultRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), DbString(reader, 7), reader.GetInt32(8) != 0, reader.GetDouble(9), JsonSerializer.Deserialize<string[]>(reader.GetString(10), _json) ?? [], DbString(reader, 11), DateTimeOffset.Parse(reader.GetString(12))));
-        return result;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.ValidationResults
+            .Where(x => x.RunId == runId)
+            .OrderBy(x => x.CompletedAt)
+            .ThenBy(x => x.ItemId)
+            .ToListAsync(ct);
+        return rows.Select(r => new ValidationResultRecord(
+            r.RunId, r.ItemId, r.SourceKind, r.SourceRef, r.ExpectedDisposition, r.ActualDisposition, r.Classification,
+            r.ReplayRunId, r.Success, r.DurationMs,
+            JsonSerializer.Deserialize<string[]>(r.FailedNodesJson, _json) ?? [],
+            r.Error, r.CompletedAt)).ToList();
     }
 
     public static ValidationRunSummary BuildSummary(IReadOnlyList<ValidationResultRecord> results)
@@ -440,10 +408,10 @@ VALUES($run,$item,$kind,$ref,$expected,$actual,$classification,$replay,$success,
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
-    private ValidationRunRecord ReadRun(SqliteDataReader reader)
+    private ValidationRunRecord ToRunRecord(ValidationRunEntity e)
     {
-        ValidationRunSummary? summary = reader.IsDBNull(11) ? null : JsonSerializer.Deserialize<ValidationRunSummary>(reader.GetString(11), _json);
-        return new ValidationRunRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetInt32(5), reader.GetInt32(6), DateTimeOffset.Parse(reader.GetString(7)), reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)), reader.GetInt32(9) != 0, DbString(reader, 10), summary);
+        ValidationRunSummary? summary = string.IsNullOrWhiteSpace(e.SummaryJson) ? null : JsonSerializer.Deserialize<ValidationRunSummary>(e.SummaryJson, _json);
+        return new ValidationRunRecord(e.RunId, e.DatasetId, e.Status, e.SourceWorkflowRunId, e.WorkflowHash, e.RequestedCount, e.CompletedCount, e.StartedAt, e.CompletedAt, e.CancelRequested, e.Error, summary);
     }
 
     private static string NormalizeExpected(string value)
@@ -463,15 +431,13 @@ VALUES($run,$item,$kind,$ref,$expected,$actual,$classification,$replay,$success,
         var lo = (int)Math.Floor(index); var hi = (int)Math.Ceiling(index);
         return lo == hi ? values[lo] : values[lo] + (values[hi] - values[lo]) * (index - lo);
     }
-    private static string? DbString(SqliteDataReader reader, int index) => reader.IsDBNull(index) ? null : reader.GetString(index);
-    private static string Iso(DateTimeOffset value) => value.ToUniversalTime().ToString("O");
-    private static async Task TouchAsync(SqliteConnection connection, string datasetId, CancellationToken ct)
+
+    private static Task TouchAsync(VisionStudioDbContext db, string datasetId, CancellationToken ct)
     {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE validation_datasets SET updated_at=$updated WHERE id=$id;";
-        command.Parameters.AddWithValue("$updated", Iso(DateTimeOffset.UtcNow));
-        command.Parameters.AddWithValue("$id", datasetId);
-        await command.ExecuteNonQueryAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        return db.ValidationDatasets
+            .Where(x => x.Id == datasetId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.UpdatedAt, now), ct);
     }
 }
 

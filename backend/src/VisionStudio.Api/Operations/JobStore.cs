@@ -1,8 +1,11 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Engine;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api;
 
@@ -83,7 +86,7 @@ public sealed record SaveJobVersionRequest(
 /// </summary>
 public sealed partial class JobStore
 {
-    private readonly SqliteMetadataDatabase _db;
+    private readonly IVisionStudioDbFactory _dbFactory;
     private readonly RecipeParameterStore _parameters;
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
     {
@@ -91,52 +94,42 @@ public sealed partial class JobStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public JobStore(SqliteMetadataDatabase db, RecipeParameterStore parameters)
+    public JobStore(IVisionStudioDbFactory dbFactory, RecipeParameterStore parameters)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _parameters = parameters;
     }
-    public JobStore(SqliteMetadataDatabase db) : this(db, new RecipeParameterStore(db)) { }
+    public JobStore(SqliteMetadataDatabase db, RecipeParameterStore parameters) : this(new VisionStudioDbFactory(db), parameters) { }
+    public JobStore(SqliteMetadataDatabase db) : this(new VisionStudioDbFactory(db), new RecipeParameterStore(db)) { }
     public JobStore(IWebHostEnvironment env) : this(new SqliteMetadataDatabase(env)) { }
 
     public async Task<IReadOnlyList<JobDescriptor>> ListAsync(CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        var rows = new List<JobRow>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version,published_version,published_dependency_manifest_hash,product_id,recipe_code,requires_validation FROM jobs ORDER BY updated_at DESC;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) rows.Add(ReadJobRow(reader));
-        }
-
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.Jobs.OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
         var result = new List<JobDescriptor>(rows.Count);
-        foreach (var row in rows) result.Add(await BuildDescriptorAsync(connection, row, ct));
+        foreach (var row in rows) result.Add(await BuildDescriptorAsync(db, row, ct));
         return result;
     }
 
     public async Task<JobDescriptor?> GetAsync(string id, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        var row = await LoadJobRowAsync(connection, id, null, ct);
-        return row is null ? null : await BuildDescriptorAsync(connection, row, ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.Jobs.FirstOrDefaultAsync(x => x.Id == id, ct);
+        return row is null ? null : await BuildDescriptorAsync(db, row, ct);
     }
 
     internal async Task<StationJob?> GetStationJobAsync(string id, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT j.name, j.published_version, v.workflow_hash
-FROM jobs j
-LEFT JOIN job_versions v ON v.job_id = j.id AND v.version = j.published_version
-WHERE j.id = $id;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return null;
-        return new StationJob(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetInt32(1),
-            reader.IsDBNull(2) ? null : reader.GetString(2));
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var data = await (
+            from j in db.Jobs
+            where j.Id == id
+            join v in db.JobVersions on new { JobId = j.Id, Version = j.PublishedVersion } equals new { JobId = v.JobId, Version = (int?)v.Version } into vj
+            from v in vj.DefaultIfEmpty()
+            select new { j.Name, j.PublishedVersion, WorkflowHash = v != null ? v.WorkflowHash : null })
+            .FirstOrDefaultAsync(ct);
+        return data is null ? null : new StationJob(data.Name, data.PublishedVersion, data.WorkflowHash);
     }
 
     public async Task<JobDescriptor> CreateAsync(CreateJobRequest request, CancellationToken ct)
@@ -144,71 +137,83 @@ WHERE j.id = $id;
         ValidateId(request.Id);
         if (string.IsNullOrWhiteSpace(request.Name)) throw new ApiValidationException("Job name is required.");
 
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
+
         try
         {
             var now = DateTimeOffset.UtcNow;
             var snapshot = await CreateSnapshotAsync(request.Id, 1, request.Workflow, request.Note ?? "Initial version", request.ProductId, request.ParameterBindings, now, ct);
 
-            await ExecuteAsync(connection, transaction,
-                "INSERT INTO jobs(id,name,description,created_at,updated_at,latest_version,published_version,product_id,recipe_code,requires_validation) VALUES($id,$name,$description,$created,$updated,1,NULL,$product,$recipe,$validation);",
-                ct,
-                ("$id", request.Id), ("$name", request.Name.Trim()), ("$description", request.Description?.Trim() ?? string.Empty),
-                ("$created", Iso(now)), ("$updated", Iso(now)),
-                ("$product", NullIfWhiteSpace(request.ProductId)), ("$recipe", NullIfWhiteSpace(request.RecipeCode)), ("$validation", request.RequiresValidation ? 1 : 0));
+            db.Jobs.Add(new JobEntity
+            {
+                Id = request.Id,
+                Name = request.Name.Trim(),
+                Description = request.Description?.Trim() ?? string.Empty,
+                CreatedAt = now,
+                UpdatedAt = now,
+                LatestVersion = 1,
+                PublishedVersion = null,
+                ProductId = NullIfWhiteSpace(request.ProductId),
+                RecipeCode = NullIfWhiteSpace(request.RecipeCode),
+                RequiresValidation = request.RequiresValidation
+            });
 
-            await InsertVersionAsync(connection, transaction, snapshot, ct);
+            AddVersionEntity(db, snapshot);
+            await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             return (await GetAsync(request.Id, ct))!;
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: 19 } sqliteEx)
         {
-            throw new ApiConflictException($"Job '{request.Id}' already exists.", ex);
+            throw new ApiConflictException($"Job '{request.Id}' already exists.", sqliteEx);
         }
     }
 
     public async Task<JobVersionSnapshot> AddVersionAsync(string id, SaveJobVersionRequest request, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
 
-        var row = await LoadJobRowAsync(connection, id, transaction, ct)
+        var row = await db.Jobs.AsTracking().FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new ApiNotFoundException($"Job '{id}' does not exist.");
         var next = row.LatestVersion + 1;
         var now = DateTimeOffset.UtcNow;
         var snapshot = await CreateSnapshotAsync(id, next, request.Workflow, request.Note ?? string.Empty, row.ProductId, request.ParameterBindings, now, ct);
 
-        await InsertVersionAsync(connection, transaction, snapshot, ct);
-        await ExecuteAsync(connection, transaction,
-            "UPDATE jobs SET latest_version=$version, updated_at=$updated WHERE id=$id;",
-            ct, ("$version", next), ("$updated", Iso(now)), ("$id", id));
+        AddVersionEntity(db, snapshot);
+        row.LatestVersion = next;
+        row.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return snapshot;
     }
 
     public async Task<JobVersionSnapshot?> GetVersionAsync(string id, int version, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT workflow_hash,created_at,note,workflow_json,base_workflow_hash,base_workflow_json,parameter_bindings_json,parameter_snapshot_json FROM job_versions WHERE job_id=$id AND version=$version;";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$version", version);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return null;
-        var workflow = JsonSerializer.Deserialize<WorkflowDefinition>(reader.GetString(3), _json)
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.JobVersions.FirstOrDefaultAsync(x => x.JobId == id && x.Version == version, ct);
+        if (entity is null) return null;
+        var workflow = JsonSerializer.Deserialize<WorkflowDefinition>(entity.WorkflowJson, _json)
             ?? throw new InvalidOperationException($"Stored workflow for job '{id}' v{version} is invalid.");
-        var baseWorkflow = reader.IsDBNull(5) ? workflow : JsonSerializer.Deserialize<WorkflowDefinition>(reader.GetString(5), _json) ?? workflow;
-        var bindings = reader.IsDBNull(6) ? new Dictionary<string,string>() : JsonSerializer.Deserialize<Dictionary<string,string>>(reader.GetString(6), _json) ?? new();
-        var parameterSnapshot = reader.IsDBNull(7) ? new Dictionary<string,JsonElement>() : JsonSerializer.Deserialize<Dictionary<string,JsonElement>>(reader.GetString(7), _json) ?? new();
-        return new JobVersionSnapshot(id, version, reader.GetString(0), ParseTime(reader.GetString(1)), reader.GetString(2), workflow,
-            reader.IsDBNull(4) ? WorkflowFingerprint.Compute(baseWorkflow) : reader.GetString(4), baseWorkflow, bindings, parameterSnapshot);
+        var baseWorkflow = string.IsNullOrWhiteSpace(entity.BaseWorkflowJson)
+            ? workflow
+            : JsonSerializer.Deserialize<WorkflowDefinition>(entity.BaseWorkflowJson, _json) ?? workflow;
+        var bindings = string.IsNullOrWhiteSpace(entity.ParameterBindingsJson)
+            ? new Dictionary<string, string>()
+            : JsonSerializer.Deserialize<Dictionary<string, string>>(entity.ParameterBindingsJson, _json) ?? new();
+        var parameterSnapshot = string.IsNullOrWhiteSpace(entity.ParameterSnapshotJson)
+            ? new Dictionary<string, JsonElement>()
+            : JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(entity.ParameterSnapshotJson, _json) ?? new();
+        return new JobVersionSnapshot(id, version, entity.WorkflowHash, entity.CreatedAt, entity.Note, workflow,
+            string.IsNullOrWhiteSpace(entity.BaseWorkflowHash) ? WorkflowFingerprint.Compute(baseWorkflow) : entity.BaseWorkflowHash,
+            baseWorkflow, bindings, parameterSnapshot);
     }
 
     public async Task<JobVersionSnapshot> GetPublishedVersionAsync(string id, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        var row = await LoadJobRowAsync(connection, id, null, ct)
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.Jobs.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new ApiNotFoundException($"Job '{id}' does not exist.");
         if (row.PublishedVersion is null)
             throw new ApiConflictException($"Job '{id}' has no published production version.");
@@ -218,8 +223,8 @@ WHERE j.id = $id;
 
     public async Task<PublishedJobSnapshot> GetPublishedSnapshotAsync(string id, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        var row = await LoadJobRowAsync(connection, id, null, ct)
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.Jobs.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new ApiNotFoundException($"Job '{id}' does not exist.");
         if (row.PublishedVersion is null)
             throw new ApiConflictException($"Job '{id}' has no published production version.");
@@ -228,7 +233,7 @@ WHERE j.id = $id;
 
         var version = await GetVersionAsync(id, row.PublishedVersion.Value, ct)
             ?? throw new InvalidDataException($"Published version {row.PublishedVersion} is missing for job '{id}'.");
-        var manifest = await LoadManifestAsync(connection, row.PublishedDependencyManifestHash, ct)
+        var manifest = await LoadManifestAsync(db, row.PublishedDependencyManifestHash, ct)
             ?? throw new InvalidDataException($"Dependency manifest '{row.PublishedDependencyManifestHash}' is missing for published job '{id}'.");
         return new PublishedJobSnapshot(version, manifest);
     }
@@ -236,89 +241,87 @@ WHERE j.id = $id;
     public async Task<JobDescriptor> PublishAsync(string id, int version, string action, RuntimeDependencyManifest dependencyManifest, CancellationToken ct, DateTimeOffset? expectedUpdatedAt = null)
     {
         // R03：发布是不可重放的现场动作基准——发布事务必须能在断电后存活。
-        await using var connection = await _db.OpenConnectionAsync(ct, strongDurability: true);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        var row = await LoadJobRowAsync(connection, id, transaction, ct)
+        await using var db = await _dbFactory.CreateDbContextAsync(ct, strongDurability: true);
+        await using var transaction = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
+        var row = await db.Jobs.AsTracking().FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new ApiNotFoundException($"Job '{id}' does not exist.");
 
         if (expectedUpdatedAt.HasValue && row.UpdatedAt != expectedUpdatedAt.Value)
             throw new ApiConflictException($"Recipe '{id}' changed after the publication review. Reload the recipe and review the active version before publishing again.");
 
-        await using (var exists = connection.CreateCommand())
-        {
-            exists.Transaction = transaction;
-            exists.CommandText = "SELECT 1 FROM job_versions WHERE job_id=$id AND version=$version LIMIT 1;";
-            exists.Parameters.AddWithValue("$id", id);
-            exists.Parameters.AddWithValue("$version", version);
-            if (await exists.ExecuteScalarAsync(ct) is null)
-                throw new ApiNotFoundException($"Version {version} does not exist for job '{id}'.");
-        }
+        if (!await db.JobVersions.AnyAsync(x => x.JobId == id && x.Version == version, ct))
+            throw new ApiNotFoundException($"Version {version} does not exist for job '{id}'.");
 
-        if (RequiresDatasetValidation(row) || await DeliveredVersionRequiresValidationAsync(connection, transaction, id, version, ct))
+        if (RequiresDatasetValidation(row) || await DeliveredVersionRequiresValidationAsync(db, id, version, ct))
         {
-            await using var validation = connection.CreateCommand();
-            validation.Transaction = transaction;
-            validation.CommandText = "SELECT accepted,reason FROM job_version_validations WHERE job_id=$id AND version=$version;";
-            validation.Parameters.AddWithValue("$id", id);
-            validation.Parameters.AddWithValue("$version", version);
-            await using var validationReader = await validation.ExecuteReaderAsync(ct);
-            if (!await validationReader.ReadAsync(ct))
-                throw new ApiConflictException($"Recipe '{id}' V{version} must be linked to an accepted Dataset Validation run before publish.");
-            if (validationReader.GetInt32(0) == 0)
-                throw new ApiConflictException($"Recipe '{id}' V{version} failed its linked validation policy: {validationReader.GetString(1)}");
+            var validation = await db.JobVersionValidations
+                .Where(x => x.JobId == id && x.Version == version)
+                .Select(x => new { x.Accepted, x.Reason })
+                .FirstOrDefaultAsync(ct)
+                ?? throw new ApiConflictException($"Recipe '{id}' V{version} must be linked to an accepted Dataset Validation run before publish.");
+            if (!validation.Accepted)
+                throw new ApiConflictException($"Recipe '{id}' V{version} failed its linked validation policy: {validation.Reason}");
         }
 
         // 发布修订严格递增，时钟分辨率或回拨也不能让旧确认在 A→B→A 后重新生效。
         var now = DateTimeOffset.UtcNow;
         if (now <= row.UpdatedAt) now = row.UpdatedAt.AddTicks(1);
-        await StoreManifestAsync(connection, transaction, dependencyManifest, ct);
-        await ExecuteAsync(connection, transaction,
-            "UPDATE jobs SET published_version=$version, published_dependency_manifest_hash=$manifest, updated_at=$updated WHERE id=$id;",
-            ct, ("$version", version), ("$manifest", dependencyManifest.ManifestHash), ("$updated", Iso(now)), ("$id", id));
-        await ExecuteAsync(connection, transaction,
-            "INSERT INTO job_publication_history(job_id,version,action,at,dependency_manifest_hash) VALUES($id,$version,$action,$at,$manifest);",
-            ct, ("$id", id), ("$version", version), ("$action", action), ("$at", Iso(now)), ("$manifest", dependencyManifest.ManifestHash));
+        await StoreManifestAsync(db, dependencyManifest, ct);
+        row.PublishedVersion = version;
+        row.PublishedDependencyManifestHash = dependencyManifest.ManifestHash;
+        row.UpdatedAt = now;
+        db.JobPublicationHistory.Add(new JobPublicationHistoryEntity
+        {
+            JobId = id,
+            Version = version,
+            Action = action,
+            At = now,
+            DependencyManifestHash = dependencyManifest.ManifestHash
+        });
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return (await GetAsync(id, ct))!;
     }
 
-    private async Task<JobDescriptor> BuildDescriptorAsync(SqliteConnection connection, JobRow row, CancellationToken ct)
+    private async Task<JobDescriptor> BuildDescriptorAsync(VisionStudioDbContext db, JobEntity row, CancellationToken ct)
     {
-        var versions = new List<JobVersionInfo>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = """
-SELECT v.version,v.workflow_hash,v.created_at,v.note,
-       jv.validation_run_id,jv.dataset_id,jv.accepted,jv.linked_at,jv.reason,jv.summary_json,jv.policy_json,
-       COALESCE(v.parameter_bindings_json,'{}')
-FROM job_versions v LEFT JOIN job_version_validations jv ON jv.job_id=v.job_id AND jv.version=v.version
-WHERE v.job_id=$id ORDER BY v.version;
-""";
-            command.Parameters.AddWithValue("$id", row.Id);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+        var versionRows = await (
+            from v in db.JobVersions
+            where v.JobId == row.Id
+            join jv in db.JobVersionValidations on new { v.JobId, v.Version } equals new { jv.JobId, jv.Version } into jvg
+            from jv in jvg.DefaultIfEmpty()
+            orderby v.Version
+            select new
             {
-                var version = reader.GetInt32(0);
-                JobVersionValidationInfo? validation = null;
-                if (!reader.IsDBNull(4))
-                {
-                    var summary = JsonSerializer.Deserialize<ValidationRunSummary>(reader.GetString(9), _json);
-                    var policy = JsonSerializer.Deserialize<ValidationAcceptancePolicy>(reader.GetString(10), _json);
-                    validation = new JobVersionValidationInfo(reader.GetString(4), reader.GetString(5), reader.GetInt32(6) != 0, ParseTime(reader.GetString(7)), reader.GetString(8), summary, policy);
-                }
-                var bindingCount = (JsonSerializer.Deserialize<Dictionary<string,string>>(reader.GetString(11), _json) ?? new()).Count;
-                versions.Add(new JobVersionInfo(version, reader.GetString(1), ParseTime(reader.GetString(2)), reader.GetString(3), row.PublishedVersion == version, validation, bindingCount));
+                v.Version,
+                v.WorkflowHash,
+                v.CreatedAt,
+                v.Note,
+                v.ParameterBindingsJson,
+                Validation = jv
+            })
+            .ToListAsync(ct);
+
+        var versions = new List<JobVersionInfo>(versionRows.Count);
+        foreach (var item in versionRows)
+        {
+            JobVersionValidationInfo? validation = null;
+            if (item.Validation is { } jv)
+            {
+                var summary = JsonSerializer.Deserialize<ValidationRunSummary>(jv.SummaryJson, _json);
+                var policy = JsonSerializer.Deserialize<ValidationAcceptancePolicy>(jv.PolicyJson, _json);
+                validation = new JobVersionValidationInfo(jv.ValidationRunId, jv.DatasetId, jv.Accepted, jv.LinkedAt, jv.Reason, summary, policy);
             }
+            var bindingsJson = string.IsNullOrWhiteSpace(item.ParameterBindingsJson) ? "{}" : item.ParameterBindingsJson;
+            var bindingCount = (JsonSerializer.Deserialize<Dictionary<string, string>>(bindingsJson, _json) ?? new()).Count;
+            versions.Add(new JobVersionInfo(item.Version, item.WorkflowHash, item.CreatedAt, item.Note, row.PublishedVersion == item.Version, validation, bindingCount));
         }
 
-        var history = new List<PublicationEvent>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT version,action,at,dependency_manifest_hash FROM job_publication_history WHERE job_id=$id ORDER BY seq;";
-            command.Parameters.AddWithValue("$id", row.Id);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) history.Add(new PublicationEvent(reader.GetInt32(0), reader.GetString(1), ParseTime(reader.GetString(2)), reader.IsDBNull(3) ? null : reader.GetString(3)));
-        }
+        var history = await db.JobPublicationHistory
+            .Where(x => x.JobId == row.Id)
+            .OrderBy(x => x.Seq)
+            .Select(x => new PublicationEvent(x.Version, x.Action, x.At, x.DependencyManifestHash))
+            .ToListAsync(ct);
 
         return new JobDescriptor(row.Id, row.Name, row.Description, row.CreatedAt, row.UpdatedAt, row.LatestVersion, row.PublishedVersion, row.PublishedDependencyManifestHash, versions, history, row.ProductId, row.RecipeCode);
     }
@@ -332,62 +335,45 @@ WHERE v.job_id=$id ORDER BY v.version;
             resolved.BaseWorkflowHash, resolved.BaseWorkflow, resolved.Bindings, resolved.Snapshot);
     }
 
-    private async Task InsertVersionAsync(SqliteConnection connection, SqliteTransaction transaction, JobVersionSnapshot snapshot, CancellationToken ct)
+    private void AddVersionEntity(VisionStudioDbContext db, JobVersionSnapshot snapshot)
     {
-        await ExecuteAsync(connection, transaction,
-            """
-INSERT INTO job_versions(job_id,version,workflow_hash,created_at,note,workflow_json,base_workflow_hash,base_workflow_json,parameter_bindings_json,parameter_snapshot_json)
-VALUES($job,$version,$hash,$created,$note,$workflow,$baseHash,$baseWorkflow,$bindings,$snapshot);
-""",
-            ct,
-            ("$job", snapshot.JobId), ("$version", snapshot.Version), ("$hash", snapshot.WorkflowHash),
-            ("$created", Iso(snapshot.CreatedAt)), ("$note", snapshot.Note), ("$workflow", JsonSerializer.Serialize(snapshot.Workflow, _json)),
-            ("$baseHash", snapshot.BaseWorkflowHash ?? snapshot.WorkflowHash),
-            ("$baseWorkflow", JsonSerializer.Serialize(snapshot.BaseWorkflow ?? snapshot.Workflow, _json)),
-            ("$bindings", JsonSerializer.Serialize(snapshot.ParameterBindings ?? new Dictionary<string,string>(), _json)),
-            ("$snapshot", JsonSerializer.Serialize(snapshot.ParameterSnapshot ?? new Dictionary<string,JsonElement>(), _json)));
+        db.JobVersions.Add(new JobVersionEntity
+        {
+            JobId = snapshot.JobId,
+            Version = snapshot.Version,
+            WorkflowHash = snapshot.WorkflowHash,
+            CreatedAt = snapshot.CreatedAt,
+            Note = snapshot.Note,
+            WorkflowJson = JsonSerializer.Serialize(snapshot.Workflow, _json),
+            BaseWorkflowHash = snapshot.BaseWorkflowHash ?? snapshot.WorkflowHash,
+            BaseWorkflowJson = JsonSerializer.Serialize(snapshot.BaseWorkflow ?? snapshot.Workflow, _json),
+            ParameterBindingsJson = JsonSerializer.Serialize(snapshot.ParameterBindings ?? new Dictionary<string, string>(), _json),
+            ParameterSnapshotJson = JsonSerializer.Serialize(snapshot.ParameterSnapshot ?? new Dictionary<string, JsonElement>(), _json)
+        });
     }
 
-    private async Task StoreManifestAsync(SqliteConnection connection, SqliteTransaction transaction, RuntimeDependencyManifest manifest, CancellationToken ct)
+    private async Task StoreManifestAsync(VisionStudioDbContext db, RuntimeDependencyManifest manifest, CancellationToken ct)
     {
-        await ExecuteAsync(connection, transaction,
-            "INSERT OR IGNORE INTO runtime_dependency_manifests(manifest_hash,schema_version,captured_at,manifest_json) VALUES($hash,$schema,$captured,$json);",
-            ct, ("$hash", manifest.ManifestHash), ("$schema", manifest.SchemaVersion), ("$captured", Iso(manifest.CapturedAt)), ("$json", JsonSerializer.Serialize(manifest, _json)));
+        if (!await db.RuntimeDependencyManifests.AnyAsync(x => x.ManifestHash == manifest.ManifestHash, ct))
+        {
+            db.RuntimeDependencyManifests.Add(new RuntimeDependencyManifestEntity
+            {
+                ManifestHash = manifest.ManifestHash,
+                SchemaVersion = manifest.SchemaVersion,
+                CapturedAt = manifest.CapturedAt,
+                ManifestJson = JsonSerializer.Serialize(manifest, _json)
+            });
+        }
     }
 
-    private async Task<RuntimeDependencyManifest?> LoadManifestAsync(SqliteConnection connection, string hash, CancellationToken ct)
+    private async Task<RuntimeDependencyManifest?> LoadManifestAsync(VisionStudioDbContext db, string hash, CancellationToken ct)
     {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT manifest_json FROM runtime_dependency_manifests WHERE manifest_hash=$hash;";
-        command.Parameters.AddWithValue("$hash", hash);
-        var json = await command.ExecuteScalarAsync(ct) as string;
+        var json = await db.RuntimeDependencyManifests
+            .Where(x => x.ManifestHash == hash)
+            .Select(x => x.ManifestJson)
+            .FirstOrDefaultAsync(ct);
         return string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<RuntimeDependencyManifest>(json, _json);
     }
-
-    private static async Task<JobRow?> LoadJobRowAsync(SqliteConnection connection, string id, SqliteTransaction? transaction, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version,published_version,published_dependency_manifest_hash,product_id,recipe_code,requires_validation FROM jobs WHERE id=$id;";
-        command.Parameters.AddWithValue("$id", id);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? ReadJobRow(reader) : null;
-    }
-
-    private static JobRow ReadJobRow(SqliteDataReader reader)
-        => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), ParseTime(reader.GetString(3)), ParseTime(reader.GetString(4)), reader.GetInt32(5), reader.IsDBNull(6) ? null : reader.GetInt32(6), reader.IsDBNull(7) ? null : reader.GetString(7), reader.IsDBNull(8) ? null : reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetString(9), reader.GetInt32(10) != 0);
-
-    private static async Task ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken ct, params (string Name, object? Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    private static string Iso(DateTimeOffset value) => value.ToUniversalTime().ToString("O");
-    private static DateTimeOffset ParseTime(string value) => DateTimeOffset.Parse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
 
     private static void ValidateId(string id)
     {
@@ -398,6 +384,4 @@ VALUES($job,$version,$hash,$created,$note,$workflow,$baseHash,$baseWorkflow,$bin
     private static string Sanitize(string id) => string.Concat(id.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_'));
 
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private sealed record JobRow(string Id, string Name, string Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int LatestVersion, int? PublishedVersion, string? PublishedDependencyManifestHash, string? ProductId, string? RecipeCode, bool RequiresValidation);
 }

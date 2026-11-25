@@ -18,7 +18,7 @@ public sealed class WorkflowModuleTests
         var extracted = await runtime.Authoring.ExtractAsync(new(
             source, ["threshold"], "threshold-stage", "Threshold Stage", "Reusable threshold", "initial"), default);
 
-        var call = Assert.Single(extracted.ReplacementWorkflow.Nodes.Where(x => x.Type == "module.call"));
+        var call = Assert.Single(extracted.ReplacementWorkflow.Nodes, x => x.Type == "module.call");
         Assert.Equal("threshold-stage", call.Parameters!["moduleId"].GetString());
         Assert.Equal(1, call.Parameters["moduleVersion"].GetInt32());
         Assert.Equal(extracted.Version.ModuleHash, call.Parameters["moduleHash"].GetString());
@@ -29,7 +29,7 @@ public sealed class WorkflowModuleTests
 
         var expanded = await runtime.Expander.ExpandAsync(extracted.ReplacementWorkflow, default);
         Assert.DoesNotContain(expanded.Workflow.Nodes, x => x.Type == "module.call");
-        var inner = Assert.Single(expanded.Workflow.Nodes.Where(x => x.Id.EndsWith("::threshold", StringComparison.Ordinal)));
+        var inner = Assert.Single(expanded.Workflow.Nodes, x => x.Id.EndsWith("::threshold", StringComparison.Ordinal));
         Assert.Equal("image.threshold", inner.Type);
         Assert.Contains(expanded.Workflow.Edges, x => x.SourceNodeId == "source" && x.TargetNodeId == inner.Id);
         Assert.Contains(expanded.Workflow.Edges, x => x.SourceNodeId == inner.Id && x.TargetNodeId == "blob");
@@ -54,7 +54,7 @@ public sealed class WorkflowModuleTests
         var expanded = await runtime.Expander.ExpandAsync(edited, default);
         var inner = expanded.Workflow.Nodes.Single(x => x.Id.EndsWith("::threshold", StringComparison.Ordinal));
         Assert.Equal(177d, inner.Parameters!["threshold"].GetDouble());
-        Assert.Equal(1, call.Parameters["moduleVersion"].GetInt32());
+        Assert.Equal(1, call.Parameters!["moduleVersion"].GetInt32());
     }
 
     [Fact]

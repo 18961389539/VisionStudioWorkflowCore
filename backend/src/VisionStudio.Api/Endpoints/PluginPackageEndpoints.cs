@@ -15,7 +15,7 @@ public static class PluginPackageEndpoints
         app.MapPost("/api/plugin-packages/preflight", async (HttpRequest request, PluginPackageService packages, CancellationToken ct) =>
         {
             var (bytes, fileName) = await ReadSingleFileAsync(request, packages, ct);
-            return Results.Ok(packages.Preflight(bytes, fileName));
+            return Results.Ok(await packages.PreflightAsync(bytes, fileName, ct));
         }).Produces<PluginPackagePreflightResult>().RequireEngineer("plugin.package.preflight", "plugin-package");
 
         app.MapPost("/api/plugin-packages/install", async (HttpRequest request, PluginPackageService packages, PluginManager plugins, ProductionRuntimeService production, CancellationToken ct) =>
@@ -23,7 +23,7 @@ public static class PluginPackageEndpoints
             if (production.AnyStationProductionLocked)
                 throw new ApiConflictException("Stop Production Runtime before installing or activating plugin packages.");
             var (bytes, fileName) = await ReadSingleFileAsync(request, packages, ct);
-            var result = packages.Install(bytes, fileName);
+            var result = await packages.InstallAsync(bytes, fileName, ct);
             if (result.ActivatedImmediately) plugins.Rescan();
             return Results.Ok(result);
         }).Produces<PluginPackageInstallResult>().RequireAdministrator("plugin.package.install", "plugin-package");

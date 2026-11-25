@@ -1,16 +1,20 @@
-using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api;
 
 public sealed class RecipeRolloutService(
-    IOptions<ProductionFleetOptions> options, JobStore jobs, IHttpClientFactory clients, SqliteMetadataDatabase database)
+    IOptions<ProductionFleetOptions> options, JobStore jobs, IHttpClientFactory clients, IVisionStudioDbFactory dbFactory)
 {
+    public RecipeRolloutService(IOptions<ProductionFleetOptions> options, JobStore jobs, IHttpClientFactory clients, SqliteMetadataDatabase database)
+        : this(options, jobs, clients, new VisionStudioDbFactory(database)) { }
+
     internal const string DeliveryPath = "api/production/recipe-deliveries";
     public const int MaxStations = 8;
     public const int MaxPackageBytes = 2 * 1024 * 1024;
@@ -54,30 +58,22 @@ public sealed class RecipeRolloutService(
 
     public async Task<IReadOnlyList<RecipeRolloutBatch>> ListAsync(CancellationToken ct)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT b.id,b.job_id,b.job_name,b.source_version,b.workflow_hash,b.created_at,
-       s.station_id,s.station_name,s.outcome,s.local_version,s.detail
-FROM (SELECT * FROM recipe_rollout_batches ORDER BY created_at DESC,id DESC LIMIT 30) b
-JOIN recipe_rollout_stations s ON s.batch_id=b.id
-ORDER BY b.created_at DESC,b.id DESC,s.station_id;
-""";
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        var rows = new List<RecipeRolloutBatch>();
-        List<RecipeRolloutStation> stationRows = [];
-        while (await reader.ReadAsync(ct))
-        {
-            var id = reader.GetString(0);
-            if (rows.Count == 0 || rows[^1].Id != id)
-            {
-                stationRows = [];
-                rows.Add(new RecipeRolloutBatch(id, reader.GetString(1), reader.GetString(2), reader.GetInt32(3),
-                    reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture), stationRows));
-            }
-            stationRows.Add(ReadStation(reader));
-        }
-        return rows;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var batches = await db.RecipeRolloutBatches
+            .OrderByDescending(x => x.CreatedAt)
+            .ThenByDescending(x => x.Id)
+            .Take(30)
+            .ToListAsync(ct);
+        if (batches.Count == 0) return [];
+        var batchIds = batches.Select(x => x.Id).ToList();
+        var stations = await db.RecipeRolloutStations
+            .Where(x => batchIds.Contains(x.BatchId))
+            .OrderBy(x => x.StationId)
+            .ToListAsync(ct);
+        var byBatch = stations.GroupBy(x => x.BatchId).ToDictionary(g => g.Key, g => g.Select(ToStation).ToList());
+        return batches.Select(b => new RecipeRolloutBatch(
+            b.Id, b.JobId, b.JobName, b.SourceVersion, b.WorkflowHash, b.CreatedAt,
+            byBatch.TryGetValue(b.Id, out var list) ? list : [])).ToList();
     }
 
     public async Task<IReadOnlyList<StationRecipeRollout>> LatestByStationAsync(CancellationToken ct)
@@ -85,31 +81,23 @@ ORDER BY b.created_at DESC,b.id DESC,s.station_id;
         var stationIds = options.Value.Stations.Select(station => station.Id).ToArray();
         if (stationIds.Length == 0) return [];
 
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT b.id,b.job_id,b.job_name,b.source_version,b.workflow_hash,b.created_at,
-       s.station_id,s.station_name,s.outcome,s.local_version,s.detail
-FROM json_each($stations) configured
-JOIN recipe_rollout_latest_station latest ON latest.station_id=configured.value
-JOIN recipe_rollout_stations s ON s.batch_id=latest.batch_id AND s.station_id=latest.station_id
-JOIN recipe_rollout_batches b ON b.id=latest.batch_id
-ORDER BY s.station_id;
-""";
-        command.Parameters.AddWithValue("$stations", JsonSerializer.Serialize(stationIds));
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        var rows = new List<StationRecipeRollout>();
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new StationRecipeRollout(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3),
-                reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture), ReadStation(reader)));
-        }
-        return rows;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var rows = await (
+            from latest in db.RecipeRolloutLatestStations
+            where stationIds.Contains(latest.StationId)
+            join s in db.RecipeRolloutStations on new { latest.BatchId, latest.StationId } equals new { s.BatchId, s.StationId }
+            join b in db.RecipeRolloutBatches on latest.BatchId equals b.Id
+            orderby s.StationId
+            select new { Batch = b, Station = s })
+            .ToListAsync(ct);
+
+        return rows.Select(x => new StationRecipeRollout(
+            x.Batch.Id, x.Batch.JobId, x.Batch.JobName, x.Batch.SourceVersion, x.Batch.WorkflowHash, x.Batch.CreatedAt,
+            ToStation(x.Station))).ToList();
     }
 
-    private static RecipeRolloutStation ReadStation(SqliteDataReader reader)
-        => new(reader.GetString(6), reader.GetString(7), Enum.Parse<RecipeDeliveryOutcome>(reader.GetString(8)),
-            reader.IsDBNull(9) ? null : reader.GetInt32(9), reader.IsDBNull(10) ? null : reader.GetString(10));
+    private static RecipeRolloutStation ToStation(RecipeRolloutStationEntity s)
+        => new(s.StationId, s.StationName, Enum.Parse<RecipeDeliveryOutcome>(s.Outcome), s.LocalVersion, s.Detail);
 
     private async Task<RecipeRolloutStation> SendStationAsync(ProductionStationOptions station, StationRecipeDelivery payload, byte[] body)
     {
@@ -148,54 +136,60 @@ ORDER BY s.station_id;
 
     private async Task SaveBatchAsync(RecipeRolloutBatch batch, CancellationToken ct)
     {
-        await using var connection = await database.OpenConnectionAsync(ct, strongDurability: true);
-        await using var tx = connection.BeginTransaction(deferred: false);
-        await using (var command = connection.CreateCommand())
+        await using var db = await dbFactory.CreateDbContextAsync(ct, strongDurability: true);
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        db.RecipeRolloutBatches.Add(new RecipeRolloutBatchEntity
         {
-            command.Transaction = tx;
-            command.CommandText = """
-INSERT INTO recipe_rollout_batches(id,job_id,job_name,source_version,workflow_hash,created_at)
-VALUES($id,$job,$name,$version,$hash,$at);
-""";
-            command.Parameters.AddWithValue("$id", batch.Id);
-            command.Parameters.AddWithValue("$job", batch.JobId);
-            command.Parameters.AddWithValue("$name", batch.JobName);
-            command.Parameters.AddWithValue("$version", batch.SourceVersion);
-            command.Parameters.AddWithValue("$hash", batch.WorkflowHash);
-            command.Parameters.AddWithValue("$at", batch.CreatedAt.ToString("O", CultureInfo.InvariantCulture));
-            await command.ExecuteNonQueryAsync(ct);
-        }
+            Id = batch.Id,
+            JobId = batch.JobId,
+            JobName = batch.JobName,
+            SourceVersion = batch.SourceVersion,
+            WorkflowHash = batch.WorkflowHash,
+            CreatedAt = batch.CreatedAt
+        });
+        await db.SaveChangesAsync(ct);
+
+        var stationIds = batch.Stations.Select(s => s.StationId).ToList();
+        var existingLatest = await db.RecipeRolloutLatestStations
+            .AsTracking()
+            .Where(x => stationIds.Contains(x.StationId))
+            .ToDictionaryAsync(x => x.StationId, ct);
+
         foreach (var station in batch.Stations)
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = tx;
-            command.CommandText = """
-INSERT INTO recipe_rollout_stations(batch_id,station_id,station_name,outcome) VALUES($batch,$station,$name,$outcome);
-INSERT INTO recipe_rollout_latest_station(station_id,batch_id) VALUES($station,$batch)
-ON CONFLICT(station_id) DO UPDATE SET batch_id=excluded.batch_id;
-""";
-            command.Parameters.AddWithValue("$batch", batch.Id);
-            command.Parameters.AddWithValue("$station", station.StationId);
-            command.Parameters.AddWithValue("$name", station.StationName);
-            command.Parameters.AddWithValue("$outcome", station.Outcome.ToString());
-            await command.ExecuteNonQueryAsync(ct);
+            db.RecipeRolloutStations.Add(new RecipeRolloutStationEntity
+            {
+                BatchId = batch.Id,
+                StationId = station.StationId,
+                StationName = station.StationName,
+                Outcome = station.Outcome.ToString()
+            });
+            if (existingLatest.TryGetValue(station.StationId, out var latest))
+            {
+                latest.BatchId = batch.Id;
+            }
+            else
+            {
+                db.RecipeRolloutLatestStations.Add(new RecipeRolloutLatestStationEntity
+                {
+                    StationId = station.StationId,
+                    BatchId = batch.Id
+                });
+            }
         }
+        await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
     }
 
     private async Task SaveStationResultAsync(string id, RecipeRolloutStation station)
     {
-        await using var connection = await database.OpenConnectionAsync(strongDurability: true);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-UPDATE recipe_rollout_stations SET outcome=$outcome,local_version=$version,detail=$detail
-WHERE batch_id=$batch AND station_id=$station;
-""";
-        command.Parameters.AddWithValue("$batch", id);
-        command.Parameters.AddWithValue("$station", station.StationId);
-        command.Parameters.AddWithValue("$outcome", station.Outcome.ToString());
-        command.Parameters.AddWithValue("$version", (object?)station.LocalVersion ?? DBNull.Value);
-        command.Parameters.AddWithValue("$detail", (object?)station.Detail ?? DBNull.Value);
-        await command.ExecuteNonQueryAsync();
+        await using var db = await dbFactory.CreateDbContextAsync(strongDurability: true);
+        var outcome = station.Outcome.ToString();
+        await db.RecipeRolloutStations
+            .Where(x => x.BatchId == id && x.StationId == station.StationId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Outcome, outcome)
+                .SetProperty(x => x.LocalVersion, station.LocalVersion)
+                .SetProperty(x => x.Detail, station.Detail));
     }
 }

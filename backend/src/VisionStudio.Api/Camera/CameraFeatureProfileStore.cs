@@ -1,7 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Engine.Camera;
+using Microsoft.Extensions.DependencyInjection;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api;
 
@@ -15,7 +18,7 @@ public sealed record CameraFeatureProfileRecord(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
-public sealed class CameraFeatureProfileStore(SqliteMetadataDatabase database)
+public sealed class CameraFeatureProfileStore(IVisionStudioDbFactory dbFactory)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -23,29 +26,32 @@ public sealed class CameraFeatureProfileStore(SqliteMetadataDatabase database)
         Converters = { new JsonStringEnumConverter() }
     };
 
+    public CameraFeatureProfileStore(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
+
     public async Task<IReadOnlyList<CameraFeatureProfileRecord>> ListAsync(string? driver = null, CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = string.IsNullOrWhiteSpace(driver)
-            ? "SELECT id,name,driver,source_camera_id,profile_hash,profile_json,created_at,updated_at FROM camera_feature_profiles ORDER BY driver,name,id;"
-            : "SELECT id,name,driver,source_camera_id,profile_hash,profile_json,created_at,updated_at FROM camera_feature_profiles WHERE driver=$driver ORDER BY name,id;";
-        if (!string.IsNullOrWhiteSpace(driver)) command.Parameters.AddWithValue("$driver", driver.Trim());
-        var output = new List<CameraFeatureProfileRecord>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) output.Add(Read(reader));
-        return output;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        IQueryable<CameraFeatureProfileEntity> query = db.CameraFeatureProfiles;
+        if (!string.IsNullOrWhiteSpace(driver))
+        {
+            var trimmed = driver.Trim();
+            query = query.Where(x => x.Driver == trimmed);
+        }
+        var entities = await query
+            .OrderBy(x => x.Driver)
+            .ThenBy(x => x.Name)
+            .ThenBy(x => x.Id)
+            .ToListAsync(ct);
+        return entities.Select(ToRecord).ToList();
     }
 
     public async Task<CameraFeatureProfileRecord> GetAsync(string id, CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,name,driver,source_camera_id,profile_hash,profile_json,created_at,updated_at FROM camera_feature_profiles WHERE id=$id;";
-        command.Parameters.AddWithValue("$id", NormalizeId(id));
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) throw new KeyNotFoundException($"Camera feature profile '{id}' was not found.");
-        return Read(reader);
+        var normalizedId = NormalizeId(id);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.CameraFeatureProfiles.FirstOrDefaultAsync(x => x.Id == normalizedId, ct)
+            ?? throw new KeyNotFoundException($"Camera feature profile '{id}' was not found.");
+        return ToRecord(entity);
     }
 
     public async Task<CameraFeatureProfileRecord> UpsertAsync(
@@ -63,62 +69,65 @@ public sealed class CameraFeatureProfileStore(SqliteMetadataDatabase database)
         var hash = CameraFeatureProfiles.Hash(profile);
         var now = DateTimeOffset.UtcNow;
         var json = JsonSerializer.Serialize(profile, Json);
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var tx = connection.BeginTransaction(deferred: false);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
         try
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = tx;
-            command.CommandText = """
-INSERT INTO camera_feature_profiles(id,name,driver,source_camera_id,profile_hash,profile_json,created_at,updated_at)
-VALUES($id,$name,$driver,$source,$hash,$json,$at,$at)
-ON CONFLICT(id) DO UPDATE SET
-  name=excluded.name,
-  driver=excluded.driver,
-  source_camera_id=excluded.source_camera_id,
-  profile_hash=excluded.profile_hash,
-  profile_json=excluded.profile_json,
-  updated_at=excluded.updated_at;
-""";
-            command.Parameters.AddWithValue("$id", id);
-            command.Parameters.AddWithValue("$name", name.Trim());
-            command.Parameters.AddWithValue("$driver", driver.Trim());
-            command.Parameters.AddWithValue("$source", (object?)sourceCameraId?.Trim() ?? DBNull.Value);
-            command.Parameters.AddWithValue("$hash", hash);
-            command.Parameters.AddWithValue("$json", json);
-            command.Parameters.AddWithValue("$at", now.ToString("O"));
-            await command.ExecuteNonQueryAsync(ct);
+            var entity = await db.CameraFeatureProfiles.AsTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+            if (entity is null)
+            {
+                entity = new CameraFeatureProfileEntity
+                {
+                    Id = id,
+                    Name = name.Trim(),
+                    Driver = driver.Trim(),
+                    SourceCameraId = sourceCameraId?.Trim(),
+                    ProfileHash = hash,
+                    ProfileJson = json,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+                db.CameraFeatureProfiles.Add(entity);
+            }
+            else
+            {
+                entity.Name = name.Trim();
+                entity.Driver = driver.Trim();
+                entity.SourceCameraId = sourceCameraId?.Trim();
+                entity.ProfileHash = hash;
+                entity.ProfileJson = json;
+                entity.UpdatedAt = now;
+            }
+            await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
+            return ToRecord(entity);
         }
         catch
         {
             await tx.RollbackAsync(CancellationToken.None);
             throw;
         }
-        return await GetAsync(id, ct);
     }
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM camera_feature_profiles WHERE id=$id;";
-        command.Parameters.AddWithValue("$id", NormalizeId(id));
-        if (await command.ExecuteNonQueryAsync(ct) == 0) throw new KeyNotFoundException($"Camera feature profile '{id}' was not found.");
+        var normalizedId = NormalizeId(id);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.CameraFeatureProfiles.Where(x => x.Id == normalizedId).ExecuteDeleteAsync(ct);
+        if (affected == 0) throw new KeyNotFoundException($"Camera feature profile '{id}' was not found.");
     }
 
-    private static CameraFeatureProfileRecord Read(SqliteDataReader reader)
+    private static CameraFeatureProfileRecord ToRecord(CameraFeatureProfileEntity entity)
     {
-        var profile = JsonSerializer.Deserialize<CameraCommissioningProfile>(reader.GetString(5), Json)
-            ?? throw new InvalidDataException($"Camera feature profile '{reader.GetString(0)}' contains invalid JSON.");
+        var profile = JsonSerializer.Deserialize<CameraCommissioningProfile>(entity.ProfileJson, Json)
+            ?? throw new InvalidDataException($"Camera feature profile '{entity.Id}' contains invalid JSON.");
         profile = CameraFeatureProfiles.Normalize(profile);
-        var storedHash = reader.GetString(4);
         var actualHash = CameraFeatureProfiles.Hash(profile);
-        if (!string.Equals(storedHash, actualHash, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException($"Camera feature profile '{reader.GetString(0)}' failed SHA-256 integrity validation.");
+        if (!string.Equals(entity.ProfileHash, actualHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Camera feature profile '{entity.Id}' failed SHA-256 integrity validation.");
         return new CameraFeatureProfileRecord(
-            reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3),
-            storedHash, profile, DateTimeOffset.Parse(reader.GetString(6)), DateTimeOffset.Parse(reader.GetString(7)));
+            entity.Id, entity.Name, entity.Driver, entity.SourceCameraId,
+            entity.ProfileHash, profile, entity.CreatedAt, entity.UpdatedAt);
     }
 
     private static string NormalizeId(string id)

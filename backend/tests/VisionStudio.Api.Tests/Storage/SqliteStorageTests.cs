@@ -62,8 +62,8 @@ public sealed class SqliteStorageTests
 
         var resolved = await traces.GetWorkflowSnapshotAsync("production-run", default);
         Assert.NotNull(resolved);
-        Assert.Equal(workflow.Id, resolved!.Id);
-        Assert.Equal(42, resolved.Nodes.Single().Parameters["revision"].GetInt32());
+        Assert.Equal(workflow.Id, resolved.Id);
+        Assert.Equal(42, resolved.Nodes.Single().Parameters!["revision"].GetInt32());
         var resolvedManifest = await traces.GetDependencyManifestAsync("production-run", default);
         Assert.NotNull(resolvedManifest);
         Assert.Equal(manifest.ManifestHash, resolvedManifest!.ManifestHash);

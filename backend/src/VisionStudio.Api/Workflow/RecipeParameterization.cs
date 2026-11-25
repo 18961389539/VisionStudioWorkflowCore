@@ -1,6 +1,10 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
@@ -34,22 +38,23 @@ public sealed record ResolvedRecipeParameterization(
 /// </summary>
 public sealed class RecipeParameterStore
 {
-    private readonly SqliteMetadataDatabase _db;
+    private readonly IVisionStudioDbFactory _dbFactory;
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
-    public RecipeParameterStore(SqliteMetadataDatabase db) => _db = db;
+    public RecipeParameterStore(IVisionStudioDbFactory dbFactory) => _dbFactory = dbFactory;
+    public RecipeParameterStore(SqliteMetadataDatabase db) : this(new VisionStudioDbFactory(db)) { }
 
     public Task<ParameterValueSet> GetProductAsync(string productId, CancellationToken ct)
-        => GetAsync("product", productId, "product_parameter_values", "product_id", ct);
+        => GetAsync("product", productId, ct);
 
     public Task<ParameterValueSet> GetRecipeAsync(string jobId, CancellationToken ct)
-        => GetAsync("recipe", jobId, "recipe_parameter_values", "job_id", ct);
+        => GetAsync("recipe", jobId, ct);
 
     public Task<ParameterValueSet> ReplaceProductAsync(string productId, ReplaceParameterValuesRequest request, CancellationToken ct)
-        => ReplaceAsync("product", productId, "products", "product_parameter_values", "product_id", request.Values, ct);
+        => ReplaceProductCoreAsync(productId, request.Values, ct);
 
     public Task<ParameterValueSet> ReplaceRecipeAsync(string jobId, ReplaceParameterValuesRequest request, CancellationToken ct)
-        => ReplaceAsync("recipe", jobId, "jobs", "recipe_parameter_values", "job_id", request.Values, ct);
+        => ReplaceRecipeCoreAsync(jobId, request.Values, ct);
 
     public async Task<ResolvedRecipeParameterization> ResolveForJobAsync(
         string jobId,
@@ -57,16 +62,13 @@ public sealed class RecipeParameterStore
         IReadOnlyDictionary<string, string>? bindings,
         CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        await using var job = connection.CreateCommand();
-        job.CommandText = "SELECT product_id FROM jobs WHERE id=$id;";
-        job.Parameters.AddWithValue("$id", jobId);
-        await using var reader = await job.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
-            throw new ApiNotFoundException($"Recipe '{jobId}' does not exist.");
-        var productId = reader.IsDBNull(0) ? null : reader.GetString(0);
-        await reader.DisposeAsync();
-        return await ResolveAsync(connection, jobId, productId, baseWorkflow, bindings, ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var job = await db.Jobs
+            .Where(x => x.Id == jobId)
+            .Select(x => new { x.ProductId })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new ApiNotFoundException($"Recipe '{jobId}' does not exist.");
+        return await ResolveAsync(db, jobId, job.ProductId, baseWorkflow, bindings, ct);
     }
 
     public async Task<ResolvedRecipeParameterization> ResolveForCreateAsync(
@@ -76,12 +78,12 @@ public sealed class RecipeParameterStore
         IReadOnlyDictionary<string, string>? bindings,
         CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        return await ResolveAsync(connection, jobId, productId, baseWorkflow, bindings, ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await ResolveAsync(db, jobId, productId, baseWorkflow, bindings, ct);
     }
 
     private async Task<ResolvedRecipeParameterization> ResolveAsync(
-        SqliteConnection connection,
+        VisionStudioDbContext db,
         string jobId,
         string? productId,
         WorkflowDefinition baseWorkflow,
@@ -100,8 +102,8 @@ public sealed class RecipeParameterStore
 
         var productValues = string.IsNullOrWhiteSpace(productId)
             ? new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-            : await LoadValuesAsync(connection, "product_parameter_values", "product_id", productId!, ct);
-        var recipeValues = await LoadValuesAsync(connection, "recipe_parameter_values", "job_id", jobId, ct);
+            : await LoadProductValuesAsync(db, productId!, ct);
+        var recipeValues = await LoadRecipeValuesAsync(db, jobId, ct);
 
         var nodeMap = baseWorkflow.Nodes.ToDictionary(x => x.Id, StringComparer.Ordinal);
         var replacements = new Dictionary<string, Dictionary<string, JsonElement>>(StringComparer.Ordinal);
@@ -164,79 +166,102 @@ public sealed class RecipeParameterStore
             snapshot);
     }
 
-    private async Task<ParameterValueSet> GetAsync(string scope, string ownerId, string table, string ownerColumn, CancellationToken ct)
+    private async Task<ParameterValueSet> GetAsync(string scope, string ownerId, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         DateTimeOffset? updatedAt = null;
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT key,value_json,updated_at FROM {table} WHERE {ownerColumn}=$id ORDER BY key;";
-        command.Parameters.AddWithValue("$id", ownerId);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        if (scope == "product")
         {
-            using var document = JsonDocument.Parse(reader.GetString(1));
-            values[reader.GetString(0)] = document.RootElement.Clone();
-            var at = DateTimeOffset.Parse(reader.GetString(2));
-            if (updatedAt is null || at > updatedAt) updatedAt = at;
+            var rows = await db.ProductParameterValues.Where(x => x.ProductId == ownerId).OrderBy(x => x.Key).ToListAsync(ct);
+            foreach (var r in rows)
+            {
+                using var document = JsonDocument.Parse(r.ValueJson);
+                values[r.Key] = document.RootElement.Clone();
+                if (updatedAt is null || r.UpdatedAt > updatedAt) updatedAt = r.UpdatedAt;
+            }
+        }
+        else
+        {
+            var rows = await db.RecipeParameterValues.Where(x => x.JobId == ownerId).OrderBy(x => x.Key).ToListAsync(ct);
+            foreach (var r in rows)
+            {
+                using var document = JsonDocument.Parse(r.ValueJson);
+                values[r.Key] = document.RootElement.Clone();
+                if (updatedAt is null || r.UpdatedAt > updatedAt) updatedAt = r.UpdatedAt;
+            }
         }
         return new(scope, ownerId, values, updatedAt);
     }
 
-    private async Task<ParameterValueSet> ReplaceAsync(
-        string scope,
-        string ownerId,
-        string ownerTable,
-        string table,
-        string ownerColumn,
-        IReadOnlyDictionary<string, JsonElement> values,
-        CancellationToken ct)
+    private async Task<ParameterValueSet> ReplaceProductCoreAsync(string productId, IReadOnlyDictionary<string, JsonElement> values, CancellationToken ct)
     {
         ValidateValues(values);
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        await using (var exists = connection.CreateCommand())
-        {
-            exists.CommandText = $"SELECT 1 FROM {ownerTable} WHERE id=$id;";
-            exists.Parameters.AddWithValue("$id", ownerId);
-            if (await exists.ExecuteScalarAsync(ct) is null)
-                throw new ApiNotFoundException($"{scope} '{ownerId}' does not exist.");
-        }
-
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        await using (var delete = connection.CreateCommand())
-        {
-            delete.Transaction = transaction;
-            delete.CommandText = $"DELETE FROM {table} WHERE {ownerColumn}=$id;";
-            delete.Parameters.AddWithValue("$id", ownerId);
-            await delete.ExecuteNonQueryAsync(ct);
-        }
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        if (!await db.Products.AnyAsync(x => x.Id == productId, ct))
+            throw new ApiNotFoundException($"product '{productId}' does not exist.");
+        await using var tx = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
+        await db.ProductParameterValues.Where(x => x.ProductId == productId).ExecuteDeleteAsync(ct);
         var now = DateTimeOffset.UtcNow;
         foreach (var (key, value) in values.OrderBy(x => x.Key, StringComparer.Ordinal))
         {
-            await using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = $"INSERT INTO {table}({ownerColumn},key,value_json,updated_at) VALUES($id,$key,$value,$updated);";
-            insert.Parameters.AddWithValue("$id", ownerId);
-            insert.Parameters.AddWithValue("$key", key);
-            insert.Parameters.AddWithValue("$value", value.GetRawText());
-            insert.Parameters.AddWithValue("$updated", now.ToUniversalTime().ToString("O"));
-            await insert.ExecuteNonQueryAsync(ct);
+            db.ProductParameterValues.Add(new ProductParameterValueEntity
+            {
+                ProductId = productId,
+                Key = key,
+                ValueJson = value.GetRawText(),
+                UpdatedAt = now
+            });
         }
-        await transaction.CommitAsync(ct);
-        return await GetAsync(scope, ownerId, table, ownerColumn, ct);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return await GetAsync("product", productId, ct);
     }
 
-    private static async Task<Dictionary<string, JsonElement>> LoadValuesAsync(SqliteConnection connection, string table, string ownerColumn, string ownerId, CancellationToken ct)
+    private async Task<ParameterValueSet> ReplaceRecipeCoreAsync(string jobId, IReadOnlyDictionary<string, JsonElement> values, CancellationToken ct)
+    {
+        ValidateValues(values);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        if (!await db.Jobs.AnyAsync(x => x.Id == jobId, ct))
+            throw new ApiNotFoundException($"recipe '{jobId}' does not exist.");
+        await using var tx = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
+        await db.RecipeParameterValues.Where(x => x.JobId == jobId).ExecuteDeleteAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var (key, value) in values.OrderBy(x => x.Key, StringComparer.Ordinal))
+        {
+            db.RecipeParameterValues.Add(new RecipeParameterValueEntity
+            {
+                JobId = jobId,
+                Key = key,
+                ValueJson = value.GetRawText(),
+                UpdatedAt = now
+            });
+        }
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return await GetAsync("recipe", jobId, ct);
+    }
+
+    private static async Task<Dictionary<string, JsonElement>> LoadProductValuesAsync(VisionStudioDbContext db, string productId, CancellationToken ct)
     {
         var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT key,value_json FROM {table} WHERE {ownerColumn}=$id;";
-        command.Parameters.AddWithValue("$id", ownerId);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        var rows = await db.ProductParameterValues.Where(x => x.ProductId == productId).ToListAsync(ct);
+        foreach (var r in rows)
         {
-            using var document = JsonDocument.Parse(reader.GetString(1));
-            values[reader.GetString(0)] = document.RootElement.Clone();
+            using var document = JsonDocument.Parse(r.ValueJson);
+            values[r.Key] = document.RootElement.Clone();
+        }
+        return values;
+    }
+
+    private static async Task<Dictionary<string, JsonElement>> LoadRecipeValuesAsync(VisionStudioDbContext db, string jobId, CancellationToken ct)
+    {
+        var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var rows = await db.RecipeParameterValues.Where(x => x.JobId == jobId).ToListAsync(ct);
+        foreach (var r in rows)
+        {
+            using var document = JsonDocument.Parse(r.ValueJson);
+            values[r.Key] = document.RootElement.Clone();
         }
         return values;
     }

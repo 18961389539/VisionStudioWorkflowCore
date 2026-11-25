@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api.Security;
 
@@ -30,11 +32,13 @@ public static class AuditContext
     internal static string? GetTarget(HttpContext context) => context.Items.TryGetValue(TargetKey, out var value) ? value?.ToString() : null;
 }
 
-public sealed class AuditEventStore(SqliteMetadataDatabase database)
+public sealed class AuditEventStore(IVisionStudioDbFactory dbFactory)
 {
     private long _persistFailures;
     private DateTimeOffset? _lastPersistFailureAt;
     private string? _lastPersistFailure;
+
+    public AuditEventStore(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
 
     /// <summary>审计持久化失败计数（单例计数器）：数据库忙/磁盘故障时记录写入失败；同时会写错误日志并记录最近一次失败详情。</summary>
     public long PersistFailures => Interlocked.Read(ref _persistFailures);
@@ -52,48 +56,55 @@ public sealed class AuditEventStore(SqliteMetadataDatabase database)
     {
         var user = context.User;
         var now = DateTimeOffset.UtcNow;
+        var atText = now.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
         var entry = new AuditChainEntry(
             0,
-            now.ToString("O"),
-            user.FindFirstValue(ClaimTypes.NameIdentifier),
-            user.Identity?.Name,
-            user.FindFirstValue(ClaimTypes.Role),
+            atText,
+            NormalizeNullable(user.FindFirstValue(ClaimTypes.NameIdentifier)),
+            NormalizeNullable(user.Identity?.Name),
+            NormalizeNullable(user.FindFirstValue(ClaimTypes.Role)),
             meta.Action,
             meta.Resource,
             context.Request.Method,
             context.Request.Path.Value ?? string.Empty,
             statusCode,
             statusCode is >= 200 and < 400,
-            AuditContext.GetTarget(context) ?? RouteTarget(context),
-            RequestCorrelation.Get(context),
-            context.Connection.RemoteIpAddress?.ToString());
+            NormalizeNullable(AuditContext.GetTarget(context) ?? RouteTarget(context)),
+            NormalizeNullable(RequestCorrelation.Get(context)),
+            NormalizeNullable(context.Connection.RemoteIpAddress?.ToString()));
 
-        await using var connection = await database.OpenConnectionAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         // 链式追加必须独占写事务：并发审计同时读"最后一行 hash"会把链分叉成两条同 seq 的链。
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        var head = await ReadChainHeadAsync(connection, transaction, ct);
-        entry = entry with { Seq = head.NextSeq };
-        var previous = head.Hash ?? AuditChain.GenesisHash;
+        await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        var head = await db.AuditEvents
+            .OrderByDescending(x => x.Seq)
+            .Select(x => new { x.Seq, x.Hash })
+            .FirstOrDefaultAsync(ct);
+        var nextSeq = head is null ? 1 : head.Seq + 1;
+        entry = entry with { Seq = nextSeq };
+        var previous = head?.Hash ?? AuditChain.GenesisHash;
         var hash = AuditChain.ComputeHash(previous, entry);
 
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-INSERT INTO audit_events(seq,at,user_id,username,role,action,resource,method,path,status_code,success,target,correlation_id,client_ip,prev_hash,hash)
-VALUES($seq,$at,$userId,$username,$role,$action,$resource,$method,$path,$status,$success,$target,$correlation,$ip,$prev,$hash);
-""";
-        command.Parameters.AddWithValue("$seq", entry.Seq);
-        command.Parameters.AddWithValue("$at", entry.At);
-        command.Parameters.AddWithValue("$userId", Db(entry.UserId));
-        command.Parameters.AddWithValue("$username", Db(entry.Username));
-        command.Parameters.AddWithValue("$role", Db(entry.Role));
-        command.Parameters.AddWithValue("$action", entry.Action); command.Parameters.AddWithValue("$resource", entry.Resource);
-        command.Parameters.AddWithValue("$method", entry.Method); command.Parameters.AddWithValue("$path", entry.Path);
-        command.Parameters.AddWithValue("$status", entry.StatusCode); command.Parameters.AddWithValue("$success", entry.Success ? 1 : 0);
-        command.Parameters.AddWithValue("$target", Db(entry.Target));
-        command.Parameters.AddWithValue("$correlation", Db(entry.CorrelationId)); command.Parameters.AddWithValue("$ip", Db(entry.ClientIp));
-        command.Parameters.AddWithValue("$prev", previous); command.Parameters.AddWithValue("$hash", hash);
-        await command.ExecuteNonQueryAsync(ct);
+        db.AuditEvents.Add(new AuditEventEntity
+        {
+            Seq = entry.Seq,
+            At = now,
+            UserId = entry.UserId,
+            Username = entry.Username,
+            Role = entry.Role,
+            Action = entry.Action,
+            Resource = entry.Resource,
+            Method = entry.Method,
+            Path = entry.Path,
+            StatusCode = entry.StatusCode,
+            Success = entry.Success,
+            Target = entry.Target,
+            CorrelationId = entry.CorrelationId,
+            ClientIp = entry.ClientIp,
+            PrevHash = previous,
+            Hash = hash
+        });
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
 
@@ -103,38 +114,33 @@ VALUES($seq,$at,$userId,$username,$role,$action,$resource,$method,$path,$status,
     /// </summary>
     public async Task<AuditChainVerification> VerifyChainAsync(CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT seq,at,user_id,username,role,action,resource,method,path,status_code,success,target,correlation_id,client_ip,prev_hash,hash
-FROM audit_events ORDER BY seq;
-""";
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         long checkedCount = 0;
         long? firstInvalidSeq = null;
         string? firstInvalidReason = null;
         string? previous = null;
         long? lastSeq = null;
         string? lastHash = null;
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+
+        await foreach (var row in db.AuditEvents.OrderBy(x => x.Seq).AsAsyncEnumerable().WithCancellation(ct))
         {
             var entry = new AuditChainEntry(
-                reader.GetInt64(0),
-                reader.GetString(1),
-                ReadNullable(reader, 2),
-                ReadNullable(reader, 3),
-                ReadNullable(reader, 4),
-                reader.GetString(5),
-                reader.GetString(6),
-                reader.GetString(7),
-                reader.GetString(8),
-                reader.GetInt32(9),
-                reader.GetBoolean(10),
-                ReadNullable(reader, 11),
-                ReadNullable(reader, 12),
-                ReadNullable(reader, 13));
-            var storedPrev = ReadNullable(reader, 14);
-            var storedHash = ReadNullable(reader, 15);
+                row.Seq,
+                row.At.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                row.UserId,
+                row.Username,
+                row.Role,
+                row.Action,
+                row.Resource,
+                row.Method,
+                row.Path,
+                row.StatusCode,
+                row.Success,
+                row.Target,
+                row.CorrelationId,
+                row.ClientIp);
+            var storedPrev = row.PrevHash;
+            var storedHash = row.Hash;
             checkedCount++;
             lastSeq = entry.Seq;
             lastHash = storedHash;
@@ -164,33 +170,32 @@ FROM audit_events ORDER BY seq;
         return new AuditChainVerification(firstInvalidSeq is null, checkedCount, firstInvalidSeq, firstInvalidReason, lastSeq, lastHash, DateTimeOffset.UtcNow);
     }
 
-    private static async Task<(long NextSeq, string? Hash)> ReadChainHeadAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT seq, hash FROM audit_events ORDER BY seq DESC LIMIT 1;";
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return (1, null);
-        return (reader.GetInt64(0) + 1, reader.IsDBNull(1) ? null : reader.GetString(1));
-    }
-
     public async Task<IReadOnlyList<AuditEventDto>> ListAsync(int offset, int limit, string? username, string? action, CancellationToken ct = default)
     {
-        var result = new List<AuditEventDto>();
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        var where = new List<string>();
-        if (!string.IsNullOrWhiteSpace(username)) { where.Add("username=$username"); command.Parameters.AddWithValue("$username", username.Trim()); }
-        if (!string.IsNullOrWhiteSpace(action)) { where.Add("action=$action"); command.Parameters.AddWithValue("$action", action.Trim()); }
-        command.CommandText = $"SELECT seq,at,user_id,username,role,action,resource,method,path,status_code,success,target,correlation_id,client_ip FROM audit_events {(where.Count == 0 ? "" : "WHERE " + string.Join(" AND ", where))} ORDER BY seq DESC LIMIT $limit OFFSET $offset;";
-        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 500)); command.Parameters.AddWithValue("$offset", Math.Max(offset, 0));
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(new AuditEventDto(reader.GetInt64(0), DateTimeOffset.Parse(reader.GetString(1)), ReadNullable(reader,2), ReadNullable(reader,3), ReadNullable(reader,4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.GetInt32(9), reader.GetBoolean(10), ReadNullable(reader,11), ReadNullable(reader,12), ReadNullable(reader,13)));
-        return result;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        IQueryable<AuditEventEntity> query = db.AuditEvents;
+        if (!string.IsNullOrWhiteSpace(username))
+        {
+            var u = username.Trim();
+            query = query.Where(x => x.Username == u);
+        }
+        if (!string.IsNullOrWhiteSpace(action))
+        {
+            var a = action.Trim();
+            query = query.Where(x => x.Action == a);
+        }
+        var entities = await query
+            .OrderByDescending(x => x.Seq)
+            .Skip(Math.Max(offset, 0))
+            .Take(Math.Clamp(limit, 1, 500))
+            .ToListAsync(ct);
+        return entities.Select(e => new AuditEventDto(
+            e.Seq, e.At, e.UserId, e.Username, e.Role, e.Action, e.Resource,
+            e.Method, e.Path, e.StatusCode, e.Success, e.Target, e.CorrelationId, e.ClientIp)).ToList();
     }
 
-    private static object Db(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value;
-    private static string? ReadNullable(SqliteDataReader reader, int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
+    private static string? NormalizeNullable(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
     private static string? RouteTarget(HttpContext context)
     {
         var values = context.Request.RouteValues.Where(x => x.Value is not null).ToDictionary(x => x.Key, x => x.Value?.ToString());

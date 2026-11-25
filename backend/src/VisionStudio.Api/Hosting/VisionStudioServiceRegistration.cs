@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 using System.Threading.RateLimiting;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
 using VisionStudio.Camera.Basler;
 using VisionStudio.Camera.Hikrobot;
 using VisionStudio.Api.Diagnostics;
@@ -180,9 +181,11 @@ public static class VisionStudioServiceRegistration
         services.AddVisionStudioForwardedHeaders(configuration);
         services.Configure<SecurityOptions>(configuration.GetSection("Security"));
         services.Configure<SecurityHeadersOptions>(configuration.GetSection("SecurityHeaders"));
-        services.AddSingleton<SecurityStore>();
-        services.AddSingleton<ServiceTokenStore>();
-        services.AddSingleton<AuditEventStore>();
+        services.AddSingleton<SecurityStore>(sp => new SecurityStore(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<IOptions<SecurityOptions>>()));
+        services.AddSingleton<ServiceTokenStore>(sp => new ServiceTokenStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.AddSingleton<AuditEventStore>(sp => new AuditEventStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
         services.AddAuthentication(options =>
         {
             options.DefaultAuthenticateScheme = VisionStudioAuthenticationHandler.Scheme;
@@ -273,10 +276,11 @@ public static class VisionStudioServiceRegistration
         services.Configure<PluginPackageOptions>(configuration.GetSection("PluginPackages"));
 
         services.AddSingleton<SqliteMetadataDatabase>();
+        services.AddSingleton<VisionStudio.Api.Storage.EfCore.IVisionStudioDbFactory, VisionStudio.Api.Storage.EfCore.VisionStudioDbFactory>();
         // 结果落库：output.database 节点通过 IResultRecordStore 写 result_records 表（migration 23）。
-        services.AddSingleton<IResultRecordStore, SqliteResultRecordStore>();
+        services.AddSingleton<IResultRecordStore>(sp => new SqliteResultRecordStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
         // SPC 看板读同一张表：数据集汇总 + 数值序列，不引入第二套存储（2026-11-23）。
-        services.AddSingleton<SpcSeriesReader>();
+        services.AddSingleton<SpcSeriesReader>(sp => new SpcSeriesReader(sp.GetRequiredService<IVisionStudioDbFactory>()));
 
         // 跨轮计数：value.counter 通过 IRunCounterStore 记住 total/pass/fail。
         // 单例是硬要求，否则每次解析执行器都会得到一份新状态，"连续 NG"永远停在 1。
@@ -284,8 +288,11 @@ public static class VisionStudioServiceRegistration
         // 并在启动时恢复；节点侧不再有 static 兜底（没注册就显式报错）。
         services.AddSingleton<InMemoryRunCounterStore>();
         services.AddSingleton<IRunCounterStore>(provider => provider.GetRequiredService<InMemoryRunCounterStore>());
-        services.AddSingleton<IDurableRunCounterStore, SqliteDurableRunCounterStore>();
-        services.AddSingleton<LegacyStorageMigrationService>();
+        services.AddSingleton<IDurableRunCounterStore>(sp => new SqliteDurableRunCounterStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.AddSingleton<LegacyStorageMigrationService>(sp => new LegacyStorageMigrationService(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<IWebHostEnvironment>(),
+            sp.GetRequiredService<ILogger<LegacyStorageMigrationService>>()));
         // F03：失败锁持久化到数据根——重启后仍保留，直到受控恢复入口（或人工）完成核对后解除；
         // 纯内存的旧实现重启即丢锁，半恢复的主机会在多实例资产不一致的状态下放行写入。
         // Q08：同一目录下另存两个标记——restore-transaction.json（恢复中途被终止 → 启动即锁）；
@@ -313,7 +320,7 @@ public static class VisionStudioServiceRegistration
         string dataRoot)
     {
         services.AddSingleton<CameraManager>();
-        services.AddSingleton<CameraFeatureProfileStore>();
+        services.AddSingleton<CameraFeatureProfileStore>(sp => new CameraFeatureProfileStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
         var cameraAdapters = configuration.GetSection("CameraAdapters").Get<CameraAdapterOptions>() ?? new CameraAdapterOptions();
         services.AddSingleton(_ => new BaslerPylonCameraAdapterProvider(cameraAdapters.BaslerAssemblyPath));
         services.AddSingleton(_ => new HikrobotMvsCameraAdapterProvider(cameraAdapters.HikrobotAssemblyPath));
@@ -321,9 +328,9 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ICameraAdapterProvider>(sp => sp.GetRequiredService<HikrobotMvsCameraAdapterProvider>());
         services.AddSingleton<ICameraActionCommandProvider>(sp => sp.GetRequiredService<BaslerPylonCameraAdapterProvider>());
         services.AddSingleton<ICameraActionCommandProvider>(sp => sp.GetRequiredService<HikrobotMvsCameraAdapterProvider>());
-        services.AddSingleton<CameraSynchronizationGroupStore>();
-        services.AddSingleton<CameraSynchronizationRunStore>();
-        services.AddSingleton<CameraSynchronizationCommissioningStore>();
+        services.AddSingleton<CameraSynchronizationGroupStore>(sp => new CameraSynchronizationGroupStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.AddSingleton<CameraSynchronizationRunStore>(sp => new CameraSynchronizationRunStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.AddSingleton<CameraSynchronizationCommissioningStore>(sp => new CameraSynchronizationCommissioningStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
         services.AddSingleton<CameraSynchronizationService>();
         services.AddSingleton<CameraSynchronizationCommissioningService>();
         services.AddSingleton<GigENetworkDiagnosticsService>();
@@ -385,7 +392,7 @@ public static class VisionStudioServiceRegistration
                 ? provider.GetRequiredService<ScriptWorkerSupervisor>()
                 : provider.GetRequiredService<InProcessScriptExecutionBackend>();
         });
-        services.AddSingleton<PluginBenchmarkStore>();
+        services.AddSingleton<PluginBenchmarkStore>(sp => new PluginBenchmarkStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
         services.AddSingleton<RuntimeWorkloadGate>();
         services.AddSingleton<PluginPerformanceBenchmarkService>();
         services.AddSingleton<PluginManager>();
@@ -449,29 +456,54 @@ public static class VisionStudioServiceRegistration
     {
         services.AddSingleton<RunStore>();
         services.AddSingleton<WorkflowStore>();
-        services.AddSingleton<RecipeParameterStore>();
+        services.AddSingleton<RecipeParameterStore>(sp => new RecipeParameterStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
         services.AddSingleton<JobStore>(sp => new JobStore(
-            sp.GetRequiredService<SqliteMetadataDatabase>(),
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
             sp.GetRequiredService<RecipeParameterStore>()));
-        services.AddSingleton<ProductRecipeStore>();
-        services.AddSingleton<WorkflowModuleStore>();
+        services.AddSingleton<ProductRecipeStore>(sp => new ProductRecipeStore(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<JobStore>()));
+        services.AddSingleton<WorkflowModuleStore>(sp => new WorkflowModuleStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
         services.AddSingleton<WorkflowModuleExpander>();
         services.AddSingleton<WorkflowModuleAuthoringService>();
         services.AddSingleton<RuntimeDependencyManifestService>();
-        services.AddSingleton<TraceabilityStore>();
+        services.AddSingleton<TraceabilityStore>(sp => new TraceabilityStore(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<IWebHostEnvironment>(),
+            sp.GetRequiredService<IOptions<TraceRetentionOptions>>(),
+            sp.GetRequiredService<StorageCapacityService>(),
+            sp.GetRequiredService<StorageMaintenanceCoordinator>()));
         services.AddSingleton<RunTraceRecorder>();
-        services.AddSingleton<RunObservabilityService>();
-        services.AddSingleton<TraceAnalysisService>();
-        services.AddSingleton<InvestigationCaseService>();
+        services.AddSingleton<RunObservabilityService>(sp => new RunObservabilityService(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<TraceabilityStore>()));
+        services.AddSingleton<TraceAnalysisService>(sp => new TraceAnalysisService(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<TraceabilityStore>(),
+            sp.GetRequiredService<RunObservabilityService>()));
+        services.AddSingleton<InvestigationCaseService>(sp => new InvestigationCaseService(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<TraceabilityStore>(),
+            sp.GetRequiredService<TraceAnalysisService>()));
         services.AddSingleton<OfflineReplayService>();
-        services.AddSingleton<DatasetValidationStore>();
+        services.AddSingleton<DatasetValidationStore>(sp => new DatasetValidationStore(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<TraceabilityStore>(),
+            sp.GetRequiredService<MediaLibraryService>()));
         services.AddSingleton<DatasetValidationService>();
         services.AddSingleton<ModelPackageService>();
         services.AddSingleton<ParameterTuningService>();
-        services.AddSingleton<AlarmStore>();
+        services.AddSingleton<AlarmStore>(sp => new AlarmStore(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<IWebHostEnvironment>(),
+            sp.GetRequiredService<ILogger<AlarmStore>>()));
         services.AddSingleton<ProductionRuntimeConfigStore>();
         services.AddSingleton<OperatorLayoutStore>();
-        services.AddSingleton<RecipeRolloutService>();
+        services.AddSingleton<RecipeRolloutService>(sp => new RecipeRolloutService(
+            sp.GetRequiredService<IOptions<ProductionFleetOptions>>(),
+            sp.GetRequiredService<JobStore>(),
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<IVisionStudioDbFactory>()));
         services.AddOptions<ProductionFleetOptions>().Bind(configuration.GetSection("ProductionFleet"))
             .Validate(options => options.IsValid(), "ProductionFleet requires unique station IDs, valid station URLs, read tokens and complete version targets.")
             .ValidateOnStart();
@@ -489,21 +521,23 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<DeviceActionAuthorizationService>();
         services.AddSingleton<ProductionRuntimeService>();
         services.AddSingleton<CalibrationWorkspaceService>();
-        services.AddSingleton<CameraIntrinsicAssetStore>();
-        services.AddSingleton<HandEyeCalibrationAssetStore>();
-        services.AddSingleton<HandEye3DCalibrationAssetStore>();
-        services.AddSingleton<AssetStore>();
+        services.AddSingleton<CameraIntrinsicAssetStore>(sp => new CameraIntrinsicAssetStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.AddSingleton<HandEyeCalibrationAssetStore>(sp => new HandEyeCalibrationAssetStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.AddSingleton<HandEye3DCalibrationAssetStore>(sp => new HandEye3DCalibrationAssetStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.AddSingleton<AssetStore>(sp => new AssetStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
         services.AddSingleton<ShapeModelAssetStore>();
         services.AddSingleton<TemplateAssetStore>();
         services.AddSingleton<ShapeModelAssetExtraction>();
-        services.AddSingleton<ShapeModelAssetGc>();
+        services.AddSingleton<ShapeModelAssetGc>(sp => new ShapeModelAssetGc(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<WorkflowStore>()));
         services.AddSingleton<ShapeModelAssetPackageService>();
         services.AddSingleton<VisionStudio.Abstractions.IModelAssetSource, ShapeModelAssetSource>();
         services.AddSingleton<CalibrationWizardSolvers>();
         services.AddSingleton<CalibrationWizardAssetStores>();
         services.AddSingleton<CalibrationWizardService>();
         services.AddSingleton<CalibrationAssetStore>(sp => new CalibrationAssetStore(
-            sp.GetRequiredService<SqliteMetadataDatabase>(),
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
             sp.GetRequiredService<CalibrationWorkspaceService>()));
         services.AddSingleton<ICalibrationPointProvider, VirtualCalibrationPointProvider>();
         return services;
@@ -514,7 +548,9 @@ public static class VisionStudioServiceRegistration
         // Start order matters: migrate persisted metadata first, then retire runs left by a previous
         // process, then register runtime assets/plugins, start Diagnostics observation, then allow
         // Production AutoStart. Trace retention starts after the runtime is initialized.
-        services.AddSingleton<InterruptedRunRecovery>();
+        services.AddSingleton<InterruptedRunRecovery>(sp => new InterruptedRunRecovery(
+            sp.GetRequiredService<IVisionStudioDbFactory>(),
+            sp.GetRequiredService<ILogger<InterruptedRunRecovery>>()));
         services.AddHostedService<DataRootOwnership>();
         services.AddHostedService<StorageMigrationHostedService>();
         services.AddHostedService<InterruptedRunRecoveryHostedService>();

@@ -1,9 +1,12 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Media;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine;
 
@@ -169,138 +172,167 @@ public static class PluginBenchmarkAnalysis
     private static double Round(double value) => Math.Round(value, 4, MidpointRounding.AwayFromZero);
 }
 
-public sealed class PluginBenchmarkStore(SqliteMetadataDatabase db)
+public sealed class PluginBenchmarkStore(IVisionStudioDbFactory dbFactory)
 {
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
+
+    public PluginBenchmarkStore(SqliteMetadataDatabase db) : this(new VisionStudioDbFactory(db)) { }
 
     public async Task<PluginBenchmarkRun> CreateAsync(StartPluginBenchmarkRequest request, string pluginVersion, string? assemblyHash, string workflowHash, IReadOnlyList<int> poolSizes, int itemCount, int warmupCount, int concurrency, CancellationToken ct)
     {
         var runId = $"plugin-bench-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
         var policy = request.RegressionPolicy ?? new PluginBenchmarkRegressionPolicy();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-INSERT INTO plugin_benchmark_runs(run_id,dataset_id,validation_run_id,plugin_id,plugin_version,plugin_assembly_sha256,workflow_hash,status,pool_sizes_json,requested_count,warmup_count,workload_concurrency,baseline_run_id,policy_json,started_at,completed_at,cancel_requested,error,recommendation_json,regression_json)
-VALUES($run,$dataset,$validation,$plugin,$version,$assembly,$workflow,'Running',$pools,$requested,$warmup,$concurrency,$baseline,$policy,$started,NULL,0,NULL,NULL,NULL);
-""";
-        command.Parameters.AddWithValue("$run", runId);
-        command.Parameters.AddWithValue("$dataset", request.DatasetId);
-        command.Parameters.AddWithValue("$validation", request.ValidationRunId);
-        command.Parameters.AddWithValue("$plugin", request.PluginId);
-        command.Parameters.AddWithValue("$version", pluginVersion);
-        command.Parameters.AddWithValue("$assembly", (object?)assemblyHash ?? DBNull.Value);
-        command.Parameters.AddWithValue("$workflow", workflowHash);
-        command.Parameters.AddWithValue("$pools", JsonSerializer.Serialize(poolSizes, _json));
-        command.Parameters.AddWithValue("$requested", itemCount);
-        command.Parameters.AddWithValue("$warmup", warmupCount);
-        command.Parameters.AddWithValue("$concurrency", concurrency);
-        command.Parameters.AddWithValue("$baseline", (object?)request.BaselineRunId ?? DBNull.Value);
-        command.Parameters.AddWithValue("$policy", JsonSerializer.Serialize(policy, _json));
-        command.Parameters.AddWithValue("$started", now.ToString("O"));
-        await command.ExecuteNonQueryAsync(ct);
-        return await GetAsync(runId, false, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = new PluginBenchmarkRunEntity
+        {
+            RunId = runId,
+            DatasetId = request.DatasetId,
+            ValidationRunId = request.ValidationRunId,
+            PluginId = request.PluginId,
+            PluginVersion = pluginVersion,
+            PluginAssemblySha256 = assemblyHash,
+            WorkflowHash = workflowHash,
+            Status = "Running",
+            PoolSizesJson = JsonSerializer.Serialize(poolSizes, _json),
+            RequestedCount = itemCount,
+            WarmupCount = warmupCount,
+            WorkloadConcurrency = concurrency,
+            BaselineRunId = request.BaselineRunId,
+            PolicyJson = JsonSerializer.Serialize(policy, _json),
+            StartedAt = now,
+            CancelRequested = false
+        };
+        db.PluginBenchmarkRuns.Add(entity);
+        await db.SaveChangesAsync(ct);
+        return ToRun(entity, null);
     }
 
     public async Task AddPoolResultAsync(string runId, PluginBenchmarkPoolResult result, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-INSERT OR REPLACE INTO plugin_benchmark_pool_results(run_id,pool_size,item_count,success_count,failure_count,failure_rate,total_duration_ms,throughput_per_second,observed_working_set_bytes,workflow_duration_json,worker_performance_json,created_at)
-VALUES($run,$pool,$items,$success,$failure,$failureRate,$duration,$throughput,$memory,$workflow,$performance,$created);
-""";
-        command.Parameters.AddWithValue("$run", runId);
-        command.Parameters.AddWithValue("$pool", result.PoolSize);
-        command.Parameters.AddWithValue("$items", result.ItemCount);
-        command.Parameters.AddWithValue("$success", result.SuccessCount);
-        command.Parameters.AddWithValue("$failure", result.FailureCount);
-        command.Parameters.AddWithValue("$failureRate", result.FailureRate);
-        command.Parameters.AddWithValue("$duration", result.TotalDurationMs);
-        command.Parameters.AddWithValue("$throughput", result.ThroughputPerSecond);
-        command.Parameters.AddWithValue("$memory", result.ObservedWorkingSetBytes);
-        command.Parameters.AddWithValue("$workflow", JsonSerializer.Serialize(result.WorkflowDuration, _json));
-        command.Parameters.AddWithValue("$performance", JsonSerializer.Serialize(result.WorkerPerformance, _json));
-        command.Parameters.AddWithValue("$created", DateTimeOffset.UtcNow.ToString("O"));
-        await command.ExecuteNonQueryAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        var workflowJson = JsonSerializer.Serialize(result.WorkflowDuration, _json);
+        var perfJson = JsonSerializer.Serialize(result.WorkerPerformance, _json);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        try
+        {
+            var existing = await db.PluginBenchmarkPoolResults
+                .AsTracking()
+                .FirstOrDefaultAsync(x => x.RunId == runId && x.PoolSize == result.PoolSize, ct);
+            if (existing is null)
+            {
+                db.PluginBenchmarkPoolResults.Add(new PluginBenchmarkPoolResultEntity
+                {
+                    RunId = runId,
+                    PoolSize = result.PoolSize,
+                    ItemCount = result.ItemCount,
+                    SuccessCount = result.SuccessCount,
+                    FailureCount = result.FailureCount,
+                    FailureRate = result.FailureRate,
+                    TotalDurationMs = result.TotalDurationMs,
+                    ThroughputPerSecond = result.ThroughputPerSecond,
+                    ObservedWorkingSetBytes = result.ObservedWorkingSetBytes,
+                    WorkflowDurationJson = workflowJson,
+                    WorkerPerformanceJson = perfJson,
+                    CreatedAt = now
+                });
+            }
+            else
+            {
+                existing.ItemCount = result.ItemCount;
+                existing.SuccessCount = result.SuccessCount;
+                existing.FailureCount = result.FailureCount;
+                existing.FailureRate = result.FailureRate;
+                existing.TotalDurationMs = result.TotalDurationMs;
+                existing.ThroughputPerSecond = result.ThroughputPerSecond;
+                existing.ObservedWorkingSetBytes = result.ObservedWorkingSetBytes;
+                existing.WorkflowDurationJson = workflowJson;
+                existing.WorkerPerformanceJson = perfJson;
+                existing.CreatedAt = now;
+            }
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task CompleteAsync(string runId, string status, PluginBenchmarkRecommendation? recommendation, PluginBenchmarkRegressionGate? regression, string? error, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE plugin_benchmark_runs SET status=$status,completed_at=$completed,error=$error,recommendation_json=$recommendation,regression_json=$regression WHERE run_id=$run;";
-        command.Parameters.AddWithValue("$status", status);
-        command.Parameters.AddWithValue("$completed", DateTimeOffset.UtcNow.ToString("O"));
-        command.Parameters.AddWithValue("$error", (object?)error ?? DBNull.Value);
-        command.Parameters.AddWithValue("$recommendation", recommendation is null ? DBNull.Value : JsonSerializer.Serialize(recommendation, _json));
-        command.Parameters.AddWithValue("$regression", regression is null ? DBNull.Value : JsonSerializer.Serialize(regression, _json));
-        command.Parameters.AddWithValue("$run", runId);
-        await command.ExecuteNonQueryAsync(ct);
+        var completedAt = DateTimeOffset.UtcNow;
+        var recJson = recommendation is null ? null : JsonSerializer.Serialize(recommendation, _json);
+        var regJson = regression is null ? null : JsonSerializer.Serialize(regression, _json);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await db.PluginBenchmarkRuns
+            .Where(x => x.RunId == runId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Status, status)
+                .SetProperty(x => x.CompletedAt, completedAt)
+                .SetProperty(x => x.Error, error)
+                .SetProperty(x => x.RecommendationJson, recJson)
+                .SetProperty(x => x.RegressionJson, regJson), ct);
     }
 
     public async Task RequestCancelAsync(string runId, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE plugin_benchmark_runs SET cancel_requested=1 WHERE run_id=$run AND status='Running';";
-        command.Parameters.AddWithValue("$run", runId);
-        if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiConflictException("Benchmark run is not running or does not exist.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.PluginBenchmarkRuns
+            .Where(x => x.RunId == runId && x.Status == "Running")
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.CancelRequested, true), ct);
+        if (affected == 0) throw new ApiConflictException("Benchmark run is not running or does not exist.");
     }
 
     public async Task<IReadOnlyList<PluginBenchmarkRun>> ListAsync(string? pluginId, CancellationToken ct)
     {
-        var result = new List<PluginBenchmarkRun>();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = string.IsNullOrWhiteSpace(pluginId)
-            ? "SELECT run_id,dataset_id,validation_run_id,plugin_id,plugin_version,plugin_assembly_sha256,workflow_hash,status,pool_sizes_json,requested_count,warmup_count,workload_concurrency,baseline_run_id,policy_json,started_at,completed_at,cancel_requested,error,recommendation_json,regression_json FROM plugin_benchmark_runs ORDER BY started_at DESC LIMIT 100;"
-            : "SELECT run_id,dataset_id,validation_run_id,plugin_id,plugin_version,plugin_assembly_sha256,workflow_hash,status,pool_sizes_json,requested_count,warmup_count,workload_concurrency,baseline_run_id,policy_json,started_at,completed_at,cancel_requested,error,recommendation_json,regression_json FROM plugin_benchmark_runs WHERE plugin_id=$plugin ORDER BY started_at DESC LIMIT 100;";
-        if (!string.IsNullOrWhiteSpace(pluginId)) command.Parameters.AddWithValue("$plugin", pluginId);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(ReadRun(reader, null));
-        var detailed = new List<PluginBenchmarkRun>(result.Count);
-        foreach (var run in result) detailed.Add(await GetAsync(run.RunId, true, ct));
-        return detailed;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        IQueryable<PluginBenchmarkRunEntity> query = db.PluginBenchmarkRuns;
+        if (!string.IsNullOrWhiteSpace(pluginId)) query = query.Where(x => x.PluginId == pluginId);
+        var runs = await query
+            .OrderByDescending(x => x.StartedAt)
+            .Take(100)
+            .ToListAsync(ct);
+        if (runs.Count == 0) return [];
+        var runIds = runs.Select(x => x.RunId).ToList();
+        var poolResults = await db.PluginBenchmarkPoolResults
+            .Where(x => runIds.Contains(x.RunId))
+            .OrderBy(x => x.PoolSize)
+            .ToListAsync(ct);
+        var byRun = poolResults.GroupBy(x => x.RunId).ToDictionary(g => g.Key, g => (IReadOnlyList<PluginBenchmarkPoolResult>)g.Select(ToPoolResult).ToList());
+        return runs.Select(r => ToRun(r, byRun.TryGetValue(r.RunId, out var list) ? list : [])).ToList();
     }
 
     public async Task<PluginBenchmarkRun> GetAsync(string runId, bool includeResults, CancellationToken ct)
     {
-        PluginBenchmarkRun? run = null;
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT run_id,dataset_id,validation_run_id,plugin_id,plugin_version,plugin_assembly_sha256,workflow_hash,status,pool_sizes_json,requested_count,warmup_count,workload_concurrency,baseline_run_id,policy_json,started_at,completed_at,cancel_requested,error,recommendation_json,regression_json FROM plugin_benchmark_runs WHERE run_id=$run;";
-            command.Parameters.AddWithValue("$run", runId);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            if (await reader.ReadAsync(ct)) run = ReadRun(reader, null);
-        }
-        if (run is null) throw new ApiNotFoundException($"Plugin benchmark '{runId}' was not found.");
-        return includeResults ? run with { Results = await GetResultsAsync(runId, connection, ct) } : run;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var run = await db.PluginBenchmarkRuns.FirstOrDefaultAsync(x => x.RunId == runId, ct)
+            ?? throw new ApiNotFoundException($"Plugin benchmark '{runId}' was not found.");
+        if (!includeResults) return ToRun(run, null);
+        var results = await db.PluginBenchmarkPoolResults
+            .Where(x => x.RunId == runId)
+            .OrderBy(x => x.PoolSize)
+            .ToListAsync(ct);
+        return ToRun(run, results.Select(ToPoolResult).ToList());
     }
 
-    private async Task<IReadOnlyList<PluginBenchmarkPoolResult>> GetResultsAsync(string runId, SqliteConnection connection, CancellationToken ct)
+    private PluginBenchmarkPoolResult ToPoolResult(PluginBenchmarkPoolResultEntity e)
     {
-        var results = new List<PluginBenchmarkPoolResult>();
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT pool_size,item_count,success_count,failure_count,failure_rate,total_duration_ms,throughput_per_second,observed_working_set_bytes,workflow_duration_json,worker_performance_json FROM plugin_benchmark_pool_results WHERE run_id=$run ORDER BY pool_size;";
-        command.Parameters.AddWithValue("$run", runId);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            var workflow = JsonSerializer.Deserialize<PluginWorkerLatencyDistribution>(reader.GetString(8), _json) ?? new(0,0,0,0,0);
-            var perf = JsonSerializer.Deserialize<PluginWorkerPerformanceProfile>(reader.GetString(9), _json) ?? throw new InvalidOperationException("Benchmark performance JSON is invalid.");
-            results.Add(new PluginBenchmarkPoolResult(reader.GetInt32(0),reader.GetInt32(1),reader.GetInt32(2),reader.GetInt32(3),reader.GetDouble(4),reader.GetDouble(5),reader.GetDouble(6),reader.GetInt64(7),workflow,perf));
-        }
-        return results;
+        var workflow = JsonSerializer.Deserialize<PluginWorkerLatencyDistribution>(e.WorkflowDurationJson, _json) ?? new(0, 0, 0, 0, 0);
+        var perf = JsonSerializer.Deserialize<PluginWorkerPerformanceProfile>(e.WorkerPerformanceJson, _json)
+            ?? throw new InvalidOperationException("Benchmark performance JSON is invalid.");
+        return new PluginBenchmarkPoolResult(e.PoolSize, e.ItemCount, e.SuccessCount, e.FailureCount, e.FailureRate, e.TotalDurationMs, e.ThroughputPerSecond, e.ObservedWorkingSetBytes, workflow, perf);
     }
 
-    private PluginBenchmarkRun ReadRun(SqliteDataReader reader, IReadOnlyList<PluginBenchmarkPoolResult>? results)
+    private PluginBenchmarkRun ToRun(PluginBenchmarkRunEntity e, IReadOnlyList<PluginBenchmarkPoolResult>? results)
         => new(
-            reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5), reader.GetString(6), reader.GetString(7),
-            JsonSerializer.Deserialize<int[]>(reader.GetString(8), _json) ?? [], reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11), reader.IsDBNull(12) ? null : reader.GetString(12),
-            JsonSerializer.Deserialize<PluginBenchmarkRegressionPolicy>(reader.GetString(13), _json) ?? new(), DateTimeOffset.Parse(reader.GetString(14)), reader.IsDBNull(15) ? null : DateTimeOffset.Parse(reader.GetString(15)), reader.GetInt32(16) != 0,
-            reader.IsDBNull(17) ? null : reader.GetString(17), reader.IsDBNull(18) ? null : JsonSerializer.Deserialize<PluginBenchmarkRecommendation>(reader.GetString(18), _json), reader.IsDBNull(19) ? null : JsonSerializer.Deserialize<PluginBenchmarkRegressionGate>(reader.GetString(19), _json), results);
+            e.RunId, e.DatasetId, e.ValidationRunId, e.PluginId, e.PluginVersion, e.PluginAssemblySha256, e.WorkflowHash, e.Status,
+            JsonSerializer.Deserialize<int[]>(e.PoolSizesJson, _json) ?? [], e.RequestedCount, e.WarmupCount, e.WorkloadConcurrency, e.BaselineRunId,
+            JsonSerializer.Deserialize<PluginBenchmarkRegressionPolicy>(e.PolicyJson, _json) ?? new(), e.StartedAt, e.CompletedAt, e.CancelRequested,
+            e.Error, e.RecommendationJson is null ? null : JsonSerializer.Deserialize<PluginBenchmarkRecommendation>(e.RecommendationJson, _json),
+            e.RegressionJson is null ? null : JsonSerializer.Deserialize<PluginBenchmarkRegressionGate>(e.RegressionJson, _json), results);
 }
 
 public sealed class PluginPerformanceBenchmarkService(

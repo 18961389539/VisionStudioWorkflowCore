@@ -1,6 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Abstractions;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
+using VisionStudio.Api.Storage.EfCore;
 
 namespace VisionStudio.Api.Endpoints;
 
@@ -138,7 +140,7 @@ public static class TraceEndpoints
         // 混合状态当成已验证恢复。解锁的唯一路径是管理员完整恢复端点——StorageBackupService
         // 在校验并安装哈希匹配的备份后调用 ClearFailureLock。
         app.MapPost("/api/storage/maintenance/recover", async (StorageMaintenanceCoordinator coordinator, SqliteMetadataDatabase database,
-            HttpContext http, CancellationToken ct) =>
+            IVisionStudioDbFactory dbFactory, HttpContext http, CancellationToken ct) =>
         {
             AuditContext.SetTarget(http, "storage-failure-lock");
             if (!coordinator.IsFailureLocked)
@@ -196,19 +198,20 @@ public static class TraceEndpoints
                 //    恢复版本（典型混合状态），绝不解锁。
                 try
                 {
-                    await using var connection = await database.OpenConnectionAsync(ct);
-                    await using var command = connection.CreateCommand();
-                    command.CommandText =
-                        "SELECT artifact FROM (" +
-                        "SELECT preview_relative_path AS artifact FROM run_traces WHERE has_preview=1 AND preview_relative_path IS NOT NULL " +
-                        "UNION ALL SELECT replay_relative_path FROM run_traces WHERE has_replay_input=1 AND replay_relative_path IS NOT NULL) " +
-                        "ORDER BY artifact;";
+                    await using var db = await dbFactory.CreateDbContextAsync(ct);
+                    var previewPaths = await db.RunTraces
+                        .Where(x => x.HasPreview && x.PreviewRelativePath != null)
+                        .Select(x => x.PreviewRelativePath!)
+                        .ToListAsync(ct);
+                    var replayPaths = await db.RunTraces
+                        .Where(x => x.HasReplayInput && x.ReplayRelativePath != null)
+                        .Select(x => x.ReplayRelativePath!)
+                        .ToListAsync(ct);
+                    var allPaths = previewPaths.Concat(replayPaths).OrderBy(x => x, StringComparer.Ordinal).ToList();
                     var checkedCount = 0;
                     var missing = new List<string>();
-                    await using var reader = await command.ExecuteReaderAsync(ct);
-                    while (await reader.ReadAsync(ct))
+                    foreach (var relative in allPaths)
                     {
-                        var relative = reader.GetString(0);
                         checkedCount++;
                         var normalized = relative.Replace('\\', '/');
                         if (Path.IsPathRooted(normalized) || normalized.Split('/').Any(part => part is ".." or "."))

@@ -1,7 +1,9 @@
 using VisionStudio.Api.Infrastructure;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
@@ -13,7 +15,7 @@ namespace VisionStudio.Api;
 public sealed class LegacyStorageMigrationService
 {
     private const string MigrationKey = "v20-file-metadata-to-sqlite";
-    private readonly SqliteMetadataDatabase _db;
+    private readonly IVisionStudioDbFactory _dbFactory;
     private readonly ILogger<LegacyStorageMigrationService> _logger;
     private int _migrationErrors;
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
@@ -21,21 +23,24 @@ public sealed class LegacyStorageMigrationService
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public LegacyStorageMigrationService(SqliteMetadataDatabase db, IWebHostEnvironment env, ILogger<LegacyStorageMigrationService> logger)
+    public LegacyStorageMigrationService(IVisionStudioDbFactory dbFactory, IWebHostEnvironment env, ILogger<LegacyStorageMigrationService> logger)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _logger = logger;
     }
 
+    public LegacyStorageMigrationService(SqliteMetadataDatabase db, IWebHostEnvironment env, ILogger<LegacyStorageMigrationService> logger)
+        : this(new VisionStudioDbFactory(db), env, logger) { }
+
     public async Task MigrateAsync(CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        if (await IsCompletedAsync(connection, ct)) return;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        if (await db.MigrationStates.AnyAsync(x => x.Key == MigrationKey, ct)) return;
 
         _migrationErrors = 0;
-        var jobs = await MigrateJobsAsync(connection, ct);
-        var calibrations = await MigrateCalibrationsAsync(connection, ct);
-        var traces = await MigrateTracesAsync(connection, ct);
+        var jobs = await MigrateJobsAsync(ct);
+        var calibrations = await MigrateCalibrationsAsync(ct);
+        var traces = await MigrateTracesAsync(ct);
 
         if (_migrationErrors > 0)
         {
@@ -43,26 +48,28 @@ public sealed class LegacyStorageMigrationService
             return;
         }
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = "INSERT OR REPLACE INTO migration_state(key,completed_at,detail) VALUES($key,$at,$detail);";
-        command.Parameters.AddWithValue("$key", MigrationKey);
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-        command.Parameters.AddWithValue("$detail", $"jobs={jobs}; calibrations={calibrations}; traces={traces}");
-        await command.ExecuteNonQueryAsync(ct);
+        await using var writeDb = await _dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await _dbFactory.BeginImmediateTransactionAsync(writeDb, ct);
+        var existing = await writeDb.MigrationStates.AsTracking().FirstOrDefaultAsync(x => x.Key == MigrationKey, ct);
+        var now = DateTimeOffset.UtcNow;
+        var detail = $"jobs={jobs}; calibrations={calibrations}; traces={traces}";
+        if (existing is null)
+        {
+            writeDb.MigrationStates.Add(new MigrationStateEntity { Key = MigrationKey, CompletedAt = now, Detail = detail });
+        }
+        else
+        {
+            existing.CompletedAt = now;
+            existing.Detail = detail;
+        }
+        await writeDb.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         _logger.LogInformation("V0.20 legacy storage migration finished: {Jobs} jobs, {Calibrations} calibrations, {Traces} traces.", jobs, calibrations, traces);
     }
 
-    private static async Task<bool> IsCompletedAsync(SqliteConnection connection, CancellationToken ct)
+    private async Task<int> MigrateJobsAsync(CancellationToken ct)
     {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT 1 FROM migration_state WHERE key=$key;";
-        command.Parameters.AddWithValue("$key", MigrationKey);
-        return await command.ExecuteScalarAsync(ct) is not null;
-    }
-
-    private async Task<int> MigrateJobsAsync(SqliteConnection connection, CancellationToken ct)
-    {
-        var root = Path.Combine(_db.DataRoot, "jobs");
+        var root = Path.Combine(_dbFactory.Database.DataRoot, "jobs");
         if (!Directory.Exists(root)) return 0;
         var count = 0;
         foreach (var dir in Directory.EnumerateDirectories(root))
@@ -73,30 +80,62 @@ public sealed class LegacyStorageMigrationService
             {
                 var meta = await ReadAsync<LegacyJobMetadata>(metadataPath, ct);
                 if (meta is null) continue;
-                await using var tx = connection.BeginTransaction(deferred: false);
-                await ExecAsync(connection, tx,
-                    "INSERT OR IGNORE INTO jobs(id,name,description,created_at,updated_at,latest_version,published_version) VALUES($id,$name,$description,$created,$updated,$latest,$published);",
-                    ct, ("$id", meta.Id), ("$name", meta.Name), ("$description", meta.Description), ("$created", Iso(meta.CreatedAt)),
-                    ("$updated", Iso(meta.UpdatedAt)), ("$latest", meta.LatestVersion), ("$published", meta.PublishedVersion));
+                await using var db = await _dbFactory.CreateDbContextAsync(ct);
+                await using var tx = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
+
+                if (!await db.Jobs.AnyAsync(x => x.Id == meta.Id, ct))
+                {
+                    db.Jobs.Add(new JobEntity
+                    {
+                        Id = meta.Id,
+                        Name = meta.Name,
+                        Description = meta.Description,
+                        CreatedAt = meta.CreatedAt,
+                        UpdatedAt = meta.UpdatedAt,
+                        LatestVersion = meta.LatestVersion,
+                        PublishedVersion = meta.PublishedVersion
+                    });
+                }
 
                 var versionsDir = Path.Combine(dir, "versions");
                 if (Directory.Exists(versionsDir))
                 {
+                    var existingVersions = (await db.JobVersions.Where(x => x.JobId == meta.Id).Select(x => x.Version).ToListAsync(ct)).ToHashSet();
                     foreach (var file in Directory.EnumerateFiles(versionsDir, "v*.json").OrderBy(x => x))
                     {
                         var snapshot = await ReadAsync<JobVersionSnapshot>(file, ct);
-                        if (snapshot is null) continue;
-                        await ExecAsync(connection, tx,
-                            "INSERT OR IGNORE INTO job_versions(job_id,version,workflow_hash,created_at,note,workflow_json) VALUES($job,$version,$hash,$created,$note,$workflow);",
-                            ct, ("$job", snapshot.JobId), ("$version", snapshot.Version), ("$hash", snapshot.WorkflowHash),
-                            ("$created", Iso(snapshot.CreatedAt)), ("$note", snapshot.Note), ("$workflow", JsonSerializer.Serialize(snapshot.Workflow, _json)));
+                        if (snapshot is null || !existingVersions.Add(snapshot.Version)) continue;
+                        db.JobVersions.Add(new JobVersionEntity
+                        {
+                            JobId = snapshot.JobId,
+                            Version = snapshot.Version,
+                            WorkflowHash = snapshot.WorkflowHash,
+                            CreatedAt = snapshot.CreatedAt,
+                            Note = snapshot.Note,
+                            WorkflowJson = JsonSerializer.Serialize(snapshot.Workflow, _json)
+                        });
                     }
                 }
 
+                var existingHistory = await db.JobPublicationHistory
+                    .Where(x => x.JobId == meta.Id)
+                    .Select(x => new { x.Version, x.Action, x.At })
+                    .ToListAsync(ct);
+                var historySet = existingHistory.Select(x => (x.Version, x.Action, x.At)).ToHashSet();
                 foreach (var evt in meta.PublicationHistory)
-                    await ExecAsync(connection, tx,
-                        "INSERT INTO job_publication_history(job_id,version,action,at) SELECT $id,$version,$action,$at WHERE NOT EXISTS (SELECT 1 FROM job_publication_history WHERE job_id=$id AND version=$version AND action=$action AND at=$at);",
-                        ct, ("$id", meta.Id), ("$version", evt.Version), ("$action", evt.Action), ("$at", Iso(evt.At)));
+                {
+                    if (historySet.Add((evt.Version, evt.Action, evt.At)))
+                    {
+                        db.JobPublicationHistory.Add(new JobPublicationHistoryEntity
+                        {
+                            JobId = meta.Id,
+                            Version = evt.Version,
+                            Action = evt.Action,
+                            At = evt.At
+                        });
+                    }
+                }
+                await db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
                 count++;
             }
@@ -105,9 +144,9 @@ public sealed class LegacyStorageMigrationService
         return count;
     }
 
-    private async Task<int> MigrateCalibrationsAsync(SqliteConnection connection, CancellationToken ct)
+    private async Task<int> MigrateCalibrationsAsync(CancellationToken ct)
     {
-        var root = Path.Combine(_db.DataRoot, "calibrations");
+        var root = Path.Combine(_dbFactory.Database.DataRoot, "calibrations");
         if (!Directory.Exists(root)) return 0;
         var count = 0;
         foreach (var dir in Directory.EnumerateDirectories(root))
@@ -118,31 +157,63 @@ public sealed class LegacyStorageMigrationService
             {
                 var meta = await ReadAsync<LegacyCalibrationMetadata>(metadataPath, ct);
                 if (meta is null) continue;
-                await using var tx = connection.BeginTransaction(deferred: false);
-                await ExecAsync(connection, tx,
-                    "INSERT OR IGNORE INTO calibration_assets(id,name,description,created_at,updated_at,latest_version,published_version) VALUES($id,$name,$description,$created,$updated,$latest,$published);",
-                    ct, ("$id", meta.Id), ("$name", meta.Name), ("$description", meta.Description), ("$created", Iso(meta.CreatedAt)),
-                    ("$updated", Iso(meta.UpdatedAt)), ("$latest", meta.LatestVersion), ("$published", meta.PublishedVersion));
+                await using var db = await _dbFactory.CreateDbContextAsync(ct);
+                await using var tx = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
+
+                if (!await db.CalibrationAssets.AnyAsync(x => x.Id == meta.Id, ct))
+                {
+                    db.CalibrationAssets.Add(new CalibrationAssetEntity
+                    {
+                        Id = meta.Id,
+                        Name = meta.Name,
+                        Description = meta.Description,
+                        CreatedAt = meta.CreatedAt,
+                        UpdatedAt = meta.UpdatedAt,
+                        LatestVersion = meta.LatestVersion,
+                        PublishedVersion = meta.PublishedVersion
+                    });
+                }
 
                 var versionsDir = Path.Combine(dir, "versions");
                 if (Directory.Exists(versionsDir))
                 {
+                    var existingVersions = (await db.CalibrationVersions.Where(x => x.AssetId == meta.Id).Select(x => x.Version).ToListAsync(ct)).ToHashSet();
                     foreach (var file in Directory.EnumerateFiles(versionsDir, "v*.json").OrderBy(x => x))
                     {
                         var snapshot = await ReadAsync<CalibrationVersionSnapshot>(file, ct);
-                        if (snapshot is null) continue;
-                        await ExecAsync(connection, tx,
-                            "INSERT OR IGNORE INTO calibration_versions(asset_id,version,snapshot_hash,created_at,note,workspace_json,result_json) VALUES($id,$version,$hash,$created,$note,$workspace,$result);",
-                            ct, ("$id", snapshot.AssetId), ("$version", snapshot.Version), ("$hash", snapshot.SnapshotHash),
-                            ("$created", Iso(snapshot.CreatedAt)), ("$note", snapshot.Note),
-                            ("$workspace", JsonSerializer.Serialize(snapshot.Workspace, _json)), ("$result", JsonSerializer.Serialize(snapshot.Result, _json)));
+                        if (snapshot is null || !existingVersions.Add(snapshot.Version)) continue;
+                        db.CalibrationVersions.Add(new CalibrationVersionEntity
+                        {
+                            AssetId = snapshot.AssetId,
+                            Version = snapshot.Version,
+                            SnapshotHash = snapshot.SnapshotHash,
+                            CreatedAt = snapshot.CreatedAt,
+                            Note = snapshot.Note,
+                            WorkspaceJson = JsonSerializer.Serialize(snapshot.Workspace, _json),
+                            ResultJson = JsonSerializer.Serialize(snapshot.Result, _json)
+                        });
                     }
                 }
 
+                var existingHistory = await db.CalibrationPublicationHistory
+                    .Where(x => x.AssetId == meta.Id)
+                    .Select(x => new { x.Version, x.Action, x.At })
+                    .ToListAsync(ct);
+                var historySet = existingHistory.Select(x => (x.Version, x.Action, x.At)).ToHashSet();
                 foreach (var evt in meta.PublicationHistory)
-                    await ExecAsync(connection, tx,
-                        "INSERT INTO calibration_publication_history(asset_id,version,action,at) SELECT $id,$version,$action,$at WHERE NOT EXISTS (SELECT 1 FROM calibration_publication_history WHERE asset_id=$id AND version=$version AND action=$action AND at=$at);",
-                        ct, ("$id", meta.Id), ("$version", evt.Version), ("$action", evt.Action), ("$at", Iso(evt.At)));
+                {
+                    if (historySet.Add((evt.Version, evt.Action, evt.At)))
+                    {
+                        db.CalibrationPublicationHistory.Add(new CalibrationPublicationHistoryEntity
+                        {
+                            AssetId = meta.Id,
+                            Version = evt.Version,
+                            Action = evt.Action,
+                            At = evt.At
+                        });
+                    }
+                }
+                await db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
                 count++;
             }
@@ -151,11 +222,11 @@ public sealed class LegacyStorageMigrationService
         return count;
     }
 
-    private async Task<int> MigrateTracesAsync(SqliteConnection connection, CancellationToken ct)
+    private async Task<int> MigrateTracesAsync(CancellationToken ct)
     {
-        var root = Path.Combine(_db.DataRoot, "traces");
+        var root = Path.Combine(_dbFactory.Database.DataRoot, "traces");
         if (!Directory.Exists(root)) return 0;
-        var artifactRoot = Path.Combine(_db.DataRoot, "artifacts");
+        var artifactRoot = Path.Combine(_dbFactory.Database.DataRoot, "artifacts");
         var count = 0;
         foreach (var metadataPath in Directory.EnumerateFiles(root, "metadata.json", SearchOption.AllDirectories))
         {
@@ -163,6 +234,9 @@ public sealed class LegacyStorageMigrationService
             {
                 var record = await ReadAsync<RunTraceRecord>(metadataPath, ct);
                 if (record is null) continue;
+                await using var db = await _dbFactory.CreateDbContextAsync(ct);
+                if (await db.RunTraces.AnyAsync(x => x.RunId == record.RunId, ct)) continue;
+
                 var dir = Path.GetDirectoryName(metadataPath)!;
                 var workflowPath = Path.Combine(dir, "workflow.json");
                 var overlaysPath = Path.Combine(dir, "overlays.json");
@@ -181,17 +255,32 @@ public sealed class LegacyStorageMigrationService
                     if (!File.Exists(destination)) File.Copy(previewPath, destination);
                 }
 
-                await using var command = connection.CreateCommand();
-                command.CommandText = """
-INSERT OR IGNORE INTO run_traces(run_id,started_at,source,job_id,job_version,workflow_id,workflow_name,workflow_hash,execution_status,disposition,total_duration_ms,node_count,overlay_count,has_preview,preview_relative_path,preview_bytes,error,note,node_reports_json,workflow_json,overlays_json)
-VALUES($run,$started,$source,$job,$jobVersion,$workflowId,$workflowName,$hash,$status,$disposition,$duration,$nodeCount,$overlayCount,$hasPreview,$preview,$previewBytes,$error,$note,$nodes,$workflow,$overlays);
-""";
-                Add(command, "$run", record.RunId); Add(command, "$started", Iso(record.StartedAt)); Add(command, "$source", record.Source);
-                Add(command, "$job", record.JobId); Add(command, "$jobVersion", record.JobVersion); Add(command, "$workflowId", record.WorkflowId); Add(command, "$workflowName", record.WorkflowName);
-                Add(command, "$hash", record.WorkflowHash); Add(command, "$status", record.ExecutionStatus); Add(command, "$disposition", record.Disposition); Add(command, "$duration", record.TotalDurationMs);
-                Add(command, "$nodeCount", record.NodeCount); Add(command, "$overlayCount", record.OverlayCount); Add(command, "$hasPreview", previewRelative is null ? 0 : 1); Add(command, "$preview", previewRelative); Add(command, "$previewBytes", File.Exists(previewPath) ? new FileInfo(previewPath).Length : 0);
-                Add(command, "$error", record.Error); Add(command, "$note", record.Note); Add(command, "$nodes", JsonSerializer.Serialize(record.NodeReports, _json)); Add(command, "$workflow", workflowJson); Add(command, "$overlays", overlaysJson);
-                count += await command.ExecuteNonQueryAsync(ct);
+                db.RunTraces.Add(new RunTraceEntity
+                {
+                    RunId = record.RunId,
+                    StartedAt = record.StartedAt,
+                    Source = record.Source,
+                    JobId = record.JobId,
+                    JobVersion = record.JobVersion,
+                    WorkflowId = record.WorkflowId,
+                    WorkflowName = record.WorkflowName,
+                    WorkflowHash = record.WorkflowHash,
+                    ExecutionStatus = record.ExecutionStatus,
+                    Disposition = record.Disposition,
+                    TotalDurationMs = record.TotalDurationMs,
+                    NodeCount = record.NodeCount,
+                    OverlayCount = record.OverlayCount,
+                    HasPreview = previewRelative is not null,
+                    PreviewRelativePath = previewRelative,
+                    PreviewBytes = File.Exists(previewPath) ? new FileInfo(previewPath).Length : 0,
+                    Error = record.Error,
+                    Note = record.Note,
+                    NodeReportsJson = JsonSerializer.Serialize(record.NodeReports, _json),
+                    WorkflowJson = workflowJson,
+                    OverlaysJson = overlaysJson
+                });
+                await db.SaveChangesAsync(ct);
+                count++;
             }
             catch (Exception ex) { Interlocked.Increment(ref _migrationErrors); _logger.LogWarning(ex, "Could not migrate legacy trace {MetadataPath}.", metadataPath); }
         }
@@ -204,17 +293,6 @@ VALUES($run,$started,$source,$job,$jobVersion,$workflowId,$workflowName,$hash,$s
         return await JsonSerializer.DeserializeAsync<T>(stream, _json, ct);
     }
 
-    private static async Task ExecAsync(SqliteConnection connection, SqliteTransaction tx, string sql, CancellationToken ct, params (string Name, object? Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = tx;
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters) Add(command, name, value);
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    private static string Iso(DateTimeOffset value) => value.ToUniversalTime().ToString("O");
-    private static void Add(SqliteCommand command, string name, object? value) => command.Parameters.AddWithValue(name, value ?? DBNull.Value);
     private static string Sanitize(string id) => string.Concat(id.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_'));
 
     private sealed record LegacyJobMetadata(string Id, string Name, string Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int LatestVersion, int? PublishedVersion, IReadOnlyList<PublicationEvent> PublicationHistory);

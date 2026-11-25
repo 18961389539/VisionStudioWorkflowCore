@@ -1,5 +1,7 @@
 using System.Text.Json;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine.Nodes;
 
 namespace VisionStudio.Api;
@@ -41,9 +43,11 @@ public sealed record SaveHandEyeCalibrationVersionRequest(
     string? Note = null);
 
 /// <summary>SQLite-backed immutable planar hand-eye calibration versions with pose-pair evidence.</summary>
-public sealed class HandEyeCalibrationAssetStore(SqliteMetadataDatabase db)
-    : CalibrationAssetStoreBase<HandEyeCalibrationModel>(db, "hand_eye_calibration")
+public sealed class HandEyeCalibrationAssetStore
+    : CalibrationAssetStoreBase<HandEyeCalibrationModel, HandEyeCalibrationAssetEntity, HandEyeCalibrationVersionEntity, HandEyeCalibrationPublicationHistoryEntity>
 {
+    public HandEyeCalibrationAssetStore(IVisionStudioDbFactory dbFactory) : base(dbFactory) { }
+    public HandEyeCalibrationAssetStore(SqliteMetadataDatabase db) : base(db) { }
     protected override string Label => "Hand-eye calibration";
     protected override string WizardName => "Hand-Eye Wizard";
     protected override string DefaultCreateNote => "Initial hand-eye calibration";

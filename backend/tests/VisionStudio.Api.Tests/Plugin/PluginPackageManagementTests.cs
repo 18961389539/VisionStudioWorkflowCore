@@ -83,6 +83,26 @@ public sealed class PluginPackageManagementTests
         Assert.Throws<InvalidOperationException>(() => fixture.Service.Install(package, "unsigned.vspkg"));
     }
 
+    [Fact]
+    public async Task InstallAsync_AllowsConcurrentSamePackageIdempotently_AndRejectsConflictingContent()
+    {
+        using var fixture = Fixture.Create();
+        using var cert = fixture.CreateCertificate();
+        fixture.Service.TrustPublisher(cert.Export(X509ContentType.Cert), "Test Publisher");
+        fixture.Service.PrepareRuntimePluginRoot(fixture.PluginRoot);
+        var package = fixture.BuildPackage(cert, "sample.math", "1.0.0");
+
+        var results = await Task.WhenAll(
+            fixture.Service.InstallAsync(package, "v1-a.vspkg"),
+            fixture.Service.InstallAsync(package, "v1-b.vspkg"));
+
+        Assert.Single(fixture.Service.ListPackages());
+        Assert.Equal(1, results.Count(r => r.ActivatedImmediately));
+
+        var conflicting = fixture.BuildPackage(cert, "sample.math", "1.0.0", extraSeed: 99);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.InstallAsync(conflicting, "v1-conflict.vspkg"));
+    }
+
     private sealed class Fixture : IDisposable
     {
         private Fixture(string root)
@@ -108,13 +128,13 @@ public sealed class PluginPackageManagementTests
         {
             using var rsa = RSA.Create(2048);
             var request = new CertificateRequest("CN=VisionStudio Test Publisher", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-            var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
-            return new X509Certificate2(cert.Export(X509ContentType.Pfx));
+            using var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+            return X509CertificateLoader.LoadPkcs12(cert.Export(X509ContentType.Pfx), ReadOnlySpan<char>.Empty);
         }
 
-        public byte[] BuildPackage(X509Certificate2 cert, string id, string version)
+        public byte[] BuildPackage(X509Certificate2 cert, string id, string version, byte extraSeed = 4)
         {
-            var entries = BaseEntries(id, version);
+            var entries = BaseEntries(id, version, extraSeed);
             entries["publisher.cer"] = cert.Export(X509ContentType.Cert);
             var contentHash = PluginPackageService.ComputeContentHash(entries);
             using var rsa = cert.GetRSAPrivateKey()!;
@@ -132,9 +152,9 @@ public sealed class PluginPackageManagementTests
 
         public byte[] BuildUnsignedPackage(string id, string version) => Zip(BaseEntries(id, version));
 
-        private static Dictionary<string, byte[]> BaseEntries(string id, string version)
+        private static Dictionary<string, byte[]> BaseEntries(string id, string version, byte extraSeed = 4)
         {
-            var dll = new byte[] { 0x4d, 0x5a, 1, 2, 3, 4 };
+            var dll = new byte[] { 0x4d, 0x5a, 1, 2, 3, extraSeed };
             var dllHash = Convert.ToHexString(SHA256.HashData(dll)).ToLowerInvariant();
             var manifest = JsonSerializer.SerializeToUtf8Bytes(new
             {

@@ -1,7 +1,10 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api;
 
@@ -51,37 +54,46 @@ public sealed record AppendAssetVersionRequest(
 /// 表：assets(kind) → asset_versions(metadata_json) → asset_blobs(sha256)。
 /// v25 迁移会把旧的 shape_model_* 数据原样搬进来；旧表暂留一个版本用于回退。
 /// </summary>
-public sealed class AssetStore(SqliteMetadataDatabase db)
+public sealed class AssetStore(IVisionStudioDbFactory dbFactory)
 {
+    public AssetStore(SqliteMetadataDatabase db) : this(new VisionStudioDbFactory(db)) { }
+
     public const int DefaultMaxBytes = 16 * 1024 * 1024;
     private static readonly JsonDocumentOptions MetadataOptions = new() { AllowTrailingCommas = true };
 
     public async Task<IReadOnlyList<AssetDescriptor>> ListAsync(string? kind, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        var ids = new List<string>();
-        await using (var command = connection.CreateCommand())
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        IQueryable<AssetEntity> query = db.Assets.Where(x => x.DeletedAt == null);
+        if (!string.IsNullOrWhiteSpace(kind))
         {
-            command.CommandText = string.IsNullOrWhiteSpace(kind)
-                ? "SELECT id FROM assets WHERE deleted_at IS NULL ORDER BY updated_at DESC;"
-                : "SELECT id FROM assets WHERE deleted_at IS NULL AND kind=$kind ORDER BY updated_at DESC;";
-            if (!string.IsNullOrWhiteSpace(kind)) command.Parameters.AddWithValue("$kind", kind.Trim().ToLowerInvariant());
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) ids.Add(reader.GetString(0));
+            var normalizedKind = kind.Trim().ToLowerInvariant();
+            query = query.Where(x => x.Kind == normalizedKind);
         }
-        var result = new List<AssetDescriptor>(ids.Count);
-        foreach (var id in ids)
-        {
-            var descriptor = await BuildDescriptorAsync(connection, id, ct);
-            if (descriptor is not null) result.Add(descriptor);
-        }
-        return result;
+        var rows = await query.OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
+        if (rows.Count == 0) return [];
+        var ids = rows.Select(x => x.Id).ToList();
+        var versions = await db.AssetVersions
+            .Where(x => ids.Contains(x.AssetId))
+            .OrderByDescending(x => x.Version)
+            .ToListAsync(ct);
+        var byAsset = versions.GroupBy(x => x.AssetId).ToDictionary(g => g.Key, g => g.Select(ToVersionInfo).ToList());
+        return rows.Select(r => new AssetDescriptor(
+            r.Id, r.Kind, r.Name, r.Description, r.CreatedAt, r.UpdatedAt, r.LatestVersion,
+            byAsset.TryGetValue(r.Id, out var v) ? v : [])).ToList();
     }
 
     public async Task<AssetDescriptor?> GetAsync(string id, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        return await BuildDescriptorAsync(connection, id, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var row = await db.Assets.FirstOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, ct);
+        if (row is null) return null;
+        var versions = await db.AssetVersions
+            .Where(x => x.AssetId == id)
+            .OrderByDescending(x => x.Version)
+            .Select(x => new AssetVersionInfo(x.Version, x.Sha256, x.SizeBytes, x.MetadataJson, x.Note, x.CreatedAt, x.CreatedBy))
+            .ToListAsync(ct);
+        return new AssetDescriptor(row.Id, row.Kind, row.Name, row.Description, row.CreatedAt, row.UpdatedAt, row.LatestVersion, versions);
     }
 
     public async Task<AssetDescriptor> CreateAsync(CreateAssetRequest request, CancellationToken ct)
@@ -96,22 +108,39 @@ public sealed class AssetStore(SqliteMetadataDatabase db)
         ValidateId(id);
         var now = DateTimeOffset.UtcNow;
 
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
         try
         {
-            await ExecuteAsync(connection, transaction,
-                "INSERT INTO assets(id,kind,name,description,created_at,updated_at,latest_version,deleted_at) VALUES($id,$kind,$name,$description,$created,$updated,1,NULL);",
-                ct, ("$id", id), ("$kind", kind), ("$name", name), ("$description", (request.Description ?? string.Empty).Trim()),
-                ("$created", Iso(now)), ("$updated", Iso(now)));
-            await InsertBlobAsync(connection, transaction, sha256, bytes, now, ct);
-            await InsertVersionAsync(connection, transaction, id, 1, sha256, bytes.Length, metadata,
-                request.Note, request.CreatedBy, now, ct);
+            db.Assets.Add(new AssetEntity
+            {
+                Id = id,
+                Kind = kind,
+                Name = name,
+                Description = (request.Description ?? string.Empty).Trim(),
+                CreatedAt = now,
+                UpdatedAt = now,
+                LatestVersion = 1,
+                DeletedAt = null
+            });
+            await EnsureBlobAsync(db, sha256, bytes, now, ct);
+            db.AssetVersions.Add(new AssetVersionEntity
+            {
+                AssetId = id,
+                Version = 1,
+                Sha256 = sha256,
+                SizeBytes = bytes.Length,
+                MetadataJson = metadata,
+                Note = (request.Note ?? string.Empty).Trim(),
+                CreatedAt = now,
+                CreatedBy = (request.CreatedBy ?? string.Empty).Trim()
+            });
+            await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: 19 } sqliteEx)
         {
-            throw new ApiConflictException($"Asset '{id}' already exists.", ex);
+            throw new ApiConflictException($"Asset '{id}' already exists.", sqliteEx);
         }
         return (await GetAsync(id, ct))!;
     }
@@ -122,98 +151,103 @@ public sealed class AssetStore(SqliteMetadataDatabase db)
         var bytes = DecodePayload(request.Base64, request.MaxBytes, out var sha256);
         var now = DateTimeOffset.UtcNow;
 
-        // (asset_id, version) 唯一约束 + MAX+1：并发追加时重读一次最新版再试，仍冲突则 409。
         for (var attempt = 0; ; attempt++)
         {
-            await using var connection = await db.OpenConnectionAsync(ct);
-            await using var transaction = connection.BeginTransaction(deferred: false);
-            var row = await LoadAssetAsync(connection, id, transaction, ct)
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+            var row = await db.Assets.AsTracking().FirstOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, ct)
                 ?? throw new ApiNotFoundException($"Asset '{id}' does not exist.");
             var version = checked(row.LatestVersion + 1);
             try
             {
-                await InsertBlobAsync(connection, transaction, sha256, bytes, now, ct);
-                await InsertVersionAsync(connection, transaction, id, version, sha256, bytes.Length, metadata,
-                    request.Note, request.CreatedBy, now, ct);
-                await ExecuteAsync(connection, transaction,
-                    "UPDATE assets SET latest_version=$version,updated_at=$updated WHERE id=$id;",
-                    ct, ("$version", version), ("$updated", Iso(now)), ("$id", id));
+                await EnsureBlobAsync(db, sha256, bytes, now, ct);
+                db.AssetVersions.Add(new AssetVersionEntity
+                {
+                    AssetId = id,
+                    Version = version,
+                    Sha256 = sha256,
+                    SizeBytes = bytes.Length,
+                    MetadataJson = metadata,
+                    Note = (request.Note ?? string.Empty).Trim(),
+                    CreatedAt = now,
+                    CreatedBy = (request.CreatedBy ?? string.Empty).Trim()
+                });
+                row.LatestVersion = version;
+                row.UpdatedAt = now;
+                await db.SaveChangesAsync(ct);
                 await transaction.CommitAsync(ct);
                 return new AssetVersionInfo(version, sha256, bytes.Length, metadata,
                     (request.Note ?? string.Empty).Trim(), now, (request.CreatedBy ?? string.Empty).Trim());
             }
-            catch (SqliteException ex) when (ex.SqliteErrorCode == 19 && attempt == 0)
+            catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: 19 } && attempt == 0)
             {
                 await transaction.RollbackAsync(ct);
             }
-            catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+            catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: 19 } sqliteEx)
             {
-                throw new ApiConflictException($"Asset '{id}' version was appended concurrently; reload and retry.", ex);
+                throw new ApiConflictException($"Asset '{id}' version was appended concurrently; reload and retry.", sqliteEx);
             }
         }
     }
 
     public async Task<AssetVersionInfo?> GetVersionAsync(string id, int version, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        return await ReadVersionInfoAsync(connection, id, version, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await (
+            from v in db.AssetVersions
+            join a in db.Assets on v.AssetId equals a.Id
+            where a.DeletedAt == null && v.AssetId == id && v.Version == version
+            select v)
+            .FirstOrDefaultAsync(ct);
+        return entity is null ? null : ToVersionInfo(entity);
     }
 
     public async Task<byte[]?> ReadBytesAsync(string id, int version, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT b.bytes
-FROM asset_versions v
-JOIN assets a ON a.id = v.asset_id AND a.deleted_at IS NULL
-JOIN asset_blobs b ON b.sha256 = v.sha256
-WHERE v.asset_id = $id AND v.version = $version;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$version", version);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? (byte[])reader["bytes"] : null;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return await (
+            from v in db.AssetVersions
+            join a in db.Assets on v.AssetId equals a.Id
+            join b in db.AssetBlobs on v.Sha256 equals b.Sha256
+            where a.DeletedAt == null && v.AssetId == id && v.Version == version
+            select b.Bytes)
+            .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>同步读取（供引擎的 <c>IModelAssetSource</c> 使用）；version&lt;=0 表示 latest。</summary>
     public byte[]? ReadBytesSync(string id, int version, string? kind = null)
     {
-        using var connection = db.OpenConnection();
+        using var db = dbFactory.CreateDbContext();
         var effective = version;
         if (effective <= 0)
         {
-            using var latest = connection.CreateCommand();
-            latest.CommandText = "SELECT latest_version FROM assets WHERE id=$id AND deleted_at IS NULL;";
-            latest.Parameters.AddWithValue("$id", id);
-            var value = latest.ExecuteScalar();
-            if (value is null or System.DBNull) return null;
-            effective = Convert.ToInt32(value);
+            var latest = db.Assets
+                .Where(x => x.Id == id && x.DeletedAt == null)
+                .Select(x => (int?)x.LatestVersion)
+                .FirstOrDefault();
+            if (latest is null) return null;
+            effective = latest.Value;
         }
 
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT b.bytes
-FROM asset_versions v
-JOIN assets a ON a.id = v.asset_id AND a.deleted_at IS NULL
-JOIN asset_blobs b ON b.sha256 = v.sha256
-WHERE v.asset_id = $id AND v.version = $version AND ($kind IS NULL OR a.kind = $kind);
-""";
-        command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$version", effective);
-        using var reader = command.ExecuteReader();
-        return reader.Read() ? (byte[])reader["bytes"] : null;
+        return (
+            from v in db.AssetVersions
+            join a in db.Assets on v.AssetId equals a.Id
+            join b in db.AssetBlobs on v.Sha256 equals b.Sha256
+            where a.DeletedAt == null && v.AssetId == id && v.Version == effective && (kind == null || a.Kind == kind)
+            select b.Bytes)
+            .FirstOrDefault();
     }
 
     public async Task<bool> DeleteAsync(string id, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE assets SET deleted_at=$at,updated_at=$at WHERE id=$id AND deleted_at IS NULL;";
-        command.Parameters.AddWithValue("$at", Iso(DateTimeOffset.UtcNow));
-        command.Parameters.AddWithValue("$id", id);
-        return await command.ExecuteNonQueryAsync(ct) > 0;
+        var now = DateTimeOffset.UtcNow;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.Assets
+            .Where(x => x.Id == id && x.DeletedAt == null)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.DeletedAt, now)
+                .SetProperty(x => x.UpdatedAt, now), ct);
+        return affected > 0;
     }
 
     public async Task<AssetDescriptor?> UpdateAsync(string id, string? name, string? description, CancellationToken ct)
@@ -224,22 +258,34 @@ WHERE v.asset_id = $id AND v.version = $version AND ($kind IS NULL OR a.kind = $
         if (trimmedName is { Length: > 200 })
             throw new ApiValidationException("Asset name must be at most 200 characters.");
 
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-UPDATE assets
-SET name = COALESCE($name, name),
-    description = COALESCE($description, description),
-    updated_at = $updated
-WHERE id = $id AND deleted_at IS NULL;
-""";
-        command.Parameters.AddWithValue("$name", (object?)trimmedName ?? DBNull.Value);
-        command.Parameters.AddWithValue("$description", (object?)(description?.Trim()) ?? DBNull.Value);
-        command.Parameters.AddWithValue("$updated", Iso(DateTimeOffset.UtcNow));
-        command.Parameters.AddWithValue("$id", id);
-        if (await command.ExecuteNonQueryAsync(ct) == 0) return null;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        var entity = await db.Assets.AsTracking().FirstOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, ct);
+        if (entity is null) return null;
+        if (trimmedName is not null) entity.Name = trimmedName;
+        if (description is not null) entity.Description = description.Trim();
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         return await GetAsync(id, ct);
     }
+
+    private static async Task EnsureBlobAsync(VisionStudioDbContext db, string sha256, byte[] bytes, DateTimeOffset createdAt, CancellationToken ct)
+    {
+        if (!await db.AssetBlobs.AnyAsync(x => x.Sha256 == sha256, ct))
+        {
+            db.AssetBlobs.Add(new AssetBlobEntity
+            {
+                Sha256 = sha256,
+                SizeBytes = bytes.Length,
+                Bytes = bytes,
+                CreatedAt = createdAt
+            });
+        }
+    }
+
+    private static AssetVersionInfo ToVersionInfo(AssetVersionEntity v)
+        => new(v.Version, v.Sha256, v.SizeBytes, v.MetadataJson, v.Note, v.CreatedAt, v.CreatedBy);
 
     internal static string ComputeSha256(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
 
@@ -285,105 +331,4 @@ WHERE id = $id AND deleted_at IS NULL;
         if (id.Length is < 1 or > 64 || !id.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.'))
             throw new ApiValidationException("Asset id must be 1-64 characters of letters, digits, '-', '_' or '.'.");
     }
-
-    private static async Task<AssetDescriptor?> BuildDescriptorAsync(SqliteConnection connection, string id, CancellationToken ct)
-    {
-        var row = await LoadAssetAsync(connection, id, null, ct);
-        if (row is null) return null;
-        var versions = new List<AssetVersionInfo>();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT version,sha256,size_bytes,metadata_json,note,created_at,created_by
-FROM asset_versions WHERE asset_id=$id ORDER BY version DESC;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            versions.Add(new AssetVersionInfo(
-                reader.GetInt32(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3),
-                reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5)), reader.GetString(6)));
-        }
-        return new AssetDescriptor(row.Id, row.Kind, row.Name, row.Description, row.CreatedAt, row.UpdatedAt, row.LatestVersion, versions);
-    }
-
-    private static async Task<AssetVersionInfo?> ReadVersionInfoAsync(SqliteConnection connection, string id, int version, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT v.version,v.sha256,v.size_bytes,v.metadata_json,v.note,v.created_at,v.created_by
-FROM asset_versions v
-JOIN assets a ON a.id = v.asset_id AND a.deleted_at IS NULL
-WHERE v.asset_id=$id AND v.version=$version;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$version", version);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return null;
-        return new AssetVersionInfo(
-            reader.GetInt32(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3),
-            reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5)), reader.GetString(6));
-    }
-
-    private static async Task<AssetRow?> LoadAssetAsync(SqliteConnection connection, string id, SqliteTransaction? transaction, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-SELECT id,kind,name,description,created_at,updated_at,latest_version
-FROM assets WHERE id=$id AND deleted_at IS NULL;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct)
-            ? new AssetRow(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                DateTimeOffset.Parse(reader.GetString(4)), DateTimeOffset.Parse(reader.GetString(5)), reader.GetInt32(6))
-            : null;
-    }
-
-    private static async Task InsertBlobAsync(SqliteConnection connection, SqliteTransaction transaction, string sha256, byte[] bytes, DateTimeOffset createdAt, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "INSERT OR IGNORE INTO asset_blobs(sha256,size_bytes,bytes,created_at) VALUES($sha,$size,$bytes,$created);";
-        command.Parameters.AddWithValue("$sha", sha256);
-        command.Parameters.AddWithValue("$size", bytes.Length);
-        command.Parameters.Add("$bytes", SqliteType.Blob).Value = bytes;
-        command.Parameters.AddWithValue("$created", Iso(createdAt));
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    private static async Task InsertVersionAsync(SqliteConnection connection, SqliteTransaction transaction, string id, int version,
-        string sha256, long sizeBytes, string metadataJson, string? note, string? createdBy, DateTimeOffset createdAt, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-INSERT INTO asset_versions(asset_id,version,sha256,size_bytes,metadata_json,note,created_at,created_by)
-VALUES($id,$version,$sha,$size,$metadata,$note,$created,$by);
-""";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$version", version);
-        command.Parameters.AddWithValue("$sha", sha256);
-        command.Parameters.AddWithValue("$size", sizeBytes);
-        command.Parameters.AddWithValue("$metadata", metadataJson);
-        command.Parameters.AddWithValue("$note", (note ?? string.Empty).Trim());
-        command.Parameters.AddWithValue("$created", Iso(createdAt));
-        command.Parameters.AddWithValue("$by", (createdBy ?? string.Empty).Trim());
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    private static async Task ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken ct,
-        params (string Name, object Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value);
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    private static string Iso(DateTimeOffset value) => value.ToUniversalTime().ToString("O");
-
-    private sealed record AssetRow(string Id, string Kind, string Name, string Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int LatestVersion);
 }

@@ -3,7 +3,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
@@ -71,67 +74,45 @@ public sealed record ExpandWorkflowModulesRequest(WorkflowDefinition Workflow);
 public sealed record WorkflowModuleDependency(string InstanceNodeId, string ModuleId, int Version, string ModuleHash);
 public sealed record ExpandedWorkflowModules(WorkflowDefinition Workflow, IReadOnlyList<WorkflowModuleDependency> Dependencies);
 
-public sealed class WorkflowModuleStore(SqliteMetadataDatabase db)
+public sealed class WorkflowModuleStore(IVisionStudioDbFactory dbFactory)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    public WorkflowModuleStore(SqliteMetadataDatabase db) : this(new VisionStudioDbFactory(db)) { }
+
     public async Task<IReadOnlyList<WorkflowModuleDescriptor>> ListAsync(CancellationToken ct)
     {
-        var modules = new List<(string Id,string Name,string Description,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt,int LatestVersion)>();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version FROM workflow_modules ORDER BY updated_at DESC,id;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-                modules.Add((reader.GetString(0),reader.GetString(1),reader.GetString(2),DateTimeOffset.Parse(reader.GetString(3)),DateTimeOffset.Parse(reader.GetString(4)),reader.GetInt32(5)));
-        }
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var modules = await db.WorkflowModules
+            .OrderByDescending(x => x.UpdatedAt)
+            .ThenBy(x => x.Id)
+            .ToListAsync(ct);
 
         var result = new List<WorkflowModuleDescriptor>(modules.Count);
         foreach (var module in modules)
             // R12（2026-10-12 复审）：列表只返回摘要——每模块仅携带最新版本，详情通过
             // GET /api/modules/{id}（按 ID 直查）、历史版本通过版本端点按需获取。
-            // 旧实现为列表反序列化全部模块的全部版本工作流，规模增长时列表成本失控。
-            result.Add(new WorkflowModuleDescriptor(module.Id,module.Name,module.Description,module.CreatedAt,module.UpdatedAt,module.LatestVersion,await ListVersionsAsync(connection,module.Id,ct,limit:1)));
+            result.Add(new WorkflowModuleDescriptor(module.Id, module.Name, module.Description, module.CreatedAt, module.UpdatedAt, module.LatestVersion, await ListVersionsAsync(db, module.Id, ct, limit: 1)));
         return result;
     }
 
     public async Task<WorkflowModuleDescriptor?> GetAsync(string id, CancellationToken ct)
     {
-        // R12（2026-10-12 复审）：按 ID 直接查询。旧实现调用 ListAsync——列出全部模块并反序列化
-        // 每个模块的全部版本——再取首项；版本规模增长后，查询单个模块的代价与全库版本总量成正比。
-        // 语义保持与 ListAsync 一致：ID 匹配大小写不敏感（COLLATE NOCASE），返回值用库内原始 ID。
-        await using var connection = await db.OpenConnectionAsync(ct);
-        string storedId, name, description, createdAtRaw, updatedAtRaw;
-        int latestVersion;
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version FROM workflow_modules WHERE id=$id COLLATE NOCASE;";
-            command.Parameters.AddWithValue("$id", id);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            if (!await reader.ReadAsync(ct)) return null;
-            storedId = reader.GetString(0);
-            name = reader.GetString(1);
-            description = reader.GetString(2);
-            createdAtRaw = reader.GetString(3);
-            updatedAtRaw = reader.GetString(4);
-            latestVersion = reader.GetInt32(5);
-        }
-        return new WorkflowModuleDescriptor(storedId, name, description,
-            DateTimeOffset.Parse(createdAtRaw), DateTimeOffset.Parse(updatedAtRaw), latestVersion,
-            await ListVersionsAsync(connection, storedId, ct));
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var module = await db.WorkflowModules
+            .FirstOrDefaultAsync(x => EF.Functions.Collate(x.Id, "NOCASE") == id, ct);
+        if (module is null) return null;
+        return new WorkflowModuleDescriptor(module.Id, module.Name, module.Description,
+            module.CreatedAt, module.UpdatedAt, module.LatestVersion,
+            await ListVersionsAsync(db, module.Id, ct));
     }
 
     public async Task<WorkflowModuleVersion?> GetVersionAsync(string id, int version, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT module_hash,created_at,note,workflow_json,inputs_json,outputs_json,parameters_json FROM workflow_module_versions WHERE module_id=$id AND version=$version;";
-        command.Parameters.AddWithValue("$id",id);
-        command.Parameters.AddWithValue("$version",version);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return null;
-        return ReadVersion(id,version,reader);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.WorkflowModuleVersions
+            .FirstOrDefaultAsync(x => x.ModuleId == id && x.Version == version, ct);
+        return entity is null ? null : ToVersion(entity);
     }
 
     public async Task<WorkflowModuleDescriptor> CreateAsync(
@@ -148,52 +129,54 @@ public sealed class WorkflowModuleStore(SqliteMetadataDatabase db)
         ValidateId(id);
         if (string.IsNullOrWhiteSpace(name)) throw new ApiValidationException("Module name is required.");
         var now = DateTimeOffset.UtcNow;
-        var hash = ComputeHash(workflow,inputs,outputs,parameters);
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var tx = connection.BeginTransaction(deferred:false);
+        var hash = ComputeHash(workflow, inputs, outputs, parameters);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
         try
         {
-            await using (var command = connection.CreateCommand())
+            db.WorkflowModules.Add(new WorkflowModuleEntity
             {
-                command.Transaction=tx;
-                command.CommandText="INSERT INTO workflow_modules(id,name,description,created_at,updated_at,latest_version) VALUES($id,$name,$description,$at,$at,1);";
-                command.Parameters.AddWithValue("$id",id); command.Parameters.AddWithValue("$name",name.Trim()); command.Parameters.AddWithValue("$description",description.Trim()); command.Parameters.AddWithValue("$at",Iso(now));
-                await command.ExecuteNonQueryAsync(ct);
-            }
-            await InsertVersionAsync(connection,tx,id,1,hash,now,note,workflow,inputs,outputs,parameters,ct);
+                Id = id,
+                Name = name.Trim(),
+                Description = description.Trim(),
+                CreatedAt = now,
+                UpdatedAt = now,
+                LatestVersion = 1
+            });
+            AddVersionEntity(db, id, 1, hash, now, note, workflow, inputs, outputs, parameters);
+            await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode==19)
+        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: 19 } sqliteEx)
         {
             await tx.RollbackAsync(CancellationToken.None);
-            throw new ApiConflictException($"Workflow module '{id}' already exists.",ex);
+            throw new ApiConflictException($"Workflow module '{id}' already exists.", sqliteEx);
         }
-        return (await GetAsync(id,ct))!;
+        return (await GetAsync(id, ct))!;
     }
 
     public async Task<WorkflowModuleVersion> AddVersionAsync(string id, WorkflowDefinition workflow, string note, CancellationToken ct)
     {
-        var module = await GetAsync(id,ct) ?? throw new ApiNotFoundException($"Workflow module '{id}' does not exist.");
-        var previous = module.Versions.OrderByDescending(x=>x.Version).First();
+        var module = await GetAsync(id, ct) ?? throw new ApiNotFoundException($"Workflow module '{id}' does not exist.");
+        var previous = module.Versions.OrderByDescending(x => x.Version).First();
         var inputs = previous.Inputs;
         var outputs = previous.Outputs;
-        var parameters = RebaseParameterDefaults(previous.Parameters,workflow);
-        ValidateInterface(workflow,inputs,outputs,parameters);
-        var version=module.LatestVersion+1;
-        var now=DateTimeOffset.UtcNow;
-        var hash=ComputeHash(workflow,inputs,outputs,parameters);
-        await using var connection=await db.OpenConnectionAsync(ct);
-        await using var tx=connection.BeginTransaction(deferred:false);
-        await InsertVersionAsync(connection,tx,id,version,hash,now,note,workflow,inputs,outputs,parameters,ct);
-        await using (var update=connection.CreateCommand())
-        {
-            update.Transaction=tx;
-            update.CommandText="UPDATE workflow_modules SET latest_version=$version,updated_at=$at WHERE id=$id;";
-            update.Parameters.AddWithValue("$version",version); update.Parameters.AddWithValue("$at",Iso(now)); update.Parameters.AddWithValue("$id",id);
-            await update.ExecuteNonQueryAsync(ct);
-        }
+        var parameters = RebaseParameterDefaults(previous.Parameters, workflow);
+        ValidateInterface(workflow, inputs, outputs, parameters);
+        var version = module.LatestVersion + 1;
+        var now = DateTimeOffset.UtcNow;
+        var hash = ComputeHash(workflow, inputs, outputs, parameters);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        AddVersionEntity(db, id, version, hash, now, note, workflow, inputs, outputs, parameters);
+        await db.SaveChangesAsync(ct);
+        await db.WorkflowModules
+            .Where(x => x.Id == id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.LatestVersion, version)
+                .SetProperty(x => x.UpdatedAt, now), ct);
         await tx.CommitAsync(ct);
-        return (await GetVersionAsync(id,version,ct))!;
+        return (await GetVersionAsync(id, version, ct))!;
     }
 
     private static IReadOnlyList<WorkflowModuleParameter> RebaseParameterDefaults(IReadOnlyList<WorkflowModuleParameter> existing, WorkflowDefinition workflow)
@@ -226,45 +209,43 @@ public sealed class WorkflowModuleStore(SqliteMetadataDatabase db)
         if (parameters.Select(x=>x.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=parameters.Count) throw new ApiValidationException("Module parameter names must be unique.");
     }
 
-    private static async Task InsertVersionAsync(SqliteConnection connection,SqliteTransaction tx,string id,int version,string hash,DateTimeOffset at,string note,WorkflowDefinition workflow,IReadOnlyList<WorkflowModulePort> inputs,IReadOnlyList<WorkflowModulePort> outputs,IReadOnlyList<WorkflowModuleParameter> parameters,CancellationToken ct)
+    private static void AddVersionEntity(VisionStudioDbContext db, string id, int version, string hash, DateTimeOffset at, string note, WorkflowDefinition workflow, IReadOnlyList<WorkflowModulePort> inputs, IReadOnlyList<WorkflowModulePort> outputs, IReadOnlyList<WorkflowModuleParameter> parameters)
     {
-        await using var command=connection.CreateCommand();
-        command.Transaction=tx;
-        command.CommandText="""
-INSERT INTO workflow_module_versions(module_id,version,module_hash,created_at,note,workflow_json,inputs_json,outputs_json,parameters_json)
-VALUES($id,$version,$hash,$at,$note,$workflow,$inputs,$outputs,$parameters);
-""";
-        command.Parameters.AddWithValue("$id",id); command.Parameters.AddWithValue("$version",version); command.Parameters.AddWithValue("$hash",hash); command.Parameters.AddWithValue("$at",Iso(at)); command.Parameters.AddWithValue("$note",note?.Trim()??string.Empty);
-        command.Parameters.AddWithValue("$workflow",JsonSerializer.Serialize(workflow,Json)); command.Parameters.AddWithValue("$inputs",JsonSerializer.Serialize(inputs,Json)); command.Parameters.AddWithValue("$outputs",JsonSerializer.Serialize(outputs,Json)); command.Parameters.AddWithValue("$parameters",JsonSerializer.Serialize(parameters,Json));
-        await command.ExecuteNonQueryAsync(ct);
+        db.WorkflowModuleVersions.Add(new WorkflowModuleVersionEntity
+        {
+            ModuleId = id,
+            Version = version,
+            ModuleHash = hash,
+            CreatedAt = at,
+            Note = note?.Trim() ?? string.Empty,
+            WorkflowJson = JsonSerializer.Serialize(workflow, Json),
+            InputsJson = JsonSerializer.Serialize(inputs, Json),
+            OutputsJson = JsonSerializer.Serialize(outputs, Json),
+            ParametersJson = JsonSerializer.Serialize(parameters, Json)
+        });
     }
 
-    private static async Task<IReadOnlyList<WorkflowModuleVersion>> ListVersionsAsync(SqliteConnection connection,string id,CancellationToken ct,int? limit=null)
+    private static async Task<IReadOnlyList<WorkflowModuleVersion>> ListVersionsAsync(VisionStudioDbContext db, string id, CancellationToken ct, int? limit = null)
     {
-        var result=new List<WorkflowModuleVersion>();
-        await using var command=connection.CreateCommand();
-        command.CommandText="SELECT version,module_hash,created_at,note,workflow_json,inputs_json,outputs_json,parameters_json FROM workflow_module_versions WHERE module_id=$id ORDER BY version DESC"+(limit is int take?" LIMIT $limit;":";");
-        command.Parameters.AddWithValue("$id",id);
-        if (limit is int bounded) command.Parameters.AddWithValue("$limit",bounded);
-        await using var reader=await command.ExecuteReaderAsync(ct);
-        while(await reader.ReadAsync(ct)) result.Add(ReadVersion(id,reader.GetInt32(0),reader,offset:1));
-        return result;
+        IQueryable<WorkflowModuleVersionEntity> query = db.WorkflowModuleVersions
+            .Where(x => x.ModuleId == id)
+            .OrderByDescending(x => x.Version);
+        if (limit is int take) query = query.Take(take);
+        var entities = await query.ToListAsync(ct);
+        return entities.Select(ToVersion).ToList();
     }
 
-    private static WorkflowModuleVersion ReadVersion(string id,int version,SqliteDataReader reader,int offset=0)
-        => new(id,version,reader.GetString(offset),DateTimeOffset.Parse(reader.GetString(offset+1)),reader.GetString(offset+2),
-            JsonSerializer.Deserialize<WorkflowDefinition>(reader.GetString(offset+3),Json)!,
-            JsonSerializer.Deserialize<WorkflowModulePort[]>(reader.GetString(offset+4),Json)??[],
-            JsonSerializer.Deserialize<WorkflowModulePort[]>(reader.GetString(offset+5),Json)??[],
-            JsonSerializer.Deserialize<WorkflowModuleParameter[]>(reader.GetString(offset+6),Json)??[]);
+    private static WorkflowModuleVersion ToVersion(WorkflowModuleVersionEntity e)
+        => new(e.ModuleId, e.Version, e.ModuleHash, e.CreatedAt, e.Note,
+            JsonSerializer.Deserialize<WorkflowDefinition>(e.WorkflowJson, Json)!,
+            JsonSerializer.Deserialize<WorkflowModulePort[]>(e.InputsJson, Json) ?? [],
+            JsonSerializer.Deserialize<WorkflowModulePort[]>(e.OutputsJson, Json) ?? [],
+            JsonSerializer.Deserialize<WorkflowModuleParameter[]>(e.ParametersJson, Json) ?? []);
 
-    public async Task DeleteAuthoringRollbackAsync(string id,CancellationToken ct)
+    public async Task DeleteAuthoringRollbackAsync(string id, CancellationToken ct)
     {
-        await using var connection=await db.OpenConnectionAsync(ct);
-        await using var command=connection.CreateCommand();
-        command.CommandText="DELETE FROM workflow_modules WHERE id=$id;";
-        command.Parameters.AddWithValue("$id",id);
-        await command.ExecuteNonQueryAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await db.WorkflowModules.Where(x => x.Id == id).ExecuteDeleteAsync(ct);
     }
 
     public static string ComputeHash(WorkflowDefinition workflow,IReadOnlyList<WorkflowModulePort> inputs,IReadOnlyList<WorkflowModulePort> outputs,IReadOnlyList<WorkflowModuleParameter> parameters)

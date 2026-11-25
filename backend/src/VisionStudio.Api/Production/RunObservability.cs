@@ -1,5 +1,8 @@
 
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api;
 
@@ -44,8 +47,11 @@ public sealed record RunObservabilitySnapshot(
 /// Baselines intentionally use prior completed runs with the same semantic workflow
 /// identity and never mix a future run into the current comparison.
 /// </summary>
-public sealed class RunObservabilityService(SqliteMetadataDatabase db, TraceabilityStore traces)
+public sealed class RunObservabilityService(IVisionStudioDbFactory dbFactory, TraceabilityStore traces)
 {
+    public RunObservabilityService(SqliteMetadataDatabase db, TraceabilityStore traces)
+        : this(new VisionStudioDbFactory(db), traces) { }
+
     public async Task<RunObservabilitySnapshot> GetAsync(string runId, int days = 7, int history = 100, CancellationToken ct = default)
     {
         var trace = await traces.GetAsync(runId, ct)
@@ -81,32 +87,14 @@ public sealed class RunObservabilityService(SqliteMetadataDatabase db, Traceabil
 
     private async Task<IReadOnlyList<NodeTimelineObservation>> ReadTimelineAsync(string runId, CancellationToken ct)
     {
-        var result = new List<NodeTimelineObservation>();
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT run_id,execution_sequence,node_id,node_type,phase,success,start_offset_ms,end_offset_ms,duration_ms,error
-FROM run_node_observations
-WHERE run_id=$run
-ORDER BY execution_sequence;
-""";
-        command.Parameters.AddWithValue("$run", runId);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            result.Add(new NodeTimelineObservation(
-                reader.GetString(0),
-                reader.GetInt64(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetString(4),
-                reader.GetInt32(5) != 0,
-                reader.GetDouble(6),
-                reader.GetDouble(7),
-                reader.GetDouble(8),
-                reader.IsDBNull(9) ? null : reader.GetString(9)));
-        }
-        return result;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return await db.RunNodeObservations
+            .Where(x => x.RunId == runId)
+            .OrderBy(x => x.ExecutionSequence)
+            .Select(x => new NodeTimelineObservation(
+                x.RunId, x.ExecutionSequence, x.NodeId, x.NodeType, x.Phase, x.Success,
+                x.StartOffsetMs, x.EndOffsetMs, x.DurationMs, x.Error))
+            .ToListAsync(ct);
     }
 
     private async Task<(int RunCount, IReadOnlyDictionary<string, List<double>> Samples)> ReadBaselineSamplesAsync(
@@ -115,56 +103,47 @@ ORDER BY execution_sequence;
         int history,
         CancellationToken ct)
     {
-        var cutoff = trace.StartedAt.AddDays(-days).ToUniversalTime().ToString("O");
-        var current = trace.StartedAt.ToUniversalTime().ToString("O");
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        var identityClause = !string.IsNullOrWhiteSpace(trace.WorkflowHash)
-            ? "t.workflow_hash=$workflowHash"
-            : "t.workflow_id=$workflowId";
-        var jobClause = !string.IsNullOrWhiteSpace(trace.JobId)
-            ? "AND t.job_id=$jobId AND t.job_version=$jobVersion"
-            : "AND t.job_id IS NULL";
-        command.CommandText = $"""
-WITH comparable AS (
-    SELECT t.run_id
-    FROM run_traces t
-    WHERE {identityClause}
-      AND t.source=$source
-      {jobClause}
-      AND t.started_at < $current
-      AND t.started_at >= $cutoff
-      AND t.execution_status='Complete'
-    ORDER BY t.started_at DESC
-    LIMIT $history
-)
-SELECT o.run_id,o.node_id,o.node_type,o.duration_ms
-FROM run_node_observations o
-JOIN comparable c ON c.run_id=o.run_id
-WHERE o.success=1 AND o.phase='Run'
-ORDER BY o.run_id,o.execution_sequence;
-""";
-        if (!string.IsNullOrWhiteSpace(trace.WorkflowHash)) command.Parameters.AddWithValue("$workflowHash", trace.WorkflowHash);
-        else command.Parameters.AddWithValue("$workflowId", trace.WorkflowId);
-        command.Parameters.AddWithValue("$source", trace.Source);
+        var cutoff = trace.StartedAt.AddDays(-days);
+        var current = trace.StartedAt;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        IQueryable<RunTraceEntity> comparableQuery = db.RunTraces;
+        comparableQuery = !string.IsNullOrWhiteSpace(trace.WorkflowHash)
+            ? comparableQuery.Where(t => t.WorkflowHash == trace.WorkflowHash)
+            : comparableQuery.Where(t => t.WorkflowId == trace.WorkflowId);
+        comparableQuery = comparableQuery.Where(t => t.Source == trace.Source);
         if (!string.IsNullOrWhiteSpace(trace.JobId))
         {
-            command.Parameters.AddWithValue("$jobId", trace.JobId);
-            command.Parameters.AddWithValue("$jobVersion", trace.JobVersion ?? 0);
+            var jobVersion = trace.JobVersion ?? 0;
+            comparableQuery = comparableQuery.Where(t => t.JobId == trace.JobId && t.JobVersion == jobVersion);
         }
-        command.Parameters.AddWithValue("$current", current);
-        command.Parameters.AddWithValue("$cutoff", cutoff);
-        command.Parameters.AddWithValue("$history", history);
+        else
+        {
+            comparableQuery = comparableQuery.Where(t => t.JobId == null);
+        }
+
+        var comparableRunIds = await comparableQuery
+            .Where(t => t.StartedAt < current && t.StartedAt >= cutoff && t.ExecutionStatus == "Complete")
+            .OrderByDescending(t => t.StartedAt)
+            .Take(history)
+            .Select(t => t.RunId)
+            .ToListAsync(ct);
+        if (comparableRunIds.Count == 0) return (0, new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase));
+
+        var rows = await db.RunNodeObservations
+            .Where(o => comparableRunIds.Contains(o.RunId) && o.Success && o.Phase == "Run")
+            .OrderBy(o => o.RunId)
+            .ThenBy(o => o.ExecutionSequence)
+            .Select(o => new { o.RunId, o.NodeId, o.NodeType, o.DurationMs })
+            .ToListAsync(ct);
 
         var samples = new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase);
         var runIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        foreach (var row in rows)
         {
-            runIds.Add(reader.GetString(0));
-            var key = Key(reader.GetString(1), reader.GetString(2));
+            runIds.Add(row.RunId);
+            var key = Key(row.NodeId, row.NodeType);
             if (!samples.TryGetValue(key, out var values)) samples[key] = values = [];
-            values.Add(reader.GetDouble(3));
+            values.Add(row.DurationMs);
         }
         return (runIds.Count, samples);
     }

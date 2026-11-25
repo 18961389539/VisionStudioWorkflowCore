@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api.Spc;
 
@@ -9,8 +11,10 @@ namespace VisionStudio.Api.Spc;
 /// 只挑选数值负载：Double / Integer 视为一个样本，NumberList 的每个元素视为一个样本。
 /// 其他类型与 NaN/Infinity 一律跳过并计数，不做静默截断。
 /// </summary>
-public sealed class SpcSeriesReader(SqliteMetadataDatabase database)
+public sealed class SpcSeriesReader(IVisionStudioDbFactory dbFactory)
 {
+    public SpcSeriesReader(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
+
     public const int MaxDatasetLimit = 500;
     public const int MaxRecordLimit = 10000;
     public const int MaxSamples = 50000;
@@ -22,33 +26,23 @@ public sealed class SpcSeriesReader(SqliteMetadataDatabase database)
         if (limit is < 1 or > MaxDatasetLimit)
             throw new ArgumentOutOfRangeException(nameof(limit), $"limit must be within 1..{MaxDatasetLimit}.");
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT dataset,
-       COUNT(*),
-       COALESCE(SUM(length(CAST(payload_json AS BLOB))), 0),
-       MIN(created_at),
-       MAX(created_at)
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.Database
+            .SqlQuery<DatasetAggRow>($"""
+SELECT dataset AS Dataset,
+       COUNT(*) AS RecordCount,
+       COALESCE(SUM(length(CAST(payload_json AS BLOB))), 0) AS PayloadBytes,
+       MIN(created_at) AS FirstRaw,
+       MAX(created_at) AS LastRaw
 FROM result_records
 GROUP BY dataset
 ORDER BY MAX(created_at) DESC
-LIMIT $limit;
-""";
-        command.Parameters.AddWithValue("$limit", limit);
+LIMIT {limit}
+""")
+            .ToListAsync(cancellationToken);
 
-        var datasets = new List<SpcDatasetSummary>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            datasets.Add(new SpcDatasetSummary(
-                Dataset: reader.GetString(0),
-                RecordCount: reader.GetInt32(1),
-                PayloadBytes: reader.GetInt64(2),
-                FirstRecordAt: ParseTimestamp(reader.IsDBNull(3) ? null : reader.GetString(3)),
-                LastRecordAt: ParseTimestamp(reader.IsDBNull(4) ? null : reader.GetString(4))));
-        }
-        return datasets;
+        return rows.Select(r => new SpcDatasetSummary(
+            r.Dataset, r.RecordCount, r.PayloadBytes, ParseTimestamp(r.FirstRaw), ParseTimestamp(r.LastRaw))).ToList();
     }
 
     public async Task<SpcSeries> ReadSeriesAsync(
@@ -63,27 +57,28 @@ LIMIT $limit;
         if (from is not null && to is not null && from > to)
             throw new ArgumentException("from must not be later than to.", nameof(from));
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT id, record_key, payload_json, created_at
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var fromStr = from?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        var toStr = to?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        var rows = await db.Database
+            .SqlQuery<SeriesRow>($"""
+SELECT id AS Id,
+       record_key AS RecordKey,
+       payload_json AS PayloadJson,
+       created_at AS CreatedAtRaw
 FROM result_records
-WHERE dataset = $dataset
-  AND ($from IS NULL OR created_at >= $from)
-  AND ($to IS NULL OR created_at <= $to)
+WHERE dataset = {dataset}
+  AND ({fromStr} IS NULL OR created_at >= {fromStr})
+  AND ({toStr} IS NULL OR created_at <= {toStr})
 ORDER BY created_at ASC, rowid ASC
-LIMIT $limit;
-""";
-        command.Parameters.AddWithValue("$dataset", dataset);
-        command.Parameters.AddWithValue("$from", (object?)(from?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)) ?? DBNull.Value);
-        command.Parameters.AddWithValue("$to", (object?)(to?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)) ?? DBNull.Value);
-        command.Parameters.AddWithValue("$limit", limit + 1);
+LIMIT {limit + 1}
+""")
+            .ToListAsync(cancellationToken);
 
         var samples = new List<SpcSamplePoint>();
         int recordsRead = 0, unsupported = 0, empty = 0, nonFinite = 0;
         var truncated = false;
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        foreach (var row in rows)
         {
             if (recordsRead >= limit)
             {
@@ -92,12 +87,8 @@ LIMIT $limit;
             }
             recordsRead++;
 
-            var recordId = reader.GetString(0);
-            var recordKey = reader.IsDBNull(1) ? null : reader.GetString(1);
-            var payload = reader.GetString(2);
-            var timestamp = ParseTimestamp(reader.GetString(3)) ?? DateTimeOffset.MinValue;
-
-            var (values, kind) = ReadValues(payload);
+            var timestamp = ParseTimestamp(row.CreatedAtRaw) ?? DateTimeOffset.MinValue;
+            var (values, kind) = ReadValues(row.PayloadJson);
             if (kind == PayloadKind.Unsupported) { unsupported++; continue; }
             if (kind == PayloadKind.Empty) { empty++; continue; }
 
@@ -109,13 +100,16 @@ LIMIT $limit;
                     break;
                 }
                 if (!double.IsFinite(value)) { nonFinite++; continue; }
-                samples.Add(new SpcSamplePoint(timestamp, value, recordId, recordKey));
+                samples.Add(new SpcSamplePoint(timestamp, value, row.Id, row.RecordKey));
             }
             if (truncated) break;
         }
 
         return new SpcSeries(dataset, samples, recordsRead, unsupported, empty, nonFinite, truncated);
     }
+
+    private sealed record DatasetAggRow(string Dataset, int RecordCount, long PayloadBytes, string? FirstRaw, string? LastRaw);
+    private sealed record SeriesRow(string Id, string? RecordKey, string PayloadJson, string CreatedAtRaw);
 
     private enum PayloadKind { Numeric, Empty, Unsupported }
 

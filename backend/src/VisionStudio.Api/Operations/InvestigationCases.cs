@@ -1,8 +1,11 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api;
 
@@ -124,10 +127,13 @@ public sealed record InvestigationTrendDashboard(
 /// without changing workflow execution, camera acquisition, robot control or plugin dispatch.
 /// </summary>
 public sealed class InvestigationCaseService(
-    SqliteMetadataDatabase db,
+    IVisionStudioDbFactory dbFactory,
     TraceabilityStore traces,
     TraceAnalysisService analysis)
 {
+    public InvestigationCaseService(SqliteMetadataDatabase db, TraceabilityStore traces, TraceAnalysisService analysis)
+        : this(new VisionStudioDbFactory(db), traces, analysis) { }
+
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
     private static readonly string[] AllowedStatuses = ["Open", "Investigating", "Resolved", "Verified", "Closed"];
     private static readonly string[] AllowedSeverities = ["Low", "Medium", "High", "Critical"];
@@ -136,15 +142,19 @@ public sealed class InvestigationCaseService(
     {
         take = Math.Clamp(take, 1, 500);
         if (!string.IsNullOrWhiteSpace(status)) ValidateStatus(status);
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {CaseColumns} FROM investigation_cases {(string.IsNullOrWhiteSpace(status) ? "" : "WHERE status=$status")} ORDER BY CASE status WHEN 'Open' THEN 0 WHEN 'Investigating' THEN 1 WHEN 'Resolved' THEN 2 WHEN 'Verified' THEN 3 ELSE 4 END,last_seen_at DESC LIMIT $take;";
-        if (!string.IsNullOrWhiteSpace(status)) command.Parameters.AddWithValue("$status", CanonicalStatus(status));
-        command.Parameters.AddWithValue("$take", take);
-        var result = new List<InvestigationCaseSummary>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(ReadCase(reader));
-        return result;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        IQueryable<InvestigationCaseEntity> query = db.InvestigationCases;
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var canonical = CanonicalStatus(status);
+            query = query.Where(x => x.Status == canonical);
+        }
+        var entities = await query
+            .OrderBy(x => x.Status == "Open" ? 0 : x.Status == "Investigating" ? 1 : x.Status == "Resolved" ? 2 : x.Status == "Verified" ? 3 : 4)
+            .ThenByDescending(x => x.LastSeenAt)
+            .Take(take)
+            .ToListAsync(ct);
+        return entities.Select(ToSummary).ToList();
     }
 
     public async Task<InvestigationCaseDetail?> GetAsync(string id, CancellationToken ct = default)
@@ -156,15 +166,18 @@ public sealed class InvestigationCaseService(
 
     public async Task<InvestigationCaseDetail?> GetForTraceAsync(string runId, CancellationToken ct = default)
     {
-        await using (var connection = await db.OpenConnectionAsync(ct))
-        await using (var direct = connection.CreateCommand())
+        await using (var db = await dbFactory.CreateDbContextAsync(ct))
         {
-            direct.CommandText = $"SELECT {AliasedCaseColumns("c")} FROM investigation_case_runs r JOIN investigation_cases c ON c.id=r.case_id WHERE r.run_id=$run ORDER BY c.updated_at DESC LIMIT 1;";
-            direct.Parameters.AddWithValue("$run", runId);
-            await using var reader = await direct.ExecuteReaderAsync(ct);
-            if (await reader.ReadAsync(ct))
+            var direct = await (
+                from r in db.InvestigationCaseRuns
+                join c in db.InvestigationCases on r.CaseId equals c.Id
+                where r.RunId == runId
+                orderby c.UpdatedAt descending
+                select c)
+                .FirstOrDefaultAsync(ct);
+            if (direct is not null)
             {
-                var summary = ReadCase(reader);
+                var summary = ToSummary(direct);
                 return new InvestigationCaseDetail(summary, await ReadEvidenceAsync(summary.Id, 100, ct), await ReadVerificationEvidenceAsync(summary.Id, 20, ct));
             }
         }
@@ -174,14 +187,11 @@ public sealed class InvestigationCaseService(
         var signature = await analysis.AnalyzeFailureAsync(runId, days: 30, take: 1, ct);
         if (!signature.HasSignature || string.IsNullOrWhiteSpace(signature.SignatureId)) return null;
         var key = CaseKey(trace, signature.SignatureId);
-        await using var lookupConnection = await db.OpenConnectionAsync(ct);
-        await using var lookup = lookupConnection.CreateCommand();
-        lookup.CommandText = $"SELECT {CaseColumns} FROM investigation_cases WHERE case_key=$key LIMIT 1;";
-        lookup.Parameters.AddWithValue("$key", key);
-        await using var lookupReader = await lookup.ExecuteReaderAsync(ct);
-        if (!await lookupReader.ReadAsync(ct)) return null;
-        var found = ReadCase(lookupReader);
-        return new InvestigationCaseDetail(found, await ReadEvidenceAsync(found.Id, 100, ct), await ReadVerificationEvidenceAsync(found.Id, 20, ct));
+        await using var lookupDb = await dbFactory.CreateDbContextAsync(ct);
+        var found = await lookupDb.InvestigationCases.FirstOrDefaultAsync(x => x.CaseKey == key, ct);
+        if (found is null) return null;
+        var summaryFound = ToSummary(found);
+        return new InvestigationCaseDetail(summaryFound, await ReadEvidenceAsync(summaryFound.Id, 100, ct), await ReadVerificationEvidenceAsync(summaryFound.Id, 20, ct));
     }
 
     public async Task<InvestigationCaseDetail> TrackFromTraceAsync(string runId, TrackInvestigationRequest? request, CancellationToken ct = default)
@@ -209,85 +219,109 @@ public sealed class InvestigationCaseService(
         var firstSeen = evidence.Min(x => x.StartedAt);
         var lastSeen = evidence.Max(x => x.StartedAt);
 
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var tx = connection.BeginTransaction(deferred: false);
-        var existing = await ReadByKeyAsync(connection, tx, caseKey, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        var existing = await db.InvestigationCases.AsTracking().FirstOrDefaultAsync(x => x.CaseKey == caseKey, ct);
         var id = existing?.Id ?? $"case-{Guid.NewGuid():N}"[..17];
         var reopen = existing is not null
             && existing.Status is "Resolved" or "Verified" or "Closed"
             && lastSeen > (existing.ClosedAt ?? existing.VerifiedAt ?? existing.ResolvedAt ?? existing.UpdatedAt);
         var status = reopen ? "Open" : existing?.Status ?? "Open";
         var reopenCount = (existing?.ReopenCount ?? 0) + (reopen ? 1 : 0);
-        var createdAt = existing?.CreatedAt ?? now;
-        var effectiveSeverity = existing is null ? severity : requestedSeverity ?? existing.Severity;
+        var effectiveSeverity = existing is null
+            ? severity
+            : string.Equals(existing.Severity, "Critical", StringComparison.Ordinal)
+                ? "Critical"
+                : requestedSeverity ?? existing.Severity;
         var effectiveFirstSeen = existing is null || firstSeen < existing.FirstSeenAt ? firstSeen : existing.FirstSeenAt;
         var effectiveLastSeen = existing is null || lastSeen > existing.LastSeenAt ? lastSeen : existing.LastSeenAt;
 
-        await using (var upsert = connection.CreateCommand())
+        if (existing is null)
         {
-            upsert.Transaction = tx;
-            upsert.CommandText = """
-INSERT INTO investigation_cases(
- id,case_key,signature_id,category,title,status,severity,workflow_id,workflow_hash,source,job_id,job_version,
- primary_node_id,primary_node_type,fingerprint,representative_run_id,first_seen_at,last_seen_at,occurrence_count,reopen_count,
- owner,root_cause,resolution_note,verification_note,verification_run_id,resolved_at,verified_at,closed_at,created_at,updated_at)
-VALUES(
- $id,$key,$signature,$category,$title,$status,$severity,$workflow,$hash,$source,$job,$jobVersion,
- $nodeId,$nodeType,$fingerprint,$run,$first,$last,$count,$reopens,
- $owner,$rootCause,$resolution,$verification,$verificationRun,$resolvedAt,$verifiedAt,$closedAt,$created,$updated)
-ON CONFLICT(case_key) DO UPDATE SET
- category=excluded.category,title=COALESCE(NULLIF(investigation_cases.title,''),excluded.title),
- severity=CASE WHEN investigation_cases.severity='Critical' THEN 'Critical' ELSE excluded.severity END,
- primary_node_id=excluded.primary_node_id,primary_node_type=excluded.primary_node_type,fingerprint=excluded.fingerprint,
- representative_run_id=excluded.representative_run_id,first_seen_at=excluded.first_seen_at,last_seen_at=excluded.last_seen_at,
- occurrence_count=MAX(investigation_cases.occurrence_count,excluded.occurrence_count),reopen_count=excluded.reopen_count,
- owner=COALESCE(excluded.owner,investigation_cases.owner),status=excluded.status,
- verification_note=CASE WHEN excluded.status='Open' THEN NULL ELSE investigation_cases.verification_note END,
- verification_run_id=CASE WHEN excluded.status='Open' THEN NULL ELSE investigation_cases.verification_run_id END,
- resolved_at=CASE WHEN excluded.status='Open' THEN NULL ELSE investigation_cases.resolved_at END,
- verified_at=CASE WHEN excluded.status='Open' THEN NULL ELSE investigation_cases.verified_at END,
- closed_at=CASE WHEN excluded.status='Open' THEN NULL ELSE investigation_cases.closed_at END,
- updated_at=excluded.updated_at;
-""";
-            Add(upsert, "$id", id); Add(upsert, "$key", caseKey); Add(upsert, "$signature", signature.SignatureId);
-            Add(upsert, "$category", signature.Category); Add(upsert, "$title", existing?.Title ?? title); Add(upsert, "$status", status);
-            Add(upsert, "$severity", effectiveSeverity); Add(upsert, "$workflow", trace.WorkflowId);
-            Add(upsert, "$hash", trace.WorkflowHash); Add(upsert, "$source", trace.Source); Add(upsert, "$job", trace.JobId); Add(upsert, "$jobVersion", trace.JobVersion);
-            Add(upsert, "$nodeId", signature.PrimaryNodeId); Add(upsert, "$nodeType", signature.PrimaryNodeType); Add(upsert, "$fingerprint", signature.Fingerprint);
-            Add(upsert, "$run", trace.RunId); Add(upsert, "$first", Iso(effectiveFirstSeen)); Add(upsert, "$last", Iso(effectiveLastSeen));
-            Add(upsert, "$count", Math.Max(signature.OccurrenceCount, existing?.OccurrenceCount ?? 0)); Add(upsert, "$reopens", reopenCount); Add(upsert, "$owner", owner);
-            Add(upsert, "$rootCause", existing?.RootCause); Add(upsert, "$resolution", existing?.ResolutionNote); Add(upsert, "$verification", existing?.VerificationNote);
-            Add(upsert, "$verificationRun", existing?.VerificationRunId); Add(upsert, "$resolvedAt", existing?.ResolvedAt is null ? null : Iso(existing.ResolvedAt.Value));
-            Add(upsert, "$verifiedAt", existing?.VerifiedAt is null ? null : Iso(existing.VerifiedAt.Value)); Add(upsert, "$closedAt", existing?.ClosedAt is null ? null : Iso(existing.ClosedAt.Value));
-            Add(upsert, "$created", Iso(createdAt)); Add(upsert, "$updated", Iso(now));
-            await upsert.ExecuteNonQueryAsync(ct);
+            existing = new InvestigationCaseEntity
+            {
+                Id = id,
+                CaseKey = caseKey,
+                SignatureId = signature.SignatureId,
+                Category = signature.Category,
+                Title = title,
+                Status = status,
+                Severity = effectiveSeverity,
+                WorkflowId = trace.WorkflowId,
+                WorkflowHash = trace.WorkflowHash,
+                Source = trace.Source,
+                JobId = trace.JobId,
+                JobVersion = trace.JobVersion,
+                PrimaryNodeId = signature.PrimaryNodeId,
+                PrimaryNodeType = signature.PrimaryNodeType,
+                Fingerprint = signature.Fingerprint,
+                RepresentativeRunId = trace.RunId,
+                FirstSeenAt = effectiveFirstSeen,
+                LastSeenAt = effectiveLastSeen,
+                OccurrenceCount = signature.OccurrenceCount,
+                ReopenCount = reopenCount,
+                Owner = owner,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.InvestigationCases.Add(existing);
         }
+        else
+        {
+            existing.Category = signature.Category;
+            if (string.IsNullOrEmpty(existing.Title)) existing.Title = title;
+            existing.Severity = effectiveSeverity;
+            existing.PrimaryNodeId = signature.PrimaryNodeId;
+            existing.PrimaryNodeType = signature.PrimaryNodeType;
+            existing.Fingerprint = signature.Fingerprint;
+            existing.RepresentativeRunId = trace.RunId;
+            existing.FirstSeenAt = effectiveFirstSeen;
+            existing.LastSeenAt = effectiveLastSeen;
+            existing.OccurrenceCount = Math.Max(existing.OccurrenceCount, signature.OccurrenceCount);
+            existing.ReopenCount = reopenCount;
+            existing.Owner = owner ?? existing.Owner;
+            existing.Status = status;
+            if (status == "Open")
+            {
+                existing.VerificationNote = null;
+                existing.VerificationRunId = null;
+                existing.ResolvedAt = null;
+                existing.VerifiedAt = null;
+                existing.ClosedAt = null;
+            }
+            existing.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
 
-        // Resolve the canonical id after the unique-key upsert. This closes the race where
-        // two engineers track the same signature concurrently and only one provisional id wins.
-        await using (var resolve = connection.CreateCommand())
-        {
-            resolve.Transaction = tx;
-            resolve.CommandText = "SELECT id FROM investigation_cases WHERE case_key=$key;";
-            resolve.Parameters.AddWithValue("$key", caseKey);
-            id = Convert.ToString(await resolve.ExecuteScalarAsync(ct))
-                ?? throw new ApiConflictException("Investigation case identity could not be resolved after upsert.");
-        }
+        var runIds = evidence.Select(x => x.RunId).Distinct().ToList();
+        var existingLinks = await db.InvestigationCaseRuns
+            .AsTracking()
+            .Where(x => x.CaseId == id && runIds.Contains(x.RunId))
+            .ToDictionaryAsync(x => x.RunId, ct);
 
         foreach (var occurrence in evidence)
         {
-            await using var link = connection.CreateCommand();
-            link.Transaction = tx;
-            link.CommandText = """
-INSERT INTO investigation_case_runs(case_id,run_id,started_at,disposition,total_duration_ms,node_duration_ms,linked_at)
-VALUES($case,$run,$started,$disposition,$duration,$nodeDuration,$linked)
-ON CONFLICT(case_id,run_id) DO UPDATE SET node_duration_ms=COALESCE(excluded.node_duration_ms,investigation_case_runs.node_duration_ms);
-""";
-            Add(link, "$case", id); Add(link, "$run", occurrence.RunId); Add(link, "$started", Iso(occurrence.StartedAt));
-            Add(link, "$disposition", occurrence.Disposition); Add(link, "$duration", occurrence.TotalDurationMs); Add(link, "$nodeDuration", occurrence.NodeDurationMs);
-            Add(link, "$linked", Iso(now));
-            await link.ExecuteNonQueryAsync(ct);
+            if (existingLinks.TryGetValue(occurrence.RunId, out var linked))
+            {
+                if (occurrence.NodeDurationMs is not null) linked.NodeDurationMs = occurrence.NodeDurationMs;
+            }
+            else
+            {
+                var entity = new InvestigationCaseRunEntity
+                {
+                    CaseId = id,
+                    RunId = occurrence.RunId,
+                    StartedAt = occurrence.StartedAt,
+                    Disposition = occurrence.Disposition,
+                    TotalDurationMs = occurrence.TotalDurationMs,
+                    NodeDurationMs = occurrence.NodeDurationMs,
+                    LinkedAt = now
+                };
+                db.InvestigationCaseRuns.Add(entity);
+                existingLinks[occurrence.RunId] = entity;
+            }
         }
+        await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return (await GetAsync(id, ct))!;
     }
@@ -324,18 +358,21 @@ ON CONFLICT(case_id,run_id) DO UPDATE SET node_duration_ms=COALESCE(excluded.nod
         if (status == "Resolved") { verifiedAt = null; closedAt = null; }
         if (status == "Verified") closedAt = null;
 
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-UPDATE investigation_cases SET status=$status,severity=$severity,owner=$owner,root_cause=$rootCause,resolution_note=$resolution,
- verification_note=$verification,verification_run_id=$verificationRun,resolved_at=$resolvedAt,verified_at=$verifiedAt,closed_at=$closedAt,updated_at=$updated
-WHERE id=$id;
-""";
-        Add(command, "$status", status); Add(command, "$severity", severity); Add(command, "$owner", owner); Add(command, "$rootCause", rootCause);
-        Add(command, "$resolution", resolution); Add(command, "$verification", verification); Add(command, "$verificationRun", verificationRun);
-        Add(command, "$resolvedAt", resolvedAt is null ? null : Iso(resolvedAt.Value)); Add(command, "$verifiedAt", verifiedAt is null ? null : Iso(verifiedAt.Value));
-        Add(command, "$closedAt", closedAt is null ? null : Iso(closedAt.Value)); Add(command, "$updated", Iso(now)); Add(command, "$id", id);
-        await command.ExecuteNonQueryAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await db.InvestigationCases
+            .Where(x => x.Id == id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Status, status)
+                .SetProperty(x => x.Severity, severity)
+                .SetProperty(x => x.Owner, owner)
+                .SetProperty(x => x.RootCause, rootCause)
+                .SetProperty(x => x.ResolutionNote, resolution)
+                .SetProperty(x => x.VerificationNote, verification)
+                .SetProperty(x => x.VerificationRunId, verificationRun)
+                .SetProperty(x => x.ResolvedAt, resolvedAt)
+                .SetProperty(x => x.VerifiedAt, verifiedAt)
+                .SetProperty(x => x.ClosedAt, closedAt)
+                .SetProperty(x => x.UpdatedAt, now), ct);
         return (await GetAsync(id, ct))!;
     }
 
@@ -407,23 +444,29 @@ WHERE id=$id;
         var now = DateTimeOffset.UtcNow;
         var evidenceId = $"verify-{Guid.NewGuid():N}"[..19];
 
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-INSERT INTO investigation_case_verifications(
- id,case_id,dataset_id,baseline_validation_run_id,candidate_validation_run_id,baseline_workflow_hash,candidate_workflow_hash,
- gate_status,baseline_signature_hits,candidate_signature_hits,baseline_inspectable_results,candidate_inspectable_results,
- baseline_summary_json,candidate_summary_json,reasons_json,warnings_json,note,created_at)
-VALUES($id,$case,$dataset,$baseline,$candidate,$baselineHash,$candidateHash,$gate,$baselineHits,$candidateHits,$baselineInspectable,$candidateInspectable,$baselineSummary,$candidateSummary,$reasons,$warnings,$note,$created);
-""";
-        Add(command, "$id", evidenceId); Add(command, "$case", id); Add(command, "$dataset", datasetId);
-        Add(command, "$baseline", baselineId); Add(command, "$candidate", candidateId); Add(command, "$baselineHash", baseline.WorkflowHash); Add(command, "$candidateHash", candidate.WorkflowHash);
-        Add(command, "$gate", gate); Add(command, "$baselineHits", baselineScan.Hits); Add(command, "$candidateHits", candidateScan.Hits);
-        Add(command, "$baselineInspectable", baselineScan.Inspectable); Add(command, "$candidateInspectable", candidateScan.Inspectable);
-        Add(command, "$baselineSummary", JsonSerializer.Serialize(baseline.Summary, _json)); Add(command, "$candidateSummary", JsonSerializer.Serialize(candidate.Summary, _json));
-        Add(command, "$reasons", JsonSerializer.Serialize(reasons, _json)); Add(command, "$warnings", JsonSerializer.Serialize(warnings, _json));
-        Add(command, "$note", note); Add(command, "$created", Iso(now));
-        await command.ExecuteNonQueryAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        db.InvestigationCaseVerifications.Add(new InvestigationCaseVerificationEntity
+        {
+            Id = evidenceId,
+            CaseId = id,
+            DatasetId = datasetId,
+            BaselineValidationRunId = baselineId,
+            CandidateValidationRunId = candidateId,
+            BaselineWorkflowHash = baseline.WorkflowHash,
+            CandidateWorkflowHash = candidate.WorkflowHash,
+            GateStatus = gate,
+            BaselineSignatureHits = baselineScan.Hits,
+            CandidateSignatureHits = candidateScan.Hits,
+            BaselineInspectableResults = baselineScan.Inspectable,
+            CandidateInspectableResults = candidateScan.Inspectable,
+            BaselineSummaryJson = JsonSerializer.Serialize(baseline.Summary, _json),
+            CandidateSummaryJson = JsonSerializer.Serialize(candidate.Summary, _json),
+            ReasonsJson = JsonSerializer.Serialize(reasons, _json),
+            WarningsJson = JsonSerializer.Serialize(warnings, _json),
+            Note = note,
+            CreatedAt = now
+        });
+        await db.SaveChangesAsync(ct);
 
         return new InvestigationVerificationEvidence(
             evidenceId, id, datasetId, baseline.DatasetName, baselineId, candidateId,
@@ -435,108 +478,94 @@ VALUES($id,$case,$dataset,$baseline,$candidate,$baselineHash,$candidateHash,$gat
     public async Task<InvestigationTrendDashboard> TrendsAsync(int days = 30, int top = 8, CancellationToken ct = default)
     {
         days = Math.Clamp(days, 1, 3650); top = Math.Clamp(top, 1, 50);
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-days).ToString("O");
-        await using var connection = await db.OpenConnectionAsync(ct);
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-days);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-        int trackedCases;
-        int activeCases;
-        int verifiedClosed;
-        await using (var counts = connection.CreateCommand())
-        {
-            counts.CommandText = "SELECT COUNT(*),SUM(CASE WHEN status IN ('Open','Investigating','Resolved') THEN 1 ELSE 0 END),SUM(CASE WHEN status IN ('Verified','Closed') THEN 1 ELSE 0 END) FROM investigation_cases;";
-            await using var reader = await counts.ExecuteReaderAsync(ct);
-            await reader.ReadAsync(ct);
-            trackedCases = reader.GetInt32(0);
-            activeCases = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
-            verifiedClosed = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
-        }
+        var statuses = await db.InvestigationCases.Select(x => x.Status).ToListAsync(ct);
+        var trackedCases = statuses.Count;
+        var activeCases = statuses.Count(s => s is "Open" or "Investigating" or "Resolved");
+        var verifiedClosed = statuses.Count(s => s is "Verified" or "Closed");
 
-        var timeline = new List<InvestigationTrendPoint>();
-        var totalEvidence = 0;
-        await using (var trend = connection.CreateCommand())
-        {
-            trend.CommandText = """
-SELECT substr(r.started_at,1,10),COUNT(*),
- SUM(CASE WHEN c.category='ExecutionFailure' THEN 1 ELSE 0 END),
- SUM(CASE WHEN c.category='QualityNG' THEN 1 ELSE 0 END),
- SUM(CASE WHEN c.category='PerformanceRegression' THEN 1 ELSE 0 END)
-FROM investigation_case_runs r JOIN investigation_cases c ON c.id=r.case_id
-WHERE r.started_at >= $cutoff
-GROUP BY substr(r.started_at,1,10) ORDER BY substr(r.started_at,1,10);
-""";
-            trend.Parameters.AddWithValue("$cutoff", cutoff);
-            await using var reader = await trend.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+        var runRows = await (
+            from r in db.InvestigationCaseRuns
+            join c in db.InvestigationCases on r.CaseId equals c.Id
+            where r.StartedAt >= cutoff
+            select new { r.CaseId, r.RunId, r.StartedAt, c.Category })
+            .ToListAsync(ct);
+
+        var timeline = runRows
+            .GroupBy(x => x.StartedAt.ToUniversalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new InvestigationTrendPoint(
+                g.Key,
+                g.Count(),
+                g.Count(x => x.Category == "ExecutionFailure"),
+                g.Count(x => x.Category == "QualityNG"),
+                g.Count(x => x.Category == "PerformanceRegression")))
+            .ToList();
+        var totalEvidence = runRows.Count;
+
+        var byCase = runRows.GroupBy(x => x.CaseId).ToDictionary(
+            g => g.Key,
+            g => new { Count = g.Count(), MaxStarted = g.Max(x => x.StartedAt) });
+
+        var allCases = await db.InvestigationCases.ToListAsync(ct);
+        var topSignatures = allCases
+            .Select(c =>
             {
-                var total = reader.GetInt32(1); totalEvidence += total;
-                timeline.Add(new InvestigationTrendPoint(reader.GetString(0), total, reader.GetInt32(2), reader.GetInt32(3), reader.GetInt32(4)));
-            }
-        }
+                var has = byCase.TryGetValue(c.Id, out var stats);
+                return new
+                {
+                    Trend = new InvestigationSignatureTrend(
+                        c.Id, c.SignatureId, c.Title, c.Category, c.Status, c.Severity, c.PrimaryNodeType,
+                        has ? stats!.Count : 0,
+                        has ? stats!.MaxStarted : DateTimeOffset.MinValue),
+                    c.LastSeenAt
+                };
+            })
+            .OrderByDescending(x => x.Trend.Occurrences)
+            .ThenByDescending(x => x.LastSeenAt)
+            .Take(top)
+            .Select(x => x.Trend)
+            .ToList();
 
-        var topSignatures = new List<InvestigationSignatureTrend>();
-        await using (var topQuery = connection.CreateCommand())
-        {
-            topQuery.CommandText = """
-SELECT c.id,c.signature_id,c.title,c.category,c.status,c.severity,c.primary_node_type,COUNT(r.run_id),MAX(r.started_at)
-FROM investigation_cases c LEFT JOIN investigation_case_runs r ON r.case_id=c.id AND r.started_at >= $cutoff
-GROUP BY c.id,c.signature_id,c.title,c.category,c.status,c.severity,c.primary_node_type
-ORDER BY COUNT(r.run_id) DESC,c.last_seen_at DESC LIMIT $top;
-""";
-            topQuery.Parameters.AddWithValue("$cutoff", cutoff); topQuery.Parameters.AddWithValue("$top", top);
-            await using var reader = await topQuery.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-                topSignatures.Add(new InvestigationSignatureTrend(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5),
-                    reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetInt32(7), reader.IsDBNull(8) ? DateTimeOffset.MinValue : DateTimeOffset.Parse(reader.GetString(8))));
-        }
         return new InvestigationTrendDashboard(days, trackedCases, activeCases, verifiedClosed, totalEvidence, timeline, topSignatures);
     }
 
     private async Task<InvestigationCaseSummary?> GetSummaryAsync(string id, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {CaseColumns} FROM investigation_cases WHERE id=$id;";
-        command.Parameters.AddWithValue("$id", id);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? ReadCase(reader) : null;
-    }
-
-    private static async Task<InvestigationCaseSummary?> ReadByKeyAsync(SqliteConnection connection, SqliteTransaction tx, string key, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand(); command.Transaction = tx;
-        command.CommandText = $"SELECT {CaseColumns} FROM investigation_cases WHERE case_key=$key;"; command.Parameters.AddWithValue("$key", key);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? ReadCase(reader) : null;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.InvestigationCases.FirstOrDefaultAsync(x => x.Id == id, ct);
+        return entity is null ? null : ToSummary(entity);
     }
 
     private async Task<IReadOnlyList<InvestigationVerificationEvidence>> ReadVerificationEvidenceAsync(string id, int take, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT v.id,v.case_id,v.dataset_id,d.name,v.baseline_validation_run_id,v.candidate_validation_run_id,
- v.baseline_workflow_hash,v.candidate_workflow_hash,v.gate_status,v.baseline_signature_hits,v.candidate_signature_hits,
- v.baseline_inspectable_results,v.candidate_inspectable_results,v.baseline_summary_json,v.candidate_summary_json,
- v.reasons_json,v.warnings_json,v.note,v.created_at
-FROM investigation_case_verifications v JOIN validation_datasets d ON d.id=v.dataset_id
-WHERE v.case_id=$id ORDER BY v.created_at DESC LIMIT $take;
-""";
-        command.Parameters.AddWithValue("$id", id); command.Parameters.AddWithValue("$take", Math.Clamp(take, 1, 500));
-        var result = new List<InvestigationVerificationEvidence>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var rows = await (
+            from v in db.InvestigationCaseVerifications
+            join d in db.ValidationDatasets on v.DatasetId equals d.Id
+            where v.CaseId == id
+            orderby v.CreatedAt descending
+            select new { Verification = v, DatasetName = d.Name })
+            .Take(Math.Clamp(take, 1, 500))
+            .ToListAsync(ct);
+
+        var result = new List<InvestigationVerificationEvidence>(rows.Count);
+        foreach (var row in rows)
         {
-            var baseline = JsonSerializer.Deserialize<ValidationRunSummary>(reader.GetString(13), _json)
+            var v = row.Verification;
+            var baseline = JsonSerializer.Deserialize<ValidationRunSummary>(v.BaselineSummaryJson, _json)
                 ?? throw new ApiConflictException("Stored baseline validation summary is invalid.");
-            var candidate = JsonSerializer.Deserialize<ValidationRunSummary>(reader.GetString(14), _json)
+            var candidate = JsonSerializer.Deserialize<ValidationRunSummary>(v.CandidateSummaryJson, _json)
                 ?? throw new ApiConflictException("Stored candidate validation summary is invalid.");
             result.Add(new InvestigationVerificationEvidence(
-                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5),
-                reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11), reader.GetInt32(12),
-                baseline, candidate,
-                JsonSerializer.Deserialize<string[]>(reader.GetString(15), _json) ?? [],
-                JsonSerializer.Deserialize<string[]>(reader.GetString(16), _json) ?? [],
-                reader.IsDBNull(17) ? null : reader.GetString(17), DateTimeOffset.Parse(reader.GetString(18))));
+                v.Id, v.CaseId, v.DatasetId, row.DatasetName, v.BaselineValidationRunId, v.CandidateValidationRunId,
+                v.BaselineWorkflowHash, v.CandidateWorkflowHash, v.GateStatus, v.BaselineSignatureHits, v.CandidateSignatureHits,
+                v.BaselineInspectableResults, v.CandidateInspectableResults, baseline, candidate,
+                JsonSerializer.Deserialize<string[]>(v.ReasonsJson, _json) ?? [],
+                JsonSerializer.Deserialize<string[]>(v.WarningsJson, _json) ?? [],
+                v.Note, v.CreatedAt));
         }
         return result;
     }
@@ -550,31 +579,23 @@ WHERE v.case_id=$id ORDER BY v.created_at DESC LIMIT $take;
 
     private async Task<ValidationEvidenceSnapshot> ReadValidationEvidenceSnapshotAsync(string runId, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        string? datasetId = null, datasetName = null, status = null, workflowHash = null, summaryJson = null;
-        var requested = 0; var completed = 0;
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = """
-SELECT r.dataset_id,d.name,r.status,r.workflow_hash,r.requested_count,r.completed_count,r.summary_json
-FROM validation_runs r JOIN validation_datasets d ON d.id=r.dataset_id WHERE r.run_id=$run;
-""";
-            command.Parameters.AddWithValue("$run", runId);
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            if (!await reader.ReadAsync(ct)) throw new ApiNotFoundException($"Validation run '{runId}' was not found.");
-            datasetId = reader.GetString(0); datasetName = reader.GetString(1); status = reader.GetString(2); workflowHash = reader.GetString(3);
-            requested = reader.GetInt32(4); completed = reader.GetInt32(5); summaryJson = reader.IsDBNull(6) ? null : reader.GetString(6);
-        }
-        var replayIds = new List<string>();
-        await using (var results = connection.CreateCommand())
-        {
-            results.CommandText = "SELECT replay_run_id FROM validation_results WHERE run_id=$run AND replay_run_id IS NOT NULL ORDER BY item_id;";
-            results.Parameters.AddWithValue("$run", runId);
-            await using var reader = await results.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) replayIds.Add(reader.GetString(0));
-        }
-        var summary = summaryJson is null ? null : JsonSerializer.Deserialize<ValidationRunSummary>(summaryJson, _json);
-        return new ValidationEvidenceSnapshot(runId, datasetId!, datasetName!, status!, workflowHash!, requested, completed, summary, replayIds);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var run = await (
+            from r in db.ValidationRuns
+            join d in db.ValidationDatasets on r.DatasetId equals d.Id
+            where r.RunId == runId
+            select new { r.DatasetId, DatasetName = d.Name, r.Status, r.WorkflowHash, r.RequestedCount, r.CompletedCount, r.SummaryJson })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new ApiNotFoundException($"Validation run '{runId}' was not found.");
+
+        var replayIds = await db.ValidationResults
+            .Where(x => x.RunId == runId && x.ReplayRunId != null)
+            .OrderBy(x => x.ItemId)
+            .Select(x => x.ReplayRunId!)
+            .ToListAsync(ct);
+
+        var summary = run.SummaryJson is null ? null : JsonSerializer.Deserialize<ValidationRunSummary>(run.SummaryJson, _json);
+        return new ValidationEvidenceSnapshot(runId, run.DatasetId, run.DatasetName, run.Status, run.WorkflowHash, run.RequestedCount, run.CompletedCount, summary, replayIds);
     }
 
     private async Task<(int Hits, int Inspectable)> CountSignatureHitsAsync(IReadOnlyList<string> replayRunIds, string signatureId, CancellationToken ct)
@@ -609,25 +630,21 @@ FROM validation_runs r JOIN validation_datasets d ON d.id=r.dataset_id WHERE r.r
 
     private async Task<IReadOnlyList<InvestigationCaseRun>> ReadEvidenceAsync(string id, int take, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT run_id,started_at,disposition,total_duration_ms,node_duration_ms FROM investigation_case_runs WHERE case_id=$id ORDER BY started_at DESC LIMIT $take;";
-        command.Parameters.AddWithValue("$id", id); command.Parameters.AddWithValue("$take", Math.Clamp(take, 1, 500));
-        var result = new List<InvestigationCaseRun>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(new InvestigationCaseRun(reader.GetString(0), DateTimeOffset.Parse(reader.GetString(1)), reader.GetString(2), reader.GetDouble(3), reader.IsDBNull(4) ? null : reader.GetDouble(4)));
-        return result;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return await db.InvestigationCaseRuns
+            .Where(x => x.CaseId == id)
+            .OrderByDescending(x => x.StartedAt)
+            .Take(Math.Clamp(take, 1, 500))
+            .Select(x => new InvestigationCaseRun(x.RunId, x.StartedAt, x.Disposition, x.TotalDurationMs, x.NodeDurationMs))
+            .ToListAsync(ct);
     }
 
-    private static InvestigationCaseSummary ReadCase(SqliteDataReader r) => new(
-        r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4), r.GetString(5), r.GetString(6),
-        r.IsDBNull(7) ? null : r.GetString(7), r.GetString(8), r.IsDBNull(9) ? null : r.GetString(9), r.IsDBNull(10) ? null : r.GetInt32(10),
-        r.IsDBNull(11) ? null : r.GetString(11), r.IsDBNull(12) ? null : r.GetString(12), r.GetString(13), r.GetString(14),
-        DateTimeOffset.Parse(r.GetString(15)), DateTimeOffset.Parse(r.GetString(16)), r.GetInt32(17), r.GetInt32(18),
-        r.IsDBNull(19) ? null : r.GetString(19), r.IsDBNull(20) ? null : r.GetString(20), r.IsDBNull(21) ? null : r.GetString(21),
-        r.IsDBNull(22) ? null : r.GetString(22), r.IsDBNull(23) ? null : r.GetString(23),
-        r.IsDBNull(24) ? null : DateTimeOffset.Parse(r.GetString(24)), r.IsDBNull(25) ? null : DateTimeOffset.Parse(r.GetString(25)), r.IsDBNull(26) ? null : DateTimeOffset.Parse(r.GetString(26)),
-        DateTimeOffset.Parse(r.GetString(27)), DateTimeOffset.Parse(r.GetString(28)));
+    private static InvestigationCaseSummary ToSummary(InvestigationCaseEntity e) => new(
+        e.Id, e.SignatureId, e.Category, e.Title, e.Status, e.Severity, e.WorkflowId,
+        e.WorkflowHash, e.Source, e.JobId, e.JobVersion, e.PrimaryNodeId, e.PrimaryNodeType,
+        e.Fingerprint, e.RepresentativeRunId, e.FirstSeenAt, e.LastSeenAt, e.OccurrenceCount,
+        e.ReopenCount, e.Owner, e.RootCause, e.ResolutionNote, e.VerificationNote,
+        e.VerificationRunId, e.ResolvedAt, e.VerifiedAt, e.ClosedAt, e.CreatedAt, e.UpdatedAt);
 
     private static string CaseKey(RunTraceRecord trace, string signatureId)
     {
@@ -671,9 +688,4 @@ FROM validation_runs r JOIN validation_datasets d ON d.id=r.dataset_id WHERE r.r
         if (value is null) return null; var trimmed = value.Trim(); if (trimmed.Length == 0) return null;
         if (trimmed.Length > max) throw new ApiValidationException($"{field} must be <= {max} characters."); return trimmed;
     }
-    private static string Iso(DateTimeOffset value) => value.ToUniversalTime().ToString("O");
-    private static void Add(SqliteCommand command, string name, object? value) => command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-
-    private const string CaseColumns = "id,signature_id,category,title,status,severity,workflow_id,workflow_hash,source,job_id,job_version,primary_node_id,primary_node_type,fingerprint,representative_run_id,first_seen_at,last_seen_at,occurrence_count,reopen_count,owner,root_cause,resolution_note,verification_note,verification_run_id,resolved_at,verified_at,closed_at,created_at,updated_at";
-    private static string AliasedCaseColumns(string a) => string.Join(",", CaseColumns.Split(',').Select(x => $"{a}.{x}"));
 }

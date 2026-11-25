@@ -1,24 +1,18 @@
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
 
 public sealed partial class JobStore
 {
-    private const string RecipeReceiptSelect = """
-SELECT r.id,r.station_id,r.job_id,j.name,r.source_version,r.workflow_hash,r.local_version,
-       CASE WHEN r.requires_validation <> 0 OR j.requires_validation <> 0 OR
-                 COALESCE(j.product_id, '') <> '' OR COALESCE(j.recipe_code, '') <> '' THEN 1 ELSE 0 END,
-       j.published_version,j.updated_at,r.received_at
-FROM recipe_delivery_receipts r JOIN jobs j ON j.id=r.job_id
-""";
-
     internal async Task<StationRecipeDelivery> GetPublishedDeliveryAsync(RecipeRolloutRequest request, CancellationToken ct)
     {
         ValidateId(request.JobId);
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        var row = await LoadJobRowAsync(connection, request.JobId, null, ct)
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.Jobs.FirstOrDefaultAsync(x => x.Id == request.JobId, ct)
             ?? throw new ApiNotFoundException($"Job '{request.JobId}' does not exist.");
         if (row.PublishedVersion != request.SourceVersion || string.IsNullOrEmpty(row.PublishedDependencyManifestHash))
             throw new ApiConflictException("The selected recipe version is no longer the published version. Reload it before sending.");
@@ -29,7 +23,7 @@ FROM recipe_delivery_receipts r JOIN jobs j ON j.id=r.job_id
             throw new ApiConflictException("The selected workflow fingerprint changed. Reload the recipe before sending.");
 
         return new StationRecipeDelivery("", row.Id, row.Name, version.Version, version.WorkflowHash,
-            RequiresDatasetValidation(row) || await DeliveredVersionRequiresValidationAsync(connection, null, row.Id, version.Version, ct), version.Workflow);
+            RequiresDatasetValidation(row) || await DeliveredVersionRequiresValidationAsync(db, row.Id, version.Version, ct), version.Workflow);
     }
 
     internal async Task<RecipeDeliveryReceipt> ReceiveDeliveryAsync(StationRecipeDelivery delivery, CancellationToken ct)
@@ -45,43 +39,59 @@ FROM recipe_delivery_receipts r JOIN jobs j ON j.id=r.job_id
         if (!string.Equals(hash, delivery.WorkflowHash, StringComparison.OrdinalIgnoreCase))
             throw new ApiValidationException("The delivered workflow fingerprint does not match.");
 
-        await using var connection = await _db.OpenConnectionAsync(ct, strongDurability: true);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        var previous = await ReadReceiptAsync(connection, transaction,
-            "WHERE r.station_id=$station AND r.job_id=$job AND r.source_version=$source AND r.workflow_hash=$hash AND r.requires_validation=$required",
-            ct, ("$station", delivery.StationId), ("$job", delivery.JobId), ("$source", delivery.SourceVersion),
-            ("$hash", hash), ("$required", delivery.RequiresValidation ? 1 : 0));
+        await using var db = await _dbFactory.CreateDbContextAsync(ct, strongDurability: true);
+        await using var transaction = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
+
+        var previous = await (
+            from r in db.RecipeDeliveryReceipts
+            join j in db.Jobs on r.JobId equals j.Id
+            where r.StationId == delivery.StationId && r.JobId == delivery.JobId &&
+                  r.SourceVersion == delivery.SourceVersion && r.WorkflowHash == hash &&
+                  r.RequiresValidation == delivery.RequiresValidation
+            select ToReceipt(r, j))
+            .FirstOrDefaultAsync(ct);
         if (previous is not null) return previous;
 
-        var row = await LoadJobRowAsync(connection, delivery.JobId, transaction, ct);
+        var row = await db.Jobs.AsTracking().FirstOrDefaultAsync(x => x.Id == delivery.JobId, ct);
         var now = DateTimeOffset.UtcNow;
         if (row is not null && now <= row.UpdatedAt) now = row.UpdatedAt.AddTicks(1);
         var localVersion = row is null ? 1 : checked(row.LatestVersion + 1);
         var name = row?.Name ?? delivery.JobName.Trim();
-        var occurredAt = Iso(now);
         if (row is null)
         {
-            await ExecuteAsync(connection, transaction, """
-INSERT INTO jobs(id,name,description,created_at,updated_at,latest_version,requires_validation)
-VALUES($job,$name,'',$at,$at,1,$required);
-""", ct, ("$job", delivery.JobId), ("$name", name), ("$at", occurredAt), ("$required", delivery.RequiresValidation ? 1 : 0));
+            db.Jobs.Add(new JobEntity
+            {
+                Id = delivery.JobId,
+                Name = name,
+                Description = string.Empty,
+                CreatedAt = now,
+                UpdatedAt = now,
+                LatestVersion = 1,
+                RequiresValidation = delivery.RequiresValidation
+            });
         }
         else
         {
-            await ExecuteAsync(connection, transaction, "UPDATE jobs SET latest_version=$version,updated_at=$at WHERE id=$job;",
-                ct, ("$job", delivery.JobId), ("$version", localVersion), ("$at", occurredAt));
+            row.LatestVersion = localVersion;
+            row.UpdatedAt = now;
         }
 
         var snapshot = new JobVersionSnapshot(delivery.JobId, localVersion, hash, now,
             $"Station delivery from source V{delivery.SourceVersion}", delivery.Workflow);
-        await InsertVersionAsync(connection, transaction, snapshot, ct);
+        AddVersionEntity(db, snapshot);
         var receiptId = Guid.NewGuid().ToString("N");
-        await ExecuteAsync(connection, transaction, """
-INSERT INTO recipe_delivery_receipts(id,station_id,job_id,source_version,workflow_hash,local_version,requires_validation,received_at)
-VALUES($id,$station,$job,$source,$hash,$local,$required,$at);
-""", ct, ("$id", receiptId), ("$station", delivery.StationId), ("$job", delivery.JobId),
-            ("$source", delivery.SourceVersion), ("$local", localVersion), ("$hash", hash),
-            ("$required", delivery.RequiresValidation ? 1 : 0), ("$at", occurredAt));
+        db.RecipeDeliveryReceipts.Add(new RecipeDeliveryReceiptEntity
+        {
+            Id = receiptId,
+            StationId = delivery.StationId,
+            JobId = delivery.JobId,
+            SourceVersion = delivery.SourceVersion,
+            WorkflowHash = hash,
+            LocalVersion = localVersion,
+            RequiresValidation = delivery.RequiresValidation,
+            ReceivedAt = now
+        });
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
         return new RecipeDeliveryReceipt(receiptId, delivery.StationId, delivery.JobId, name, delivery.SourceVersion, hash,
@@ -90,50 +100,35 @@ VALUES($id,$station,$job,$source,$hash,$local,$required,$at);
 
     internal async Task<IReadOnlyList<RecipeDeliveryReceipt>> ListRecipeDeliveriesAsync(CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = RecipeReceiptSelect + "\nORDER BY r.received_at DESC,r.id DESC LIMIT 30;";
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        var result = new List<RecipeDeliveryReceipt>();
-        while (await reader.ReadAsync(ct)) result.Add(ReadReceipt(reader));
-        return result;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await (
+            from r in db.RecipeDeliveryReceipts
+            join j in db.Jobs on r.JobId equals j.Id
+            orderby r.ReceivedAt descending, r.Id descending
+            select ToReceipt(r, j))
+            .Take(30)
+            .ToListAsync(ct);
     }
 
     internal async Task<RecipeDeliveryReceipt?> GetRecipeDeliveryAsync(string id, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        return await ReadReceiptAsync(connection, null, "WHERE r.id=$id", ct, ("$id", id));
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await (
+            from r in db.RecipeDeliveryReceipts
+            join j in db.Jobs on r.JobId equals j.Id
+            where r.Id == id
+            select ToReceipt(r, j))
+            .FirstOrDefaultAsync(ct);
     }
 
-    private static async Task<RecipeDeliveryReceipt?> ReadReceiptAsync(SqliteConnection connection, SqliteTransaction? transaction,
-        string filter, CancellationToken ct, params (string Key, object? Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = RecipeReceiptSelect + "\n" + filter + ";";
-        foreach (var (key, value) in parameters) command.Parameters.AddWithValue(key, value ?? DBNull.Value);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? ReadReceipt(reader) : null;
-    }
+    private static RecipeDeliveryReceipt ToReceipt(RecipeDeliveryReceiptEntity r, JobEntity j)
+        => new(r.Id, r.StationId, r.JobId, j.Name, r.SourceVersion, r.WorkflowHash, r.LocalVersion,
+            r.RequiresValidation || RequiresDatasetValidation(j),
+            j.PublishedVersion, j.UpdatedAt, r.ReceivedAt);
 
-    private static RecipeDeliveryReceipt ReadReceipt(SqliteDataReader reader)
-        => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetInt32(4),
-            reader.GetString(5), reader.GetInt32(6), reader.GetBoolean(7), reader.IsDBNull(8) ? null : reader.GetInt32(8),
-            ParseTime(reader.GetString(9)), ParseTime(reader.GetString(10)));
-
-    private static bool RequiresDatasetValidation(JobRow row)
+    private static bool RequiresDatasetValidation(JobEntity row)
         => row.RequiresValidation || !string.IsNullOrWhiteSpace(row.ProductId) || !string.IsNullOrWhiteSpace(row.RecipeCode);
 
-    private static async Task<bool> DeliveredVersionRequiresValidationAsync(SqliteConnection connection, SqliteTransaction? transaction,
-        string jobId, int version, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-SELECT 1 FROM recipe_delivery_receipts WHERE job_id=$job AND local_version=$version AND requires_validation=1;
-""";
-        command.Parameters.AddWithValue("$job", jobId);
-        command.Parameters.AddWithValue("$version", version);
-        return await command.ExecuteScalarAsync(ct) is not null;
-    }
+    private static Task<bool> DeliveredVersionRequiresValidationAsync(VisionStudioDbContext db, string jobId, int version, CancellationToken ct)
+        => db.RecipeDeliveryReceipts.AnyAsync(x => x.JobId == jobId && x.LocalVersion == version && x.RequiresValidation, ct);
 }

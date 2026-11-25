@@ -1,7 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api.Security;
 
@@ -19,23 +22,20 @@ public sealed record ServiceTokenPrincipal(string Id, string Name, IReadOnlyList
 /// - 按作用域授权，认证角色固定为 Service，走不到任何人类角色策略；
 /// - 可轮换（同 id/名称/作用域，换新密钥）与吊销；last_used_at 每令牌每分钟最多写一次。
 /// </summary>
-public sealed class ServiceTokenStore(SqliteMetadataDatabase database)
+public sealed class ServiceTokenStore(IVisionStudioDbFactory dbFactory)
 {
     public const string TokenPrefix = "vst_";
     private static readonly TimeSpan UsageWriteInterval = TimeSpan.FromMinutes(1);
 
+    public ServiceTokenStore(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
+
     public async Task<IReadOnlyList<ServiceTokenDto>> ListAsync(CancellationToken ct = default)
     {
-        var tokens = new List<ServiceTokenDto>();
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT id,name,prefix,scopes,created_at,created_by,expires_at,last_used_at,revoked_at
-FROM security_service_tokens ORDER BY created_at DESC;
-""";
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) tokens.Add(ReadDto(reader));
-        return tokens;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entities = await db.SecurityServiceTokens
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync(ct);
+        return entities.Select(ToDto).ToList();
     }
 
     public async Task<ServiceTokenCreated> CreateAsync(CreateServiceTokenRequest request, string? createdBy, CancellationToken ct = default)
@@ -47,135 +47,100 @@ FROM security_service_tokens ORDER BY created_at DESC;
         var token = GenerateToken();
         var now = DateTimeOffset.UtcNow;
 
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-INSERT INTO security_service_tokens(id,name,token_hash,prefix,scopes,created_at,created_by,expires_at,last_used_at,revoked_at)
-VALUES($id,$name,$hash,$prefix,$scopes,$created,$by,$expires,NULL,NULL);
-""";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$name", name);
-        command.Parameters.AddWithValue("$hash", SecurityHashing.HashToken(token));
-        command.Parameters.AddWithValue("$prefix", PrefixOf(token));
-        command.Parameters.AddWithValue("$scopes", string.Join(',', scopes));
-        command.Parameters.AddWithValue("$created", now.ToString("O"));
-        command.Parameters.AddWithValue("$by", string.IsNullOrWhiteSpace(createdBy) ? DBNull.Value : createdBy);
-        command.Parameters.AddWithValue("$expires", expiresAt is null ? DBNull.Value : expiresAt.Value.ToString("O"));
-        try { await command.ExecuteNonQueryAsync(ct); }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = new SecurityServiceTokenEntity
         {
-            throw new ApiConflictException($"Service token name '{name}' already exists.", ex);
+            Id = id,
+            Name = name,
+            TokenHash = SecurityHashing.HashToken(token),
+            Prefix = PrefixOf(token),
+            Scopes = string.Join(',', scopes),
+            CreatedAt = now,
+            CreatedBy = string.IsNullOrWhiteSpace(createdBy) ? null : createdBy,
+            ExpiresAt = expiresAt
+        };
+        db.SecurityServiceTokens.Add(entity);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: 19 } sqliteEx)
+        {
+            throw new ApiConflictException($"Service token name '{name}' already exists.", sqliteEx);
         }
 
-        return new ServiceTokenCreated(token, new ServiceTokenDto(id, name, PrefixOf(token), scopes, now, createdBy, expiresAt, null, null));
+        return new ServiceTokenCreated(token, ToDto(entity));
     }
 
     /// <summary>轮换只换密钥（新 prefix），id/名称/作用域/过期时间保持不变；已吊销令牌不能轮换。</summary>
     public async Task<ServiceTokenCreated> RotateAsync(string id, CancellationToken ct = default)
     {
         var token = GenerateToken();
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        var existing = await FindAsync(connection, id, ct, transaction)
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        var existing = await db.SecurityServiceTokens.AsTracking().FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new ApiNotFoundException($"Service token '{id}' was not found.");
         if (existing.RevokedAt is not null)
             throw new ApiConflictException("Revoked service tokens cannot be rotated; create a new token instead.");
 
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "UPDATE security_service_tokens SET token_hash=$hash,prefix=$prefix,last_used_at=NULL WHERE id=$id;";
-        command.Parameters.AddWithValue("$hash", SecurityHashing.HashToken(token));
-        command.Parameters.AddWithValue("$prefix", PrefixOf(token));
-        command.Parameters.AddWithValue("$id", id);
-        await command.ExecuteNonQueryAsync(ct);
+        existing.TokenHash = SecurityHashing.HashToken(token);
+        existing.Prefix = PrefixOf(token);
+        existing.LastUsedAt = null;
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
-        return new ServiceTokenCreated(token, existing with { Prefix = PrefixOf(token), LastUsedAt = null });
+        return new ServiceTokenCreated(token, ToDto(existing));
     }
 
     /// <summary>吊销幂等：已吊销的令牌再吊销返回现状，不报错。</summary>
     public async Task<ServiceTokenDto> RevokeAsync(string id, CancellationToken ct = default)
     {
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        var existing = await FindAsync(connection, id, ct, transaction)
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await dbFactory.BeginImmediateTransactionAsync(db, ct);
+        var existing = await db.SecurityServiceTokens.AsTracking().FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new ApiNotFoundException($"Service token '{id}' was not found.");
         if (existing.RevokedAt is not null)
         {
             await transaction.CommitAsync(ct);
-            return existing;
+            return ToDto(existing);
         }
 
-        var now = DateTimeOffset.UtcNow;
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "UPDATE security_service_tokens SET revoked_at=$at WHERE id=$id;";
-        command.Parameters.AddWithValue("$at", now.ToString("O"));
-        command.Parameters.AddWithValue("$id", id);
-        await command.ExecuteNonQueryAsync(ct);
+        existing.RevokedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return existing with { RevokedAt = now };
+        return ToDto(existing);
     }
 
     /// <summary>按明文令牌解析主体；吊销/过期返回 null（认证层据此 401）。</summary>
     public async Task<ServiceTokenPrincipal?> ResolveAsync(string token, CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;
-        await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,name,scopes,expires_at,revoked_at,last_used_at FROM security_service_tokens WHERE token_hash=$hash;";
-        command.Parameters.AddWithValue("$hash", SecurityHashing.HashToken(token));
+        var hash = SecurityHashing.HashToken(token);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.SecurityServiceTokens.FirstOrDefaultAsync(x => x.TokenHash == hash, ct);
+        if (entity is null || entity.RevokedAt is not null || (entity.ExpiresAt is { } expiry && expiry <= now))
+            return null;
 
-        string id;
-        string name;
-        string[] scopes;
-        DateTimeOffset? expiresAt;
-        DateTimeOffset? revokedAt;
-        DateTimeOffset? lastUsedAt;
-        await using (var reader = await command.ExecuteReaderAsync(ct))
+        var stale = now - UsageWriteInterval;
+        if (entity.LastUsedAt is null || entity.LastUsedAt < stale)
         {
-            if (!await reader.ReadAsync(ct)) return null;
-            id = reader.GetString(0);
-            name = reader.GetString(1);
-            scopes = SplitScopes(reader.GetString(2));
-            expiresAt = reader.IsDBNull(3) ? null : DateTimeOffset.Parse(reader.GetString(3));
-            revokedAt = reader.IsDBNull(4) ? null : DateTimeOffset.Parse(reader.GetString(4));
-            lastUsedAt = reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5));
+            await db.SecurityServiceTokens
+                .Where(x => x.Id == entity.Id && (x.LastUsedAt == null || x.LastUsedAt < stale))
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastUsedAt, now), ct);
         }
-        if (revokedAt is not null || (expiresAt is { } expiry && expiry <= now)) return null;
-
-        if (lastUsedAt is null || lastUsedAt < now - UsageWriteInterval)
-        {
-            await using var touch = connection.CreateCommand();
-            touch.CommandText = "UPDATE security_service_tokens SET last_used_at=$now WHERE id=$id AND (last_used_at IS NULL OR last_used_at<$stale);";
-            touch.Parameters.AddWithValue("$now", now.ToString("O"));
-            touch.Parameters.AddWithValue("$stale", (now - UsageWriteInterval).ToString("O"));
-            touch.Parameters.AddWithValue("$id", id);
-            await touch.ExecuteNonQueryAsync(ct);
-        }
-        return new ServiceTokenPrincipal(id, name, scopes, expiresAt);
+        return new ServiceTokenPrincipal(entity.Id, entity.Name, SplitScopes(entity.Scopes), entity.ExpiresAt);
     }
 
-    private static async Task<ServiceTokenDto?> FindAsync(SqliteConnection connection, string id, CancellationToken ct, SqliteTransaction transaction)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT id,name,prefix,scopes,created_at,created_by,expires_at,last_used_at,revoked_at FROM security_service_tokens WHERE id=$id;";
-        command.Parameters.AddWithValue("$id", id);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? ReadDto(reader) : null;
-    }
-
-    private static ServiceTokenDto ReadDto(SqliteDataReader reader) => new(
-        reader.GetString(0),
-        reader.GetString(1),
-        reader.GetString(2),
-        SplitScopes(reader.GetString(3)),
-        DateTimeOffset.Parse(reader.GetString(4)),
-        reader.IsDBNull(5) ? null : reader.GetString(5),
-        reader.IsDBNull(6) ? null : DateTimeOffset.Parse(reader.GetString(6)),
-        reader.IsDBNull(7) ? null : DateTimeOffset.Parse(reader.GetString(7)),
-        reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)));
+    private static ServiceTokenDto ToDto(SecurityServiceTokenEntity e) => new(
+        e.Id,
+        e.Name,
+        e.Prefix,
+        SplitScopes(e.Scopes),
+        e.CreatedAt,
+        e.CreatedBy,
+        e.ExpiresAt,
+        e.LastUsedAt,
+        e.RevokedAt);
 
     private static string GenerateToken()
         => TokenPrefix + Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');

@@ -1,4 +1,5 @@
-using System.Globalization;
+using Microsoft.EntityFrameworkCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api;
 
@@ -9,21 +10,19 @@ public sealed partial class TraceabilityStore
     internal async Task<ProductionOperatorPreview?> GetOperatorPreviewAsync(string jobId, int jobVersion,
         DateTimeOffset sessionStartedAt, CancellationToken ct, bool ngOnly = false, string source = "ProductionRuntime")
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT run_id,started_at,disposition
-FROM run_traces
-WHERE job_id=$job AND job_version=$version AND source=$source
-  AND started_at >= $started AND has_preview=1
-""" + (ngOnly ? "\nAND disposition='NG' COLLATE NOCASE" : "") + "\nORDER BY started_at DESC,run_id DESC LIMIT 1;";
-        command.Parameters.AddWithValue("$job", jobId);
-        command.Parameters.AddWithValue("$version", jobVersion);
-        command.Parameters.AddWithValue("$source", source);
-        command.Parameters.AddWithValue("$started", sessionStartedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return null;
-        return new ProductionOperatorPreview(reader.GetString(0),
-            DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture), reader.GetString(2).ToUpperInvariant(), jobVersion);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        IQueryable<RunTraceEntity> query = db.RunTraces
+            .Where(x => x.JobId == jobId && x.JobVersion == jobVersion && x.Source == source &&
+                        x.StartedAt >= sessionStartedAt && x.HasPreview);
+        if (ngOnly)
+            query = query.Where(x => EF.Functions.Collate(x.Disposition, "NOCASE") == "NG");
+
+        var hit = await query
+            .OrderByDescending(x => x.StartedAt)
+            .ThenByDescending(x => x.RunId)
+            .Select(x => new { x.RunId, x.StartedAt, x.Disposition })
+            .FirstOrDefaultAsync(ct);
+
+        return hit is null ? null : new ProductionOperatorPreview(hit.RunId, hit.StartedAt, hit.Disposition.ToUpperInvariant(), jobVersion);
     }
 }

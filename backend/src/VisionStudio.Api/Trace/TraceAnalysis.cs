@@ -3,7 +3,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
@@ -69,10 +72,12 @@ public sealed record FailureSignatureAnalysis(
 /// and derives stable failure signatures without changing runtime execution behavior.
 /// </summary>
 public sealed class TraceAnalysisService(
-    SqliteMetadataDatabase db,
+    IVisionStudioDbFactory dbFactory,
     TraceabilityStore traces,
     RunObservabilityService observability)
 {
+    public TraceAnalysisService(SqliteMetadataDatabase db, TraceabilityStore traces, RunObservabilityService observability)
+        : this(new VisionStudioDbFactory(db), traces, observability) { }
     // trace 工件由 TraceabilityStore 持久化（写入选项带 JsonStringEnumConverter，枚举写成字符串）。
     // 读取必须使用同一配置，否则 NodeRunReport.phase 等枚举字段反序列化抛 JsonException。
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
@@ -227,38 +232,14 @@ public sealed class TraceAnalysisService(
 
     private async Task<string?> FindPreviousOkBaselineAsync(RunTraceRecord current, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        var identity = !string.IsNullOrWhiteSpace(current.WorkflowHash)
-            ? "workflow_hash=$hash"
-            : "workflow_id=$workflow";
-        var job = !string.IsNullOrWhiteSpace(current.JobId)
-            ? "AND job_id=$job AND job_version=$jobVersion"
-            : "AND job_id IS NULL";
-        command.CommandText = $"""
-SELECT run_id
-FROM run_traces
-WHERE {identity}
-  AND source=$source
-  {job}
-  AND run_id<>$run
-  AND started_at < $started
-  AND execution_status='Complete'
-  AND UPPER(disposition)='OK'
-ORDER BY started_at DESC
-LIMIT 1;
-""";
-        if (!string.IsNullOrWhiteSpace(current.WorkflowHash)) command.Parameters.AddWithValue("$hash", current.WorkflowHash);
-        else command.Parameters.AddWithValue("$workflow", current.WorkflowId);
-        command.Parameters.AddWithValue("$source", current.Source);
-        if (!string.IsNullOrWhiteSpace(current.JobId))
-        {
-            command.Parameters.AddWithValue("$job", current.JobId);
-            command.Parameters.AddWithValue("$jobVersion", current.JobVersion ?? 0);
-        }
-        command.Parameters.AddWithValue("$run", current.RunId);
-        command.Parameters.AddWithValue("$started", current.StartedAt.ToUniversalTime().ToString("O"));
-        return await command.ExecuteScalarAsync(ct) as string;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var query = ApplyCohortFilter(db.RunTraces, current);
+        return await query
+            .Where(t => t.RunId != current.RunId && t.StartedAt < current.StartedAt &&
+                        t.ExecutionStatus == "Complete" && t.Disposition.ToUpper() == "OK")
+            .OrderByDescending(t => t.StartedAt)
+            .Select(t => t.RunId)
+            .FirstOrDefaultAsync(ct);
     }
 
     private async Task<IReadOnlyList<FailureSignatureOccurrence>> ReadFailureOccurrencesAsync(
@@ -268,51 +249,30 @@ LIMIT 1;
         int take,
         CancellationToken ct)
     {
-        var cutoff = current.StartedAt.AddDays(-days).ToUniversalTime().ToString("O");
-        var until = current.StartedAt.ToUniversalTime().ToString("O");
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        var identity = !string.IsNullOrWhiteSpace(current.WorkflowHash)
-            ? "t.workflow_hash=$hash"
-            : "t.workflow_id=$workflow";
-        var job = !string.IsNullOrWhiteSpace(current.JobId)
-            ? "AND t.job_id=$job AND t.job_version=$jobVersion"
-            : "AND t.job_id IS NULL";
-        var categoryFilter = descriptor.Category == "ExecutionFailure"
-            ? "AND (t.execution_status<>'Complete' OR UPPER(t.disposition)='ERROR')"
-            : "AND UPPER(t.disposition)='NG'";
-        command.CommandText = $"""
-SELECT t.run_id,t.started_at,t.disposition,t.total_duration_ms,t.execution_status,t.error,t.node_reports_json
-FROM run_traces t
-WHERE {identity}
-  AND t.source=$source
-  {job}
-  AND t.started_at >= $cutoff
-  AND t.started_at <= $until
-  {categoryFilter}
-ORDER BY t.started_at DESC;
-""";
-        AddCohortParameters(command, current, cutoff, until);
+        var cutoff = current.StartedAt.AddDays(-days);
+        var until = current.StartedAt;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var query = ApplyCohortFilter(db.RunTraces, current)
+            .Where(t => t.StartedAt >= cutoff && t.StartedAt <= until);
+        query = descriptor.Category == "ExecutionFailure"
+            ? query.Where(t => t.ExecutionStatus != "Complete" || t.Disposition.ToUpper() == "ERROR")
+            : query.Where(t => t.Disposition.ToUpper() == "NG");
+
+        var rows = await query
+            .OrderByDescending(t => t.StartedAt)
+            .Select(t => new { t.RunId, t.StartedAt, t.Disposition, t.TotalDurationMs, t.ExecutionStatus, t.Error, t.NodeReportsJson })
+            .ToListAsync(ct);
 
         var result = new List<FailureSignatureOccurrence>();
         var count = 0;
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        foreach (var row in rows)
         {
-            var reports = JsonSerializer.Deserialize<List<NodeRunReport>>(reader.GetString(6), _json) ?? [];
-            var candidate = BuildNonPerformanceSignature(
-                reader.GetString(4),
-                reader.GetString(2),
-                reader.IsDBNull(5) ? null : reader.GetString(5),
-                reports);
+            var reports = JsonSerializer.Deserialize<List<NodeRunReport>>(row.NodeReportsJson, _json) ?? [];
+            var candidate = BuildNonPerformanceSignature(row.ExecutionStatus, row.Disposition, row.Error, reports);
             if (candidate is null || !string.Equals(candidate.SignatureId, descriptor.SignatureId, StringComparison.Ordinal)) continue;
             count++;
             if (result.Count < take)
-                result.Add(new FailureSignatureOccurrence(
-                    reader.GetString(0),
-                    DateTimeOffset.Parse(reader.GetString(1)),
-                    reader.GetString(2),
-                    reader.GetDouble(3)));
+                result.Add(new FailureSignatureOccurrence(row.RunId, row.StartedAt, row.Disposition, row.TotalDurationMs));
         }
         descriptor.OccurrenceCount = count;
         return result;
@@ -331,76 +291,48 @@ ORDER BY t.started_at DESC;
             return [new FailureSignatureOccurrence(current.RunId, current.StartedAt, current.Disposition, current.TotalDurationMs)];
         }
 
-        var cutoff = current.StartedAt.AddDays(-days).ToUniversalTime().ToString("O");
-        var until = current.StartedAt.ToUniversalTime().ToString("O");
-        await using var connection = await db.OpenConnectionAsync(ct);
-        var identity = !string.IsNullOrWhiteSpace(current.WorkflowHash)
-            ? "t.workflow_hash=$hash"
-            : "t.workflow_id=$workflow";
-        var job = !string.IsNullOrWhiteSpace(current.JobId)
-            ? "AND t.job_id=$job AND t.job_version=$jobVersion"
-            : "AND t.job_id IS NULL";
-        var where = $"""
-{identity}
-  AND t.source=$source
-  {job}
-  AND t.started_at >= $cutoff
-  AND t.started_at <= $until
-  AND o.node_id=$nodeId
-  AND o.node_type=$nodeType
-  AND o.phase='Run'
-  AND o.success=1
-  AND o.duration_ms > $threshold
-""";
+        var cutoff = current.StartedAt.AddDays(-days);
+        var until = current.StartedAt;
+        var threshold = descriptor.PerformanceThresholdMs.Value;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-        await using (var count = connection.CreateCommand())
-        {
-            count.CommandText = $"SELECT COUNT(*) FROM run_node_observations o JOIN run_traces t ON t.run_id=o.run_id WHERE {where};";
-            AddCohortParameters(count, current, cutoff, until);
-            count.Parameters.AddWithValue("$nodeId", descriptor.PrimaryNodeId);
-            count.Parameters.AddWithValue("$nodeType", descriptor.PrimaryNodeType);
-            count.Parameters.AddWithValue("$threshold", descriptor.PerformanceThresholdMs.Value);
-            descriptor.OccurrenceCount = Convert.ToInt32(await count.ExecuteScalarAsync(ct));
-        }
+        var cohortTraces = ApplyCohortFilter(db.RunTraces, current)
+            .Where(t => t.StartedAt >= cutoff && t.StartedAt <= until);
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"""
-SELECT t.run_id,t.started_at,t.disposition,t.total_duration_ms,o.duration_ms
-FROM run_node_observations o
-JOIN run_traces t ON t.run_id=o.run_id
-WHERE {where}
-ORDER BY t.started_at DESC
-LIMIT $take;
-""";
-        AddCohortParameters(command, current, cutoff, until);
-        command.Parameters.AddWithValue("$nodeId", descriptor.PrimaryNodeId);
-        command.Parameters.AddWithValue("$nodeType", descriptor.PrimaryNodeType);
-        command.Parameters.AddWithValue("$threshold", descriptor.PerformanceThresholdMs.Value);
-        command.Parameters.AddWithValue("$take", take);
-        var result = new List<FailureSignatureOccurrence>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-            result.Add(new FailureSignatureOccurrence(
-                reader.GetString(0),
-                DateTimeOffset.Parse(reader.GetString(1)),
-                reader.GetString(2),
-                reader.GetDouble(3),
-                reader.GetDouble(4)));
-        return result;
+        var joined =
+            from o in db.RunNodeObservations
+            join t in cohortTraces on o.RunId equals t.RunId
+            where o.NodeId == descriptor.PrimaryNodeId &&
+                  o.NodeType == descriptor.PrimaryNodeType &&
+                  o.Phase == "Run" &&
+                  o.Success &&
+                  o.DurationMs > threshold
+            select new { t.RunId, t.StartedAt, t.Disposition, t.TotalDurationMs, o.DurationMs };
+
+        descriptor.OccurrenceCount = await joined.CountAsync(ct);
+        var rows = await joined
+            .OrderByDescending(x => x.StartedAt)
+            .Take(take)
+            .ToListAsync(ct);
+        return rows.Select(x => new FailureSignatureOccurrence(x.RunId, x.StartedAt, x.Disposition, x.TotalDurationMs, x.DurationMs)).ToList();
     }
 
-    private void AddCohortParameters(Microsoft.Data.Sqlite.SqliteCommand command, RunTraceRecord current, string cutoff, string until)
+    private static IQueryable<RunTraceEntity> ApplyCohortFilter(IQueryable<RunTraceEntity> source, RunTraceRecord current)
     {
-        if (!string.IsNullOrWhiteSpace(current.WorkflowHash)) command.Parameters.AddWithValue("$hash", current.WorkflowHash);
-        else command.Parameters.AddWithValue("$workflow", current.WorkflowId);
-        command.Parameters.AddWithValue("$source", current.Source);
+        source = !string.IsNullOrWhiteSpace(current.WorkflowHash)
+            ? source.Where(t => t.WorkflowHash == current.WorkflowHash)
+            : source.Where(t => t.WorkflowId == current.WorkflowId);
+        source = source.Where(t => t.Source == current.Source);
         if (!string.IsNullOrWhiteSpace(current.JobId))
         {
-            command.Parameters.AddWithValue("$job", current.JobId);
-            command.Parameters.AddWithValue("$jobVersion", current.JobVersion ?? 0);
+            var jv = current.JobVersion ?? 0;
+            source = source.Where(t => t.JobId == current.JobId && t.JobVersion == jv);
         }
-        command.Parameters.AddWithValue("$cutoff", cutoff);
-        command.Parameters.AddWithValue("$until", until);
+        else
+        {
+            source = source.Where(t => t.JobId == null);
+        }
+        return source;
     }
 
     private SignatureDescriptor? BuildSignature(RunTraceRecord trace, RunObservabilitySnapshot observation)

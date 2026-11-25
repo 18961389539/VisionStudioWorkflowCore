@@ -1,22 +1,19 @@
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using VisionStudio.Api.Storage.EfCore;
 
 namespace VisionStudio.Api;
 
 /// <summary>
 /// Asynchronous runs (dataset validation, camera-sync commissioning, plugin benchmark) are executed by
-/// in-process workers and only their rows outlive the process. A host that stops unexpectedly therefore
-/// leaves those rows at 'Running'/'Queued' forever: the UI keeps polling a run that cannot progress, and
-/// operations guarded by "no running run" (for example deleting the dataset) stay blocked until someone
-/// edits the database by hand.
-///
-/// This host is a single-process deployment (the same assumption <see cref="WorkflowStore"/> documents),
-/// so every unfinished row that exists before this process starts has no owner. Marking them once at
-/// startup is deterministic — no time-based guessing — and idempotent.
+/// in-process workers and only their rows outlive the process.
 /// </summary>
 public sealed class InterruptedRunRecovery(
-    SqliteMetadataDatabase database,
+    IVisionStudioDbFactory dbFactory,
     ILogger<InterruptedRunRecovery> logger)
 {
+    public InterruptedRunRecovery(SqliteMetadataDatabase database, ILogger<InterruptedRunRecovery> logger)
+        : this(new VisionStudioDbFactory(database), logger) { }
+
     public const string Status = "Interrupted";
 
     internal const string Reason =
@@ -24,14 +21,30 @@ public sealed class InterruptedRunRecovery(
 
     public async Task<int> RecoverAsync(CancellationToken cancellationToken)
     {
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var completedAt = DateTimeOffset.UtcNow.ToUniversalTime().ToString("O");
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var completedAt = DateTimeOffset.UtcNow;
         var recovered = 0;
 
-        recovered += await MarkAsync(connection, "validation_runs", "status='Running'", completedAt, cancellationToken);
-        recovered += await MarkAsync(connection, "camera_sync_commissioning_tests",
-            "status IN ('Queued','Running')", completedAt, cancellationToken);
-        recovered += await MarkAsync(connection, "plugin_benchmark_runs", "status='Running'", completedAt, cancellationToken);
+        recovered += await db.ValidationRuns
+            .Where(x => x.Status == "Running")
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Status, Status)
+                .SetProperty(x => x.CompletedAt, x => x.CompletedAt ?? completedAt)
+                .SetProperty(x => x.Error, x => x.Error ?? Reason), cancellationToken);
+
+        recovered += await db.CameraSyncCommissioningTests
+            .Where(x => x.Status == "Queued" || x.Status == "Running")
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Status, Status)
+                .SetProperty(x => x.CompletedAt, x => x.CompletedAt ?? completedAt)
+                .SetProperty(x => x.Error, x => x.Error ?? Reason), cancellationToken);
+
+        recovered += await db.PluginBenchmarkRuns
+            .Where(x => x.Status == "Running")
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Status, Status)
+                .SetProperty(x => x.CompletedAt, x => x.CompletedAt ?? completedAt)
+                .SetProperty(x => x.Error, x => x.Error ?? Reason), cancellationToken);
 
         if (recovered > 0)
         {
@@ -41,28 +54,6 @@ public sealed class InterruptedRunRecovery(
         }
 
         return recovered;
-    }
-
-    private static async Task<int> MarkAsync(
-        SqliteConnection connection,
-        string table,
-        string predicate,
-        string completedAt,
-        CancellationToken cancellationToken)
-    {
-        // Table names and predicates are compile-time constants; no user input reaches the SQL text.
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            UPDATE {table}
-               SET status=$status,
-                   completed_at=COALESCE(completed_at,$completed),
-                   error=COALESCE(error,$error)
-             WHERE {predicate};
-            """;
-        command.Parameters.AddWithValue("$status", Status);
-        command.Parameters.AddWithValue("$completed", completedAt);
-        command.Parameters.AddWithValue("$error", Reason);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }
 

@@ -116,7 +116,8 @@ public sealed class PluginPackageService
     private const string ManagedMarker = ".visionstudio-managed-package";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true, PropertyNameCaseInsensitive = true };
 
-    private readonly object _sync = new();
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _trustSync = new();
     private readonly string _repositoryRoot;
     private readonly string _trustRoot;
     private readonly string _trustFile;
@@ -139,18 +140,18 @@ public sealed class PluginPackageService
 
     public IReadOnlyList<TrustedPluginPublisher> ListTrustedPublishers()
     {
-        lock (_sync) return ReadTrustedPublishers().OrderBy(x => x.DisplayName ?? x.Subject, StringComparer.OrdinalIgnoreCase).ToArray();
+        lock (_trustSync) return ReadTrustedPublishers().OrderBy(x => x.DisplayName ?? x.Subject, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     public TrustedPluginPublisher TrustPublisher(byte[] certificateBytes, string? displayName)
     {
-        using var certificate = new X509Certificate2(certificateBytes);
+        using var certificate = X509CertificateLoader.LoadCertificate(certificateBytes);
         var thumbprint = NormalizeThumbprint(certificate.Thumbprint);
         if (string.IsNullOrWhiteSpace(thumbprint)) throw new InvalidOperationException("Certificate thumbprint is unavailable.");
         if (!certificate.HasPrivateKey && certificate.GetRSAPublicKey() is null && certificate.GetECDsaPublicKey() is null)
             throw new InvalidOperationException("Publisher certificate does not expose an RSA or ECDSA public key.");
 
-        lock (_sync)
+        lock (_trustSync)
         {
             var current = ReadTrustedPublishers().ToDictionary(x => x.Thumbprint, StringComparer.OrdinalIgnoreCase);
             var item = new TrustedPluginPublisher(
@@ -171,7 +172,7 @@ public sealed class PluginPackageService
     public void RemoveTrustedPublisher(string thumbprint)
     {
         thumbprint = NormalizeThumbprint(thumbprint);
-        lock (_sync)
+        lock (_trustSync)
         {
             var next = ReadTrustedPublishers().Where(x => !string.Equals(x.Thumbprint, thumbprint, StringComparison.OrdinalIgnoreCase)).ToArray();
             WriteJsonAtomic(_trustFile, next);
@@ -179,6 +180,9 @@ public sealed class PluginPackageService
             if (File.Exists(certPath)) File.Delete(certPath);
         }
     }
+
+    public Task<PluginPackagePreflightResult> PreflightAsync(byte[] packageBytes, string sourceFileName, CancellationToken ct = default)
+        => Task.Run(() => Preflight(packageBytes, sourceFileName), ct);
 
     public PluginPackagePreflightResult Preflight(byte[] packageBytes, string sourceFileName)
     {
@@ -194,118 +198,228 @@ public sealed class PluginPackageService
         }
     }
 
+    public async Task<PluginPackageInstallResult> InstallAsync(byte[] packageBytes, string sourceFileName, CancellationToken ct = default)
+    {
+        var inspected = await Task.Run(() => InspectArchive(packageBytes, sourceFileName), ct).ConfigureAwait(false);
+        var staging = await PrepareInstallStagingAsync(inspected, packageBytes, sourceFileName, ct).ConfigureAwait(false);
+        try
+        {
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return CommitInstallUnderGate(inspected, staging.VersionDirectory, staging.TempDirectory);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+        catch
+        {
+            TryDeleteDirectory(staging.TempDirectory);
+            throw;
+        }
+    }
+
     public PluginPackageInstallResult Install(byte[] packageBytes, string sourceFileName)
     {
-        lock (_sync)
+        var inspected = InspectArchive(packageBytes, sourceFileName);
+        var staging = PrepareInstallStaging(inspected, packageBytes, sourceFileName);
+        try
         {
-            var inspected = InspectArchive(packageBytes, sourceFileName);
-            if (!inspected.Preflight.Valid) throw new InvalidOperationException(inspected.Preflight.Error ?? "Plugin package preflight failed.");
-            if (_options.RequireTrustedSignature && (!inspected.Preflight.Signed || !inspected.Preflight.SignatureValid || !inspected.Preflight.PublisherTrusted))
-                throw new InvalidOperationException("Plugin package installation requires a valid signature from a trusted publisher.");
-
-            var manifest = inspected.Manifest;
-            var versionDirectory = GetVersionDirectory(manifest.Id, manifest.Version);
-            if (Directory.Exists(versionDirectory))
+            _gate.Wait();
+            try
             {
-                var existing = ReadMetadata(versionDirectory);
-                if (existing is null || !string.Equals(existing.PackageSha256, inspected.Preflight.PackageSha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"Plugin {manifest.Id} {manifest.Version} is already installed with different package content. Publish a new version instead of mutating an existing version.");
+                return CommitInstallUnderGate(inspected, staging.VersionDirectory, staging.TempDirectory);
             }
-            else
+            finally
             {
-                var temp = versionDirectory + ".install-" + Guid.NewGuid().ToString("N");
-                Directory.CreateDirectory(temp);
-                try
-                {
-                    ExtractPayload(inspected.ArchiveEntries, temp);
-                    File.WriteAllBytes(Path.Combine(temp, ArchiveFileName), packageBytes);
-                    var metadata = new PluginPackageMetadata(
-                        manifest.Id,
-                        manifest.Name,
-                        manifest.Version,
-                        manifest.Vendor ?? "",
-                        inspected.Preflight.PackageSha256,
-                        inspected.Preflight.ContentSha256,
-                        inspected.Preflight.Signed,
-                        inspected.Preflight.SignatureValid,
-                        inspected.Preflight.PublisherTrusted,
-                        inspected.Preflight.PublisherThumbprint,
-                        inspected.Preflight.PublisherSubject,
-                        DateTimeOffset.UtcNow,
-                        Path.GetFileName(sourceFileName));
-                    WriteJsonAtomic(Path.Combine(temp, MetadataFileName), metadata);
-                    Directory.CreateDirectory(Path.GetDirectoryName(versionDirectory)!);
-                    Directory.Move(temp, versionDirectory);
-                }
-                catch
-                {
-                    if (Directory.Exists(temp)) Directory.Delete(temp, true);
-                    throw;
-                }
+                _gate.Release();
             }
-
-            var pointers = ReadPointers();
-            var activated = false;
-            var restart = false;
-            if (!pointers.Active.TryGetValue(manifest.Id, out var activeVersion))
-            {
-                if (!string.IsNullOrWhiteSpace(_pluginsRoot))
-                {
-                    MaterializeVersion(manifest.Id, manifest.Version, _pluginsRoot!);
-                    activated = true;
-                }
-                pointers.Active[manifest.Id] = manifest.Version;
-                pointers.Pending.Remove(manifest.Id);
-                WritePointers(pointers);
-            }
-            else if (!string.Equals(activeVersion, manifest.Version, StringComparison.OrdinalIgnoreCase))
-            {
-                pointers.Pending[manifest.Id] = manifest.Version;
-                WritePointers(pointers);
-                restart = true;
-            }
-
-            var info = ListPackagesCore().Single(x => string.Equals(x.Id, manifest.Id, StringComparison.OrdinalIgnoreCase) && string.Equals(x.Version, manifest.Version, StringComparison.OrdinalIgnoreCase));
-            return new PluginPackageInstallResult(info, activated, restart,
-                activated ? "Package installed and materialized for runtime discovery." : restart ? $"Package installed. {manifest.Id} {manifest.Version} is pending activation on host restart." : "Package version is already active.");
         }
+        catch
+        {
+            TryDeleteDirectory(staging.TempDirectory);
+            throw;
+        }
+    }
+
+    private (string VersionDirectory, string? TempDirectory) PrepareInstallStaging(
+        InspectedPackage inspected,
+        byte[] packageBytes,
+        string sourceFileName)
+    {
+        ValidateInstallPolicy(inspected);
+        var manifest = inspected.Manifest;
+        var versionDirectory = GetVersionDirectory(manifest.Id, manifest.Version);
+        if (Directory.Exists(versionDirectory))
+            return (versionDirectory, null);
+
+        var tempRoot = Path.Combine(_repositoryRoot, ".staging");
+        Directory.CreateDirectory(tempRoot);
+        var temp = Path.Combine(tempRoot, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        try
+        {
+            ExtractPayload(inspected.ArchiveEntries, temp);
+            File.WriteAllBytes(Path.Combine(temp, ArchiveFileName), packageBytes);
+            WriteJsonAtomic(Path.Combine(temp, MetadataFileName), BuildInstallMetadata(inspected, sourceFileName));
+            return (versionDirectory, temp);
+        }
+        catch
+        {
+            TryDeleteDirectory(temp);
+            throw;
+        }
+    }
+
+    private async Task<(string VersionDirectory, string? TempDirectory)> PrepareInstallStagingAsync(
+        InspectedPackage inspected,
+        byte[] packageBytes,
+        string sourceFileName,
+        CancellationToken ct)
+    {
+        ValidateInstallPolicy(inspected);
+        var manifest = inspected.Manifest;
+        var versionDirectory = GetVersionDirectory(manifest.Id, manifest.Version);
+        if (Directory.Exists(versionDirectory))
+            return (versionDirectory, null);
+
+        var tempRoot = Path.Combine(_repositoryRoot, ".staging");
+        Directory.CreateDirectory(tempRoot);
+        var temp = Path.Combine(tempRoot, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        try
+        {
+            await ExtractPayloadAsync(inspected.ArchiveEntries, temp, ct).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(Path.Combine(temp, ArchiveFileName), packageBytes, ct).ConfigureAwait(false);
+            await WriteJsonAtomicAsync(Path.Combine(temp, MetadataFileName), BuildInstallMetadata(inspected, sourceFileName), ct).ConfigureAwait(false);
+            return (versionDirectory, temp);
+        }
+        catch
+        {
+            TryDeleteDirectory(temp);
+            throw;
+        }
+    }
+
+    private void ValidateInstallPolicy(InspectedPackage inspected)
+    {
+        if (!inspected.Preflight.Valid)
+            throw new InvalidOperationException(inspected.Preflight.Error ?? "Plugin package preflight failed.");
+        if (_options.RequireTrustedSignature && (!inspected.Preflight.Signed || !inspected.Preflight.SignatureValid || !inspected.Preflight.PublisherTrusted))
+            throw new InvalidOperationException("Plugin package installation requires a valid signature from a trusted publisher.");
+    }
+
+    private static PluginPackageMetadata BuildInstallMetadata(InspectedPackage inspected, string sourceFileName)
+    {
+        var manifest = inspected.Manifest;
+        return new PluginPackageMetadata(
+            manifest.Id,
+            manifest.Name,
+            manifest.Version,
+            manifest.Vendor ?? "",
+            inspected.Preflight.PackageSha256,
+            inspected.Preflight.ContentSha256,
+            inspected.Preflight.Signed,
+            inspected.Preflight.SignatureValid,
+            inspected.Preflight.PublisherTrusted,
+            inspected.Preflight.PublisherThumbprint,
+            inspected.Preflight.PublisherSubject,
+            DateTimeOffset.UtcNow,
+            Path.GetFileName(sourceFileName));
+    }
+
+    private PluginPackageInstallResult CommitInstallUnderGate(InspectedPackage inspected, string versionDirectory, string? tempDirectory)
+    {
+        var manifest = inspected.Manifest;
+        if (Directory.Exists(versionDirectory))
+        {
+            TryDeleteDirectory(tempDirectory);
+            var existing = ReadMetadata(versionDirectory);
+            if (existing is null || !string.Equals(existing.PackageSha256, inspected.Preflight.PackageSha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Plugin {manifest.Id} {manifest.Version} is already installed with different package content. Publish a new version instead of mutating an existing version.");
+        }
+        else
+        {
+            if (tempDirectory is null)
+            {
+                // Version directory disappeared between pre-check and gate acquisition; stage inside fallback.
+                var fallback = PrepareInstallStaging(inspected, inspected.PackageBytes, inspected.SourceFileName);
+                tempDirectory = fallback.TempDirectory!;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(versionDirectory)!);
+            Directory.Move(tempDirectory, versionDirectory);
+        }
+
+        var pointers = ReadPointers();
+        var activated = false;
+        var restart = false;
+        if (!pointers.Active.TryGetValue(manifest.Id, out var activeVersion))
+        {
+            if (!string.IsNullOrWhiteSpace(_pluginsRoot))
+            {
+                MaterializeVersion(manifest.Id, manifest.Version, _pluginsRoot!);
+                activated = true;
+            }
+            pointers.Active[manifest.Id] = manifest.Version;
+            pointers.Pending.Remove(manifest.Id);
+            WritePointers(pointers);
+        }
+        else if (!string.Equals(activeVersion, manifest.Version, StringComparison.OrdinalIgnoreCase))
+        {
+            pointers.Pending[manifest.Id] = manifest.Version;
+            WritePointers(pointers);
+            restart = true;
+        }
+
+        var info = ListPackagesCore().Single(x => string.Equals(x.Id, manifest.Id, StringComparison.OrdinalIgnoreCase) && string.Equals(x.Version, manifest.Version, StringComparison.OrdinalIgnoreCase));
+        return new PluginPackageInstallResult(info, activated, restart,
+            activated ? "Package installed and materialized for runtime discovery." : restart ? $"Package installed. {manifest.Id} {manifest.Version} is pending activation on host restart." : "Package version is already active.");
     }
 
     public IReadOnlyList<PluginPackageVersionInfo> ListPackages()
     {
-        lock (_sync) return ListPackagesCore();
+        _gate.Wait();
+        try { return ListPackagesCore(); }
+        finally { _gate.Release(); }
     }
 
     public PluginPackageSelectionResult SelectVersion(string id, string version)
     {
-        lock (_sync)
+        _gate.Wait();
+        try { return SelectVersionCore(id, version); }
+        finally { _gate.Release(); }
+    }
+
+    private PluginPackageSelectionResult SelectVersionCore(string id, string version)
+    {
+        EnsureInstalled(id, version);
+        var pointers = ReadPointers();
+        pointers.Active.TryGetValue(id, out var active);
+        if (string.Equals(active, version, StringComparison.OrdinalIgnoreCase))
         {
-            EnsureInstalled(id, version);
-            var pointers = ReadPointers();
-            pointers.Active.TryGetValue(id, out var active);
-            if (string.Equals(active, version, StringComparison.OrdinalIgnoreCase))
-            {
-                pointers.Pending.Remove(id);
-                WritePointers(pointers);
-                return new PluginPackageSelectionResult(id, version, null, false, "Requested version is already active.");
-            }
-            if (string.IsNullOrWhiteSpace(active))
-            {
-                if (!string.IsNullOrWhiteSpace(_pluginsRoot)) MaterializeVersion(id, version, _pluginsRoot!);
-                pointers.Active[id] = version;
-                pointers.Pending.Remove(id);
-                WritePointers(pointers);
-                return new PluginPackageSelectionResult(id, version, null, false, "Version selected as the active package.");
-            }
-            pointers.Pending[id] = version;
+            pointers.Pending.Remove(id);
             WritePointers(pointers);
-            return new PluginPackageSelectionResult(id, active!, version, true, $"Version {version} is staged. Restart the host to switch from {active}.");
+            return new PluginPackageSelectionResult(id, version, null, false, "Requested version is already active.");
         }
+        if (string.IsNullOrWhiteSpace(active))
+        {
+            if (!string.IsNullOrWhiteSpace(_pluginsRoot)) MaterializeVersion(id, version, _pluginsRoot!);
+            pointers.Active[id] = version;
+            pointers.Pending.Remove(id);
+            WritePointers(pointers);
+            return new PluginPackageSelectionResult(id, version, null, false, "Version selected as the active package.");
+        }
+        pointers.Pending[id] = version;
+        WritePointers(pointers);
+        return new PluginPackageSelectionResult(id, active!, version, true, $"Version {version} is staged. Restart the host to switch from {active}.");
     }
 
     public PluginPackageSelectionResult Rollback(string id, string? targetVersion)
     {
-        lock (_sync)
+        _gate.Wait();
+        try
         {
             var packages = ListPackagesCore().Where(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.InstalledAt).ToArray();
             if (packages.Length == 0) throw new KeyNotFoundException($"Plugin package '{id}' is not installed.");
@@ -326,13 +440,18 @@ public sealed class PluginPackageService
             }
             if (string.IsNullOrWhiteSpace(target)) throw new InvalidOperationException($"Plugin '{id}' has no alternate installed version to roll back to.");
             EnsureInstalled(id, target);
-            return SelectVersion(id, target);
+            return SelectVersionCore(id, target);
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
     public void RemoveVersion(string id, string version)
     {
-        lock (_sync)
+        _gate.Wait();
+        try
         {
             var pointers = ReadPointers();
             if (pointers.Active.TryGetValue(id, out var active) && string.Equals(active, version, StringComparison.OrdinalIgnoreCase))
@@ -343,12 +462,17 @@ public sealed class PluginPackageService
             if (!Directory.Exists(directory)) throw new KeyNotFoundException($"Plugin {id} {version} is not installed.");
             Directory.Delete(directory, true);
         }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     /// <summary>Applies pending selections only during host startup, before PluginManager loads any DLL.</summary>
     public void PrepareRuntimePluginRoot(string pluginsRoot)
     {
-        lock (_sync)
+        _gate.Wait();
+        try
         {
             _pluginsRoot = Path.GetFullPath(pluginsRoot);
             Directory.CreateDirectory(_pluginsRoot);
@@ -357,6 +481,10 @@ public sealed class PluginPackageService
             pointers.Pending.Clear();
             WritePointers(pointers);
             foreach (var pair in pointers.Active) MaterializeVersion(pair.Key, pair.Value, _pluginsRoot);
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
@@ -371,12 +499,14 @@ public sealed class PluginPackageService
             if (id.StartsWith(".", StringComparison.Ordinal)) continue;
             foreach (var versionDir in Directory.GetDirectories(idDir))
             {
+                var versionFolder = Path.GetFileName(versionDir);
+                if (versionFolder.StartsWith(".", StringComparison.Ordinal) || versionFolder.Contains(".install-", StringComparison.Ordinal)) continue;
                 var metadata = ReadMetadata(versionDir);
                 if (metadata is null) continue;
                 var active = pointers.Active.TryGetValue(metadata.Id, out var av) && string.Equals(av, metadata.Version, StringComparison.OrdinalIgnoreCase);
                 var pending = pointers.Pending.TryGetValue(metadata.Id, out var pv) && string.Equals(pv, metadata.Version, StringComparison.OrdinalIgnoreCase);
                 var trustedNow = metadata.Signed && !string.IsNullOrWhiteSpace(metadata.PublisherThumbprint) &&
-                    ReadTrustedPublishers().Any(x => x.Enabled && string.Equals(x.Thumbprint, metadata.PublisherThumbprint, StringComparison.OrdinalIgnoreCase));
+                    ReadTrustedPublishersSnapshot().Any(x => x.Enabled && string.Equals(x.Thumbprint, metadata.PublisherThumbprint, StringComparison.OrdinalIgnoreCase));
                 result.Add(new PluginPackageVersionInfo(metadata.Id, metadata.Name, metadata.Version, metadata.Vendor, metadata.PackageSha256, metadata.ContentSha256,
                     metadata.Signed, metadata.SignatureValid, trustedNow, metadata.PublisherThumbprint, metadata.PublisherSubject, metadata.InstalledAt,
                     active, pending, pending, metadata.PackageFormat));
@@ -424,12 +554,12 @@ public sealed class PluginPackageService
             if (!string.Equals(signature.ContentSha256, contentHash, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("signature.json contentSha256 does not match package content.");
             var certPath = NormalizeArchivePath(signature.CertificateFile);
             if (!entries.TryGetValue(certPath, out var certBytes)) throw new InvalidOperationException($"Publisher certificate '{certPath}' is missing from the package.");
-            using var certificate = new X509Certificate2(certBytes);
+            using var certificate = X509CertificateLoader.LoadCertificate(certBytes);
             thumbprint = NormalizeThumbprint(certificate.Thumbprint);
             subject = certificate.Subject;
             signatureValid = VerifySignature(certificate, signature, Convert.FromHexString(contentHash));
             if (!signatureValid) throw new InvalidOperationException("Plugin package cryptographic signature is invalid.");
-            publisherTrusted = ReadTrustedPublishers().Any(x => x.Enabled && string.Equals(x.Thumbprint, thumbprint, StringComparison.OrdinalIgnoreCase));
+            publisherTrusted = ReadTrustedPublishersSnapshot().Any(x => x.Enabled && string.Equals(x.Thumbprint, thumbprint, StringComparison.OrdinalIgnoreCase));
             if (!publisherTrusted) warnings.Add($"Publisher {subject} ({thumbprint}) is not trusted by this host.");
             if (DateTime.UtcNow < certificate.NotBefore.ToUniversalTime() || DateTime.UtcNow > certificate.NotAfter.ToUniversalTime())
                 warnings.Add("Publisher certificate is outside its validity period. Signature identity is preserved, but installation policy may reject the package.");
@@ -439,7 +569,7 @@ public sealed class PluginPackageService
         if (_options.RequireTrustedSignature && (!signed || !signatureValid || !publisherTrusted)) warnings.Add("Host policy requires a valid signature from a trusted publisher before installation.");
         var result = new PluginPackagePreflightResult(true, null, manifest.Id, manifest.Name, manifest.Version, manifest.Vendor, manifest.EntryAssembly,
             packageHash, contentHash, signed, signatureValid, publisherTrusted, thumbprint, subject, warnings);
-        return new InspectedPackage(manifest, entries, result);
+        return new InspectedPackage(manifest, entries, result, packageBytes, sourceFileName);
     }
 
     private static void ValidateManifest(PluginPackageManifest manifest, IReadOnlyDictionary<string, byte[]> entries)
@@ -535,6 +665,27 @@ public sealed class PluginPackageService
         }
     }
 
+    private static async Task ExtractPayloadAsync(IReadOnlyDictionary<string, byte[]> entries, string destination, CancellationToken ct)
+    {
+        var prefix = destination.EndsWith(Path.DirectorySeparatorChar) ? destination : destination + Path.DirectorySeparatorChar;
+        foreach (var pair in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.Equals(pair.Key, SignatureFileName, StringComparison.OrdinalIgnoreCase)) continue;
+            var path = Path.GetFullPath(Path.Combine(destination, pair.Key.Replace('/', Path.DirectorySeparatorChar)));
+            if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Package extraction escaped the staging directory.");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, pair.Value, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static void TryDeleteDirectory(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
+        try { Directory.Delete(directory, true); }
+        catch { /* Best-effort staging directory cleanup after failure or concurrent install. */ }
+    }
+
     private void MaterializeVersion(string id, string version, string pluginsRoot)
     {
         var source = GetVersionDirectory(id, version);
@@ -588,6 +739,11 @@ public sealed class PluginPackageService
         return JsonSerializer.Deserialize<PluginPackageMetadata>(File.ReadAllBytes(path), Json);
     }
 
+    private IReadOnlyList<TrustedPluginPublisher> ReadTrustedPublishersSnapshot()
+    {
+        lock (_trustSync) return ReadTrustedPublishers();
+    }
+
     private IReadOnlyList<TrustedPluginPublisher> ReadTrustedPublishers()
     {
         if (!File.Exists(_trustFile)) return [];
@@ -613,7 +769,20 @@ public sealed class PluginPackageService
         File.Move(temp, path, true);
     }
 
+    private static async Task WriteJsonAtomicAsync<T>(string path, T value, CancellationToken ct)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        await File.WriteAllBytesAsync(temp, JsonSerializer.SerializeToUtf8Bytes(value, Json), ct).ConfigureAwait(false);
+        File.Move(temp, path, true);
+    }
+
     private static string NormalizeThumbprint(string? thumbprint) => new((thumbprint ?? "").Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
-    private sealed record InspectedPackage(PluginPackageManifest Manifest, IReadOnlyDictionary<string, byte[]> ArchiveEntries, PluginPackagePreflightResult Preflight);
+    private sealed record InspectedPackage(
+        PluginPackageManifest Manifest,
+        IReadOnlyDictionary<string, byte[]> ArchiveEntries,
+        PluginPackagePreflightResult Preflight,
+        byte[] PackageBytes,
+        string SourceFileName);
 }

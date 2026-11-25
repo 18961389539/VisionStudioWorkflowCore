@@ -4,8 +4,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using VisionStudio.Api.Provenance;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 using VisionStudio.Engine;
 using VisionStudio.Engine.Provenance;
 
@@ -78,74 +81,70 @@ public sealed record CameraSynchronizationCommissioningTest(
     string? Error,
     CameraSynchronizationCommissioningReport? Report);
 
-public sealed class CameraSynchronizationCommissioningStore(SqliteMetadataDatabase database)
+public sealed class CameraSynchronizationCommissioningStore(IVisionStudioDbFactory dbFactory)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 
+    public CameraSynchronizationCommissioningStore(SqliteMetadataDatabase database) : this(new VisionStudioDbFactory(database)) { }
+
     public async Task CreateAsync(CameraSynchronizationCommissioningTest test, CancellationToken ct = default)
     {
-        await using var c = await database.OpenConnectionAsync(ct);
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = """
-INSERT INTO camera_sync_commissioning_tests(test_id,group_id,group_config_hash,scheduled,requested_iterations,completed_iterations,frame_timeout_ms,delay_ms,minimum_samples,status,started_at,completed_at,error,report_json)
-VALUES($id,$group,$hash,$scheduled,$requested,$completed,$timeout,$delay,$minimum,$status,$started,NULL,NULL,NULL);
-""";
-        Bind(cmd, test);
-        await cmd.ExecuteNonQueryAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        db.CameraSyncCommissioningTests.Add(new CameraSyncCommissioningTestEntity
+        {
+            TestId = test.TestId,
+            GroupId = test.GroupId,
+            GroupConfigHash = test.GroupConfigurationHash,
+            Scheduled = test.Scheduled,
+            RequestedIterations = test.RequestedIterations,
+            CompletedIterations = test.CompletedIterations,
+            FrameTimeoutMs = test.FrameTimeoutMs,
+            DelayMs = test.DelayMs,
+            MinimumSamples = test.MinimumSamples,
+            Status = test.Status,
+            StartedAt = test.StartedAt
+        });
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task UpdateAsync(CameraSynchronizationCommissioningTest test, CancellationToken ct = default)
     {
-        await using var c = await database.OpenConnectionAsync(ct);
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = """
-UPDATE camera_sync_commissioning_tests SET completed_iterations=$completed,status=$status,completed_at=$completedAt,error=$error,report_json=$report WHERE test_id=$id;
-""";
-        cmd.Parameters.AddWithValue("$id", test.TestId);
-        cmd.Parameters.AddWithValue("$completed", test.CompletedIterations);
-        cmd.Parameters.AddWithValue("$status", test.Status);
-        cmd.Parameters.AddWithValue("$completedAt", test.CompletedAt is null ? DBNull.Value : test.CompletedAt.Value.ToString("O"));
-        cmd.Parameters.AddWithValue("$error", (object?)test.Error ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$report", test.Report is null ? DBNull.Value : JsonSerializer.Serialize(test.Report, Json));
-        await cmd.ExecuteNonQueryAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var reportJson = test.Report is null ? null : JsonSerializer.Serialize(test.Report, Json);
+        await db.CameraSyncCommissioningTests
+            .Where(x => x.TestId == test.TestId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.CompletedIterations, test.CompletedIterations)
+                .SetProperty(x => x.Status, test.Status)
+                .SetProperty(x => x.CompletedAt, test.CompletedAt)
+                .SetProperty(x => x.Error, test.Error)
+                .SetProperty(x => x.ReportJson, reportJson), ct);
     }
 
     public async Task<CameraSynchronizationCommissioningTest> GetAsync(string testId, CancellationToken ct = default)
     {
-        await using var c = await database.OpenConnectionAsync(ct);
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT test_id,group_id,group_config_hash,scheduled,requested_iterations,completed_iterations,frame_timeout_ms,delay_ms,minimum_samples,status,started_at,completed_at,error,report_json FROM camera_sync_commissioning_tests WHERE test_id=$id;";
-        cmd.Parameters.AddWithValue("$id", testId);
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        if (!await r.ReadAsync(ct)) throw new KeyNotFoundException($"Camera synchronization commissioning test '{testId}' does not exist.");
-        return Read(r);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.CameraSyncCommissioningTests.FirstOrDefaultAsync(x => x.TestId == testId, ct)
+            ?? throw new KeyNotFoundException($"Camera synchronization commissioning test '{testId}' does not exist.");
+        return ToModel(entity);
     }
 
     public async Task<IReadOnlyList<CameraSynchronizationCommissioningTest>> ListAsync(string groupId, int limit = 20, CancellationToken ct = default)
     {
-        await using var c = await database.OpenConnectionAsync(ct);
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT test_id,group_id,group_config_hash,scheduled,requested_iterations,completed_iterations,frame_timeout_ms,delay_ms,minimum_samples,status,started_at,completed_at,error,report_json FROM camera_sync_commissioning_tests WHERE group_id=$group ORDER BY started_at DESC LIMIT $limit;";
-        cmd.Parameters.AddWithValue("$group", groupId);
-        cmd.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 100));
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        var list = new List<CameraSynchronizationCommissioningTest>();
-        while (await r.ReadAsync(ct)) list.Add(Read(r));
-        return list;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var entities = await db.CameraSyncCommissioningTests
+            .Where(x => x.GroupId == groupId)
+            .OrderByDescending(x => x.StartedAt)
+            .Take(Math.Clamp(limit, 1, 100))
+            .ToListAsync(ct);
+        return entities.Select(ToModel).ToList();
     }
 
-    private static void Bind(SqliteCommand cmd, CameraSynchronizationCommissioningTest t)
-    {
-        cmd.Parameters.AddWithValue("$id", t.TestId); cmd.Parameters.AddWithValue("$group", t.GroupId); cmd.Parameters.AddWithValue("$hash", t.GroupConfigurationHash);
-        cmd.Parameters.AddWithValue("$scheduled", t.Scheduled ? 1 : 0); cmd.Parameters.AddWithValue("$requested", t.RequestedIterations); cmd.Parameters.AddWithValue("$completed", t.CompletedIterations);
-        cmd.Parameters.AddWithValue("$timeout", t.FrameTimeoutMs); cmd.Parameters.AddWithValue("$delay", t.DelayMs); cmd.Parameters.AddWithValue("$minimum", t.MinimumSamples);
-        cmd.Parameters.AddWithValue("$status", t.Status); cmd.Parameters.AddWithValue("$started", t.StartedAt.ToString("O"));
-    }
-
-    private static CameraSynchronizationCommissioningTest Read(SqliteDataReader r) => new(
-        r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt32(3) != 0, r.GetInt32(4), r.GetInt32(5), r.GetInt32(6), r.GetInt32(7), r.GetInt32(8), r.GetString(9),
-        DateTimeOffset.Parse(r.GetString(10)), r.IsDBNull(11) ? null : DateTimeOffset.Parse(r.GetString(11)), r.IsDBNull(12) ? null : r.GetString(12),
-        r.IsDBNull(13) ? null : JsonSerializer.Deserialize<CameraSynchronizationCommissioningReport>(r.GetString(13), Json));
+    private static CameraSynchronizationCommissioningTest ToModel(CameraSyncCommissioningTestEntity e) => new(
+        e.TestId, e.GroupId, e.GroupConfigHash, e.Scheduled,
+        e.RequestedIterations, e.CompletedIterations, e.FrameTimeoutMs, e.DelayMs, e.MinimumSamples,
+        e.Status, e.StartedAt, e.CompletedAt, e.Error,
+        e.ReportJson is null ? null : JsonSerializer.Deserialize<CameraSynchronizationCommissioningReport>(e.ReportJson, Json));
 }
 
 public sealed class CameraSynchronizationCommissioningService(

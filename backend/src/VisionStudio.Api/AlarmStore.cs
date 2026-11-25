@@ -2,9 +2,13 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Storage.EfCore;
+using VisionStudio.Api.Storage.EfCore.Entities;
 
 namespace VisionStudio.Api;
 
@@ -51,7 +55,7 @@ public sealed class AlarmStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private readonly SqliteMetadataDatabase _database;
+    private readonly IVisionStudioDbFactory _dbFactory;
     private readonly ILogger<AlarmStore> _logger;
     private readonly string _legacyPath;
     private readonly SemaphoreSlim _legacyGate = new(1, 1);
@@ -63,18 +67,28 @@ public sealed class AlarmStore
     {
     }
 
+    public AlarmStore(IVisionStudioDbFactory dbFactory, IWebHostEnvironment env, ILogger<AlarmStore> logger)
+        : this(dbFactory, logger, File.Move)
+    {
+    }
+
     public AlarmStore(SqliteMetadataDatabase database, IWebHostEnvironment env, ILogger<AlarmStore> logger)
-        : this(database, env, logger, File.Move)
+        : this(new VisionStudioDbFactory(database), logger, File.Move)
     {
     }
 
     internal AlarmStore(SqliteMetadataDatabase database, IWebHostEnvironment env, ILogger<AlarmStore> logger,
         Action<string, string> archiveLegacyFile)
+        : this(new VisionStudioDbFactory(database), logger, archiveLegacyFile)
     {
-        _database = database;
+    }
+
+    private AlarmStore(IVisionStudioDbFactory dbFactory, ILogger<AlarmStore> logger, Action<string, string> archiveLegacyFile)
+    {
+        _dbFactory = dbFactory;
         _logger = logger;
         _archiveLegacyFile = archiveLegacyFile;
-        var dir = Path.Combine(database.DataRoot, "production");
+        var dir = Path.Combine(dbFactory.Database.DataRoot, "production");
         Directory.CreateDirectory(dir);
         _legacyPath = Path.Combine(dir, "alarms.json");
     }
@@ -87,28 +101,30 @@ public sealed class AlarmStore
     {
         try
         {
-            using var connection = _database.OpenConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-SELECT COUNT(*),
-       COALESCE(MAX(COALESCE(last_raised_at, raised_at)), ''),
-       COALESCE(MAX(recovered_at), ''),
-       COALESCE(MAX(acknowledged_at), ''),
-       COALESCE(SUM(active), 0),
-       COALESCE(SUM(acknowledged), 0),
-       COALESCE(SUM(occurrence_count), 0)
-FROM alarms;
-""";
-            using var reader = command.ExecuteReader();
-            if (!reader.Read()) return "0";
+            using var db = _dbFactory.CreateDbContext();
+            var rows = db.Alarms
+                .Select(x => new
+                {
+                    Last = x.LastRaisedAt ?? x.RaisedAt,
+                    x.RecoveredAt,
+                    x.AcknowledgedAt,
+                    Active = x.Active ? 1 : 0,
+                    Acknowledged = x.Acknowledged ? 1 : 0,
+                    x.OccurrenceCount
+                })
+                .ToList();
+            if (rows.Count == 0) return "0::::0:0:0";
+            var maxLast = rows.Max(x => x.Last);
+            var maxRecovered = rows.Where(x => x.RecoveredAt != null).Max(x => x.RecoveredAt);
+            var maxAcknowledged = rows.Where(x => x.AcknowledgedAt != null).Max(x => x.AcknowledgedAt);
             return string.Join(':',
-                reader.GetInt32(0).ToString(CultureInfo.InvariantCulture),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetInt32(4).ToString(CultureInfo.InvariantCulture),
-                reader.GetInt32(5).ToString(CultureInfo.InvariantCulture),
-                reader.GetInt64(6).ToString(CultureInfo.InvariantCulture));
+                rows.Count.ToString(CultureInfo.InvariantCulture),
+                FormatTimestamp(maxLast),
+                maxRecovered is { } r ? FormatTimestamp(r) : string.Empty,
+                maxAcknowledged is { } a ? FormatTimestamp(a) : string.Empty,
+                rows.Sum(x => x.Active).ToString(CultureInfo.InvariantCulture),
+                rows.Sum(x => x.Acknowledged).ToString(CultureInfo.InvariantCulture),
+                rows.Sum(x => (long)x.OccurrenceCount).ToString(CultureInfo.InvariantCulture));
         }
         catch
         {
@@ -127,61 +143,42 @@ FROM alarms;
         await EnsureLegacyImportedAsync(ct);
         var effectiveSkip = Math.Max(0, skip);
         var effectiveTake = take <= 0 ? DefaultPageSize : Math.Min(take, MaxPageSize);
-        var filter = (pendingOnly, activeOnly) switch
-        {
-            (true, _) => " WHERE active = 1 AND acknowledged = 0",
-            (_, true) => " WHERE active = 1",
-            _ => string.Empty
-        };
-        if (source is not null)
-            filter += filter.Length == 0 ? " WHERE source = $source" : " AND source = $source";
 
-        await using var connection = await _database.OpenConnectionAsync(ct);
-        await using var tx = connection.BeginTransaction(deferred: true);
-        var total = source is null
-            ? await ScalarIntAsync(connection, tx, $"SELECT COUNT(*) FROM alarms{filter};", ct)
-            : await ScalarIntAsync(connection, tx, $"SELECT COUNT(*) FROM alarms{filter};", ct, ("$source", source));
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        IQueryable<AlarmEntity> query = db.Alarms;
+        if (pendingOnly) query = query.Where(x => x.Active && !x.Acknowledged);
+        else if (activeOnly) query = query.Where(x => x.Active);
+        if (source is not null) query = query.Where(x => x.Source == source);
 
-        await using var command = connection.CreateCommand();
-        command.Transaction = tx;
-        command.CommandText = $"""
-SELECT {Columns}
-FROM alarms{filter}
-ORDER BY raised_at DESC, id DESC
-LIMIT $take OFFSET $skip;
-""";
-        command.Parameters.AddWithValue("$take", effectiveTake);
-        command.Parameters.AddWithValue("$skip", effectiveSkip);
-        if (source is not null) command.Parameters.AddWithValue("$source", source);
-
-        var items = new List<AlarmRecord>(Math.Min(effectiveTake, 128));
-        await using (var reader = await command.ExecuteReaderAsync(ct))
-        {
-            while (await reader.ReadAsync(ct)) items.Add(ReadRecord(reader));
-        }
+        var total = await query.CountAsync(ct);
+        var entities = await query
+            .OrderByDescending(x => x.RaisedAt)
+            .ThenByDescending(x => x.Id)
+            .Skip(effectiveSkip)
+            .Take(effectiveTake)
+            .ToListAsync(ct);
         await tx.CommitAsync(ct);
-        return new AlarmPage(items, total);
+        return new AlarmPage(entities.Select(ToRecord).ToList(), total);
     }
 
     public async Task<AlarmSummary> GetSummaryAsync(CancellationToken ct, string? source = null)
     {
         await EnsureLegacyImportedAsync(ct);
-        await using var connection = await _database.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        var sourceFilter = source is null ? string.Empty : " AND source = $source";
-        command.CommandText = $"""
-SELECT COUNT(*),
-       COUNT(CASE WHEN severity = $critical THEN 1 END),
-       (SELECT message FROM alarms WHERE active = 1{sourceFilter} ORDER BY COALESCE(last_raised_at, raised_at) DESC, id DESC LIMIT 1),
-       COUNT(CASE WHEN acknowledged = 0 THEN 1 END)
-FROM alarms
-WHERE active = 1{sourceFilter};
-""";
-        command.Parameters.AddWithValue("$critical", nameof(AlarmSeverity.Critical));
-        if (source is not null) command.Parameters.AddWithValue("$source", source);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        await reader.ReadAsync(ct);
-        return new AlarmSummary(reader.GetInt32(0), reader.GetInt32(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt32(3));
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var query = db.Alarms.Where(x => x.Active);
+        if (source is not null) query = query.Where(x => x.Source == source);
+
+        var criticalName = nameof(AlarmSeverity.Critical);
+        var activeCount = await query.CountAsync(ct);
+        var criticalCount = await query.CountAsync(x => x.Severity == criticalName, ct);
+        var pendingCount = await query.CountAsync(x => !x.Acknowledged, ct);
+        var latestMessage = await query
+            .OrderByDescending(x => x.LastRaisedAt ?? x.RaisedAt)
+            .ThenByDescending(x => x.Id)
+            .Select(x => x.Message)
+            .FirstOrDefaultAsync(ct);
+        return new AlarmSummary(activeCount, criticalCount, latestMessage, pendingCount);
     }
 
     /// <summary>
@@ -201,37 +198,46 @@ WHERE active = 1{sourceFilter};
     public async Task<AlarmRecord> RaiseAsync(string code, AlarmSeverity severity, string source, string message, string? runId, CancellationToken ct)
     {
         await EnsureLegacyImportedAsync(ct);
-        await using var connection = await _database.OpenConnectionAsync(ct);
-        await using var tx = connection.BeginTransaction(deferred: false);
+        var now = DateTimeOffset.UtcNow;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
         try
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = tx;
-            command.CommandText = $"""
-INSERT INTO alarms(id, code, severity, source, message, active, acknowledged, raised_at, last_raised_at, run_id)
-VALUES($id, $code, $severity, $source, $message, 1, 0, $now, $now, $runId)
-ON CONFLICT(code, source) WHERE active = 1 DO UPDATE SET
-    severity = excluded.severity, message = excluded.message, run_id = excluded.run_id,
-    last_raised_at = MAX(COALESCE(alarms.last_raised_at, alarms.raised_at), excluded.last_raised_at),
-    occurrence_count = alarms.occurrence_count + 1
-RETURNING {Columns};
-""";
-            command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N"));
-            command.Parameters.AddWithValue("$code", code);
-            command.Parameters.AddWithValue("$severity", severity.ToString());
-            command.Parameters.AddWithValue("$source", source);
-            command.Parameters.AddWithValue("$message", message);
-            command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
-            command.Parameters.AddWithValue("$runId", (object?)runId ?? DBNull.Value);
-            AlarmRecord alarm;
-            await using (var reader = await command.ExecuteReaderAsync(ct))
+            var entity = await db.Alarms
+                .AsTracking()
+                .FirstOrDefaultAsync(x => x.Active && x.Code == code && x.Source == source, ct);
+            if (entity is not null)
             {
-                if (!await reader.ReadAsync(ct)) throw new InvalidOperationException("Alarm write returned no record.");
-                alarm = ReadRecord(reader);
+                entity.Severity = severity.ToString();
+                entity.Message = message;
+                entity.RunId = runId;
+                var currentLast = entity.LastRaisedAt ?? entity.RaisedAt;
+                entity.LastRaisedAt = now > currentLast ? now : currentLast;
+                entity.OccurrenceCount += 1;
             }
-            await TrimAsync(connection, tx, ct);
+            else
+            {
+                entity = new AlarmEntity
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Code = code,
+                    Severity = severity.ToString(),
+                    Source = source,
+                    Message = message,
+                    Active = true,
+                    Acknowledged = false,
+                    RaisedAt = now,
+                    LastRaisedAt = now,
+                    RunId = runId,
+                    OccurrenceCount = 1
+                };
+                db.Alarms.Add(entity);
+            }
+
+            await db.SaveChangesAsync(ct);
+            await TrimAsync(db, ct);
             await tx.CommitAsync(ct);
-            return alarm;
+            return ToRecord(entity);
         }
         catch
         {
@@ -243,39 +249,33 @@ RETURNING {Columns};
     public async Task RecoverAsync(string code, string source, CancellationToken ct)
     {
         await EnsureLegacyImportedAsync(ct);
-        await using var connection = await _database.OpenConnectionAsync(ct);
-        await ExecuteAsync(connection, null, """
-UPDATE alarms
-SET active = 0, recovered_at = $now
-WHERE active = 1 AND code = $code AND source = $source;
-""", ct,
-            ("$now", FormatTimestamp(DateTimeOffset.UtcNow)),
-            ("$code", code),
-            ("$source", source));
+        var now = DateTimeOffset.UtcNow;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.Alarms
+            .Where(x => x.Active && x.Code == code && x.Source == source)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Active, false)
+                .SetProperty(x => x.RecoveredAt, now), ct);
     }
 
     public async Task<AlarmRecord> AcknowledgeAsync(string id, CancellationToken ct)
     {
         await EnsureLegacyImportedAsync(ct);
-        await using var connection = await _database.OpenConnectionAsync(ct);
-        await using var tx = connection.BeginTransaction(deferred: false);
+        var now = DateTimeOffset.UtcNow;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
         try
         {
-            var affected = await ExecuteAsync(connection, tx,
-                "UPDATE alarms SET acknowledged = 1, acknowledged_at = COALESCE(acknowledged_at, $now) WHERE id = $id;", ct,
-                ("$now", FormatTimestamp(DateTimeOffset.UtcNow)), ("$id", id));
-            if (affected == 0) throw new ApiNotFoundException($"Alarm '{id}' does not exist.");
+            var entity = await db.Alarms
+                .AsTracking()
+                .FirstOrDefaultAsync(x => x.Id == id, ct)
+                ?? throw new ApiNotFoundException($"Alarm '{id}' does not exist.");
 
-            await using var query = connection.CreateCommand();
-            query.Transaction = tx;
-            query.CommandText = $"SELECT {Columns} FROM alarms WHERE id = $id;";
-            query.Parameters.AddWithValue("$id", id);
-            await using var reader = await query.ExecuteReaderAsync(ct);
-            if (!await reader.ReadAsync(ct)) throw new ApiNotFoundException($"Alarm '{id}' does not exist.");
-            var record = ReadRecord(reader);
-            await reader.DisposeAsync();
+            entity.Acknowledged = true;
+            entity.AcknowledgedAt ??= now;
+            await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
-            return record;
+            return ToRecord(entity);
         }
         catch
         {
@@ -286,17 +286,21 @@ WHERE active = 1 AND code = $code AND source = $source;
 
     /// <summary>
     /// 保留策略的事务内版本：活动报警全留，已恢复报警只留最新到上限。
-    /// 与 <see cref="TrimToRetention"/> 同口径，但用 SQL 完成，避免把上限条记录读进内存。
+    /// 与 <see cref="TrimToRetention"/> 同口径，避免把上限条记录读进内存。
     /// </summary>
-    private static async Task TrimAsync(SqliteConnection connection, SqliteTransaction tx, CancellationToken ct)
+    private static async Task TrimAsync(VisionStudioDbContext db, CancellationToken ct)
     {
-        var active = await ScalarIntAsync(connection, tx, "SELECT COUNT(*) FROM alarms WHERE active = 1;", ct);
+        var active = await db.Alarms.CountAsync(x => x.Active, ct);
         var keep = Math.Max(0, MaxRetainedRecords - active);
-        await ExecuteAsync(connection, tx, """
-DELETE FROM alarms
-WHERE active = 0
-  AND id NOT IN (SELECT id FROM alarms WHERE active = 0 ORDER BY raised_at DESC, id DESC LIMIT $keep);
-""", ct, ("$keep", keep));
+        var keepIds = db.Alarms
+            .Where(x => !x.Active)
+            .OrderByDescending(x => x.RaisedAt)
+            .ThenByDescending(x => x.Id)
+            .Take(keep)
+            .Select(x => x.Id);
+        await db.Alarms
+            .Where(x => !x.Active && !keepIds.Contains(x.Id))
+            .ExecuteDeleteAsync(ct);
     }
 
     /// <summary>
@@ -329,9 +333,9 @@ WHERE active = 0
 
     private async Task ImportLegacyFileAsync(CancellationToken ct)
     {
-        await using var connection = await _database.OpenConnectionAsync(ct, strongDurability: true);
-        await using var tx = connection.BeginTransaction(deferred: false);
-        if (await ScalarIntAsync(connection, tx, "SELECT COUNT(*) FROM legacy_alarm_import WHERE id = 1;", ct) != 0)
+        await using var db = await _dbFactory.CreateDbContextAsync(ct, strongDurability: true);
+        await using var tx = await _dbFactory.BeginImmediateTransactionAsync(db, ct);
+        if (await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS Value FROM legacy_alarm_import WHERE id = 1").FirstAsync(ct) != 0)
             return;
 
         List<AlarmRecord> items;
@@ -342,75 +346,60 @@ WHERE active = 0
         }
 
         // 保留数据库中已有的状态。旧文件内同一活动报警取最新一条。
+        var existingIds = (await db.Alarms.Select(x => x.Id).ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
+        var activeKeys = (await db.Alarms.Where(x => x.Active).Select(x => new { x.Code, x.Source }).ToListAsync(ct))
+            .Select(x => (x.Code, x.Source))
+            .ToHashSet();
+
         foreach (var item in items.OrderByDescending(x => x.RaisedAt))
         {
             ct.ThrowIfCancellationRequested();
-            await ExecuteAsync(connection, tx, """
-INSERT INTO alarms(id, code, severity, source, message, active, acknowledged, raised_at, recovered_at, acknowledged_at, run_id)
-VALUES($id, $code, $severity, $source, $message, $active, $acknowledged, $raisedAt, $recoveredAt, $acknowledgedAt, $runId)
-ON CONFLICT DO NOTHING;
-""", ct,
-                ("$id", item.Id),
-                ("$code", item.Code),
-                ("$severity", item.Severity.ToString()),
-                ("$source", item.Source),
-                ("$message", item.Message),
-                ("$active", item.Active ? 1 : 0),
-                ("$acknowledged", item.Acknowledged ? 1 : 0),
-                ("$raisedAt", FormatTimestamp(item.RaisedAt)),
-                ("$recoveredAt", item.RecoveredAt is { } recovered ? FormatTimestamp(recovered) : null),
-                ("$acknowledgedAt", item.AcknowledgedAt is { } acknowledged ? FormatTimestamp(acknowledged) : null),
-                ("$runId", item.RunId));
+            if (!existingIds.Add(item.Id)) continue;
+            if (item.Active && !activeKeys.Add((item.Code, item.Source))) continue;
+            db.Alarms.Add(new AlarmEntity
+            {
+                Id = item.Id,
+                Code = item.Code,
+                Severity = item.Severity.ToString(),
+                Source = item.Source,
+                Message = item.Message,
+                Active = item.Active,
+                Acknowledged = item.Acknowledged,
+                RaisedAt = item.RaisedAt,
+                RecoveredAt = item.RecoveredAt,
+                AcknowledgedAt = item.AcknowledgedAt,
+                RunId = item.RunId,
+                LastRaisedAt = item.LastRaisedAt,
+                OccurrenceCount = item.OccurrenceCount
+            });
         }
-        await TrimAsync(connection, tx, ct);
-        await ExecuteAsync(connection, tx, "INSERT INTO legacy_alarm_import(id) VALUES(1);", ct);
+        await db.SaveChangesAsync(ct);
+        await TrimAsync(db, ct);
+        await db.Database.ExecuteSqlRawAsync("INSERT INTO legacy_alarm_import(id) VALUES(1);", ct);
         ct.ThrowIfCancellationRequested();
         await tx.CommitAsync(ct);
         _logger.LogInformation("Imported legacy alarms from {Path} into SQLite.", _legacyPath);
     }
 
-    private static AlarmRecord ReadRecord(SqliteDataReader reader) => new(
-        Id: reader.GetString(0),
-        Code: reader.GetString(1),
-        Severity: ParseSeverity(reader.GetString(2)),
-        Source: reader.GetString(3),
-        Message: reader.GetString(4),
-        Active: reader.GetInt32(5) != 0,
-        Acknowledged: reader.GetInt32(6) != 0,
-        RaisedAt: ParseTimestamp(reader.GetString(7)),
-        RecoveredAt: reader.IsDBNull(8) ? null : ParseTimestamp(reader.GetString(8)),
-        AcknowledgedAt: reader.IsDBNull(9) ? null : ParseTimestamp(reader.GetString(9)),
-        RunId: reader.IsDBNull(10) ? null : reader.GetString(10),
-        LastRaisedAt: ParseTimestamp(reader.GetString(11)),
-        OccurrenceCount: reader.GetInt32(12));
+    private static AlarmRecord ToRecord(AlarmEntity entity) => new(
+        Id: entity.Id,
+        Code: entity.Code,
+        Severity: ParseSeverity(entity.Severity),
+        Source: entity.Source,
+        Message: entity.Message,
+        Active: entity.Active,
+        Acknowledged: entity.Acknowledged,
+        RaisedAt: entity.RaisedAt,
+        RecoveredAt: entity.RecoveredAt,
+        AcknowledgedAt: entity.AcknowledgedAt,
+        RunId: entity.RunId,
+        LastRaisedAt: entity.LastRaisedAt ?? entity.RaisedAt,
+        OccurrenceCount: entity.OccurrenceCount);
 
     private static AlarmSeverity ParseSeverity(string value)
         => Enum.TryParse<AlarmSeverity>(value, ignoreCase: true, out var severity) ? severity : AlarmSeverity.Warning;
 
-    private static DateTimeOffset ParseTimestamp(string value)
-        => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-
     /// <summary>统一存 UTC 往返格式：字符串排序与时间排序一致，聚合最大值才能当版本戳。</summary>
     private static string FormatTimestamp(DateTimeOffset value)
         => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
-
-    private static async Task<int> ScalarIntAsync(SqliteConnection connection, SqliteTransaction? transaction, string sql, CancellationToken ct,
-        params (string Name, object? Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        return Convert.ToInt32(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-    }
-
-    private static async Task<int> ExecuteAsync(SqliteConnection connection, SqliteTransaction? transaction, string sql, CancellationToken ct,
-        params (string Name, object? Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        return await command.ExecuteNonQueryAsync(ct);
-    }
 }
