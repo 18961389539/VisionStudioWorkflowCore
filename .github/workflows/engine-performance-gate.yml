@@ -48,14 +48,14 @@ jobs:
           ./scripts/engine-benchmark-gate.ps1 @arguments
       - name: Upload benchmark evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: engine-performance-gate
           path: artifacts/engine-benchmark-result.json
           if-no-files-found: warn
       - name: Upload refreshed baseline
         if: ${{ inputs.update_baseline == true }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: engine-benchmark-baseline
           path: ci/engine-benchmark-baseline.json
