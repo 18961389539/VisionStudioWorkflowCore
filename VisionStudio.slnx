@@ -19,8 +19,4 @@
     <Project Path="backend/tests/VisionStudio.Api.Tests/VisionStudio.Api.Tests.csproj" />
     <Project Path="backend/tests/VisionStudio.Engine.Tests/VisionStudio.Engine.Tests.csproj" />
   </Folder>
-  <Folder Name="/Wpf/">
-    <Project Path="wpf/src/VisionStudio.Wpf/VisionStudio.Wpf.csproj" />
-    <Project Path="wpf/tests/VisionStudio.Wpf.Tests/VisionStudio.Wpf.Tests.csproj" />
-  </Folder>
 </Solution>

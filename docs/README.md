@@ -42,8 +42,6 @@
 |---|---|
 | [`editor-document-design-improvements.md`](editor-document-design-improvements.md) | 文档模型、未保存变更、并发修订 |
 | [`workflow-change-design-improvements.md`](workflow-change-design-improvements.md) | 变更语义与脏标记 |
-| [`wpf-desktop.md`](wpf-desktop.md) | WPF 解决方案、启动、数据根、ImageViewer 接入与桌面测试 |
-| [`wpf-trial-acceptance.md`](wpf-trial-acceptance.md) | WPF 内部试用候选包验收证据、交付边界及目标机待验证清单 |
 | [`tuning-workspace-design-improvements.md`](tuning-workspace-design-improvements.md) | 调参工作区 |
 | [`run-controller-design-improvements.md`](run-controller-design-improvements.md) | 运行控制与状态机 |
 | [`trace-query-design-improvements.md`](trace-query-design-improvements.md) | 留证查询 |
@@ -60,7 +58,6 @@
 | [`perf-optimization-2026-10-26.md`](perf-optimization-2026-10-26.md) | 性能优化记录 |
 | [`comment-code-audit-2026-10-29.md`](comment-code-audit-2026-10-29.md) | 注释与代码一致性审计 |
 | [`quality-gates.md`](quality-gates.md) | 门禁口径与棘轮 |
-| [`../third_party/README.md`](../third_party/README.md) | 外部源码来源、许可证、本地修改与升级约定 |
 | [`engine-benchmark.md`](engine-benchmark.md) | 引擎算法微基准：固定夹具、夜间固定机器、25% 中位耗时容差 |
 | [`archive/node-design-improvements-rounds-1-51.md`](archive/node-design-improvements-rounds-1-51.md) | 早期 51 轮节点改造记录（历史） |
 

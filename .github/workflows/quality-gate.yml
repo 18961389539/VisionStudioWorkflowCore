@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Backend / Frontend / WPF / E2E 独立执行，四段通过才算门禁通过。
+  # Backend / Frontend / E2E 独立执行，三段通过才算门禁通过。
   backend:
     runs-on: windows-latest
     timeout-minutes: 25
@@ -50,31 +50,6 @@ jobs:
         with:
           name: coverage-and-test-results
           path: artifacts/test-results
-          if-no-files-found: ignore
-
-  wpf:
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - name: Cache WPF NuGet packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: nuget-wpf-${{ runner.os }}-${{ hashFiles('backend/**/*.csproj', 'backend/**/*.props', 'wpf/**/*.csproj', 'wpf/**/*.props', 'third_party/ImageViewer/**/*.csproj', 'third_party/ImageViewer/**/*.props') }}
-          restore-keys: nuget-wpf-${{ runner.os }}-
-      - name: Run WPF quality gate
-        shell: pwsh
-        run: ./scripts/quality-gate.ps1 -Scope Wpf
-      - name: Upload WPF test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wpf-test-results
-          path: artifacts/test-results/wpf
           if-no-files-found: ignore
 
   frontend:

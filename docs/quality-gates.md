@@ -9,16 +9,14 @@
 ./scripts/quality-gate.ps1                  # 全量（本地提交前）
 ./scripts/quality-gate.ps1 -Scope Backend   # 静态审计 + 度量下限 + 发布/迁移回归 + dotnet test + 覆盖率
 ./scripts/quality-gate.ps1 -Scope Frontend  # npm ci + oxlint + 单测覆盖率 + 生产构建 + 产物体积预算
-./scripts/quality-gate.ps1 -Scope Wpf       # Windows WPF 构建、宿主/图像/工作流测试与 NuGet 检查
 ./scripts/quality-gate.ps1 -Scope E2E       # Playwright 真浏览器
 
 ./scripts/quality-gate.ps1 -Scope Frontend -SkipInstall   # 本地迭代：跳过 npm ci
 bash ./scripts/quality-gate.sh --scope Backend           # Linux/macOS/Git Bash 同口径入口（支持 All/Backend/Frontend/E2E 与 --skip-install）
 ```
 
-`-Scope` 将同一套检查分到独立 runner 并行跑，**没有降低任何口径**。Windows 下
-PowerShell 的 `-Scope All` 运行 Backend、Wpf、Frontend 与 E2E 四段；非 Windows 主机会
-明确跳过 Wpf，显式指定 Wpf 则报错。Bash 入口继续覆盖原有三段，不承担 Windows 桌面检查。
+`-Scope` 将同一套检查分到独立 runner 并行跑，**没有降低任何口径**。PowerShell 与
+Bash 两个入口都覆盖 Backend、Frontend、E2E 三段。
 
 `-SkipInstall` 只跳过 `npm ci` 这一步，后面 lint / 覆盖率 / 构建照常全跑。加它的理由是实打实的：
 `npm ci` 会先删空 `node_modules` 再全量重装，本地改一行断言就要等几分钟。代价是它会跳过
@@ -48,27 +46,6 @@ PowerShell 的 LF 规则不改变静态审计要求的编码契约：含非 ASCI
 排查时使用 `git ls-files --eol` 和 `git check-attr text eol -- <文件>`。
 本次固化时索引文本已全部为 LF，因此没有批量归一化源码；不要在有在途改动时盲目运行
 `git add --renormalize .`。未来确需归一化时，应先隔离业务改动，再单独审查并提交换行差异。
-
-## WPF 桌面段
-
-`-Scope Wpf` 在 Windows 上构建 [`../wpf/VisionStudio.Wpf.slnx`](../wpf/VisionStudio.Wpf.slnx)
-并运行全部 WPF 测试，覆盖进程内宿主、工作流 ViewModel、主窗口、节点详情及默认外部图像引擎。
-ImageViewer 使用仓库内的源码，不从同级目录或网络临时拉取。测试以 Release 运行，
-TRX 写入 `artifacts/test-results/wpf/`；CI 的独立 `wpf` job 上传该目录。
-
-桌面段显式保持父级构建配置，后端与外部控件依赖也使用 Release，不回退到 Debug。
-它先执行 [`../scripts/test-wpf-publish-paths.ps1`](../scripts/test-wpf-publish-paths.ps1)，验证发布目录、
-数据根互相包含和陈旧 smoke 报告均被拒绝且不写入文件。桌面回归包含参数条件可见性、
-修订冲突、未知/陈旧状态、数据根独占、1000 个模拟生产周期、20 轮关闭清理和六个逻辑视口尺寸。
-逻辑视口不等于 Windows 实际 DPI 验收；当前候选包验证范围与待验证项见
-[`wpf-trial-acceptance.md`](wpf-trial-acceptance.md)。
-
-它复用既有 NuGet 检查，不要求 Python、Node.js 或真实相机。离线时通告检查明确打印跳过，
-不得把这种情况表述成“未发现漏洞”。它不会清理
-`artifacts/wpf-data` 等运行数据，也不会改变后端与前端原有门禁阈值。
-发布包还须单独运行 [`../scripts/publish-wpf.ps1`](../scripts/publish-wpf.ps1)：
-从自包含暂存包启动真实窗口，验证包内内容根与 CLR 路径、流程/回放/诊断、关闭后同数据根重启；
-这项不由普通源代码测试替代。
 
 ## 后端段
 

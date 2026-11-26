@@ -11,7 +11,7 @@
 
 | 路径 | 内容 |
 |---|---|
-| [`VisionStudio.slnx`](VisionStudio.slnx) | Windows 下统一打开、构建后端与 WPF；分层解决方案仍保留 |
+| [`VisionStudio.slnx`](VisionStudio.slnx) | Windows 下统一打开、构建后端；分层解决方案仍保留 |
 | `backend/src/VisionStudio.Api` | 宿主：Minimal API、认证/审计、限流、存储、发布与运行入口 |
 | `backend/src/VisionStudio.Engine` | 执行引擎：节点执行器、图调度、设备/机器人实现、诊断 |
 | `backend/src/VisionStudio.Abstractions` | 跨层契约：图定义、目录条目、数据值、相机/溯源/标定/卡尺诊断 DTO、成熟度 |
@@ -24,9 +24,6 @@
 | `backend/tests` | xUnit：`VisionStudio.Api.Tests`（宿主/接口）、`VisionStudio.Engine.Tests`（算法/调度）；`Contracts/AssemblyBoundaryTests` 守护程序集依赖方向 |
 | `frontend/src` | 编辑器：画布、节点配置、调参工作区、配方与生产面板 |
 | `frontend/src/generated` | 生成物：目录快照、OpenAPI 快照、由快照生成的 TS 类型 |
-| `wpf/src/VisionStudio.Wpf` | WPF 桌面客户端：进程内引擎、设备监控与 ImageViewer 图像显示 |
-| `wpf/tests` | WPF 宿主、工作流与图像控件集成测试 |
-| [`third_party`](third_party/README.md) | 随仓库管理的外部源码、许可证与本地接入修改说明 |
 | `scripts` | 开发/发布/质量门禁脚本（见下） |
 | `docs` | 设计与审计文档，索引见 [`docs/README.md`](docs/README.md) |
 | `samples` | 可直接导入的示例流程 |
@@ -47,9 +44,8 @@ Api ──► Engine ──► Algorithms ──► Imaging ──► Abstractio
 
 ## 2. 本地开发
 
-Windows 下可从根目录打开统一解决方案，或分别使用
-[`backend/VisionStudio.slnx`](backend/VisionStudio.slnx) 与
-[`wpf/VisionStudio.Wpf.slnx`](wpf/VisionStudio.Wpf.slnx)：
+Windows 下可从根目录打开统一解决方案，或使用
+[`backend/VisionStudio.slnx`](backend/VisionStudio.slnx)：
 
 ```powershell
 dotnet build .\VisionStudio.slnx
@@ -78,35 +74,6 @@ cd frontend; npm install; npm run dev
 - Development 桌面模式下，绝对路径遵循运行进程的 Windows/Linux 文件系统权限，可直接选择任意有权访问的目录。
   生产环境默认仍只读 `ReplayInputRoots`、数据根和媒体根；远程部署必须显式设置
   `VisionStudio__AllowUnrestrictedReplayInput=true` 才会放开绝对路径，因此不会默认暴露服务器文件系统。
-
-### WPF 桌面端
-
-WPF 默认引用仓库内的 [`third_party/ImageViewer`](third_party/ImageViewer/README.md)，
-主图像区、相机预览与节点详情统一使用外部控件，不再依赖仓库之外的同级目录。
-数据根、显示开关、宿主 API 与测试说明见 [`docs/wpf-desktop.md`](docs/wpf-desktop.md)。
-
-```powershell
-.\run-wpf.ps1
-# 显式使用内建显示：
-.\run-wpf.ps1 -UseExternalImageViewer:$false
-```
-
-根目录启动脚本保留兼容入口，实际实现位于 [`scripts/run-wpf.ps1`](scripts/run-wpf.ps1)。
-运行数据与测试/发布产物都放在 `artifacts/`，其中的数据根不能作为普通构建缓存清空。
-
-内部试用离线包使用独立发布链：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-wpf.ps1
-# 在交付包目录中：
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Start-VisionStudio.ps1 -DataRoot 'D:\VisionStudioTrialData'
-```
-
-发布默认输出 `artifacts/wpf-publish`，自包含 .NET 运行时；发布启动默认数据目录为
-`%LOCALAPPDATA%\VisionStudio\Trial\data`，不放在版本目录内。
-当前为本机 Windows 10 Enterprise LTSC 2019 已验证候选包，Windows 11、Windows 10 22H2
-具体版次、真实 DPI 和硬件认证仍未验证。范围、操作和验收证据见
-[`docs/wpf-desktop.md`](docs/wpf-desktop.md) 与 [`docs/wpf-trial-acceptance.md`](docs/wpf-trial-acceptance.md)。
 
 ## 3. 发布与现场运行
 
@@ -139,13 +106,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Start-VisionStudio.ps1 -Da
 ./scripts/quality-gate.ps1                          # 全量（提交前本地跑这个）
 ./scripts/quality-gate.ps1 -Scope Backend           # 后端段
 ./scripts/quality-gate.ps1 -Scope Frontend          # 前端段（lint + 单测覆盖率 + 构建 + 产物体积预算）
-./scripts/quality-gate.ps1 -Scope Wpf               # Windows 桌面端构建与集成测试
 ./scripts/quality-gate.ps1 -Scope E2E               # Playwright 真浏览器
 ./scripts/quality-gate.ps1 -Scope Frontend -SkipInstall   # 本地迭代：复用现成 node_modules
 ```
 
-口径、棘轮与"为什么这么定"见 [`docs/quality-gates.md`](docs/quality-gates.md)。CI 把四段并行跑，
-四段全绿才算通过。`-SkipInstall` 只在本地迭代时用，它跳过 `npm ci`，因此可能掩盖
+口径、棘轮与"为什么这么定"见 [`docs/quality-gates.md`](docs/quality-gates.md)。CI 把三段并行跑，
+三段全绿才算通过。`-SkipInstall` 只在本地迭代时用，它跳过 `npm ci`，因此可能掩盖
 `package-lock.json` 漂移——提交前请至少跑一次不带该开关的 `-Scope Frontend`。
 
 > 脚本被系统执行策略拦下（`因为在此系统上禁止运行脚本`）时，用进程级放开即可，不改机器策略：

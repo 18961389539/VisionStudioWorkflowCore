@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="src/VisionStudio.Wpf/VisionStudio.Wpf.csproj" />
-  <Project Path="tests/VisionStudio.Wpf.Tests/VisionStudio.Wpf.Tests.csproj" />
-</Solution>

@@ -7,14 +7,13 @@
 
       Backend  静态审计 + 度量下限 + 发布/迁移回归 + dotnet test + 告警基线 + 覆盖率
       Frontend npm ci + lint + 单测与覆盖率 + 生产构建 + 产物体积预算
-      Wpf      Windows 桌面客户端构建 + 图像控件/宿主/工作流测试 + NuGet 检查
       E2E      Playwright 真浏览器回归
-      All（默认，本地用）以上全部；非 Windows 主机明确跳过 Wpf
+      All（默认，本地用）以上全部
 
     -SkipInstall：仅用于本地反复跑门禁时复用已有 node_modules。CI 必须保持默认（不加此开关）。
 #>
 param(
-    [ValidateSet('All', 'Backend', 'Frontend', 'Wpf', 'E2E')]
+    [ValidateSet('All', 'Backend', 'Frontend', 'E2E')]
     [string]$Scope = 'All',
 
     # 跳过 npm ci，复用现有 node_modules（本地迭代用；CI 不要加）。
@@ -28,11 +27,6 @@ $backendCoverage = Join-Path $results 'backend-coverage'
 $runBackend = $Scope -in @('All', 'Backend')
 $runFrontend = $Scope -in @('All', 'Frontend')
 $runE2E = $Scope -in @('All', 'E2E')
-$isWindowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
-if ($Scope -eq 'Wpf' -and -not $isWindowsHost) {
-    throw 'Wpf quality gate requires Windows. Use Backend, Frontend or E2E on other platforms.'
-}
-$runWpf = $Scope -eq 'Wpf' -or ($Scope -eq 'All' -and $isWindowsHost)
 
 . (Join-Path $PSScriptRoot 'lib/QualityGateHelpers.ps1')
 
@@ -177,22 +171,6 @@ if ($runBackend) {
     Assert-LastExitCode 'coverage gate'
 
     Invoke-NuGetVulnerabilityGate "$root/backend/VisionStudio.slnx"
-}
-
-if ($runWpf) {
-    & (Join-Path $root 'scripts\test-wpf-publish-paths.ps1')
-    Assert-LastExitCode 'WPF publish path guards'
-    $wpfSolution = Join-Path $root 'wpf\VisionStudio.Wpf.slnx'
-    $wpfResults = Join-Path $results 'wpf'
-    New-Item $wpfResults -ItemType Directory -Force | Out-Null
-    # Keep Release for references outside the WPF-only solution.
-    dotnet test $wpfSolution --configuration Release `
-        '-p:ShouldUnsetParentConfigurationAndPlatform=false' `
-        --logger 'trx;LogFileName=wpf-tests.trx' --results-directory $wpfResults
-    Assert-LastExitCode 'WPF build and integration tests'
-    Invoke-NuGetVulnerabilityGate $wpfSolution
-} elseif ($Scope -eq 'All') {
-    Write-Host 'Skipping WPF checks: the desktop client requires Windows.'
 }
 
 if ($runFrontend) {
