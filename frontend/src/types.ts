@@ -787,6 +787,8 @@ export type MediaLinkedSourceDescriptor = ContractDto<'MediaLinkedSourceDescript
 export type MediaSourceDescriptor = ContractDto<'MediaSourceDescriptor'>;
 
 export type MediaBulkResult = ContractDto<'MediaBulkResult'>;
+export type MediaIntegrityReport = ContractDto<'MediaIntegrityReport'>;
+export type MediaManifestVerification = ContractDto<'MediaManifestVerification'>;
 
 /** UI 视图：label 收窄为封闭联合驱动筛选，bytes 收窄为 number。 */
 export type MediaItemDescriptor = {
@@ -802,6 +804,12 @@ export type MediaItemDescriptor = {
   height?: number | null;
   channels?: number | null;
   bitDepth?: number | null;
+  sha256?: string | null;
+  originPath?: string | null;
+  sourceKind?: string | null;
+  importedAt?: string | null;
+  importedBy?: string | null;
+  duplicateOf?: string | null;
 };
 
 

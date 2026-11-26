@@ -6,7 +6,7 @@
   },
   "servers": [
     {
-      "url": "http://127.0.0.1:50117/"
+      "url": "http://127.0.0.1:51194/"
     }
   ],
   "paths": {
@@ -5545,6 +5545,112 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MediaBulkResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/manifest": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaManifest"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/manifest/verify": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaManifest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaManifestVerification"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/integrity": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaIntegrityReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/maintenance": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaMaintenanceResult"
                 }
               }
             }
@@ -21707,6 +21813,73 @@
           }
         }
       },
+      "MediaIntegrityIssue": {
+        "required": [
+          "path",
+          "kind"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "MediaIntegrityReport": {
+        "required": [
+          "scannedAt",
+          "fileCount",
+          "indexedCount",
+          "duplicateGroups",
+          "issues"
+        ],
+        "type": "object",
+        "properties": {
+          "scannedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fileCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "indexedCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "duplicateGroups": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaIntegrityIssue"
+            }
+          }
+        }
+      },
       "MediaItemDescriptor": {
         "required": [
           "relativePath",
@@ -21785,6 +21958,43 @@
               "string"
             ],
             "format": "int32"
+          },
+          "sha256": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "originPath": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceKind": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "importedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "importedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "duplicateOf": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -21910,6 +22120,158 @@
           "lastModifiedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "authorizedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "authorizedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "MediaMaintenanceResult": {
+        "required": [
+          "removedIndexRows",
+          "removedThumbnails",
+          "report"
+        ],
+        "type": "object",
+        "properties": {
+          "removedIndexRows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "removedThumbnails": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "report": {
+            "$ref": "#/components/schemas/MediaIntegrityReport"
+          }
+        }
+      },
+      "MediaManifest": {
+        "required": [
+          "version",
+          "collection",
+          "createdAt",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "collection": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaManifestEntry"
+            }
+          }
+        }
+      },
+      "MediaManifestEntry": {
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "bytes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "MediaManifestIssue": {
+        "required": [
+          "path",
+          "kind"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "expectedSha256": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "actualSha256": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "MediaManifestVerification": {
+        "required": [
+          "valid",
+          "checked",
+          "issues"
+        ],
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "checked": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaManifestIssue"
+            }
           }
         }
       },

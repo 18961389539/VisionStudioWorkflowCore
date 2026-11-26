@@ -33,13 +33,34 @@ internal sealed class MediaLibraryIndex(SqliteMetadataDatabase database)
     {
         using var connection = database.OpenConnection();
         using var transaction = connection.BeginTransaction(deferred: false);
-        using (var clear = connection.CreateCommand())
+        using (var seen = connection.CreateCommand())
         {
-            clear.Transaction = transaction;
-            clear.CommandText = "DELETE FROM media_index_items;";
-            clear.ExecuteNonQuery();
+            seen.Transaction = transaction;
+            seen.CommandText = """
+DROP TABLE IF EXISTS temp.media_index_seen;
+CREATE TEMP TABLE media_index_seen(relative_path TEXT PRIMARY KEY);
+""";
+            seen.ExecuteNonQuery();
         }
-        foreach (var item in items) Upsert(connection, transaction, item);
+        foreach (var item in items)
+        {
+            Upsert(connection, transaction, item);
+            using var seen = connection.CreateCommand();
+            seen.Transaction = transaction;
+            seen.CommandText = "INSERT OR IGNORE INTO temp.media_index_seen(relative_path) VALUES($path);";
+            seen.Parameters.AddWithValue("$path", item.RelativePath);
+            seen.ExecuteNonQuery();
+        }
+        using (var remove = connection.CreateCommand())
+        {
+            remove.Transaction = transaction;
+            remove.CommandText = """
+DELETE FROM media_index_items
+WHERE relative_path NOT IN (SELECT relative_path FROM temp.media_index_seen);
+DROP TABLE temp.media_index_seen;
+""";
+            remove.ExecuteNonQuery();
+        }
         transaction.Commit();
     }
 
@@ -157,7 +178,8 @@ ORDER BY collection_name COLLATE NOCASE;
         command.Parameters.AddWithValue("$take", Math.Clamp(query.Take, 1, 1000));
         command.CommandText = $"""
 SELECT relative_path, collection_name, label, file_name, extension, bytes, modified_at,
-       width, height, channels, bit_depth
+       width, height, channels, bit_depth, sha256, origin_path, source_kind, imported_at,
+       imported_by, duplicate_of
 FROM media_index_items{whereSql}
 ORDER BY modified_at DESC, relative_path COLLATE NOCASE
 LIMIT $take OFFSET $skip;
@@ -177,8 +199,65 @@ LIMIT $take OFFSET $skip;
                 reader.IsDBNull(7) ? null : reader.GetInt32(7),
                 reader.IsDBNull(8) ? null : reader.GetInt32(8),
                 reader.IsDBNull(9) ? null : reader.GetInt32(9),
-                reader.IsDBNull(10) ? null : reader.GetInt32(10)));
+                reader.IsDBNull(10) ? null : reader.GetInt32(10),
+                reader.IsDBNull(11) ? null : reader.GetString(11),
+                reader.IsDBNull(12) ? null : reader.GetString(12),
+                reader.IsDBNull(13) ? null : reader.GetString(13),
+                reader.IsDBNull(14) ? null : DateTimeOffset.Parse(reader.GetString(14)),
+                reader.IsDBNull(15) ? null : reader.GetString(15),
+                reader.IsDBNull(16) ? null : reader.GetString(16)));
         return new MediaItemPage(items, total);
+    }
+
+    public IReadOnlyList<MediaItemDescriptor> AllItems()
+    {
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+SELECT relative_path, collection_name, label, file_name, extension, bytes, modified_at,
+       width, height, channels, bit_depth, sha256, origin_path, source_kind, imported_at,
+       imported_by, duplicate_of
+FROM media_index_items;
+""";
+        using var reader = command.ExecuteReader();
+        var items = new List<MediaItemDescriptor>();
+        while (reader.Read())
+            items.Add(new MediaItemDescriptor(
+                reader.GetString(0),
+                "media://" + reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetInt64(5),
+                DateTimeOffset.Parse(reader.GetString(6)),
+                reader.IsDBNull(7) ? null : reader.GetInt32(7),
+                reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                reader.IsDBNull(9) ? null : reader.GetInt32(9),
+                reader.IsDBNull(10) ? null : reader.GetInt32(10),
+                reader.IsDBNull(11) ? null : reader.GetString(11),
+                reader.IsDBNull(12) ? null : reader.GetString(12),
+                reader.IsDBNull(13) ? null : reader.GetString(13),
+                reader.IsDBNull(14) ? null : DateTimeOffset.Parse(reader.GetString(14)),
+                reader.IsDBNull(15) ? null : reader.GetString(15),
+                reader.IsDBNull(16) ? null : reader.GetString(16)));
+        return items;
+    }
+
+    public string? FindDuplicate(string sha256, string? relativePath = null)
+    {
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+SELECT relative_path
+FROM media_index_items
+WHERE sha256=$sha256 AND ($path IS NULL OR relative_path<>$path)
+ORDER BY relative_path COLLATE NOCASE
+LIMIT 1;
+""";
+        command.Parameters.AddWithValue("$sha256", sha256);
+        command.Parameters.AddWithValue("$path", (object?)relativePath ?? DBNull.Value);
+        return command.ExecuteScalar() as string;
     }
 
     private static void Upsert(SqliteConnection connection, SqliteTransaction? transaction, MediaItemDescriptor item)
@@ -188,9 +267,11 @@ LIMIT $take OFFSET $skip;
         command.CommandText = """
 INSERT INTO media_index_items(
     relative_path, collection_name, label, file_name, extension, bytes, modified_at,
-    width, height, channels, bit_depth, indexed_at)
+    width, height, channels, bit_depth, sha256, origin_path, source_kind, imported_at,
+    imported_by, duplicate_of, indexed_at)
 VALUES(
-    $path,$collection,$label,$name,$extension,$bytes,$modified,$width,$height,$channels,$bitDepth,$indexed)
+    $path,$collection,$label,$name,$extension,$bytes,$modified,$width,$height,$channels,$bitDepth,
+    $sha256,$originPath,$sourceKind,$importedAt,$importedBy,$duplicateOf,$indexed)
 ON CONFLICT(relative_path) DO UPDATE SET
     collection_name=excluded.collection_name,
     label=excluded.label,
@@ -202,6 +283,12 @@ ON CONFLICT(relative_path) DO UPDATE SET
     height=COALESCE(excluded.height,media_index_items.height),
     channels=COALESCE(excluded.channels,media_index_items.channels),
     bit_depth=COALESCE(excluded.bit_depth,media_index_items.bit_depth),
+    sha256=COALESCE(excluded.sha256,media_index_items.sha256),
+    origin_path=COALESCE(excluded.origin_path,media_index_items.origin_path),
+    source_kind=COALESCE(excluded.source_kind,media_index_items.source_kind),
+    imported_at=COALESCE(excluded.imported_at,media_index_items.imported_at),
+    imported_by=COALESCE(excluded.imported_by,media_index_items.imported_by),
+    duplicate_of=CASE WHEN excluded.sha256 IS NULL THEN media_index_items.duplicate_of ELSE excluded.duplicate_of END,
     indexed_at=excluded.indexed_at;
 """;
         command.Parameters.AddWithValue("$path", item.RelativePath);
@@ -215,6 +302,12 @@ ON CONFLICT(relative_path) DO UPDATE SET
         command.Parameters.AddWithValue("$height", (object?)item.Height ?? DBNull.Value);
         command.Parameters.AddWithValue("$channels", (object?)item.Channels ?? DBNull.Value);
         command.Parameters.AddWithValue("$bitDepth", (object?)item.BitDepth ?? DBNull.Value);
+        command.Parameters.AddWithValue("$sha256", (object?)item.Sha256 ?? DBNull.Value);
+        command.Parameters.AddWithValue("$originPath", (object?)item.OriginPath ?? DBNull.Value);
+        command.Parameters.AddWithValue("$sourceKind", (object?)item.SourceKind ?? DBNull.Value);
+        command.Parameters.AddWithValue("$importedAt", (object?)item.ImportedAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$importedBy", (object?)item.ImportedBy ?? DBNull.Value);
+        command.Parameters.AddWithValue("$duplicateOf", (object?)item.DuplicateOf ?? DBNull.Value);
         command.Parameters.AddWithValue("$indexed", DateTimeOffset.UtcNow.ToString("O"));
         command.ExecuteNonQuery();
     }

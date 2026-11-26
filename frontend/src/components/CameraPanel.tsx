@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Drawer, Form, Space, Table, Tabs, Tag, message } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import type { CameraAdapterDescriptor, CameraDescriptor, CameraDiscoveredDevice, CameraSettings, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus, MediaLinkedSourceDescriptor, MediaBulkResult } from '../types';
+import type { CameraAdapterDescriptor, CameraDescriptor, CameraDiscoveredDevice, CameraSettings, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus, MediaLinkedSourceDescriptor, MediaBulkResult, MediaIntegrityReport } from '../types';
 import { localizeStatus } from '../i18n';
 import { responseErrorMessage } from '../apiErrors';
 import { apiFetch, cachedGet, invalidateCache, RequestToken } from '../apiClient';
@@ -62,6 +62,7 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
   const [linkedDirectoryName, setLinkedDirectoryName] = useState('');
   const [linkedDirectoryPath, setLinkedDirectoryPath] = useState('');
   const [mediaImportProgress, setMediaImportProgress] = useState<{ completed: number; total: number; batch: number; totalBatches: number }>();
+  const [mediaIntegrity, setMediaIntegrity] = useState<MediaIntegrityReport>();
   const [uploadCollection, setUploadCollection] = useState('offline');
   const [uploadLabel, setUploadLabel] = useState('Unlabeled');
   const [newCollection, setNewCollection] = useState('');
@@ -629,6 +630,76 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     } finally { setBusy(undefined); }
   };
 
+  const activeMediaCollection = () => mediaCollection ?? uploadCollection;
+
+  const downloadMediaManifest = async () => {
+    const collection = activeMediaCollection();
+    if (!collection.trim()) return;
+    setBusy('media-manifest');
+    try {
+      const response = await apiFetch(media.manifest(collection));
+      if (!response.ok) throw new Error(await responseError(response, 'Generate media manifest failed'));
+      const manifest = await response.json();
+      const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${collection}.media-manifest.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      messageApi.success(`已生成 ${manifest.files?.length ?? 0} 项媒体清单`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : 'Generate media manifest failed');
+    } finally { setBusy(undefined); }
+  };
+
+  const verifyMediaManifest = async (file: File) => {
+    const collection = activeMediaCollection();
+    if (!collection.trim()) return;
+    setBusy('media-manifest-verify');
+    try {
+      const manifest = JSON.parse(await file.text());
+      const response = await apiFetch(media.verifyManifest(collection), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(manifest)
+      });
+      if (!response.ok) throw new Error(await responseError(response, 'Verify media manifest failed'));
+      const result = await response.json();
+      if (result.valid) messageApi.success(`媒体清单校验通过（${result.checked} 项）`);
+      else messageApi.warning(`媒体清单发现 ${result.issues.length} 个问题`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : 'Verify media manifest failed');
+    } finally { setBusy(undefined); }
+  };
+
+  const scanMediaIntegrity = async () => {
+    setBusy('media-integrity');
+    try {
+      const response = await apiFetch(media.integrity);
+      if (!response.ok) throw new Error(await responseError(response, 'Media integrity scan failed'));
+      const report: MediaIntegrityReport = await response.json();
+      setMediaIntegrity(report);
+      messageApi.info(`媒体完整性扫描完成：${report.fileCount} 项，${report.issues.length} 个问题`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : 'Media integrity scan failed');
+    } finally { setBusy(undefined); }
+  };
+
+  const repairMediaIndex = async () => {
+    setBusy('media-maintenance');
+    try {
+      const response = await apiFetch(media.maintenance, { method: 'POST' });
+      if (!response.ok) throw new Error(await responseError(response, 'Media maintenance failed'));
+      const result = await response.json();
+      setMediaIntegrity(result.report);
+      await refreshMedia(true);
+      messageApi.success(`索引已修复，清理缩略图 ${result.removedThumbnails} 个`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : 'Media maintenance failed');
+    } finally { setBusy(undefined); }
+  };
+
   const deleteMedia = async (item: MediaItemDescriptor) => {
     setBusy(`delete:${item.relativePath}`);
     try {
@@ -808,6 +879,11 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
                 linkDirectory={linkDirectory}
                 unlinkDirectory={unlinkDirectory}
                 bulkUpdateMedia={bulkUpdateMedia}
+                mediaIntegrity={mediaIntegrity}
+                downloadManifest={downloadMediaManifest}
+                verifyManifest={verifyMediaManifest}
+                scanIntegrity={scanMediaIntegrity}
+                repairIndex={repairMediaIndex}
                 mediaSearch={mediaSearch}
                 setMediaSearch={setMediaSearch}
                 mediaMinWidth={mediaMinWidth}

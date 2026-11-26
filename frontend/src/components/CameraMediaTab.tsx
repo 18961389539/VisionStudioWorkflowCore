@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Popconfirm, Progress, Select, Space, Table, Tag, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import type { InputHTMLAttributes } from 'react';
-import type { MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus, MediaLinkedSourceDescriptor } from '../types';
+import type { MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus, MediaLinkedSourceDescriptor, MediaIntegrityReport } from '../types';
 import { media } from '../endpoints';
 import { formatBytes, labelColor, labelText } from './cameraPanelShared';
 
@@ -35,6 +35,11 @@ export type CameraMediaTabProps = {
     action: 'delete' | 'move' | 'relabel',
     options: { targetCollection?: string; targetLabel?: string }
   ) => Promise<{ succeeded: number; failures: unknown[] } | undefined>;
+  mediaIntegrity?: MediaIntegrityReport;
+  downloadManifest: () => void | Promise<void>;
+  verifyManifest: (file: File) => void | Promise<void>;
+  scanIntegrity: () => void | Promise<void>;
+  repairIndex: () => void | Promise<void>;
   mediaSearch: string;
   setMediaSearch: (value: string) => void;
   mediaMinWidth?: number;
@@ -70,7 +75,8 @@ export default function CameraMediaTab(props: CameraMediaTabProps) {
     uploadCollection, setUploadCollection, collections, uploadLabel, setUploadLabel, uploadFiles,
     setUploadFiles, importMedia, importProgress, linkedSources,
     linkedDirectoryName, setLinkedDirectoryName, linkedDirectoryPath, setLinkedDirectoryPath,
-    linkDirectory, unlinkDirectory, bulkUpdateMedia,
+    linkDirectory, unlinkDirectory, bulkUpdateMedia, mediaIntegrity,
+    downloadManifest, verifyManifest, scanIntegrity, repairIndex,
     mediaSearch, setMediaSearch, mediaMinWidth, setMediaMinWidth, mediaMaxWidth, setMediaMaxWidth,
     mediaModifiedAfter, setMediaModifiedAfter, mediaModifiedBefore, setMediaModifiedBefore,
     deleteMedia, mediaCollection, setMediaCollection, mediaLabel, setMediaLabel,
@@ -78,6 +84,7 @@ export default function CameraMediaTab(props: CameraMediaTabProps) {
     setSelectedMedia, selectedMedia, applyMediaAsFileCameraSource,
   } = props;
   const directoryInputRef = useRef<HTMLInputElement>(null);
+  const manifestInputRef = useRef<HTMLInputElement>(null);
   const directoryFilesRef = useRef<File[]>([]);
   const [selectionNotice, setSelectionNotice] = useState<string>();
   const [directoryFileCount, setDirectoryFileCount] = useState(0);
@@ -196,7 +203,10 @@ export default function CameraMediaTab(props: CameraMediaTabProps) {
     <div>
       <strong>{source.name}</strong>
       <span>{source.path}</span>
-      <small>{source.itemCount} 张图像 · {formatBytes(source.totalBytes)}</small>
+      <small>
+        {source.itemCount} 张图像 · {formatBytes(source.totalBytes)}
+        {source.authorizedBy ? ` · 由 ${source.authorizedBy} 授权` : ''}
+      </small>
     </div>
     <Popconfirm title="移除目录引用？原始文件不会删除。" okText="移除" cancelText="取消"
       onConfirm={() => unlinkDirectory(source.name)}>
@@ -204,6 +214,27 @@ export default function CameraMediaTab(props: CameraMediaTabProps) {
     </Popconfirm>
   </div>
 ))}
+<Space wrap style={{ margin: '16px 0 8px' }}>
+  <Button loading={busy === 'media-manifest'} onClick={() => void downloadManifest()}>生成快照清单</Button>
+  <input ref={manifestInputRef} type="file" accept=".json" style={{ display: 'none' }}
+    onChange={(event) => {
+      const file = event.currentTarget.files?.[0];
+      if (file) void verifyManifest(file);
+      event.currentTarget.value = '';
+    }} />
+  <Button loading={busy === 'media-manifest-verify'} onClick={() => manifestInputRef.current?.click()}>校验快照清单</Button>
+  <Button loading={busy === 'media-integrity'} onClick={() => void scanIntegrity()}>扫描完整性</Button>
+  {mediaIntegrity && mediaIntegrity.issues.length > 0 &&
+    <Button danger loading={busy === 'media-maintenance'} onClick={() => void repairIndex()}>修复索引并清理缩略图</Button>}
+</Space>
+{mediaIntegrity && <Alert
+  type={mediaIntegrity.issues.length ? 'warning' : 'success'}
+  showIcon
+  title={`媒体完整性：${mediaIntegrity.fileCount} 个文件，${mediaIntegrity.duplicateGroups} 组重复`}
+  description={mediaIntegrity.issues.length
+    ? mediaIntegrity.issues.slice(0, 4).map(issue => `${issue.kind}: ${issue.path}`).join('；')
+    : '索引、文件和缩略图均一致。'}
+/>}
 <div className="media-filter-row">
   <Input aria-label="搜索媒体文件名" allowClear placeholder="搜索文件名或路径" value={mediaSearch}
     onChange={(event) => setMediaSearch(event.target.value)} onPressEnter={() => { setMediaPage(1); void refreshMedia(false, 1, mediaPageSize); }} />
@@ -253,6 +284,10 @@ export default function CameraMediaTab(props: CameraMediaTabProps) {
   { title: '图像', dataIndex: 'name', ellipsis: true }, { title: '集合', dataIndex: 'collection', width: 110 },
   { title: '尺寸', width: 100, render: (_: unknown, row) => row.width && row.height ? `${row.width}×${row.height}` : '—' },
   { title: '大小', width: 80, render: (_: unknown, row) => formatBytes(row.bytes) },
+  { title: '来源', width: 130, render: (_: unknown, row) => <span title={row.originPath ?? ''}>{row.sourceKind ?? '旧媒体'}</span> },
+  { title: '留证', width: 120, render: (_: unknown, row) => row.sha256
+    ? <Tag color={row.duplicateOf ? 'gold' : 'green'} title={row.sha256}>{row.duplicateOf ? '重复内容' : row.sha256.slice(0, 10)}</Tag>
+    : <Tag>待扫描</Tag> },
   { title: '', width: 70, render: (_: unknown, row) => <Popconfirm title="确定删除此媒体项吗？" okText="删除" cancelText="取消" onConfirm={() => deleteMedia(row)}><Button size="small" danger loading={busy === `delete:${row.relativePath}`}>删除</Button></Popconfirm> }
 ]} />
 

@@ -79,15 +79,26 @@ public static class MediaEndpoints
             MediaLinkedSourceCreateRequest request,
             MediaLibraryService media,
             ProductionRuntimeService production,
+            HttpContext http,
             CancellationToken ct) =>
         {
             production.EnsureMediaMutationAllowed(request.Path);
-            return Results.Ok(await media.LinkDirectoryAsync(request.Name, request.Path, ct));
+            AuditContext.SetTarget(http, request.Name);
+            return Results.Ok(await media.LinkDirectoryAsync(
+                request.Name,
+                request.Path,
+                ct,
+                http.User.Identity?.Name));
         })
             .Produces<MediaLinkedSourceDescriptor>()
             .RequireEngineer("media.link.create", "media");
 
-        app.MapPost("/api/media/import", async (HttpRequest request, MediaLibraryService media, ProductionRuntimeService production, CancellationToken ct) =>
+        app.MapPost("/api/media/import", async (
+            HttpRequest request,
+            HttpContext http,
+            MediaLibraryService media,
+            ProductionRuntimeService production,
+            CancellationToken ct) =>
         {
             if (!request.HasFormContentType) throw new ApiValidationException("Media import requires multipart/form-data.");
             if (request.ContentLength is > 0) media.EnsureIncomingRequestCapacity(request.ContentLength.Value);
@@ -100,6 +111,7 @@ public static class MediaEndpoints
             var batchBytes = form.Files.Sum(x => x.Length);
             if (batchBytes > media.MaxBatchBytes) throw new ApiValidationException($"Media import batch exceeds MaxBatchBytes ({media.MaxBatchBytes}).");
             production.EnsureMediaMutationAllowed(media.ToMediaUri(collection));
+            AuditContext.SetTarget(http, $"{collection}:{form.Files.Count}");
 
             var imported = new List<MediaItemDescriptor>();
             var relativePaths = form["relativePaths"].ToArray();
@@ -113,7 +125,14 @@ public static class MediaEndpoints
                     ? file.FileName
                     : relativePaths[index]?.ToString() ?? file.FileName;
                 imported.Add(await media.ImportAsync(
-                    collection, label, relativePath, stream, file.Length, ct, idempotentRelativePath: true));
+                    collection,
+                    label,
+                    relativePath,
+                    stream,
+                    file.Length,
+                    ct,
+                    idempotentRelativePath: true,
+                    importedBy: http.User.Identity?.Name));
             }
             return Results.Ok(imported);
         }).Produces<IReadOnlyList<MediaItemDescriptor>>().RequireEngineer("media.import", "media").RequireRateLimiting("media-import");
@@ -140,14 +159,51 @@ public static class MediaEndpoints
             MediaBulkRequest request,
             MediaLibraryService media,
             ProductionRuntimeService production,
+            HttpContext http,
             CancellationToken ct) =>
         {
             foreach (var path in request.Paths)
                 production.EnsureMediaMutationAllowed(media.ToMediaUri(path));
+            AuditContext.SetTarget(http, $"{request.Action}:{request.Paths.Length}");
             return Results.Ok(await media.BulkUpdateAsync(request, ct));
         })
             .Produces<MediaBulkResult>()
             .RequireEngineer("media.bulk", "media");
+
+        app.MapGet("/api/media/manifest", async (
+            string collection,
+            MediaLibraryService media,
+            CancellationToken ct) =>
+            Results.Ok(await media.CreateManifestAsync(collection, ct)))
+            .Produces<MediaManifest>()
+            .RequireEngineer("media.manifest.read", "media");
+
+        app.MapPost("/api/media/manifest/verify", async (
+            string collection,
+            MediaManifest manifest,
+            MediaLibraryService media,
+            CancellationToken ct) =>
+            Results.Ok(await media.VerifyManifestAsync(collection, manifest, ct)))
+            .Produces<MediaManifestVerification>()
+            .RequireEngineer("media.manifest.verify", "media");
+
+        app.MapGet("/api/media/integrity", async (
+            MediaLibraryService media,
+            CancellationToken ct) =>
+            Results.Ok(await media.AuditIntegrityAsync(ct)))
+            .Produces<MediaIntegrityReport>()
+            .RequireEngineer("media.integrity.read", "media");
+
+        app.MapPost("/api/media/maintenance", async (
+            HttpContext http,
+            MediaLibraryService media,
+            CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, "media-index+thumbnails");
+            return Results.Ok(await media.RepairIndexAsync(ct));
+        })
+            .Produces<MediaMaintenanceResult>()
+            .RequireAdministrator("media.maintenance", "media");
 
         return app;
     }

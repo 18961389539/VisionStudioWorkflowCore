@@ -172,7 +172,7 @@ describe('CameraPanel 设备命令与参数错误', () => {
 
     fireEvent.change(screen.getByRole('textbox', { name: '搜索媒体文件名' }), { target: { value: 'frame' } });
     fireEvent.change(screen.getByRole('spinbutton', { name: '最小宽度' }), { target: { value: '640' } });
-    fireEvent.click(screen.getByRole('button', { name: /扫\s*描/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^扫\s*描$/ }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) =>
         String(url).includes('search=frame') && String(url).includes('minWidth=640'))).toBe(true);
@@ -190,6 +190,26 @@ describe('CameraPanel 设备命令与参数错误', () => {
         targetLabel: 'Unlabeled'
       });
     });
+  });
+
+  it('媒体库可扫描完整性并提供索引修复入口', async () => {
+    const { fetchMock } = mount((url) => {
+      if (url === '/api/media/integrity')
+        return Promise.resolve(json({
+          scannedAt: '2026-11-26T10:00:00Z',
+          fileCount: 4209,
+          indexedCount: 4208,
+          duplicateGroups: 2,
+          issues: [{ path: 'missing.png', kind: 'missing-index', detail: null }]
+        }));
+      return undefined;
+    }, 'media');
+    await screen.findByRole('button', { name: '扫描完整性' });
+    fireEvent.click(screen.getByRole('button', { name: '扫描完整性' }));
+
+    expect(await screen.findByText(/媒体完整性：4209 个文件，2 组重复/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '修复索引并清理缩略图' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/media/integrity')).toBe(true);
   });
 
   it('打开设备成功后立即刷新列表；失败时显示后端原因', async () => {

@@ -77,6 +77,18 @@ public sealed class MediaLibraryTests
     }
 
     [Fact]
+    public async Task Import_RejectsPngHeaderWithoutDecodableImage()
+    {
+        using var env = new TempWebHostEnvironment();
+        var media = CreateMedia(env);
+        var truncated = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00 };
+        using var bytes = new MemoryStream(truncated);
+
+        await Assert.ThrowsAsync<ApiValidationException>(
+            () => media.ImportAsync("bad", "Unlabeled", "truncated.png", bytes, bytes.Length, default));
+    }
+
+    [Fact]
     public void FileCameraDevice_RequiresLogicalMediaSource()
     {
         var root = Path.Combine(Path.GetTempPath(), "visionstudio-media-test", Guid.NewGuid().ToString("N"));
@@ -163,6 +175,70 @@ public sealed class MediaLibraryTests
         Assert.Single(withDimensions.Items);
         Assert.Equal(1, withDimensions.Items[0].Width);
         Assert.Equal(1, withDimensions.Items[0].Height);
+    }
+
+    [Fact]
+    public async Task Import_StoresProvenanceHashAndDuplicateEvidence()
+    {
+        using var env = new TempWebHostEnvironment();
+        var configuration = CreateConfiguration();
+        var database = new SqliteMetadataDatabase(env, configuration);
+        var media = CreateMedia(env, configuration: configuration, database: database);
+        using var firstBytes = new MemoryStream(TinyPng);
+        var first = await media.ImportAsync(
+            "provenance", "OK", "camera-a/frame.png", firstBytes, firstBytes.Length, default, importedBy: "alice");
+        using var secondBytes = new MemoryStream(TinyPng);
+        var second = await media.ImportAsync(
+            "provenance", "OK", "camera-b/frame.png", secondBytes, secondBytes.Length, default, importedBy: "alice");
+
+        Assert.Equal("camera-a/frame.png", first.OriginPath);
+        Assert.Equal("upload", first.SourceKind);
+        Assert.Equal("alice", first.ImportedBy);
+        Assert.NotNull(first.ImportedAt);
+        Assert.Equal(64, first.Sha256?.Length);
+        Assert.Equal(first.RelativePath, second.DuplicateOf);
+    }
+
+    [Fact]
+    public async Task Manifest_DetectsContentChangesAndUnexpectedFiles()
+    {
+        using var env = new TempWebHostEnvironment();
+        var media = CreateMedia(env);
+        using var bytes = new MemoryStream(TinyPng);
+        var item = await media.ImportAsync("manifest", "OK", "day-1/frame.png", bytes, bytes.Length, default);
+        var manifest = await media.CreateManifestAsync("manifest");
+        await File.AppendAllTextAsync(media.ResolveItemPath(item.RelativePath), "changed");
+        using (var extra = new MemoryStream(TinyPng))
+            await media.ImportAsync("manifest", "OK", "day-1/extra.png", extra, extra.Length, default);
+
+        var verification = await media.VerifyManifestAsync("manifest", manifest);
+
+        Assert.False(verification.Valid);
+        Assert.Contains(verification.Issues, issue => issue.Path == item.RelativePath && issue.Kind == "content-changed");
+        Assert.Contains(verification.Issues, issue => issue.Kind == "unexpected");
+    }
+
+    [Fact]
+    public async Task IntegrityScan_DetectsDuplicatesAndIndexRepairsMissingRows()
+    {
+        using var env = new TempWebHostEnvironment();
+        var configuration = CreateConfiguration();
+        var database = new SqliteMetadataDatabase(env, configuration);
+        var media = CreateMedia(env, configuration: configuration, database: database);
+        for (var index = 0; index < 2; index++)
+        {
+            using var bytes = new MemoryStream(TinyPng);
+            await media.ImportAsync("integrity", "OK", $"camera-{index}/frame.png", bytes, bytes.Length, default);
+        }
+
+        var report = await media.AuditIntegrityAsync();
+        Assert.Equal(2, report.FileCount);
+        Assert.Equal(1, report.DuplicateGroups);
+        Assert.Contains(report.Issues, issue => issue.Kind == "duplicate-content");
+
+        var maintenance = await media.RepairIndexAsync();
+        Assert.Equal(0, maintenance.RemovedIndexRows);
+        Assert.Equal(2, maintenance.Report.FileCount);
     }
 
     [Fact]

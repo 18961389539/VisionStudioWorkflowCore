@@ -74,7 +74,8 @@ public sealed partial class SqliteSchemaMigrationRunner
         new(35, "Station recipe deliveries and rollout batches", RecipeDeliverySchemaSql),
         new(36, "Durable per-workflow counter events", DurableCounterSchemaSql),
         new(37, "Latest station rollout and retained NG preview lookup", ProductionWorkstationLookupSchemaSql),
-        new(38, "Searchable media library index", MediaIndexSchemaSql)
+        new(38, "Searchable media library index", MediaIndexSchemaSql),
+        new(39, "Media provenance and integrity evidence", MediaProvenanceSchemaSql)
     ];
 
     private sealed class Migration

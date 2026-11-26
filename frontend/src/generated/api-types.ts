@@ -6752,6 +6752,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    collection: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MediaManifest"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/manifest/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query: {
+                    collection: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MediaManifest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MediaManifestVerification"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/integrity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MediaIntegrityReport"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MediaMaintenanceResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/hardware-provenance": {
         parameters: {
             query?: never;
@@ -15737,6 +15885,22 @@ export interface components {
             /** Format: date-time */
             lastModifiedAt: null | string;
         };
+        MediaIntegrityIssue: {
+            path: string;
+            kind: string;
+            detail?: null | string;
+        };
+        MediaIntegrityReport: {
+            /** Format: date-time */
+            scannedAt: string;
+            /** Format: int32 */
+            fileCount: number | string;
+            /** Format: int32 */
+            indexedCount: number | string;
+            /** Format: int32 */
+            duplicateGroups: number | string;
+            issues: components["schemas"]["MediaIntegrityIssue"][];
+        };
         MediaItemDescriptor: {
             relativePath: string;
             source: string;
@@ -15756,6 +15920,13 @@ export interface components {
             channels?: null | number | string;
             /** Format: int32 */
             bitDepth?: null | number | string;
+            sha256?: null | string;
+            originPath?: null | string;
+            sourceKind?: null | string;
+            /** Format: date-time */
+            importedAt?: null | string;
+            importedBy?: null | string;
+            duplicateOf?: null | string;
         };
         MediaLibraryStatus: {
             root: string;
@@ -15786,6 +15957,42 @@ export interface components {
             totalBytes: number | string;
             /** Format: date-time */
             lastModifiedAt: string;
+            /** Format: date-time */
+            authorizedAt?: null | string;
+            authorizedBy?: null | string;
+        };
+        MediaMaintenanceResult: {
+            /** Format: int32 */
+            removedIndexRows: number | string;
+            /** Format: int32 */
+            removedThumbnails: number | string;
+            report: components["schemas"]["MediaIntegrityReport"];
+        };
+        MediaManifest: {
+            /** Format: int32 */
+            version: number | string;
+            collection: string;
+            /** Format: date-time */
+            createdAt: string;
+            files: components["schemas"]["MediaManifestEntry"][];
+        };
+        MediaManifestEntry: {
+            path: string;
+            sha256: string;
+            /** Format: int64 */
+            bytes: number | string;
+        };
+        MediaManifestIssue: {
+            path: string;
+            kind: string;
+            expectedSha256?: null | string;
+            actualSha256?: null | string;
+        };
+        MediaManifestVerification: {
+            valid: boolean;
+            /** Format: int32 */
+            checked: number | string;
+            issues: components["schemas"]["MediaManifestIssue"][];
         };
         MediaSourceDescriptor: {
             name: string;

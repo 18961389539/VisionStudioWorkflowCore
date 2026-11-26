@@ -37,7 +37,13 @@ public sealed record MediaItemDescriptor(
     int? Width = null,
     int? Height = null,
     int? Channels = null,
-    int? BitDepth = null);
+    int? BitDepth = null,
+    string? Sha256 = null,
+    string? OriginPath = null,
+    string? SourceKind = null,
+    DateTimeOffset? ImportedAt = null,
+    string? ImportedBy = null,
+    string? DuplicateOf = null);
 
 /// <summary>媒体项分页结果；Total 是 skip/take 之前的过滤后条数。</summary>
 public sealed record MediaItemPage(IReadOnlyList<MediaItemDescriptor> Items, int Total);
@@ -49,7 +55,9 @@ public sealed record MediaLinkedSourceDescriptor(
     string Path,
     int ItemCount,
     long TotalBytes,
-    DateTimeOffset LastModifiedAt);
+    DateTimeOffset LastModifiedAt,
+    DateTimeOffset? AuthorizedAt = null,
+    string? AuthorizedBy = null);
 
 public sealed record MediaSourceDescriptor(
     string Name,
@@ -67,6 +75,25 @@ public sealed record MediaBulkRequest(
 
 public sealed record MediaBulkFailure(string Path, string Error);
 public sealed record MediaBulkResult(int Succeeded, IReadOnlyList<MediaItemDescriptor> Items, IReadOnlyList<MediaBulkFailure> Failures);
+public sealed record MediaManifestEntry(string Path, string Sha256, long Bytes);
+public sealed record MediaManifest(
+    int Version,
+    string Collection,
+    DateTimeOffset CreatedAt,
+    IReadOnlyList<MediaManifestEntry> Files);
+public sealed record MediaManifestIssue(string Path, string Kind, string? ExpectedSha256 = null, string? ActualSha256 = null);
+public sealed record MediaManifestVerification(
+    bool Valid,
+    int Checked,
+    IReadOnlyList<MediaManifestIssue> Issues);
+public sealed record MediaIntegrityIssue(string Path, string Kind, string? Detail = null);
+public sealed record MediaIntegrityReport(
+    DateTimeOffset ScannedAt,
+    int FileCount,
+    int IndexedCount,
+    int DuplicateGroups,
+    IReadOnlyList<MediaIntegrityIssue> Issues);
+public sealed record MediaMaintenanceResult(int RemovedIndexRows, int RemovedThumbnails, MediaIntegrityReport Report);
 
 /// <summary>
 /// Owns the only user-facing filesystem namespace for offline vision images.
@@ -254,7 +281,8 @@ public sealed class MediaLibraryService
         Stream input,
         long length,
         CancellationToken ct,
-        bool idempotentRelativePath = false)
+        bool idempotentRelativePath = false,
+        string? importedBy = null)
     {
         if (length <= 0) throw new ApiValidationException("Uploaded image is empty.");
         if (length > MaxImportBytes) throw new ApiValidationException($"Image exceeds MediaLibrary MaxImportBytes ({MaxImportBytes} bytes).");
@@ -290,6 +318,7 @@ public sealed class MediaLibraryService
                     throw new ApiValidationException($"Uploaded image exceeds MediaLibrary MaxImportBytes ({MaxImportBytes} bytes).");
             }
             ValidateImageSignature(temp, Path.GetExtension(fileName));
+            ValidateImageDecodable(temp, fileName);
             if (idempotentRelativePath && File.Exists(destination) && await FilesEqualAsync(temp, destination, ct))
             {
                 File.Delete(temp);
@@ -306,7 +335,18 @@ public sealed class MediaLibraryService
             throw;
         }
 
-        var imported = Describe(destination);
+        var hash = await FileSha256Async(destination, ct);
+        EnsureIndex();
+        var duplicate = _index?.FindDuplicate(hash, NormalizeRelative(Path.GetRelativePath(_root, destination).Replace('\\', '/')));
+        var imported = Describe(destination) with
+        {
+        Sha256 = hash,
+        OriginPath = safeRelativeName,
+        SourceKind = "upload",
+        ImportedAt = DateTimeOffset.UtcNow,
+        ImportedBy = importedBy,
+        DuplicateOf = duplicate
+        };
         _index?.Upsert(imported);
         return imported;
         }
@@ -348,13 +388,170 @@ public sealed class MediaLibraryService
         return full;
     }
 
+    public async Task<MediaManifest> CreateManifestAsync(string collection, CancellationToken ct = default)
+    {
+        var safeCollection = NormalizeSegment(collection, "collection");
+        var entries = new List<MediaManifestEntry>();
+        foreach (var item in EnumerateItems(safeCollection, null).OrderBy(x => x.RelativePath, NaturalPathComparer.Instance))
+        {
+            ct.ThrowIfCancellationRequested();
+            var sha256 = await FileSha256Async(ResolveItemPath(item.RelativePath), ct);
+            var enriched = item with
+            {
+                Sha256 = sha256,
+                SourceKind = item.SourceKind ?? "upload"
+            };
+            _index?.Upsert(enriched);
+            entries.Add(new MediaManifestEntry(item.RelativePath, sha256, item.Bytes));
+        }
+        return new MediaManifest(1, safeCollection, DateTimeOffset.UtcNow, entries);
+    }
+
+    public async Task<MediaManifestVerification> VerifyManifestAsync(
+        string collection,
+        MediaManifest manifest,
+        CancellationToken ct = default)
+    {
+        var safeCollection = NormalizeSegment(collection, "collection");
+        var issues = new List<MediaManifestIssue>();
+        if (manifest.Version != 1)
+            issues.Add(new MediaManifestIssue("", "unsupported-version"));
+        if (!string.Equals(manifest.Collection, safeCollection, StringComparison.OrdinalIgnoreCase))
+            issues.Add(new MediaManifestIssue("", "collection-mismatch"));
+
+        var actual = EnumerateItems(safeCollection, null)
+            .ToDictionary(item => item.RelativePath, StringComparer.OrdinalIgnoreCase);
+        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in manifest.Files)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!expected.Add(entry.Path))
+            {
+                issues.Add(new MediaManifestIssue(entry.Path, "duplicate-entry"));
+                continue;
+            }
+            if (!entry.Path.StartsWith(safeCollection + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                issues.Add(new MediaManifestIssue(entry.Path, "path-outside-collection"));
+                continue;
+            }
+            if (!actual.Remove(entry.Path, out var item))
+            {
+                issues.Add(new MediaManifestIssue(entry.Path, "missing", entry.Sha256));
+                continue;
+            }
+            var actualSha256 = await FileSha256Async(ResolveItemPath(item.RelativePath), ct);
+            if (!string.Equals(actualSha256, entry.Sha256, StringComparison.OrdinalIgnoreCase))
+                issues.Add(new MediaManifestIssue(entry.Path, "content-changed", entry.Sha256, actualSha256));
+            else if (item.Bytes != entry.Bytes)
+                issues.Add(new MediaManifestIssue(entry.Path, "size-changed"));
+            _index?.Upsert(item with { Sha256 = actualSha256, SourceKind = item.SourceKind ?? "upload" });
+        }
+        foreach (var unexpected in actual.Keys)
+            issues.Add(new MediaManifestIssue(unexpected, "unexpected"));
+        return new MediaManifestVerification(issues.Count == 0, manifest.Files.Count, issues);
+    }
+
+    public async Task<MediaIntegrityReport> AuditIntegrityAsync(CancellationToken ct = default)
+    {
+        EnsureIndex();
+        var indexed = _index?.AllItems().ToDictionary(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, MediaItemDescriptor>(StringComparer.OrdinalIgnoreCase);
+        var actual = new Dictionary<string, MediaItemDescriptor>(StringComparer.OrdinalIgnoreCase);
+        var issues = new List<MediaIntegrityIssue>();
+        var hashes = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in EnumerateItems(null, null))
+        {
+            ct.ThrowIfCancellationRequested();
+            actual[item.RelativePath] = item;
+            var physical = ResolveItemPath(item.RelativePath);
+            string sha256;
+            try
+            {
+                sha256 = await FileSha256Async(physical, ct);
+                ValidateImageDecodable(physical, item.Name);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ApiProblemException)
+            {
+                issues.Add(new MediaIntegrityIssue(item.RelativePath, "undecodable", ex.Message));
+                continue;
+            }
+            if (!indexed.TryGetValue(item.RelativePath, out var indexedItem))
+            {
+                issues.Add(new MediaIntegrityIssue(item.RelativePath, "missing-index"));
+            }
+            else if (indexedItem.Sha256 is not null
+                && !indexedItem.Sha256.Equals(sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                issues.Add(new MediaIntegrityIssue(item.RelativePath, "content-changed", "当前 SHA-256 与索引留证不一致"));
+            }
+            if (!hashes.TryGetValue(sha256, out var paths))
+                hashes[sha256] = paths = [];
+            paths.Add(item.RelativePath);
+            _index?.Upsert(item with
+            {
+                Sha256 = sha256,
+                SourceKind = indexedItem?.SourceKind ?? item.SourceKind ?? "upload"
+            });
+        }
+        foreach (var orphan in indexed.Keys.Where(path => !actual.ContainsKey(path)))
+            issues.Add(new MediaIntegrityIssue(orphan, "missing-file"));
+        var duplicateGroups = hashes.Values.Count(paths => paths.Count > 1);
+        foreach (var group in hashes.Values.Where(paths => paths.Count > 1))
+            foreach (var path in group.Skip(1))
+                issues.Add(new MediaIntegrityIssue(path, "duplicate-content", $"与 {group[0]} 内容相同"));
+        var expectedThumbnails = actual
+            .Select(pair => ThumbnailKey(pair.Key, new FileInfo(ResolveItemPath(pair.Key))))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var thumbnail in Directory.EnumerateFiles(_thumbnailRoot, "*.jpg", SearchOption.TopDirectoryOnly))
+        {
+            var key = Path.GetFileNameWithoutExtension(thumbnail);
+            if (!expectedThumbnails.Contains(key))
+                issues.Add(new MediaIntegrityIssue(Path.GetFileName(thumbnail), "orphan-thumbnail"));
+        }
+        return new MediaIntegrityReport(
+            DateTimeOffset.UtcNow,
+            actual.Count,
+            indexed.Count,
+            duplicateGroups,
+            issues);
+    }
+
+    public async Task<MediaMaintenanceResult> RepairIndexAsync(CancellationToken ct = default)
+    {
+        EnsureIndex();
+        var before = _index?.AllItems().Count ?? 0;
+        var actual = new List<MediaItemDescriptor>();
+        foreach (var item in EnumerateItems(null, null))
+        {
+            ct.ThrowIfCancellationRequested();
+            var sha256 = await FileSha256Async(ResolveItemPath(item.RelativePath), ct);
+            actual.Add(item with { Sha256 = sha256, SourceKind = item.SourceKind ?? "upload" });
+        }
+        _index?.Rebuild(actual);
+        var after = _index?.AllItems().Count ?? actual.Count;
+        var expected = actual
+            .Select(item => ThumbnailKey(item.RelativePath, new FileInfo(ResolveItemPath(item.RelativePath))))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var removedThumbnails = 0;
+        foreach (var thumbnail in Directory.EnumerateFiles(_thumbnailRoot, "*.jpg", SearchOption.TopDirectoryOnly))
+        {
+            if (expected.Contains(Path.GetFileNameWithoutExtension(thumbnail))) continue;
+            File.Delete(thumbnail);
+            removedThumbnails++;
+        }
+        return new MediaMaintenanceResult(
+            Math.Max(0, before - after),
+            removedThumbnails,
+            await AuditIntegrityAsync(ct));
+    }
+
     public async Task<string> ResolveThumbnailPathAsync(string relativePath, CancellationToken ct = default)
     {
         var physical = ResolveItemPath(relativePath);
         var normalized = NormalizeRelative(relativePath);
         var sourceInfo = new FileInfo(physical);
-        var key = Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes($"{normalized}|{sourceInfo.LastWriteTimeUtc.Ticks}|{sourceInfo.Length}"))).ToLowerInvariant();
+        var key = ThumbnailKey(normalized, sourceInfo);
         var thumbnail = Path.Combine(_thumbnailRoot, key + ".jpg");
         if (File.Exists(thumbnail)) return thumbnail;
         Directory.CreateDirectory(_thumbnailRoot);
@@ -444,7 +641,8 @@ public sealed class MediaLibraryService
     public async Task<MediaLinkedSourceDescriptor> LinkDirectoryAsync(
         string name,
         string path,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? authorizedBy = null)
     {
         var safeName = NormalizeSegment(name, "linked source name");
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
@@ -463,7 +661,9 @@ public sealed class MediaLibraryService
             Path.GetFullPath(resolved),
             files.Length,
             files.Sum(x => x.Length),
-            files.Max(x => new DateTimeOffset(x.LastWriteTimeUtc)));
+            files.Max(x => new DateTimeOffset(x.LastWriteTimeUtc)),
+            DateTimeOffset.UtcNow,
+            authorizedBy);
 
         await _mutationGate.WaitAsync(ct);
         try
@@ -588,6 +788,13 @@ public sealed class MediaLibraryService
         if (!valid) throw new ApiValidationException($"Uploaded file content does not match the declared image extension '{extension}'.");
     }
 
+    private static void ValidateImageDecodable(string path, string fileName)
+    {
+        using var image = Cv2.ImRead(path, ImreadModes.Unchanged);
+        if (image.Empty())
+            throw new ApiValidationException($"Uploaded image '{fileName}' cannot be decoded by the imaging engine.");
+    }
+
     private void EnsureImportCapacity(long incomingBytes)
     {
         var currentBytes = DirectoryBytes(_root);
@@ -690,6 +897,10 @@ public sealed class MediaLibraryService
         _ => 64
     };
 
+    private static string ThumbnailKey(string relativePath, FileInfo file) =>
+        Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes($"{relativePath}|{file.LastWriteTimeUtc.Ticks}|{file.Length}"))).ToLowerInvariant();
+
     private string MovedDestination(string relativePath, string? targetCollection, string? targetLabel)
     {
         var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -785,6 +996,55 @@ public sealed class MediaLibraryService
             if (leftCount != rightCount || !leftBuffer.AsSpan(0, leftCount).SequenceEqual(rightBuffer.AsSpan(0, rightCount)))
                 return false;
             if (leftCount == 0) return true;
+        }
+    }
+
+    private static async Task<string> FileSha256Async(string path, CancellationToken ct)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct));
+    }
+
+    private sealed class NaturalPathComparer : IComparer<string>
+    {
+        public static NaturalPathComparer Instance { get; } = new();
+
+        public int Compare(string? left, string? right)
+        {
+            if (ReferenceEquals(left, right)) return 0;
+            if (left is null) return -1;
+            if (right is null) return 1;
+            var indexLeft = 0;
+            var indexRight = 0;
+            while (indexLeft < left.Length && indexRight < right.Length)
+            {
+                if (char.IsDigit(left[indexLeft]) && char.IsDigit(right[indexRight]))
+                {
+                    var startLeft = indexLeft;
+                    var startRight = indexRight;
+                    while (indexLeft < left.Length && char.IsDigit(left[indexLeft])) indexLeft++;
+                    while (indexRight < right.Length && char.IsDigit(right[indexRight])) indexRight++;
+                    var digitsLeft = left[startLeft..indexLeft].TrimStart('0');
+                    var digitsRight = right[startRight..indexRight].TrimStart('0');
+                    var lengthComparison = digitsLeft.Length.CompareTo(digitsRight.Length);
+                    if (lengthComparison != 0) return lengthComparison;
+                    var digitComparison = digitsLeft.CompareTo(digitsRight, StringComparison.Ordinal);
+                    if (digitComparison != 0) return digitComparison;
+                    continue;
+                }
+                var comparison = char.ToUpperInvariant(left[indexLeft]).CompareTo(char.ToUpperInvariant(right[indexRight]));
+                if (comparison != 0) return comparison;
+                indexLeft++;
+                indexRight++;
+            }
+            var remaining = (left.Length - indexLeft).CompareTo(right.Length - indexRight);
+            return remaining != 0 ? remaining : StringComparer.Ordinal.Compare(left, right);
         }
     }
 

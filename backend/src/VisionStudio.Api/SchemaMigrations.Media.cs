@@ -24,4 +24,14 @@ CREATE INDEX IF NOT EXISTS ix_media_index_modified
 CREATE INDEX IF NOT EXISTS ix_media_index_file_name
     ON media_index_items(file_name COLLATE NOCASE);
 """;
+
+    private const string MediaProvenanceSchemaSql = """
+ALTER TABLE media_index_items ADD COLUMN sha256 TEXT NULL;
+ALTER TABLE media_index_items ADD COLUMN origin_path TEXT NULL;
+ALTER TABLE media_index_items ADD COLUMN source_kind TEXT NULL;
+ALTER TABLE media_index_items ADD COLUMN imported_at TEXT NULL;
+ALTER TABLE media_index_items ADD COLUMN imported_by TEXT NULL;
+ALTER TABLE media_index_items ADD COLUMN duplicate_of TEXT NULL;
+CREATE INDEX IF NOT EXISTS ix_media_index_sha256 ON media_index_items(sha256);
+""";
 }
