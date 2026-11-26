@@ -30,6 +30,12 @@ public sealed class SqliteMetadataDatabase
     public string DatabasePath => _databasePath;
     public int CurrentSchemaVersion => SqliteSchemaMigrationRunner.CurrentVersion;
 
+    public void ReleaseIdleConnections()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        SqliteConnection.ClearPool(connection);
+    }
+
     /// <summary>
     /// 同步打开连接：仅供 <see cref="IModelAssetSource"/> 这类必须同步返回的读路径使用。
     /// 若尚未初始化，在线程池执行迁移以免阻塞或死锁于调用方 SynchronizationContext。

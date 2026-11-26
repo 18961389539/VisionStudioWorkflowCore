@@ -546,15 +546,84 @@ public sealed class MediaLibraryService
             await AuditIntegrityAsync(ct));
     }
 
-    public async Task<string> ResolveThumbnailPathAsync(string relativePath, CancellationToken ct = default)
+    public Task<string> ResolveThumbnailPathAsync(string relativePath, CancellationToken ct = default)
     {
         var physical = ResolveItemPath(relativePath);
         var normalized = NormalizeRelative(relativePath);
         var sourceInfo = new FileInfo(physical);
         var key = ThumbnailKey(normalized, sourceInfo);
         var thumbnail = Path.Combine(_thumbnailRoot, key + ".jpg");
+        return ResolveOrCreateThumbnailAsync(thumbnail, physical, normalized, updateIndex: true, ct);
+    }
+
+    public MediaItemPage ListLinkedSourceItems(
+        string name,
+        string? search = null,
+        int skip = 0,
+        int take = 50)
+    {
+        var link = ResolveAuthorizedLinkedSource(name);
+        var rootFull = Path.GetFullPath(link.Path);
+        var query = EnumerateSupportedExternalFiles(rootFull)
+            .Select(file =>
+            {
+                var relative = Path.GetRelativePath(rootFull, file.FullName).Replace('\\', '/');
+                return new MediaItemDescriptor(
+                    relative,
+                    file.FullName,
+                    link.Name,
+                    "Unlabeled",
+                    file.Name,
+                    file.Extension.ToLowerInvariant(),
+                    file.Length,
+                    new DateTimeOffset(file.LastWriteTimeUtc),
+                    SourceKind: "linked");
+            })
+            .Where(item => string.IsNullOrWhiteSpace(search)
+                || item.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || item.RelativePath.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(item => item.RelativePath, NaturalPathComparer.Instance)
+            .ToArray();
+        var effectiveSkip = Math.Max(0, skip);
+        var effectiveTake = Math.Clamp(take, 1, 200);
+        return new MediaItemPage(query.Skip(effectiveSkip).Take(effectiveTake).ToArray(), query.Length);
+    }
+
+    public string ResolveLinkedSourceItemPath(string name, string relativePath)
+    {
+        var link = ResolveAuthorizedLinkedSource(name);
+        var rootFull = Path.GetFullPath(link.Path);
+        var relative = NormalizeRelative(relativePath);
+        var full = Path.GetFullPath(Path.Combine(rootFull, relative.Replace('/', Path.DirectorySeparatorChar)));
+        var rootPrefix = rootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(rootPrefix, _pathComparison) || !File.Exists(full) || !Supported.Contains(Path.GetExtension(full)))
+            throw new ApiNotFoundException($"Linked media item '{relativePath}' does not exist.");
+        EnsureNoReparseTraversalUnder(rootFull, full);
+        return full;
+    }
+
+    public Task<string> ResolveLinkedSourceThumbnailPathAsync(string name, string relativePath, CancellationToken ct = default)
+    {
+        var physical = ResolveLinkedSourceItemPath(name, relativePath);
+        var safeName = NormalizeSegment(name, "linked source name");
+        var normalized = NormalizeRelative(relativePath);
+        var sourceInfo = new FileInfo(physical);
+        var key = ThumbnailKey($"linked/{safeName}/{normalized}", sourceInfo);
+        var linkedThumbDir = Path.Combine(_thumbnailRoot, "linked");
+        Directory.CreateDirectory(linkedThumbDir);
+        var thumbnail = Path.Combine(linkedThumbDir, key + ".jpg");
+        return ResolveOrCreateThumbnailAsync(thumbnail, physical, normalized, updateIndex: false, ct);
+    }
+
+    private async Task<string> ResolveOrCreateThumbnailAsync(
+        string thumbnail,
+        string physical,
+        string normalized,
+        bool updateIndex,
+        CancellationToken ct)
+    {
         if (File.Exists(thumbnail)) return thumbnail;
-        Directory.CreateDirectory(_thumbnailRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(thumbnail)!);
 
         var metadata = await Task.Run(() =>
         {
@@ -597,15 +666,33 @@ public sealed class MediaLibraryService
         {
             try { if (File.Exists(temp)) File.Delete(temp); } catch { }
         }
-        var item = Describe(physical) with
+        if (updateIndex)
         {
-            Width = metadata.Width,
-            Height = metadata.Height,
-            Channels = metadata.Channels,
-            BitDepth = metadata.BitDepth
-        };
-        _index?.Upsert(item);
+            var item = Describe(physical) with
+            {
+                Width = metadata.Width,
+                Height = metadata.Height,
+                Channels = metadata.Channels,
+                BitDepth = metadata.BitDepth
+            };
+            _index?.Upsert(item);
+        }
         return thumbnail;
+    }
+
+    private MediaLinkedSourceDescriptor ResolveAuthorizedLinkedSource(string name)
+    {
+        var safeName = NormalizeSegment(name, "linked source name");
+        var link = ReadLinkedSources().FirstOrDefault(x => x.Name.Equals(safeName, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ApiNotFoundException($"Linked media source '{safeName}' does not exist.");
+        var resolver = _replayInputResolver ?? throw new ApiValidationException(
+            "Linked directories require host file-read authorization.");
+        var resolved = resolver.Resolve(link.Path) ?? throw new ApiValidationException(
+            $"Directory '{link.Path}' is outside the authorized read roots.");
+        if (!Directory.Exists(resolved))
+            throw new ApiNotFoundException($"Linked directory '{resolved}' does not exist.");
+        EnsureNoReparsePoint(resolved);
+        return link with { Path = Path.GetFullPath(resolved) };
     }
 
     public MediaLinkedSourceDescriptor[] ListLinkedSources()
@@ -1120,11 +1207,14 @@ public sealed class MediaLibraryService
         }
     }
 
-    private void EnsureNoReparseTraversal(string path)
+    private void EnsureNoReparseTraversal(string path) => EnsureNoReparseTraversalUnder(_root, path);
+
+    private static void EnsureNoReparseTraversalUnder(string root, string path)
     {
+        var fullRoot = Path.GetFullPath(root);
         var full = Path.GetFullPath(path);
-        var relative = Path.GetRelativePath(_root, full);
-        var current = _root;
+        var relative = Path.GetRelativePath(fullRoot, full);
+        var current = fullRoot;
         EnsureNoReparsePoint(current);
         if (relative == ".") return;
         foreach (var segment in relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))

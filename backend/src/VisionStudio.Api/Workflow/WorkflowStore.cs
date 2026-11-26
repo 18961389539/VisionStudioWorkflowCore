@@ -195,7 +195,7 @@ public sealed class WorkflowStore
     /// does not understand and saving would destroy them. Failing closed with a 409 lets the operator
     /// upgrade the host (or export the document) instead of silently losing configuration.
     /// </summary>
-    internal static void EnsureSupportedSchema(WorkflowDefinition workflow, string id)
+    public static void EnsureSupportedSchema(WorkflowDefinition workflow, string id)
     {
         if (workflow.SchemaVersion <= WorkflowDocumentSchema.CurrentVersion) return;
         throw new ApiConflictException(

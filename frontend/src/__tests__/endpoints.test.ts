@@ -45,6 +45,9 @@ describe('endpoints', () => {
     expect(devices.tag('d1', 't1')).toBe('/api/devices/d1/tags/t1');
     expect(robots.ack('r1', 'cmd-1')).toBe('/api/robots/r1/ack/cmd-1');
     expect(media.preview('a/b.png')).toBe('/api/media/preview?path=a%2Fb.png');
+    expect(media.linkedSourceItems('name=train&skip=0&take=20')).toBe('/api/media/linked-sources/items?name=train&skip=0&take=20');
+    expect(media.linkedSourcePreview('train', 'sub/a.png')).toBe('/api/media/linked-sources/preview?name=train&path=sub%2Fa.png');
+    expect(media.linkedSourceThumbnail('train', 'sub/a.png')).toBe('/api/media/linked-sources/thumbnail?name=train&path=sub%2Fa.png');
     expect(storage.backups).toBe('/api/storage/backups');
     expect(investigations.forTrace('run-1')).toBe('/api/investigations/for-trace/run-1');
     expect(hardwareProvenance.byKindAndId('camera', 'c1')).toBe('/api/hardware-provenance/camera/c1');

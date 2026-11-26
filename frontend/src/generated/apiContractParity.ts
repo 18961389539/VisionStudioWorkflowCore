@@ -112,6 +112,13 @@ export type Parity_MediaCollectionDescriptor = BackendFitsFrontend<Frontend.Medi
 /** label 在 schema 里是宽 string；前端用封闭联合驱动筛选。 */
 type NormalizeMediaItem<T> = Omit<Normalize<T>, 'label'> & { label: Frontend.MediaItemDescriptor['label'] };
 export type Parity_MediaItemDescriptor = BackendFitsFrontend<Frontend.MediaItemDescriptor, NormalizeMediaItem<Schema<'MediaItemDescriptor'>>>;
+// 媒体来源/清单/完整性这四类 DTO 在前端直接用 ContractDto 派生、没有额外 UI 收窄，
+// 因此对账只需还原 .NET 数值联合（Normalize 已处理）。
+export type Parity_MediaSourceDescriptor = BackendFitsFrontend<Frontend.MediaSourceDescriptor, Normalize<Schema<'MediaSourceDescriptor'>>>;
+export type Parity_MediaLinkedSourceDescriptor = BackendFitsFrontend<Frontend.MediaLinkedSourceDescriptor, Normalize<Schema<'MediaLinkedSourceDescriptor'>>>;
+export type Parity_MediaBulkResult = BackendFitsFrontend<Frontend.MediaBulkResult, Normalize<Schema<'MediaBulkResult'>>>;
+export type Parity_MediaIntegrityReport = BackendFitsFrontend<Frontend.MediaIntegrityReport, Normalize<Schema<'MediaIntegrityReport'>>>;
+export type Parity_MediaManifestVerification = BackendFitsFrontend<Frontend.MediaManifestVerification, Normalize<Schema<'MediaManifestVerification'>>>;
 export type Parity_CameraSynchronizationGroup = BackendFitsFrontend<Frontend.CameraSynchronizationGroup, Normalize<Schema<'CameraSynchronizationGroup'>>>;
 export type Parity_CameraSynchronizationGroupStatus = BackendFitsFrontend<Frontend.CameraSynchronizationGroupStatus, Normalize<Schema<'CameraSynchronizationGroupStatus'>>>;
 export type Parity_CameraSynchronizationRunRecord = BackendFitsFrontend<Frontend.CameraSynchronizationRunRecord, Normalize<Schema<'CameraSynchronizationRunRecord'>>>;

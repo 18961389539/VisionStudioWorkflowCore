@@ -342,6 +342,11 @@ export const media = {
   sources: apiUrl('media/sources'),
   linkedSources: apiUrl('media/linked-sources'),
   linkedSourceByName: (name: string) => apiUrl(`media/linked-sources?name=${encodeURIComponent(name)}`),
+  linkedSourceItems: (query: string) => apiUrl(`media/linked-sources/items?${query}`),
+  linkedSourcePreview: (name: string, path: string) =>
+    apiUrl(`media/linked-sources/preview?name=${encodeURIComponent(name)}&path=${encodeURIComponent(path)}`),
+  linkedSourceThumbnail: (name: string, path: string) =>
+    apiUrl(`media/linked-sources/thumbnail?name=${encodeURIComponent(name)}&path=${encodeURIComponent(path)}`),
   bulk: apiUrl('media/bulk'),
   manifest: (collection: string) => apiUrl(`media/manifest?collection=${encodeURIComponent(collection)}`),
   verifyManifest: (collection: string) => apiUrl(`media/manifest/verify?collection=${encodeURIComponent(collection)}`),

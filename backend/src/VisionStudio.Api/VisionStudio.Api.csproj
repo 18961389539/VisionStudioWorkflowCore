@@ -24,6 +24,10 @@
          本地 dotnet run 不受影响，它直接读项目目录）。显式排除，保证构建/发布输出干净。 -->
     <Content Remove="plugins\**" />
     <None Remove="plugins\**" />
+    <!-- Web SDK 默认内容项也会将本机 data 中的运行 JSON 带入引用它的桌面发布包。
+         运行数据必须保持外置；排除内容项不删除源码目录中的既有数据。 -->
+    <Content Remove="data\**" />
+    <None Remove="data\**" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="McMaster.NETCore.Plugins" />

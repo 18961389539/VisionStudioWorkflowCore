@@ -149,6 +149,18 @@ public sealed class MediaLibraryTests
             Assert.Equal(linkedRoot, linked.Path);
             Assert.Contains(media.ListLinkedSources(), item => item.Name == "training" && item.ItemCount == 1);
             Assert.Contains(media.ListSources(), item => item.Kind == "linked" && item.Source == linkedRoot);
+
+            var page = media.ListLinkedSourceItems("training");
+            Assert.Equal(1, page.Total);
+            Assert.Single(page.Items);
+            Assert.Equal("nested/frame.png", page.Items[0].RelativePath);
+            Assert.Equal(Path.Combine(linkedRoot, "nested", "frame.png"), page.Items[0].Source);
+            var resolved = media.ResolveLinkedSourceItemPath("training", "nested/frame.png");
+            Assert.Equal(Path.Combine(linkedRoot, "nested", "frame.png"), resolved);
+            var thumb = await media.ResolveLinkedSourceThumbnailPathAsync("training", "nested/frame.png");
+            Assert.True(File.Exists(thumb));
+            Assert.Throws<ApiValidationException>(() => media.ResolveLinkedSourceItemPath("training", "../outside.png"));
+
             Assert.True(await media.UnlinkDirectoryAsync("training"));
         }
         finally

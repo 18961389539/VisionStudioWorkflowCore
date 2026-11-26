@@ -18,6 +18,44 @@ public static class MediaEndpoints
         app.MapGet("/api/media/linked-sources", (MediaLibraryService media) => Results.Ok(media.ListLinkedSources()))
             .Produces<IReadOnlyList<MediaLinkedSourceDescriptor>>()
             .RequireEngineer("media.link.read", "media");
+        app.MapGet("/api/media/linked-sources/items", (
+            string name,
+            string? search,
+            int? skip,
+            int? take,
+            HttpContext http,
+            MediaLibraryService media) =>
+        {
+            var page = media.ListLinkedSourceItems(name, search, skip ?? 0, take ?? 50);
+            http.Response.Headers["X-Total-Count"] = page.Total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return Results.Ok(page.Items);
+        })
+            .Produces<IReadOnlyList<MediaItemDescriptor>>()
+            .RequireEngineer("media.link.read", "media");
+        app.MapGet("/api/media/linked-sources/preview", (string name, string path, MediaLibraryService media) =>
+        {
+            var physical = media.ResolveLinkedSourceItemPath(name, path);
+            var contentType = Path.GetExtension(physical).ToLowerInvariant() switch
+            {
+                ".png" => "image/png",
+                ".bmp" => "image/bmp",
+                ".tif" or ".tiff" => "image/tiff",
+                _ => "image/jpeg"
+            };
+            return Results.File(physical, contentType, enableRangeProcessing: false);
+        })
+            .RequireEngineer("media.link.read", "media");
+        app.MapGet("/api/media/linked-sources/thumbnail", async (
+            string name,
+            string path,
+            MediaLibraryService media,
+            CancellationToken ct) =>
+        {
+            var physical = await media.ResolveLinkedSourceThumbnailPathAsync(name, path, ct);
+            return Results.File(physical, "image/jpeg", enableRangeProcessing: false);
+        })
+            .Produces(StatusCodes.Status200OK)
+            .RequireEngineer("media.link.read", "media");
         // 分页 + 总数（2026-11-13）：此前只支持 take，图库超过一页后旧图无法翻到。
         // 与 /api/alarms 保持一致：响应体仍是数组（前端渲染不变），总数放 X-Total-Count。
         app.MapGet("/api/media/items", (

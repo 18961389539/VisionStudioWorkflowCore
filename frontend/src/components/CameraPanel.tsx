@@ -61,11 +61,24 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
   const [linkedSources, setLinkedSources] = useState<MediaLinkedSourceDescriptor[]>([]);
   const [linkedDirectoryName, setLinkedDirectoryName] = useState('');
   const [linkedDirectoryPath, setLinkedDirectoryPath] = useState('');
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [browsingLinkedName, setBrowsingLinkedName] = useState<string>();
+  const [linkedItems, setLinkedItems] = useState<MediaItemDescriptor[]>([]);
+  const [linkedItemsTotal, setLinkedItemsTotal] = useState(0);
+  const [linkedItemsPage, setLinkedItemsPage] = useState(1);
+  const [linkedItemsPageSize, setLinkedItemsPageSize] = useState(20);
+  const [linkedItemsSearch, setLinkedItemsSearch] = useState('');
+  const [linkedItemsLoading, setLinkedItemsLoading] = useState(false);
+  const [selectedLinkedItem, setSelectedLinkedItem] = useState<MediaItemDescriptor>();
   const [mediaImportProgress, setMediaImportProgress] = useState<{ completed: number; total: number; batch: number; totalBatches: number }>();
   const [mediaIntegrity, setMediaIntegrity] = useState<MediaIntegrityReport>();
   const [uploadCollection, setUploadCollection] = useState('offline');
   const [uploadLabel, setUploadLabel] = useState('Unlabeled');
   const [newCollection, setNewCollection] = useState('');
+  const mediaRefreshGeneration = useRef(0);
+  const mediaRefreshToken = useRef<RequestToken | null>(null);
+  const linkedRefreshGeneration = useRef(0);
+  const linkedRefreshToken = useRef<RequestToken | null>(null);
   const [form] = Form.useForm();
   const [vendorForm] = Form.useForm();
   const [settingsForm] = Form.useForm<CameraSettings>();
@@ -324,30 +337,72 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     finally { setBusy(undefined); }
   };
 
-  const refreshMedia = async (quiet = false, page = mediaPage, pageSize = mediaPageSize) => {
+  type MediaFilterOverrides = {
+    collection?: string;
+    label?: string;
+    search?: string;
+    minWidth?: number;
+    maxWidth?: number;
+    modifiedAfter?: string;
+    modifiedBefore?: string;
+  };
+
+  const refreshMedia = async (quiet = false, page = mediaPage, pageSize = mediaPageSize, overrides?: MediaFilterOverrides) => {
+    const generation = ++mediaRefreshGeneration.current;
+    mediaRefreshToken.current?.cancel();
+    const token = new RequestToken();
+    mediaRefreshToken.current = token;
+    setMediaLoading(true);
     try {
+      const collection = overrides && 'collection' in overrides ? overrides.collection : mediaCollection;
+      const label = overrides && 'label' in overrides ? overrides.label : mediaLabel;
+      const search = overrides && 'search' in overrides ? (overrides.search ?? '') : mediaSearch;
+      const minWidth = overrides && 'minWidth' in overrides ? overrides.minWidth : mediaMinWidth;
+      const maxWidth = overrides && 'maxWidth' in overrides ? overrides.maxWidth : mediaMaxWidth;
+      const modifiedAfter = overrides && 'modifiedAfter' in overrides ? (overrides.modifiedAfter ?? '') : mediaModifiedAfter;
+      const modifiedBefore = overrides && 'modifiedBefore' in overrides ? (overrides.modifiedBefore ?? '') : mediaModifiedBefore;
+
       const query = new URLSearchParams();
-      if (mediaCollection) query.set('collection', mediaCollection);
-      if (mediaLabel) query.set('label', mediaLabel);
-      if (mediaSearch.trim()) query.set('search', mediaSearch.trim());
-      if (mediaMinWidth) query.set('minWidth', String(mediaMinWidth));
-      if (mediaMaxWidth) query.set('maxWidth', String(mediaMaxWidth));
-      if (mediaModifiedAfter) query.set('modifiedAfter', new Date(`${mediaModifiedAfter}T00:00:00`).toISOString());
-      if (mediaModifiedBefore) query.set('modifiedBefore', new Date(`${mediaModifiedBefore}T23:59:59.999`).toISOString());
+      if (collection) query.set('collection', collection);
+      if (label) query.set('label', label);
+      if (search.trim()) query.set('search', search.trim());
+      if (minWidth) query.set('minWidth', String(minWidth));
+      if (maxWidth) query.set('maxWidth', String(maxWidth));
+      if (modifiedAfter) query.set('modifiedAfter', new Date(`${modifiedAfter}T00:00:00`).toISOString());
+      if (modifiedBefore) query.set('modifiedBefore', new Date(`${modifiedBefore}T23:59:59.999`).toISOString());
       query.set('skip', String(Math.max(0, page - 1) * pageSize));
       query.set('take', String(pageSize));
+
       const [statusResponse, collectionsResponse, itemsResponse, linkedSourcesResponse] = await Promise.all([
-        apiFetch(media.status),
-        apiFetch(media.collections),
-        apiFetch(media.itemsQuery(query.toString())),
-        apiFetch(media.linkedSources)
+        apiFetch(media.status, { signal: token.signal }),
+        apiFetch(media.collections, { signal: token.signal }),
+        apiFetch(media.itemsQuery(query.toString()), { signal: token.signal }),
+        apiFetch(media.linkedSources, { signal: token.signal }).catch(() => undefined)
       ]);
-      if (!statusResponse.ok || !collectionsResponse.ok || !itemsResponse.ok || !linkedSourcesResponse.ok)
-        throw new Error('Media Library API unavailable');
-      setMediaStatus(await statusResponse.json());
-      setCollections(await collectionsResponse.json());
-      setLinkedSources(await linkedSourcesResponse.json());
-      const items: MediaItemDescriptor[] = await itemsResponse.json();
+      if (generation !== mediaRefreshGeneration.current || token.signal.aborted) return;
+      if (!statusResponse.ok || !collectionsResponse.ok || !itemsResponse.ok)
+        throw new Error('媒体库接口不可用');
+
+      const [nextStatus, nextCollections, items]: [MediaLibraryStatus, MediaCollectionDescriptor[], MediaItemDescriptor[]] = await Promise.all([
+        statusResponse.json(),
+        collectionsResponse.json(),
+        itemsResponse.json()
+      ]);
+      const nextLinkedSources: MediaLinkedSourceDescriptor[] = linkedSourcesResponse?.ok
+        ? await linkedSourcesResponse.json()
+        : [];
+      if (generation !== mediaRefreshGeneration.current || token.signal.aborted) return;
+
+      setMediaStatus(nextStatus);
+      setCollections(nextCollections);
+      setLinkedSources(nextLinkedSources);
+      if (browsingLinkedName && !nextLinkedSources.some((item) => item.name === browsingLinkedName)) {
+        setBrowsingLinkedName(undefined);
+        setLinkedItems([]);
+        setLinkedItemsTotal(0);
+        setSelectedLinkedItem(undefined);
+      }
+
       const rawTotal = itemsResponse.headers.get('X-Total-Count');
       const parsedTotal = rawTotal === null ? Number.NaN : Number(rawTotal);
       const total = Number.isFinite(parsedTotal) ? parsedTotal : items.length;
@@ -355,14 +410,79 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
       if (page > lastPage) {
         // 删除当前页最后一项后页码可能越界：收到总数后回退到最后一页重新取。
         setMediaPage(lastPage);
-        await refreshMedia(quiet, lastPage, pageSize);
+        await refreshMedia(quiet, lastPage, pageSize, overrides);
         return;
       }
       setMediaTotal(total);
       setMediaItems(items);
-      if (selectedMedia && !items.some((x) => x.relativePath === selectedMedia.relativePath)) setSelectedMedia(undefined);
+      if (selectedMedia) {
+        const refreshedSelected = items.find((x) => x.relativePath === selectedMedia.relativePath);
+        setSelectedMedia(refreshedSelected);
+      }
     } catch (error) {
-      if (!quiet) messageApi.error(error instanceof Error ? error.message : 'Media Library API unavailable');
+      if (generation !== mediaRefreshGeneration.current || token.signal.aborted) return;
+      if (!quiet) messageApi.error(error instanceof Error ? error.message : '媒体库接口不可用');
+    } finally {
+      if (generation === mediaRefreshGeneration.current) setMediaLoading(false);
+    }
+  };
+
+  const resetMediaFilters = () => {
+    setMediaSearch('');
+    setMediaCollection(undefined);
+    setMediaLabel(undefined);
+    setMediaMinWidth(undefined);
+    setMediaMaxWidth(undefined);
+    setMediaModifiedAfter('');
+    setMediaModifiedBefore('');
+    setMediaPage(1);
+    void refreshMedia(false, 1, mediaPageSize, {
+      collection: undefined,
+      label: undefined,
+      search: '',
+      minWidth: undefined,
+      maxWidth: undefined,
+      modifiedAfter: '',
+      modifiedBefore: ''
+    });
+  };
+
+  const browseLinkedSource = async (
+    name: string,
+    page = 1,
+    pageSize = linkedItemsPageSize,
+    search = linkedItemsSearch
+  ) => {
+    const generation = ++linkedRefreshGeneration.current;
+    linkedRefreshToken.current?.cancel();
+    const token = new RequestToken();
+    linkedRefreshToken.current = token;
+    setBrowsingLinkedName(name);
+    setLinkedItemsLoading(true);
+    try {
+      const query = new URLSearchParams({
+        name,
+        skip: String(Math.max(0, page - 1) * pageSize),
+        take: String(pageSize)
+      });
+      if (search.trim()) query.set('search', search.trim());
+      const response = await apiFetch(media.linkedSourceItems(query.toString()), { signal: token.signal });
+      if (generation !== linkedRefreshGeneration.current || token.signal.aborted) return;
+      if (!response.ok) throw new Error(await responseError(response, '读取服务端目录图片失败'));
+      const items: MediaItemDescriptor[] = await response.json();
+      if (generation !== linkedRefreshGeneration.current || token.signal.aborted) return;
+      const rawTotal = response.headers.get('X-Total-Count');
+      const parsedTotal = rawTotal === null ? Number.NaN : Number(rawTotal);
+      setLinkedItemsTotal(Number.isFinite(parsedTotal) ? parsedTotal : items.length);
+      setLinkedItems(items);
+      setLinkedItemsPage(page);
+      setLinkedItemsPageSize(pageSize);
+      setSelectedLinkedItem((prev) => (prev && items.some((x) => x.relativePath === prev.relativePath) ? prev : items[0]));
+    } catch (error) {
+      if (generation !== linkedRefreshGeneration.current || token.signal.aborted) return;
+      messageApi.error(error instanceof Error ? error.message : '读取服务端目录图片失败');
+    } finally {
+      if (generation === linkedRefreshGeneration.current) setLinkedItemsLoading(false);
     }
   };
 
@@ -403,7 +523,6 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     if (!open) return;
     void effectActionsRef.current.refresh();
     void effectActionsRef.current.refreshAdapters();
-    void effectActionsRef.current.refreshMedia();
     void effectActionsRef.current.refreshSyncGroups();
     // 2026-11-12：1 s 轮询改为推送触发（服务端内容变化才广播），定时器只做断线兜底。
     const timer = window.setInterval(() => { void effectActionsRef.current.refreshQuiet(); }, 10_000);
@@ -513,9 +632,9 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     setBusy('create-collection');
     try {
       const response = await apiFetch(apiUrl('media/collections'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newCollection.trim() }) });
-      if (!response.ok) throw new Error(await responseError(response, 'Create collection failed'));
-      setUploadCollection(newCollection.trim()); setNewCollection(''); await refreshMedia(true); messageApi.success('Media collection created');
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Create collection failed'); }
+      if (!response.ok) throw new Error(await responseError(response, '创建集合失败'));
+      setUploadCollection(newCollection.trim()); setNewCollection(''); await refreshMedia(true); messageApi.success('媒体集合已创建');
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '创建集合失败'); }
     finally { setBusy(undefined); }
   };
 
@@ -582,13 +701,14 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: linkedDirectoryName.trim(), path: linkedDirectoryPath.trim() })
       });
-      if (!response.ok) throw new Error(await responseError(response, 'Link directory failed'));
+      if (!response.ok) throw new Error(await responseError(response, '关联服务端目录失败'));
+      const saved: MediaLinkedSourceDescriptor = await response.json();
       setLinkedDirectoryName('');
       setLinkedDirectoryPath('');
       await refreshMedia(true);
-      messageApi.success('服务端目录已保存为只读引用');
+      messageApi.success(`服务端目录「${saved.name}」已保存为只读引用`);
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : 'Link directory failed');
+      messageApi.error(error instanceof Error ? error.message : '关联服务端目录失败');
     } finally { setBusy(undefined); }
   };
 
@@ -596,18 +716,24 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     setBusy(`media-unlink:${name}`);
     try {
       const response = await apiFetch(media.linkedSourceByName(name), { method: 'DELETE' });
-      if (!response.ok) throw new Error(await responseError(response, 'Unlink directory failed'));
+      if (!response.ok) throw new Error(await responseError(response, '移除目录引用失败'));
+      if (browsingLinkedName === name) {
+        setBrowsingLinkedName(undefined);
+        setLinkedItems([]);
+        setLinkedItemsTotal(0);
+        setSelectedLinkedItem(undefined);
+      }
       await refreshMedia(true);
       messageApi.success('只读目录引用已移除，原文件未删除');
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : 'Unlink directory failed');
+      messageApi.error(error instanceof Error ? error.message : '移除目录引用失败');
     } finally { setBusy(undefined); }
   };
 
   const bulkUpdateMedia = async (
     paths: string[],
-    action: 'delete' | 'move' | 'relabel',
-    options: { targetCollection?: string; targetLabel?: string }) => {
+    action: 'delete' | 'move' | 'relabel' | 'rename',
+    options: { targetCollection?: string; targetLabel?: string; targetName?: string }) => {
     if (paths.length === 0) return undefined;
     setBusy('media-bulk');
     try {
@@ -616,16 +742,17 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, paths, ...options })
       });
-      if (!response.ok) throw new Error(await responseError(response, 'Bulk media update failed'));
+      if (!response.ok) throw new Error(await responseError(response, '批量更新媒体失败'));
       const result: MediaBulkResult = await response.json();
       await refreshMedia(true);
+      if (action === 'rename' && result.items.length === 1) setSelectedMedia(result.items[0] as MediaItemDescriptor);
       if (result.failures.length)
         messageApi.warning(`${result.succeeded} 项成功，${result.failures.length} 项失败：${result.failures[0].error}`);
       else
-        messageApi.success(`已更新 ${result.succeeded} 个媒体项`);
+        messageApi.success(action === 'rename' ? '文件已重命名' : `已更新 ${result.succeeded} 个媒体项`);
       return result;
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : 'Bulk media update failed');
+      messageApi.error(error instanceof Error ? error.message : '批量更新媒体失败');
       return undefined;
     } finally { setBusy(undefined); }
   };
@@ -638,7 +765,7 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     setBusy('media-manifest');
     try {
       const response = await apiFetch(media.manifest(collection));
-      if (!response.ok) throw new Error(await responseError(response, 'Generate media manifest failed'));
+      if (!response.ok) throw new Error(await responseError(response, '生成媒体清单失败'));
       const manifest = await response.json();
       const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -649,7 +776,7 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
       URL.revokeObjectURL(url);
       messageApi.success(`已生成 ${manifest.files?.length ?? 0} 项媒体清单`);
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : 'Generate media manifest failed');
+      messageApi.error(error instanceof Error ? error.message : '生成媒体清单失败');
     } finally { setBusy(undefined); }
   };
 
@@ -664,12 +791,12 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(manifest)
       });
-      if (!response.ok) throw new Error(await responseError(response, 'Verify media manifest failed'));
+      if (!response.ok) throw new Error(await responseError(response, '校验媒体清单失败'));
       const result = await response.json();
       if (result.valid) messageApi.success(`媒体清单校验通过（${result.checked} 项）`);
       else messageApi.warning(`媒体清单发现 ${result.issues.length} 个问题`);
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : 'Verify media manifest failed');
+      messageApi.error(error instanceof Error ? error.message : '校验媒体清单失败');
     } finally { setBusy(undefined); }
   };
 
@@ -677,12 +804,12 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     setBusy('media-integrity');
     try {
       const response = await apiFetch(media.integrity);
-      if (!response.ok) throw new Error(await responseError(response, 'Media integrity scan failed'));
+      if (!response.ok) throw new Error(await responseError(response, '媒体完整性扫描失败'));
       const report: MediaIntegrityReport = await response.json();
       setMediaIntegrity(report);
       messageApi.info(`媒体完整性扫描完成：${report.fileCount} 项，${report.issues.length} 个问题`);
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : 'Media integrity scan failed');
+      messageApi.error(error instanceof Error ? error.message : '媒体完整性扫描失败');
     } finally { setBusy(undefined); }
   };
 
@@ -690,13 +817,13 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     setBusy('media-maintenance');
     try {
       const response = await apiFetch(media.maintenance, { method: 'POST' });
-      if (!response.ok) throw new Error(await responseError(response, 'Media maintenance failed'));
+      if (!response.ok) throw new Error(await responseError(response, '索引修复失败'));
       const result = await response.json();
       setMediaIntegrity(result.report);
       await refreshMedia(true);
       messageApi.success(`索引已修复，清理缩略图 ${result.removedThumbnails} 个`);
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : 'Media maintenance failed');
+      messageApi.error(error instanceof Error ? error.message : '索引修复失败');
     } finally { setBusy(undefined); }
   };
 
@@ -704,10 +831,10 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     setBusy(`delete:${item.relativePath}`);
     try {
       const response = await apiFetch(media.itemByPath(item.relativePath), { method: 'DELETE' });
-      if (!response.ok) throw new Error(await responseError(response, 'Delete media failed'));
+      if (!response.ok) throw new Error(await responseError(response, '删除媒体失败'));
       if (selectedMedia?.relativePath === item.relativePath) setSelectedMedia(undefined);
-      await refreshMedia(true); messageApi.success('Media item deleted');
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Delete media failed'); }
+      await refreshMedia(true); messageApi.success('媒体项已删除');
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '删除媒体失败'); }
     finally { setBusy(undefined); }
   };
 
@@ -858,6 +985,7 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
               /> },
               { key: 'media', label: '媒体库', children: <CameraMediaTab
                 busy={busy}
+                mediaLoading={mediaLoading}
                 mediaStatus={mediaStatus}
                 newCollection={newCollection}
                 setNewCollection={setNewCollection}
@@ -878,6 +1006,18 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
                 setLinkedDirectoryPath={setLinkedDirectoryPath}
                 linkDirectory={linkDirectory}
                 unlinkDirectory={unlinkDirectory}
+                browsingLinkedName={browsingLinkedName}
+                setBrowsingLinkedName={setBrowsingLinkedName}
+                linkedItems={linkedItems}
+                linkedItemsTotal={linkedItemsTotal}
+                linkedItemsPage={linkedItemsPage}
+                linkedItemsPageSize={linkedItemsPageSize}
+                linkedItemsSearch={linkedItemsSearch}
+                setLinkedItemsSearch={setLinkedItemsSearch}
+                linkedItemsLoading={linkedItemsLoading}
+                selectedLinkedItem={selectedLinkedItem}
+                setSelectedLinkedItem={setSelectedLinkedItem}
+                browseLinkedSource={browseLinkedSource}
                 bulkUpdateMedia={bulkUpdateMedia}
                 mediaIntegrity={mediaIntegrity}
                 downloadManifest={downloadMediaManifest}
@@ -906,9 +1046,15 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
                 setMediaPageSize={setMediaPageSize}
                 mediaTotal={mediaTotal}
                 refreshMedia={refreshMedia}
+                resetMediaFilters={resetMediaFilters}
                 setSelectedMedia={setSelectedMedia}
                 selectedMedia={selectedMedia}
-                applyMediaAsFileCameraSource={(source) => form.setFieldsValue({ source })}
+                onCopyMessage={(text) => { messageApi.success(text); }}
+                applyMediaAsFileCameraSource={(source) => {
+                  form.setFieldsValue({ source });
+                  setActiveTab('registration');
+                  messageApi.success('已填入文件相机来源，请确认编号并点击注册');
+                }}
               /> }
             ]}
           />
