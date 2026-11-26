@@ -12,24 +12,32 @@ namespace VisionStudio.Api.Tests;
 /// </summary>
 public sealed class ReplayInputResolverTests
 {
-    private sealed class StubEnvironment(string contentRoot) : IWebHostEnvironment
+    private sealed class StubEnvironment(string contentRoot, string environmentName = "Testing") : IWebHostEnvironment
     {
         public string ApplicationName { get; set; } = "VisionStudio.Api.Tests";
         public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
         public string WebRootPath { get; set; } = contentRoot;
-        public string EnvironmentName { get; set; } = "Testing";
+        public string EnvironmentName { get; set; } = environmentName;
         public string ContentRootPath { get; set; } = contentRoot;
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 
-    private static ConfiguredReplayInputResolver Resolver(string contentRoot, string? extraRoots = null, string? dataRoot = null, string? mediaRoot = null)
+    private static ConfiguredReplayInputResolver Resolver(
+        string contentRoot,
+        string? extraRoots = null,
+        string? dataRoot = null,
+        string? mediaRoot = null,
+        string environmentName = "Testing",
+        bool? allowUnrestricted = null)
     {
         var settings = new Dictionary<string, string?>();
         if (extraRoots is not null) settings[ConfiguredReplayInputResolver.ConfigurationKey] = extraRoots;
         if (dataRoot is not null) settings[VisionStudioDataRoot.ConfigurationKey] = dataRoot;
         if (mediaRoot is not null) settings["MediaLibrary:RootPath"] = mediaRoot;
+        if (allowUnrestricted is not null)
+            settings[ConfiguredReplayInputResolver.AllowUnrestrictedConfigurationKey] = allowUnrestricted.Value.ToString();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-        return new ConfiguredReplayInputResolver(configuration, new StubEnvironment(contentRoot));
+        return new ConfiguredReplayInputResolver(configuration, new StubEnvironment(contentRoot, environmentName));
     }
 
     [Fact]
@@ -108,6 +116,36 @@ public sealed class ReplayInputResolverTests
 
         Assert.NotNull(resolver.Resolve(Path.Combine(shared, "frame.png")));
         Assert.Contains(resolver.AllowedRoots, entry => entry.StartsWith(Path.TrimEndingDirectorySeparator(shared), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Development_UsesDesktopFilePermissionsForAbsolutePaths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "visionstudio-replay-root", Guid.NewGuid().ToString("N"));
+        var outside = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "visionstudio-desktop", "frame.png"));
+        var resolver = Resolver(root, environmentName: "Development");
+
+        Assert.Equal(outside, resolver.Resolve(outside));
+    }
+
+    [Fact]
+    public void Production_DeniesUnconfiguredAbsolutePaths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "visionstudio-replay-root", Guid.NewGuid().ToString("N"));
+        var outside = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "visionstudio-production", "frame.png"));
+        var resolver = Resolver(root, environmentName: "Production");
+
+        Assert.Null(resolver.Resolve(outside));
+    }
+
+    [Fact]
+    public void Production_CanOptIntoDesktopFilePermissions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "visionstudio-replay-root", Guid.NewGuid().ToString("N"));
+        var outside = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "visionstudio-production", "frame.png"));
+        var resolver = Resolver(root, environmentName: "Production", allowUnrestricted: true);
+
+        Assert.Equal(outside, resolver.Resolve(outside));
     }
 
     [Fact]

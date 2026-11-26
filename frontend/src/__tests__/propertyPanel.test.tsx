@@ -22,11 +22,11 @@ beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserv
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('offers media-library samples for image.load and opens the media tab', async () => {
-  const mediaItems = [{
-    relativePath: 'line-a/ok.png', source: 'media://line-a/ok.png', collection: 'line-a',
-    label: 'OK', name: 'ok.png', extension: '.png', bytes: 42, modifiedAt: '2026-01-01T00:00:00Z'
-  }];
-  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(mediaItems), {
+  const mediaSources = [
+    { name: 'line-a', source: 'media://line-a', isDirectory: true, itemCount: 1, kind: 'media' },
+    { name: 'training', source: 'D:\\Pictures\\training', isDirectory: true, itemCount: 4209, kind: 'linked' }
+  ];
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(mediaSources), {
     status: 200, headers: { 'Content-Type': 'application/json' }
   }));
   vi.stubGlobal('fetch', fetchMock);
@@ -39,11 +39,11 @@ it('offers media-library samples for image.load and opens the media tab', async 
   render(<PropertyPanel node={node} catalogItem={imageLoad} onChange={onChange} onOpenResourcePanel={onOpenResourcePanel} />);
   await act(async () => {});
 
-  expect(fetchMock.mock.calls[0][0]).toBe('/api/media/items?take=200');
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/media/sources');
   const input = screen.getByRole('combobox', { name: '图像路径' });
   fireEvent.mouseDown(input);
-  fireEvent.click(await screen.findByText('ok.png · line-a · OK'));
-  expect(onChange).toHaveBeenCalledWith('path', 'media://line-a/ok.png');
+  fireEvent.click(await screen.findByText('training · 服务端目录 · 4209 张'));
+  expect(onChange).toHaveBeenCalledWith('path', 'D:\\Pictures\\training');
   fireEvent.click(screen.getByRole('button', { name: '打开媒体库' }));
   expect(onOpenResourcePanel).toHaveBeenCalledWith('media');
 });

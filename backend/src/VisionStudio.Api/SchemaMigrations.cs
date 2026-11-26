@@ -23,7 +23,7 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed partial class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 37;
+    public const int CurrentVersion = 38;
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
     {

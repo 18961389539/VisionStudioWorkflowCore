@@ -4,7 +4,7 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const apiTarget = process.env.VISIONSTUDIO_E2E_API ?? 'http://localhost:5180';
+const apiTarget = process.env.VISIONSTUDIO_E2E_API ?? 'http://localhost:5280';
 
 export default defineConfig({
   plugins: [react()],
@@ -41,10 +41,10 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5173,
+    port: 5273,
     proxy: {
-      '/api': apiTarget,
-      '/hubs': { target: apiTarget, ws: true }
+      '/api': { target: apiTarget, changeOrigin: false },
+      '/hubs': { target: apiTarget, ws: true, changeOrigin: false }
     }
   },
   test: {

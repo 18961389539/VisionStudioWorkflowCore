@@ -6432,6 +6432,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MediaSourceDescriptor"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/linked-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MediaLinkedSourceDescriptor"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MediaLinkedSourceCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MediaLinkedSourceDescriptor"];
+                    };
+                };
+            };
+        };
+        delete: {
+            parameters: {
+                query: {
+                    name: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/items": {
         parameters: {
             query?: never;
@@ -6444,6 +6556,11 @@ export interface paths {
                 query?: {
                     collection?: string;
                     label?: string;
+                    search?: string;
+                    minWidth?: number | string;
+                    maxWidth?: number | string;
+                    modifiedAfter?: string;
+                    modifiedBefore?: string;
                     skip?: number | string;
                     take?: number | string;
                 };
@@ -6526,6 +6643,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    path: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/import": {
         parameters: {
             query?: never;
@@ -6551,6 +6703,45 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["MediaItemDescriptor"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MediaBulkRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MediaBulkResult"];
                     };
                 };
             };
@@ -12653,7 +12844,26 @@ export interface paths {
             };
         };
         post?: never;
-        delete?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -15495,6 +15705,23 @@ export interface components {
             note: null | string;
             warnings: components["schemas"]["MatchingAutoTuneWarning"][];
         };
+        MediaBulkFailure: {
+            path: string;
+            error: string;
+        };
+        MediaBulkRequest: {
+            action: string;
+            paths: string[];
+            targetCollection?: null | string;
+            targetLabel?: null | string;
+            targetName?: null | string;
+        };
+        MediaBulkResult: {
+            /** Format: int32 */
+            succeeded: number | string;
+            items: components["schemas"]["MediaItemDescriptor"][];
+            failures: components["schemas"]["MediaBulkFailure"][];
+        };
         MediaCollectionCreateRequest: {
             name: string;
         };
@@ -15521,6 +15748,14 @@ export interface components {
             bytes: number | string;
             /** Format: date-time */
             modifiedAt: string;
+            /** Format: int32 */
+            width?: null | number | string;
+            /** Format: int32 */
+            height?: null | number | string;
+            /** Format: int32 */
+            channels?: null | number | string;
+            /** Format: int32 */
+            bitDepth?: null | number | string;
         };
         MediaLibraryStatus: {
             root: string;
@@ -15537,6 +15772,28 @@ export interface components {
             /** Format: int64 */
             maxLibraryBytes: number | string;
             allowedExtensions: string[];
+        };
+        MediaLinkedSourceCreateRequest: {
+            name: string;
+            path: string;
+        };
+        MediaLinkedSourceDescriptor: {
+            name: string;
+            path: string;
+            /** Format: int32 */
+            itemCount: number | string;
+            /** Format: int64 */
+            totalBytes: number | string;
+            /** Format: date-time */
+            lastModifiedAt: string;
+        };
+        MediaSourceDescriptor: {
+            name: string;
+            source: string;
+            isDirectory: boolean;
+            /** Format: int32 */
+            itemCount: number | string;
+            kind: string;
         };
         /**
          * @default ABCD

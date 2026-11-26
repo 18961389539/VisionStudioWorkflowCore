@@ -73,7 +73,8 @@ public sealed partial class SqliteSchemaMigrationRunner
             "result_records.idempotency_key + ux_result_records_dataset_idempotency_key"),
         new(35, "Station recipe deliveries and rollout batches", RecipeDeliverySchemaSql),
         new(36, "Durable per-workflow counter events", DurableCounterSchemaSql),
-        new(37, "Latest station rollout and retained NG preview lookup", ProductionWorkstationLookupSchemaSql)
+        new(37, "Latest station rollout and retained NG preview lookup", ProductionWorkstationLookupSchemaSql),
+        new(38, "Searchable media library index", MediaIndexSchemaSql)
     ];
 
     private sealed class Migration

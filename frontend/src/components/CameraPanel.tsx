@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Drawer, Form, Space, Table, Tabs, Tag, message } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import type { CameraAdapterDescriptor, CameraDescriptor, CameraDiscoveredDevice, CameraSettings, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
+import type { CameraAdapterDescriptor, CameraDescriptor, CameraDiscoveredDevice, CameraSettings, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus, MediaLinkedSourceDescriptor, MediaBulkResult } from '../types';
 import { localizeStatus } from '../i18n';
 import { responseErrorMessage } from '../apiErrors';
 import { apiFetch, cachedGet, invalidateCache, RequestToken } from '../apiClient';
@@ -18,6 +18,8 @@ import { acquisitionColor, stateColor, type SyncGroupFormValues } from './camera
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
 const CAMERA_POLL_TIMEOUT_MS = 5000;
+const MEDIA_IMPORT_BATCH_FILES = 200;
+const MEDIA_IMPORT_BATCH_BYTES = 512 * 1024 * 1024;
 
 type Props = { open: boolean; onClose: () => void; initialTab?: 'acquisition' | 'media' };
 
@@ -49,8 +51,17 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
   const [mediaPageSize, setMediaPageSize] = useState(20);
   const [mediaCollection, setMediaCollection] = useState<string>();
   const [mediaLabel, setMediaLabel] = useState<string>();
+  const [mediaSearch, setMediaSearch] = useState('');
+  const [mediaMinWidth, setMediaMinWidth] = useState<number>();
+  const [mediaMaxWidth, setMediaMaxWidth] = useState<number>();
+  const [mediaModifiedAfter, setMediaModifiedAfter] = useState('');
+  const [mediaModifiedBefore, setMediaModifiedBefore] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<MediaItemDescriptor>();
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
+  const [linkedSources, setLinkedSources] = useState<MediaLinkedSourceDescriptor[]>([]);
+  const [linkedDirectoryName, setLinkedDirectoryName] = useState('');
+  const [linkedDirectoryPath, setLinkedDirectoryPath] = useState('');
+  const [mediaImportProgress, setMediaImportProgress] = useState<{ completed: number; total: number; batch: number; totalBatches: number }>();
   const [uploadCollection, setUploadCollection] = useState('offline');
   const [uploadLabel, setUploadLabel] = useState('Unlabeled');
   const [newCollection, setNewCollection] = useState('');
@@ -317,14 +328,24 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
       const query = new URLSearchParams();
       if (mediaCollection) query.set('collection', mediaCollection);
       if (mediaLabel) query.set('label', mediaLabel);
+      if (mediaSearch.trim()) query.set('search', mediaSearch.trim());
+      if (mediaMinWidth) query.set('minWidth', String(mediaMinWidth));
+      if (mediaMaxWidth) query.set('maxWidth', String(mediaMaxWidth));
+      if (mediaModifiedAfter) query.set('modifiedAfter', new Date(`${mediaModifiedAfter}T00:00:00`).toISOString());
+      if (mediaModifiedBefore) query.set('modifiedBefore', new Date(`${mediaModifiedBefore}T23:59:59.999`).toISOString());
       query.set('skip', String(Math.max(0, page - 1) * pageSize));
       query.set('take', String(pageSize));
-      const [statusResponse, collectionsResponse, itemsResponse] = await Promise.all([
-        apiFetch(media.status), apiFetch(media.collections), apiFetch(media.itemsQuery(query.toString()))
+      const [statusResponse, collectionsResponse, itemsResponse, linkedSourcesResponse] = await Promise.all([
+        apiFetch(media.status),
+        apiFetch(media.collections),
+        apiFetch(media.itemsQuery(query.toString())),
+        apiFetch(media.linkedSources)
       ]);
-      if (!statusResponse.ok || !collectionsResponse.ok || !itemsResponse.ok) throw new Error('Media Library API unavailable');
+      if (!statusResponse.ok || !collectionsResponse.ok || !itemsResponse.ok || !linkedSourcesResponse.ok)
+        throw new Error('Media Library API unavailable');
       setMediaStatus(await statusResponse.json());
       setCollections(await collectionsResponse.json());
+      setLinkedSources(await linkedSourcesResponse.json());
       const items: MediaItemDescriptor[] = await itemsResponse.json();
       const rawTotal = itemsResponse.headers.get('X-Total-Count');
       const parsedTotal = rawTotal === null ? Number.NaN : Number(rawTotal);
@@ -497,19 +518,115 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
     finally { setBusy(undefined); }
   };
 
-  const importMedia = async () => {
-    const nativeFiles = uploadFiles.map((x) => x.originFileObj).filter(Boolean);
+  const importMedia = async (selectedDirectoryFiles?: File[]) => {
+    const nativeFiles = selectedDirectoryFiles
+      ?? uploadFiles
+        .map((item) => item.originFileObj as File | undefined)
+        .filter((file): file is File => file !== undefined);
     if (!uploadCollection.trim() || nativeFiles.length === 0) return;
     setBusy('media-import');
+    const batches: File[][] = [];
+    let currentBatch: File[] = [];
+    let currentBytes = 0;
+    for (const file of nativeFiles) {
+      if (currentBatch.length > 0
+        && (currentBatch.length >= MEDIA_IMPORT_BATCH_FILES || currentBytes + file.size > MEDIA_IMPORT_BATCH_BYTES)) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBytes = 0;
+      }
+      currentBatch.push(file);
+      currentBytes += file.size;
+    }
+    if (currentBatch.length) batches.push(currentBatch);
+    let completed = 0;
     try {
-      const body = new FormData(); body.append('collection', uploadCollection.trim()); body.append('label', uploadLabel);
-      nativeFiles.forEach((file) => body.append('files', file as Blob, (file as File).name));
-      const response = await apiFetch(apiUrl('media/import'), { method: 'POST', body });
-      if (!response.ok) throw new Error(await responseError(response, 'Media import failed'));
-      const imported: MediaItemDescriptor[] = await response.json();
-      setUploadFiles([]); setMediaCollection(uploadCollection.trim()); setMediaPage(1); await refreshMedia(true, 1, mediaPageSize); messageApi.success(`Imported ${imported.length} image(s)`);
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Media import failed'); }
-    finally { setBusy(undefined); }
+      for (let index = 0; index < batches.length; index++) {
+        setMediaImportProgress({ completed, total: nativeFiles.length, batch: index + 1, totalBatches: batches.length });
+        const body = new FormData();
+        body.append('collection', uploadCollection.trim());
+        body.append('label', uploadLabel);
+        for (const file of batches[index]) {
+          body.append('files', file, file.name);
+          body.append('relativePaths', file.webkitRelativePath || file.name);
+        }
+        const response = await apiFetch(media.import, { method: 'POST', body });
+        if (!response.ok) throw new Error(await responseError(response, `Media batch ${index + 1} failed`));
+        const imported: MediaItemDescriptor[] = await response.json();
+        completed += imported.length;
+      }
+      setUploadFiles([]);
+      setMediaCollection(uploadCollection.trim());
+      setMediaPage(1);
+      await refreshMedia(true, 1, mediaPageSize);
+      messageApi.success(`已导入 ${completed} 张图像（${batches.length} 个批次）`);
+      return true;
+    } catch (error) {
+      await refreshMedia(true, 1, mediaPageSize);
+      messageApi.error(`${completed}/${nativeFiles.length} 已导入：${error instanceof Error ? error.message : '媒体导入失败'}`);
+      return false;
+    }
+    finally {
+      setBusy(undefined);
+      setMediaImportProgress(undefined);
+    }
+  };
+
+  const linkDirectory = async () => {
+    if (!linkedDirectoryName.trim() || !linkedDirectoryPath.trim()) return;
+    setBusy('media-link');
+    try {
+      const response = await apiFetch(media.linkedSources, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: linkedDirectoryName.trim(), path: linkedDirectoryPath.trim() })
+      });
+      if (!response.ok) throw new Error(await responseError(response, 'Link directory failed'));
+      setLinkedDirectoryName('');
+      setLinkedDirectoryPath('');
+      await refreshMedia(true);
+      messageApi.success('服务端目录已保存为只读引用');
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : 'Link directory failed');
+    } finally { setBusy(undefined); }
+  };
+
+  const unlinkDirectory = async (name: string) => {
+    setBusy(`media-unlink:${name}`);
+    try {
+      const response = await apiFetch(media.linkedSourceByName(name), { method: 'DELETE' });
+      if (!response.ok) throw new Error(await responseError(response, 'Unlink directory failed'));
+      await refreshMedia(true);
+      messageApi.success('只读目录引用已移除，原文件未删除');
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : 'Unlink directory failed');
+    } finally { setBusy(undefined); }
+  };
+
+  const bulkUpdateMedia = async (
+    paths: string[],
+    action: 'delete' | 'move' | 'relabel',
+    options: { targetCollection?: string; targetLabel?: string }) => {
+    if (paths.length === 0) return undefined;
+    setBusy('media-bulk');
+    try {
+      const response = await apiFetch(media.bulk, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, paths, ...options })
+      });
+      if (!response.ok) throw new Error(await responseError(response, 'Bulk media update failed'));
+      const result: MediaBulkResult = await response.json();
+      await refreshMedia(true);
+      if (result.failures.length)
+        messageApi.warning(`${result.succeeded} 项成功，${result.failures.length} 项失败：${result.failures[0].error}`);
+      else
+        messageApi.success(`已更新 ${result.succeeded} 个媒体项`);
+      return result;
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : 'Bulk media update failed');
+      return undefined;
+    } finally { setBusy(undefined); }
   };
 
   const deleteMedia = async (item: MediaItemDescriptor) => {
@@ -682,6 +799,25 @@ export default function CameraPanel({ open, onClose, initialTab = 'acquisition' 
                 uploadFiles={uploadFiles}
                 setUploadFiles={setUploadFiles}
                 importMedia={importMedia}
+                importProgress={mediaImportProgress}
+                linkedSources={linkedSources}
+                linkedDirectoryName={linkedDirectoryName}
+                setLinkedDirectoryName={setLinkedDirectoryName}
+                linkedDirectoryPath={linkedDirectoryPath}
+                setLinkedDirectoryPath={setLinkedDirectoryPath}
+                linkDirectory={linkDirectory}
+                unlinkDirectory={unlinkDirectory}
+                bulkUpdateMedia={bulkUpdateMedia}
+                mediaSearch={mediaSearch}
+                setMediaSearch={setMediaSearch}
+                mediaMinWidth={mediaMinWidth}
+                setMediaMinWidth={setMediaMinWidth}
+                mediaMaxWidth={mediaMaxWidth}
+                setMediaMaxWidth={setMediaMaxWidth}
+                mediaModifiedAfter={mediaModifiedAfter}
+                setMediaModifiedAfter={setMediaModifiedAfter}
+                mediaModifiedBefore={mediaModifiedBefore}
+                setMediaModifiedBefore={setMediaModifiedBefore}
                 deleteMedia={deleteMedia}
                 mediaCollection={mediaCollection}
                 setMediaCollection={setMediaCollection}

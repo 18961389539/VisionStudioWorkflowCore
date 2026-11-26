@@ -80,7 +80,10 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
   useEffect(() => { updateNodeInternals(id); }, [id, portSignature, updateNodeInternals]);
 
   const connectedInputs = connectedInputNames(id, inputs, inputEdges, sourceId => sourceData.find(node => node.id === sourceId));
-  const missingInputs = new Set(inputs.filter(port => port.required && !connectedInputs.has(port.name)).map(port => port.name));
+  // 未接控制线的节点可以作为工作流入口；后端会从这类入口启动执行。
+  // 只有数据输入缺少连接时才算缺口，避免 image.load / image.acquire 等源节点误报。
+  const missingInputs = new Set(inputs.filter(port => port.dataType !== 'Control'
+    && port.required && !connectedInputs.has(port.name)).map(port => port.name));
   const missingRequired = missingInputs.size;
 
   // 一条关键结果：按节点类型选主字段（见 summaryText），叠加耗时；失败节点优先显示错误摘要

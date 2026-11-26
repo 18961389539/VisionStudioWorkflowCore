@@ -88,7 +88,7 @@ describe('consistent node validation', () => {
   });
 
   it.each([
-    ['Control', 'Image', 'control'], ['Image', 'Control', 'data'],
+    ['Control', 'Image', 'control'],
     ['String', 'Image', 'data'], ['Image', 'Image', 'control']
   ])('keeps required %s -> %s inputs unsatisfied for %s edges', (sourceType, targetType, kind) => {
     const upstream = { ...source, outputs: [{ name: 'out', dataType: sourceType }] };
@@ -97,6 +97,13 @@ describe('consistent node validation', () => {
     const edge: Edge = { id: 'invalid', source: upstream.type, sourceHandle: 'out', target: target.type, targetHandle: 'value', data: { kind } };
     expect(validateWorkflow([asNode(upstream), asNode(target)], [upstream, target], [edge])
       .some(issue => issue.id === `port-missing-${target.type}-value`)).toBe(true);
+  });
+
+  it('accepts an unconnected control input as a workflow entry point', () => {
+    const target: NodeCatalogItem = { type: 'image.load', displayName: '读取图像文件', category: 'Acquisition', parameters: [],
+      inputs: [{ name: 'exec', dataType: 'Control', required: true }], outputs: [] };
+    expect(validateWorkflow([asNode(target)], [target], []))
+      .not.toContainEqual(expect.objectContaining({ id: 'port-missing-image.load-exec' }));
   });
 
   it.each(['node', 'port'])('does not satisfy required inputs from a missing source %s', (missing) => {

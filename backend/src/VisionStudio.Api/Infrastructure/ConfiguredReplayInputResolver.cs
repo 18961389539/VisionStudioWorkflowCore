@@ -3,17 +3,19 @@ using VisionStudio.Abstractions;
 namespace VisionStudio.Api.Infrastructure;
 
 /// <summary>
-/// 离线回放读盘授权器：把 <c>__replayInputPath</c> 限制在数据根 / 媒体库根 / 显式配置的附加根之内。
+/// 离线回放读盘授权器：桌面开发模式使用进程的本机文件权限，生产模式默认限制在配置的读目录内。
 /// <para>
 /// 设计意图（R2 复查 P0）：回放路径由宿主注入，但 <c>NodeDefinition.Parameters</c> 来自可导入的流程文档，
-/// 因此引擎不能信任它。<c>VisionStudio:ReplayInputRoots</c>（分号分隔）用于为现场留出额外根目录时显式放开，
-/// 默认只允许产品自己的数据目录。
+/// 因此生产环境不能无条件信任它。<c>VisionStudio:ReplayInputRoots</c>（分号分隔）用于保留最小授权边界；
+/// 桌面开发模式或管理员显式开启 <c>VisionStudio:AllowUnrestrictedReplayInput</c> 时，绝对路径遵循进程 OS 权限。
 /// </para>
 /// </summary>
 public sealed class ConfiguredReplayInputResolver : IReplayInputResolver
 {
     public const string ConfigurationKey = "VisionStudio:ReplayInputRoots";
+    public const string AllowUnrestrictedConfigurationKey = "VisionStudio:AllowUnrestrictedReplayInput";
 
+    private readonly bool _allowUnrestrictedLocalPaths;
     private readonly string[] _normalizedRoots;
     private readonly string _normalizedMediaRoot;
     private readonly StringComparison _comparison = OperatingSystem.IsWindows()
@@ -22,6 +24,8 @@ public sealed class ConfiguredReplayInputResolver : IReplayInputResolver
 
     public ConfiguredReplayInputResolver(IConfiguration configuration, IWebHostEnvironment environment)
     {
+        _allowUnrestrictedLocalPaths = configuration.GetValue<bool?>(AllowUnrestrictedConfigurationKey)
+            ?? environment.IsDevelopment();
         var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath, configuration);
         var mediaRoot = VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configuration["MediaLibrary:RootPath"], configuration);
         var roots = new List<string>
@@ -92,6 +96,8 @@ public sealed class ConfiguredReplayInputResolver : IReplayInputResolver
 
         // 末尾补分隔符后再比较，避免 <data>/media-other 命中 <data>/media。
         var candidate = NormalizeRoot(full);
+        if (_allowUnrestrictedLocalPaths && Path.IsPathFullyQualified(requestedPath))
+            return full;
         return _normalizedRoots.Any(root => candidate.StartsWith(root, _comparison)) ? full : null;
     }
 

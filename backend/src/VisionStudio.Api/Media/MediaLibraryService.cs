@@ -1,4 +1,8 @@
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text;
+using OpenCvSharp;
+using VisionStudio.Abstractions;
 using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api.Media;
@@ -29,12 +33,40 @@ public sealed record MediaItemDescriptor(
     string Name,
     string Extension,
     long Bytes,
-    DateTimeOffset ModifiedAt);
+    DateTimeOffset ModifiedAt,
+    int? Width = null,
+    int? Height = null,
+    int? Channels = null,
+    int? BitDepth = null);
 
 /// <summary>媒体项分页结果；Total 是 skip/take 之前的过滤后条数。</summary>
 public sealed record MediaItemPage(IReadOnlyList<MediaItemDescriptor> Items, int Total);
 
 public sealed record ResolvedMediaSource(string Source, string RelativePath, string PhysicalPath, bool IsDirectory);
+
+public sealed record MediaLinkedSourceDescriptor(
+    string Name,
+    string Path,
+    int ItemCount,
+    long TotalBytes,
+    DateTimeOffset LastModifiedAt);
+
+public sealed record MediaSourceDescriptor(
+    string Name,
+    string Source,
+    bool IsDirectory,
+    int ItemCount,
+    string Kind);
+
+public sealed record MediaBulkRequest(
+    string Action,
+    string[] Paths,
+    string? TargetCollection = null,
+    string? TargetLabel = null,
+    string? TargetName = null);
+
+public sealed record MediaBulkFailure(string Path, string Error);
+public sealed record MediaBulkResult(int Succeeded, IReadOnlyList<MediaItemDescriptor> Items, IReadOnlyList<MediaBulkFailure> Failures);
 
 /// <summary>
 /// Owns the only user-facing filesystem namespace for offline vision images.
@@ -47,18 +79,32 @@ public sealed class MediaLibraryService
     private static readonly HashSet<string> Labels = new(new[] { "Unlabeled", "OK", "NG", "Review" }, StringComparer.OrdinalIgnoreCase);
 
     private readonly string _root;
+    private readonly string _thumbnailRoot;
+    private readonly string _linkedSourcesPath;
+    private readonly IReplayInputResolver? _replayInputResolver;
+    private readonly MediaLibraryIndex? _index;
     private readonly SemaphoreSlim _mutationGate = new(1, 1);
     private readonly long _criticalFreeBytes;
     private readonly StringComparison _pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    public MediaLibraryService(IWebHostEnvironment environment, IConfiguration configuration)
+    public MediaLibraryService(
+        IWebHostEnvironment environment,
+        IConfiguration configuration,
+        IReplayInputResolver? replayInputResolver = null,
+        SqliteMetadataDatabase? database = null)
     {
         var configured = configuration.GetValue<string>("MediaLibrary:RootPath");
         // R05：相对配置路径也必须相对**数据根**解析（而非打包目录）；否则发布后媒体库会落在包内，
         // 与备份的 system/media 段（数据根/media）不一致 —— 备份清单与还原目标就此错位。
         _root = VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configured, configuration);
         Directory.CreateDirectory(_root);
+        _thumbnailRoot = Path.Combine(Path.GetDirectoryName(_root)!, "media-thumbnails");
+        Directory.CreateDirectory(_thumbnailRoot);
+        EnsureNoReparsePoint(_thumbnailRoot);
         EnsureNoReparsePoint(_root);
+        _linkedSourcesPath = Path.Combine(_root, ".linked-sources.json");
+        _replayInputResolver = replayInputResolver;
+        _index = database is null ? null : new MediaLibraryIndex(database);
         MaxImportBytes = Math.Max(1_048_576, configuration.GetValue<long?>("MediaLibrary:MaxImportBytes") ?? 104_857_600);
         MaxLibraryBytes = Math.Max(MaxImportBytes, configuration.GetValue<long?>("MediaLibrary:MaxLibraryBytes") ?? 20L * 1024 * 1024 * 1024);
         MaxBatchBytes = Math.Max(MaxImportBytes, configuration.GetValue<long?>("MediaLibrary:MaxBatchBytes") ?? 512L * 1024 * 1024);
@@ -82,20 +128,50 @@ public sealed class MediaLibraryService
 
     public MediaLibraryStatus Status()
     {
-        var items = EnumerateItems(null, null).ToArray();
-        return new MediaLibraryStatus(
+        var limits = new MediaLibraryStatus(
             "media://",
-            ListCollections().Count,
-            items.Length,
-            items.Count(x => x.Label.Equals("NG", StringComparison.OrdinalIgnoreCase)),
-            items.Sum(x => x.Bytes),
+            0,
+            0,
+            0,
+            0,
             MaxImportBytes,
             MaxLibraryBytes,
             SupportedExtensions);
+        if (_index is null)
+        {
+            var items = EnumerateItems(null, null).ToArray();
+            return limits with
+            {
+                CollectionCount = ListCollections().Count,
+                ItemCount = items.Length,
+                NgItemCount = items.Count(x => x.Label.Equals("NG", StringComparison.OrdinalIgnoreCase)),
+                TotalBytes = items.Sum(x => x.Bytes)
+            };
+        }
+        EnsureIndex();
+        var status = _index.Status(limits);
+        return status with
+        {
+            CollectionCount = Directory.EnumerateDirectories(_root, "*", SearchOption.TopDirectoryOnly)
+                .Count(path => !IsReparsePoint(path))
+        };
     }
 
     public IReadOnlyList<MediaCollectionDescriptor> ListCollections()
     {
+        if (_index is not null)
+        {
+            EnsureIndex();
+            var indexed = _index.Collections().ToDictionary(item => item.Name, StringComparer.OrdinalIgnoreCase);
+            foreach (var path in Directory.EnumerateDirectories(_root, "*", SearchOption.TopDirectoryOnly)
+                .Where(path => !IsReparsePoint(path)))
+            {
+                var name = Path.GetFileName(path);
+                if (!indexed.ContainsKey(name))
+                    indexed[name] = new MediaCollectionDescriptor(name, ToMediaUri(name), 0, 0, 0, null);
+            }
+            return indexed.Values.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        }
         Directory.CreateDirectory(_root);
         EnsureNoReparsePoint(_root);
         return Directory.EnumerateDirectories(_root, "*", SearchOption.TopDirectoryOnly)
@@ -116,9 +192,39 @@ public sealed class MediaLibraryService
             .ToArray();
     }
 
-    public MediaItemPage ListItems(string? collection, string? label, int skip = 0, int take = 200)
+    public MediaItemPage ListItems(
+        string? collection,
+        string? label,
+        int skip = 0,
+        int take = 200,
+        string? search = null,
+        int? minWidth = null,
+        int? maxWidth = null,
+        DateTimeOffset? modifiedAfter = null,
+        DateTimeOffset? modifiedBefore = null)
     {
+        if (_index is not null)
+        {
+            EnsureIndex();
+            return _index.Query(new MediaItemQuery(
+                collection,
+                string.IsNullOrWhiteSpace(label) ? null : NormalizeLabel(label),
+                search,
+                minWidth,
+                maxWidth,
+                modifiedAfter,
+                modifiedBefore,
+                skip,
+                take));
+        }
         var filtered = EnumerateItems(collection, label)
+            .Where(item => string.IsNullOrWhiteSpace(search)
+                || item.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || item.RelativePath.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .Where(item => minWidth is null || item.Width >= minWidth)
+            .Where(item => maxWidth is null || item.Width <= maxWidth)
+            .Where(item => modifiedAfter is null || item.ModifiedAt >= modifiedAfter)
+            .Where(item => modifiedBefore is null || item.ModifiedAt <= modifiedBefore)
             .OrderByDescending(x => x.ModifiedAt)
             .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -144,10 +250,11 @@ public sealed class MediaLibraryService
     public async Task<MediaItemDescriptor> ImportAsync(
         string collection,
         string? label,
-        string originalName,
+        string relativeName,
         Stream input,
         long length,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool idempotentRelativePath = false)
     {
         if (length <= 0) throw new ApiValidationException("Uploaded image is empty.");
         if (length > MaxImportBytes) throw new ApiValidationException($"Image exceeds MediaLibrary MaxImportBytes ({MaxImportBytes} bytes).");
@@ -158,20 +265,20 @@ public sealed class MediaLibraryService
         EnsureImportCapacity(length);
         var safeCollection = NormalizeSegment(collection, "collection");
         var safeLabel = NormalizeLabel(label);
-        var fileName = Path.GetFileName(originalName);
-        if (string.IsNullOrWhiteSpace(fileName) || !string.Equals(fileName, originalName, StringComparison.Ordinal))
-            throw new ApiValidationException("Upload filename must not contain a path.");
+        var safeRelativeName = NormalizeRelative(relativeName);
+        var fileName = Path.GetFileName(safeRelativeName.Replace('/', Path.DirectorySeparatorChar));
         if (!Supported.Contains(Path.GetExtension(fileName)))
             throw new ApiValidationException($"Unsupported media extension '{Path.GetExtension(fileName)}'. Allowed: {string.Join(", ", SupportedExtensions)}.");
-        if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            throw new ApiValidationException("Upload filename contains invalid characters.");
 
-        var folderRelative = $"{safeCollection}/{safeLabel}";
+        var relativeDirectory = Path.GetDirectoryName(safeRelativeName.Replace('/', Path.DirectorySeparatorChar));
+        var folderRelative = string.IsNullOrWhiteSpace(relativeDirectory)
+            ? $"{safeCollection}/{safeLabel}"
+            : $"{safeCollection}/{safeLabel}/{relativeDirectory.Replace(Path.DirectorySeparatorChar, '/')}";
         var folder = ResolveRelativePath(folderRelative, allowMissingLeaf: true);
         Directory.CreateDirectory(folder);
         EnsureNoReparseTraversal(folder);
 
-        var destination = UniqueDestination(folder, fileName);
+        var destination = idempotentRelativePath ? Path.Combine(folder, fileName) : UniqueDestination(folder, fileName);
         var temp = destination + ".upload-" + Guid.NewGuid().ToString("N");
         try
         {
@@ -183,6 +290,14 @@ public sealed class MediaLibraryService
                     throw new ApiValidationException($"Uploaded image exceeds MediaLibrary MaxImportBytes ({MaxImportBytes} bytes).");
             }
             ValidateImageSignature(temp, Path.GetExtension(fileName));
+            if (idempotentRelativePath && File.Exists(destination) && await FilesEqualAsync(temp, destination, ct))
+            {
+                File.Delete(temp);
+                var existing = Describe(destination);
+                _index?.Upsert(existing);
+                return existing;
+            }
+            if (File.Exists(destination)) destination = UniqueDestination(folder, fileName);
             File.Move(temp, destination);
         }
         catch
@@ -191,7 +306,9 @@ public sealed class MediaLibraryService
             throw;
         }
 
-        return Describe(destination);
+        var imported = Describe(destination);
+        _index?.Upsert(imported);
+        return imported;
         }
         finally { _mutationGate.Release(); }
     }
@@ -205,6 +322,7 @@ public sealed class MediaLibraryService
             if (!File.Exists(full)) throw new ApiNotFoundException($"Media item '{relativePath}' does not exist.");
             if (!Supported.Contains(Path.GetExtension(full))) throw new ApiValidationException("Only supported image files can be removed through the media API.");
             File.Delete(full);
+            _index?.Remove(NormalizeRelative(relativePath));
             RemoveEmptyParents(Path.GetDirectoryName(full));
         }
         finally { _mutationGate.Release(); }
@@ -228,6 +346,209 @@ public sealed class MediaLibraryService
         if (!File.Exists(full) || !Supported.Contains(Path.GetExtension(full)))
             throw new ApiNotFoundException($"Media item '{relativePath}' does not exist.");
         return full;
+    }
+
+    public async Task<string> ResolveThumbnailPathAsync(string relativePath, CancellationToken ct = default)
+    {
+        var physical = ResolveItemPath(relativePath);
+        var normalized = NormalizeRelative(relativePath);
+        var sourceInfo = new FileInfo(physical);
+        var key = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes($"{normalized}|{sourceInfo.LastWriteTimeUtc.Ticks}|{sourceInfo.Length}"))).ToLowerInvariant();
+        var thumbnail = Path.Combine(_thumbnailRoot, key + ".jpg");
+        if (File.Exists(thumbnail)) return thumbnail;
+        Directory.CreateDirectory(_thumbnailRoot);
+
+        var metadata = await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            using var image = Cv2.ImRead(physical, ImreadModes.Unchanged);
+            if (image.Empty()) throw new ApiValidationException($"Media item '{normalized}' could not be decoded.");
+            using var preview = new Mat();
+            if (image.Depth() == MatType.CV_8U && image.Channels() is 1 or 3)
+                image.CopyTo(preview);
+            else if (image.Depth() == MatType.CV_8U && image.Channels() == 4)
+                Cv2.CvtColor(image, preview, ColorConversionCodes.BGRA2BGR);
+            else
+                Cv2.Normalize(image, preview, 0, 255, NormTypes.MinMax, MatType.CV_8U);
+            if (preview.Channels() == 4) Cv2.CvtColor(preview, preview, ColorConversionCodes.BGRA2BGR);
+            var scale = Math.Min(1d, Math.Min(480d / preview.Width, 320d / preview.Height));
+            using var resized = scale >= 1 ? preview.Clone() : new Mat();
+            if (scale < 1)
+                Cv2.Resize(preview, resized, new Size(), scale, scale, InterpolationFlags.Area);
+            if (!Cv2.ImEncode(
+                    ".jpg",
+                    resized,
+                    out var jpeg,
+                    [new ImageEncodingParam(ImwriteFlags.JpegQuality, 82)]))
+                throw new ApiUnavailableException("Unable to encode media thumbnail.");
+            return (
+                Bytes: jpeg,
+                Width: image.Width,
+                Height: image.Height,
+                Channels: image.Channels(),
+                BitDepth: BitDepthOf(image.Depth()));
+        }, ct);
+
+        var temp = thumbnail + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await File.WriteAllBytesAsync(temp, metadata.Bytes, ct);
+            File.Move(temp, thumbnail, overwrite: true);
+        }
+        finally
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+        }
+        var item = Describe(physical) with
+        {
+            Width = metadata.Width,
+            Height = metadata.Height,
+            Channels = metadata.Channels,
+            BitDepth = metadata.BitDepth
+        };
+        _index?.Upsert(item);
+        return thumbnail;
+    }
+
+    public MediaLinkedSourceDescriptor[] ListLinkedSources()
+    {
+        var links = ReadLinkedSources();
+        return links
+            .Select(link =>
+            {
+                if (!Directory.Exists(link.Path)) return link with { ItemCount = 0, TotalBytes = 0 };
+                var files = EnumerateSupportedExternalFiles(link.Path);
+                return link with
+                {
+                    ItemCount = files.Length,
+                    TotalBytes = files.Sum(x => x.Length),
+                    LastModifiedAt = files.Length == 0
+                        ? link.LastModifiedAt
+                        : files.Max(x => new DateTimeOffset(x.LastWriteTimeUtc))
+                };
+            })
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public MediaSourceDescriptor[] ListSources()
+    {
+        var imported = ListCollections().Select(collection =>
+            new MediaSourceDescriptor(collection.Name, collection.Source, true, collection.ItemCount, "media"));
+        var linked = ListLinkedSources().Select(link =>
+            new MediaSourceDescriptor(link.Name, link.Path, true, link.ItemCount, "linked"));
+        return imported.Concat(linked).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task<MediaLinkedSourceDescriptor> LinkDirectoryAsync(
+        string name,
+        string path,
+        CancellationToken ct = default)
+    {
+        var safeName = NormalizeSegment(name, "linked source name");
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            throw new ApiValidationException("Linked directory path must be absolute.");
+        var resolver = _replayInputResolver ?? throw new ApiValidationException(
+            "Linked directories require host file-read authorization.");
+        var resolved = resolver.Resolve(path) ?? throw new ApiValidationException(
+            $"Directory '{path}' is outside the authorized read roots.");
+        if (!Directory.Exists(resolved))
+            throw new ApiNotFoundException($"Linked directory '{resolved}' does not exist.");
+        var files = EnumerateSupportedExternalFiles(resolved);
+        if (files.Length == 0)
+            throw new ApiValidationException("Linked directory contains no supported images.");
+        var linked = new MediaLinkedSourceDescriptor(
+            safeName,
+            Path.GetFullPath(resolved),
+            files.Length,
+            files.Sum(x => x.Length),
+            files.Max(x => new DateTimeOffset(x.LastWriteTimeUtc)));
+
+        await _mutationGate.WaitAsync(ct);
+        try
+        {
+            var links = ReadLinkedSources()
+                .Where(item => !item.Name.Equals(safeName, StringComparison.OrdinalIgnoreCase))
+                .Append(linked)
+                .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            await WriteLinkedSourcesAsync(links, ct);
+            return linked;
+        }
+        finally { _mutationGate.Release(); }
+    }
+
+    public async Task<bool> UnlinkDirectoryAsync(string name, CancellationToken ct = default)
+    {
+        var safeName = NormalizeSegment(name, "linked source name");
+        await _mutationGate.WaitAsync(ct);
+        try
+        {
+            var links = ReadLinkedSources();
+            var next = links.Where(link => !link.Name.Equals(safeName, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (next.Length == links.Length) return false;
+            await WriteLinkedSourcesAsync(next, ct);
+            return true;
+        }
+        finally { _mutationGate.Release(); }
+    }
+
+    public async Task<MediaBulkResult> BulkUpdateAsync(MediaBulkRequest request, CancellationToken ct = default)
+    {
+        if (request.Paths.Length == 0)
+            throw new ApiValidationException("At least one media path is required.");
+        var action = request.Action.Trim().ToLowerInvariant();
+        if (action is not ("delete" or "move" or "relabel" or "rename"))
+            throw new ApiValidationException("Media bulk action must be delete, move, relabel or rename.");
+        if (action == "rename" && request.Paths.Length != 1)
+            throw new ApiValidationException("Rename accepts exactly one media path.");
+
+        var items = new List<MediaItemDescriptor>();
+        var failures = new List<MediaBulkFailure>();
+        await _mutationGate.WaitAsync(ct);
+        try
+        {
+            foreach (var requestedPath in request.Paths)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var relative = NormalizeRelative(requestedPath);
+                    var source = ResolveRelativePath(relative, allowMissingLeaf: false);
+                    if (!File.Exists(source)) throw new ApiNotFoundException($"Media item '{relative}' does not exist.");
+                    if (action == "delete")
+                    {
+                        File.Delete(source);
+                        _index?.Remove(relative);
+                        RemoveEmptyParents(Path.GetDirectoryName(source));
+                        items.Add(DescribeDeleted(relative));
+                        continue;
+                    }
+
+                    var destination = action == "rename"
+                        ? RenamedDestination(source, request.TargetName)
+                        : MovedDestination(relative, request.TargetCollection, request.TargetLabel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    EnsureNoReparseTraversal(Path.GetDirectoryName(destination)!);
+                    if (File.Exists(destination) && !string.Equals(destination, source, _pathComparison))
+                        destination = UniqueDestination(Path.GetDirectoryName(destination)!, Path.GetFileName(destination));
+                    if (!string.Equals(destination, source, _pathComparison))
+                        File.Move(source, destination);
+                    _index?.Remove(relative);
+                    RemoveEmptyParents(Path.GetDirectoryName(source));
+                    var updated = Describe(destination);
+                    _index?.Upsert(updated);
+                    items.Add(updated);
+                }
+                catch (Exception ex) when (ex is ApiProblemException or IOException or UnauthorizedAccessException)
+                {
+                    failures.Add(new MediaBulkFailure(requestedPath, ex.Message));
+                }
+            }
+        }
+        finally { _mutationGate.Release(); }
+        return new MediaBulkResult(items.Count, items, failures);
     }
 
     public void SeedCollectionFromDirectory(string collection, string sourceDirectory)
@@ -318,6 +639,12 @@ public sealed class MediaLibraryService
         }
     }
 
+    private void EnsureIndex()
+    {
+        if (_index is null) return;
+        _index.EnsureInitialized(() => EnumerateItems(null, null).ToArray());
+    }
+
     private MediaItemDescriptor Describe(string fullPath)
     {
         var relative = Path.GetRelativePath(_root, fullPath).Replace('\\', '/');
@@ -341,6 +668,123 @@ public sealed class MediaLibraryService
             if (!Supported.Contains(Path.GetExtension(path))) continue;
             EnsureNoReparseTraversal(path);
             yield return path;
+        }
+    }
+
+    private static FileInfo[] EnumerateSupportedExternalFiles(string root) =>
+            Directory.EnumerateFiles(root, "*", new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                AttributesToSkip = FileAttributes.ReparsePoint,
+                IgnoreInaccessible = false
+            })
+            .Where(path => Supported.Contains(Path.GetExtension(path)))
+            .Select(path => new FileInfo(path))
+            .ToArray();
+
+    private static int BitDepthOf(MatType depth) => (int)depth switch
+    {
+        0 or 1 => 8,
+        2 or 3 => 16,
+        4 or 5 => 32,
+        _ => 64
+    };
+
+    private string MovedDestination(string relativePath, string? targetCollection, string? targetLabel)
+    {
+        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 2)
+            throw new ApiValidationException($"Media item '{relativePath}' does not have collection/label segments.");
+        var collection = string.IsNullOrWhiteSpace(targetCollection)
+            ? NormalizeSegment(segments[0], "collection")
+            : NormalizeSegment(targetCollection, "collection");
+        var label = string.IsNullOrWhiteSpace(targetLabel)
+            ? NormalizeLabel(segments[1])
+            : NormalizeLabel(targetLabel);
+        var tail = string.Join('/', segments.Skip(2));
+        return ResolveRelativePath($"{collection}/{label}/{tail}", allowMissingLeaf: true);
+    }
+
+    private string RenamedDestination(string source, string? targetName)
+    {
+        if (string.IsNullOrWhiteSpace(targetName))
+            throw new ApiValidationException("Target name is required.");
+        var safeName = NormalizeSegment(targetName, "file name");
+        if (!Supported.Contains(Path.GetExtension(safeName)))
+            throw new ApiValidationException("Renamed media item must keep a supported image extension.");
+        return Path.Combine(Path.GetDirectoryName(source)!, safeName);
+    }
+
+    private static MediaItemDescriptor DescribeDeleted(string relativePath)
+    {
+        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var name = segments.LastOrDefault() ?? relativePath;
+        return new MediaItemDescriptor(
+            relativePath,
+            "media://" + relativePath,
+            segments.FirstOrDefault() ?? "Unsorted",
+            segments.Length > 1 ? segments[1] : "Unlabeled",
+            name,
+            Path.GetExtension(name),
+            0,
+            DateTimeOffset.UtcNow);
+    }
+
+    private MediaLinkedSourceDescriptor[] ReadLinkedSources()
+    {
+        if (!File.Exists(_linkedSourcesPath)) return [];
+        try
+        {
+            var value = JsonSerializer.Deserialize<MediaLinkedSourceDescriptor[]>(
+                File.ReadAllText(_linkedSourcesPath));
+            return value ?? [];
+        }
+        catch (JsonException ex)
+        {
+            throw new ApiUnavailableException("Linked media source registry is invalid.", ex);
+        }
+        catch (IOException ex)
+        {
+            throw new ApiUnavailableException("Unable to read linked media sources.", ex);
+        }
+    }
+
+    private async Task WriteLinkedSourcesAsync(
+        IReadOnlyCollection<MediaLinkedSourceDescriptor> links,
+        CancellationToken ct)
+    {
+        var temp = _linkedSourcesPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await File.WriteAllTextAsync(
+                temp,
+                JsonSerializer.Serialize(links, new JsonSerializerOptions { WriteIndented = true }),
+                ct);
+            File.Move(temp, _linkedSourcesPath, overwrite: true);
+        }
+        catch
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            throw;
+        }
+    }
+
+    private static async Task<bool> FilesEqualAsync(string left, string right, CancellationToken ct)
+    {
+        var leftInfo = new FileInfo(left);
+        var rightInfo = new FileInfo(right);
+        if (leftInfo.Length != rightInfo.Length) return false;
+        await using var leftStream = new FileStream(left, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous);
+        await using var rightStream = new FileStream(right, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous);
+        var leftBuffer = new byte[64 * 1024];
+        var rightBuffer = new byte[64 * 1024];
+        while (true)
+        {
+            var leftCount = await leftStream.ReadAsync(leftBuffer, ct);
+            var rightCount = await rightStream.ReadAsync(rightBuffer, ct);
+            if (leftCount != rightCount || !leftBuffer.AsSpan(0, leftCount).SequenceEqual(rightBuffer.AsSpan(0, rightCount)))
+                return false;
+            if (leftCount == 0) return true;
         }
     }
 

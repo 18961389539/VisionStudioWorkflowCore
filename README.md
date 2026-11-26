@@ -44,20 +44,26 @@ Api ──► Engine ──► Algorithms ──► Imaging ──► Abstractio
 ## 2. 本地开发
 
 ```powershell
-# 一键拉起（打包示例插件 + 后端 5180 + 前端 5173；支持 -Port / -SkipPlugin / -BackendOnly）
+# 一键拉起（打包示例插件 + 后端 5280 + 前端 5273；支持 -Port / -SkipPlugin / -BackendOnly）
 ./run-dev.ps1
 
 # 或分终端手动启动：
-# 终端 1：后端（Development 环境，自动登录内置管理员，端口 5180）
+# 终端 1：后端（Development 环境，自动登录内置管理员，端口 5280）
 ./scripts/run-dev.ps1
 
-# 终端 2：前端（Vite 5173，/api 与 /hubs 代理到 5180）
+# 终端 2：前端（Vite 5273，/api 与 /hubs 代理到 5280）
 cd frontend; npm install; npm run dev
 ```
 
 - 后端**必须**以 Development 运行：Production 会拒绝 `Security:AutoLoginAdmin=true`（免密码管理员
   不得进入现场），直接用 `dotnet run` 默认按 Production 处理并拒绝启动。
 - 数据根默认 `artifacts/dev-data`，与发布数据根分离，调试不会污染现场数据。
+- `image.load` 可直接读取已授权的服务端目录；用进程环境变量
+  `VisionStudio__ReplayInputRoots=D:\Images` 授权多个开发目录（多个根用 `;` 分隔）。
+  `scripts/run-dev.ps1` 也会读取同名用户级环境变量，用户级配置可在重启后保留。
+- Development 桌面模式下，绝对路径遵循运行进程的 Windows/Linux 文件系统权限，可直接选择任意有权访问的目录。
+  生产环境默认仍只读 `ReplayInputRoots`、数据根和媒体根；远程部署必须显式设置
+  `VisionStudio__AllowUnrestrictedReplayInput=true` 才会放开绝对路径，因此不会默认暴露服务器文件系统。
 
 ## 3. 发布与现场运行
 

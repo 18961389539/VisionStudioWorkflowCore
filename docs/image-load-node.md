@@ -11,18 +11,22 @@
 
 ## 安全边界（最关键的一条）
 
-读盘一律经过宿主的 `IReplayInputResolver`，与 `image.acquire` 的回放路径共用同一套授权根：
+读盘一律经过宿主的 `IReplayInputResolver`。Development 桌面模式下，绝对路径遵循进程 OS 权限，
+无需逐目录授权；生产环境默认与 `image.acquire` 共用下列授权根：
 
 - 数据根（`VisionStudioDataRoot`）
 - 媒体库根（`MediaLibrary:RootPath`）
 - 显式配置的 `VisionStudio:ReplayInputRoots`（分号分隔的绝对路径）
+
+远程/生产部署如确需与桌面模式相同的任意绝对路径读取，必须显式设置
+`VisionStudio:AllowUnrestrictedReplayInput=true`。该选项不会默认开启。
 
 三条拒绝路径都带可操作的提示：
 
 | 情况 | 行为 |
 |---|---|
 | 没有注入授权器（引擎裸跑/单元测试） | 失败并说明"离线读图是宿主能力，请配置 ReplayInputRoots" |
-| 路径不在授权根内 | 失败并点名 ReplayInputRoots |
+| 生产模式路径不在授权根内 | 失败并点名 ReplayInputRoots；显式允许全部路径时可读取进程有权访问的绝对路径 |
 | 文件不存在 / 扩展名不是图像 | 分别报 `FileNotFoundException` / 明确列出支持的扩展名 |
 
 理由写在 `IReplayInputResolver` 的注释里，也写进了节点描述：**流程文档是可导入的 JSON**。

@@ -5,6 +5,7 @@ using VisionStudio.Api;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Provenance;
 using VisionStudio.Api.Media;
+using VisionStudio.Abstractions;
 using VisionStudio.Engine;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Device;
@@ -103,6 +104,109 @@ public sealed class MediaLibraryTests
     }
 
     [Fact]
+    public async Task Import_PreservesRelativePathAndIsIdempotentWhenRequested()
+    {
+        using var env = new TempWebHostEnvironment();
+        var media = CreateMedia(env);
+        using var firstBytes = new MemoryStream(TinyPng);
+        var first = await media.ImportAsync(
+            "batch", "OK", "camera-a/day-1/sample.png", firstBytes, firstBytes.Length, default, idempotentRelativePath: true);
+        using var secondBytes = new MemoryStream(TinyPng);
+        var second = await media.ImportAsync(
+            "batch", "OK", "camera-a/day-1/sample.png", secondBytes, secondBytes.Length, default, idempotentRelativePath: true);
+
+        Assert.Equal("media://batch/OK/camera-a/day-1/sample.png", first.Source);
+        Assert.Equal(first.RelativePath, second.RelativePath);
+        Assert.Single(media.ListItems("batch", "OK").Items);
+    }
+
+    [Fact]
+    public async Task LinkedDirectory_IsPersistedAndListedAsReadOnlySource()
+    {
+        using var env = new TempWebHostEnvironment();
+        var resolver = new AllowAllResolver();
+        var media = CreateMedia(env, resolver);
+        var linkedRoot = Path.Combine(Path.GetTempPath(), "visionstudio-linked-media", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(linkedRoot, "nested"));
+        await File.WriteAllBytesAsync(Path.Combine(linkedRoot, "nested", "frame.png"), TinyPng);
+        try
+        {
+            var linked = await media.LinkDirectoryAsync("training", linkedRoot);
+
+            Assert.Equal(1, linked.ItemCount);
+            Assert.Equal(linkedRoot, linked.Path);
+            Assert.Contains(media.ListLinkedSources(), item => item.Name == "training" && item.ItemCount == 1);
+            Assert.Contains(media.ListSources(), item => item.Kind == "linked" && item.Source == linkedRoot);
+            Assert.True(await media.UnlinkDirectoryAsync("training"));
+        }
+        finally
+        {
+            Directory.Delete(linkedRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task IndexedSearchAndThumbnailMetadata_AreStableAcrossQueries()
+    {
+        using var env = new TempWebHostEnvironment();
+        var configuration = CreateConfiguration();
+        var database = new SqliteMetadataDatabase(env, configuration);
+        var media = CreateMedia(env, configuration: configuration, database: database);
+        using var bytes = new MemoryStream(TinyPng);
+        var imported = await media.ImportAsync("indexed", "OK", "camera/frame-01.png", bytes, bytes.Length, default);
+
+        var search = media.ListItems(null, null, search: "frame-01");
+        Assert.Single(search.Items);
+        var thumbnail = await media.ResolveThumbnailPathAsync(imported.RelativePath);
+        Assert.True(File.Exists(thumbnail));
+        var withDimensions = media.ListItems("indexed", "OK", minWidth: 1, maxWidth: 1);
+        Assert.Single(withDimensions.Items);
+        Assert.Equal(1, withDimensions.Items[0].Width);
+        Assert.Equal(1, withDimensions.Items[0].Height);
+    }
+
+    [Fact]
+    public async Task IndexedCollections_KeepEmptyCollectionsVisible()
+    {
+        using var env = new TempWebHostEnvironment();
+        var configuration = CreateConfiguration();
+        var database = new SqliteMetadataDatabase(env, configuration);
+        var media = CreateMedia(env, configuration: configuration, database: database);
+        _ = media.ListCollections();
+
+        var created = await media.CreateCollectionAsync("empty");
+
+        Assert.Equal("empty", created.Name);
+        Assert.Contains(media.ListCollections(), item => item.Name == "empty" && item.ItemCount == 0);
+        Assert.Equal(1, media.Status().CollectionCount);
+    }
+
+    [Fact]
+    public async Task BulkMoveAndDelete_ReportPartialResultsAndPreservePaths()
+    {
+        using var env = new TempWebHostEnvironment();
+        var media = CreateMedia(env);
+        using var firstBytes = new MemoryStream(TinyPng);
+        var first = await media.ImportAsync("bulk-a", "OK", "camera/a.png", firstBytes, firstBytes.Length, default);
+        using var secondBytes = new MemoryStream(TinyPng);
+        var second = await media.ImportAsync("bulk-a", "OK", "camera/b.png", secondBytes, secondBytes.Length, default);
+
+        var moved = await media.BulkUpdateAsync(new MediaBulkRequest(
+            "move",
+            [first.RelativePath, second.RelativePath],
+            TargetCollection: "bulk-b",
+            TargetLabel: "NG"));
+        Assert.Equal(2, moved.Succeeded);
+        Assert.All(moved.Items, item => Assert.StartsWith("bulk-b/NG/camera/", item.RelativePath));
+        var deleted = await media.BulkUpdateAsync(new MediaBulkRequest(
+            "delete",
+            [moved.Items[0].RelativePath, "missing.png"]));
+        Assert.Equal(1, deleted.Succeeded);
+        Assert.Single(deleted.Failures);
+        Assert.Equal(1, media.ListItems("bulk-b", "NG").Total);
+    }
+
+    [Fact]
     public async Task ListItems_PaginatesAndReportsFilteredTotal()
     {
         using var env = new TempWebHostEnvironment();
@@ -166,9 +270,18 @@ public sealed class MediaLibraryTests
         Assert.Contains(validation.Drifts, x => x.Kind == "Camera" && x.Id == "file-1");
     }
 
-    private static MediaLibraryService CreateMedia(TempWebHostEnvironment env)
+    private static MediaLibraryService CreateMedia(
+        TempWebHostEnvironment env,
+        IReplayInputResolver? resolver = null,
+        IConfiguration? configuration = null,
+        SqliteMetadataDatabase? database = null)
     {
-        var configuration = new ConfigurationBuilder()
+        configuration ??= CreateConfiguration();
+        return new MediaLibraryService(env, configuration, resolver, database);
+    }
+
+    private static IConfiguration CreateConfiguration() =>
+        new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["MediaLibrary:RootPath"] = "data/media",
@@ -176,6 +289,10 @@ public sealed class MediaLibraryTests
                 ["MediaLibrary:MaxBatchFiles"] = "20",
                 ["MediaLibrary:MaxBatchBytes"] = "4194304"
             }).Build();
-        return new MediaLibraryService(env, configuration);
+
+    private sealed class AllowAllResolver : IReplayInputResolver
+    {
+        public string? Resolve(string requestedPath) =>
+            Path.IsPathFullyQualified(requestedPath) ? Path.GetFullPath(requestedPath) : null;
     }
 }

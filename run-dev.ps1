@@ -1,5 +1,5 @@
 param(
-    [int]$Port = 5180,
+    [int]$Port = 5280,
     [switch]$SkipPlugin,
     [switch]$BackendOnly
 )
@@ -23,7 +23,7 @@ Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", 
 if (-not $BackendOnly) {
     Write-Host "[3/3] Starting React/Vite frontend..." -ForegroundColor Cyan
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root/frontend'; if (-not (Test-Path node_modules)) { npm install }; npm run dev"
-    Write-Host "Open http://localhost:5173 (API: http://127.0.0.1:$Port)" -ForegroundColor Green
+    Write-Host "Open http://localhost:5273 (API: http://127.0.0.1:$Port)" -ForegroundColor Green
 } else {
     Write-Host "API starting on http://127.0.0.1:$Port (-BackendOnly)." -ForegroundColor Green
 }

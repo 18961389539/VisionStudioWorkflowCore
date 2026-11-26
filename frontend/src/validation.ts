@@ -145,18 +145,18 @@ export function validateWorkflow(nodes: Node[], catalog: NodeCatalogItem[], edge
       });
     }
 
-    // 必需语义按端口种类分别判定：控制必需口只认控制线，数据必需口只认数据线
-    // （与 VisionNode 的缺口提示、connectionVerdict 保持一致，避免“接了控制线仍报未连接”）
+    // 与后端编译器一致：未连接控制输入的节点可以作为工作流入口；
+    // 只有必需数据输入缺少连接才阻断执行。
     for (const port of portsOf(node, 'inputs')) {
+      if (port.dataType === 'Control') continue;
       if (!isPortRequired(port, parameters, descriptors)) continue;
-      const isControl = port.dataType === 'Control';
       if (connectedInputs.has(port.name)) continue;
       issues.push({
         id: `port-missing-${node.id}-${port.name}`,
         severity: 'error',
         source: 'client',
         nodeId: node.id,
-        message: `节点「${nodeLabel(node.id)}」的必需${isControl ? '控制' : '数据'}输入 ${portDisplayName(port.name, port.label)}（${port.dataType}）未连接`
+        message: `节点「${nodeLabel(node.id)}」的必需数据输入 ${portDisplayName(port.name, port.label)}（${port.dataType}）未连接`
       });
     }
     const counts = new Map<string, number>();

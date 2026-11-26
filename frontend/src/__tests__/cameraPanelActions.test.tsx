@@ -79,7 +79,7 @@ function stubLayout() {
 
 type Handler = (url: string, init?: RequestInit) => Promise<Response> | undefined;
 
-function mount(handler?: Handler) {
+function mount(handler?: Handler, initialTab: 'acquisition' | 'media' = 'acquisition') {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const custom = handler?.(url, init);
@@ -92,7 +92,7 @@ function mount(handler?: Handler) {
   });
   vi.stubGlobal('fetch', fetchMock);
   return {
-    ...render(<CameraPanel open onClose={vi.fn()} />),
+    ...render(<CameraPanel open initialTab={initialTab} onClose={vi.fn()} />),
     fetchMock
   };
 }
@@ -104,6 +104,94 @@ beforeEach(() => { stubLayout(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('CameraPanel 设备命令与参数错误', () => {
+  it('媒体库支持选择文件夹并批量导入其中的图像', async () => {
+    const { fetchMock } = mount(undefined, 'media');
+    expect(await screen.findByRole('button', { name: '选择文件夹' })).toBeInTheDocument();
+    const directoryInput = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]'))
+      .find((input) => input.hasAttribute('directory') || input.hasAttribute('webkitdirectory'));
+    expect(directoryInput).toBeDefined();
+
+    const first = new File(['first'], 'first.png', { type: 'image/png' });
+    const second = new File(['second'], 'nested.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(second, 'webkitRelativePath', { value: 'sample/nested.jpg' });
+    fireEvent.change(directoryInput!, { target: { files: [first, second] } });
+
+    const importButton = await screen.findByRole('button', { name: /导入 2 张图像/ });
+    fireEvent.click(importButton);
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([url]) => String(url) === '/api/media/import');
+      expect(request).toBeDefined();
+      const form = request![1]?.body as FormData;
+      expect(form.getAll('files')).toHaveLength(2);
+      expect(form.getAll('relativePaths')).toEqual(['first.png', 'sample/nested.jpg']);
+    });
+  });
+
+  it('媒体库将 4000 张图片保存在上传队列中且不渲染全部文件', async () => {
+    const { fetchMock } = mount(undefined, 'media');
+    expect(await screen.findByRole('button', { name: '选择文件夹' })).toBeInTheDocument();
+    const directoryInput = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]'))
+      .find((input) => input.hasAttribute('directory') || input.hasAttribute('webkitdirectory'));
+    expect(directoryInput).toBeDefined();
+
+    const files = Array.from({ length: 4000 }, (_, index) =>
+      new File([String(index)], `image-${index}.png`, { type: 'image/png' }));
+    fireEvent.change(directoryInput!, { target: { files } });
+
+    expect(await screen.findByRole('button', { name: '导入 4000 张图像' })).toBeInTheDocument();
+    expect(screen.getByText(/将分 20 批上传/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '导入 4000 张图像' }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/media/import')).toHaveLength(20);
+    });
+  });
+
+  it('媒体库支持索引筛选和批量改标签', async () => {
+    const item = {
+      relativePath: 'offline/OK/camera/frame.png',
+      source: 'media://offline/OK/camera/frame.png',
+      collection: 'offline',
+      label: 'OK',
+      name: 'frame.png',
+      extension: '.png',
+      bytes: 100,
+      modifiedAt: '2026-11-20T00:00:00Z',
+      width: 1280,
+      height: 720
+    };
+    const { fetchMock } = mount((url, init) => {
+      if (url.includes('/api/media/items')) return Promise.resolve(new Response(JSON.stringify([item]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Total-Count': '1' }
+      }));
+      if (url === '/api/media/bulk' && init?.method === 'POST')
+        return Promise.resolve(json({ succeeded: 1, items: [], failures: [] }));
+      return undefined;
+    }, 'media');
+    expect(await screen.findByText('frame.png')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索媒体文件名' }), { target: { value: 'frame' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: '最小宽度' }), { target: { value: '640' } });
+    fireEvent.click(screen.getByRole('button', { name: /扫\s*描/ }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) =>
+        String(url).includes('search=frame') && String(url).includes('minWidth=640'))).toBe(true);
+    });
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    fireEvent.click(checkboxes.at(-1)!);
+    fireEvent.click(screen.getByRole('button', { name: '改标签' }));
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([url]) => String(url) === '/api/media/bulk');
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request![1]?.body))).toMatchObject({
+        action: 'relabel',
+        paths: ['offline/OK/camera/frame.png'],
+        targetLabel: 'Unlabeled'
+      });
+    });
+  });
+
   it('打开设备成功后立即刷新列表；失败时显示后端原因', async () => {
     let openFails = false;
     const { fetchMock } = mount((url, init) => {

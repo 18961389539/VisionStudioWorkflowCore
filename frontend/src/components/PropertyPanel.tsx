@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { AutoComplete, Button, Empty, Input, InputNumber, Select, Switch, Tag, Tooltip } from 'antd';
 import type { Node } from '@xyflow/react';
-import type { CameraDescriptor, DeviceDescriptor, MediaItemDescriptor, NodeCatalogItem, ParameterDescriptor, RobotDescriptor, VisionRoi } from '../types';
+import type { CameraDescriptor, DeviceDescriptor, MediaSourceDescriptor, NodeCatalogItem, ParameterDescriptor, RobotDescriptor, VisionRoi } from '../types';
 import { isParameterVisible, parameterPresentation, validateParameterValues } from '../validation';
 import { MAX_ROI_POLYGON_POINTS, roiConfigurationIssue } from '../nodeConfigurationState';
 import { responseErrorMessage } from '../apiErrors';
@@ -202,7 +202,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
     if (names.has('deviceId') || names.has('tagId')) requested.push({ kind: 'device', url: apiUrl('devices') });
     if (names.has('robotId')) requested.push({ kind: 'robot', url: apiUrl('robots') });
     if (catalogItem.type === 'image.load' && names.has('path'))
-      requested.push({ kind: 'media', url: apiUrl('media/items?take=200') });
+      requested.push({ kind: 'media', url: apiUrl('media/sources') });
     if (requested.length === 0) return;
 
     const controller = new AbortController();
@@ -226,9 +226,9 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
           const items: RobotDescriptor[] = await response.json();
           options = items.map((item) => ({ label: `${item.name} · ${item.id}`, value: item.id }));
         } else {
-          const items: MediaItemDescriptor[] = await response.json();
+          const items: MediaSourceDescriptor[] = await response.json();
           options = items.map((item) => ({
-            label: `${item.name} · ${item.collection} · ${item.label}`,
+            label: `${item.name} · ${item.kind === 'linked' ? '服务端目录' : '媒体库'} · ${item.itemCount} 张`,
             value: item.source
           }));
         }

@@ -782,6 +782,12 @@ export type MediaLibraryStatus = ContractDto<'MediaLibraryStatus'>;
 
 export type MediaCollectionDescriptor = ContractDto<'MediaCollectionDescriptor'>;
 
+export type MediaLinkedSourceDescriptor = ContractDto<'MediaLinkedSourceDescriptor'>;
+
+export type MediaSourceDescriptor = ContractDto<'MediaSourceDescriptor'>;
+
+export type MediaBulkResult = ContractDto<'MediaBulkResult'>;
+
 /** UI 视图：label 收窄为封闭联合驱动筛选，bytes 收窄为 number。 */
 export type MediaItemDescriptor = {
   relativePath: string;
@@ -792,6 +798,10 @@ export type MediaItemDescriptor = {
   extension: string;
   bytes: number;
   modifiedAt: string;
+  width?: number | null;
+  height?: number | null;
+  channels?: number | null;
+  bitDepth?: number | null;
 };
 
 

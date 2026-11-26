@@ -339,10 +339,15 @@ export const spc = {
 export const media = {
   status: apiUrl('media/status'),
   collections: apiUrl('media/collections'),
+  sources: apiUrl('media/sources'),
+  linkedSources: apiUrl('media/linked-sources'),
+  linkedSourceByName: (name: string) => apiUrl(`media/linked-sources?name=${encodeURIComponent(name)}`),
+  bulk: apiUrl('media/bulk'),
   items: apiUrl('media/items'),
   itemsQuery: (query: string) => apiUrl(`media/items?${query}`),
   import: apiUrl('media/import'),
   preview: (path: string) => apiUrl(`media/preview?path=${encodeURIComponent(path)}`),
+  thumbnail: (path: string) => apiUrl(`media/thumbnail?path=${encodeURIComponent(path)}`),
   itemByPath: (path: string) => apiUrl(`media/items?path=${encodeURIComponent(path)}`)
 } as const;
 

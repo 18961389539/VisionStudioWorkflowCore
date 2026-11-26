@@ -62,7 +62,7 @@ describe('canvas node presentation', () => {
 
   describe('required input and connection feedback', () => {
     it.each([
-      ['Control', 'Image', 'control'], ['Image', 'Control', 'data'],
+      ['Control', 'Image', 'control'],
       ['String', 'Image', 'data'], ['Image', 'Image', 'control']
     ])('does not satisfy %s -> %s with a %s edge', (sourceType, targetType, kind) => {
       incoming(sourceType, kind);
@@ -70,6 +70,12 @@ describe('canvas node presentation', () => {
       expect(requiredMark('value')).toBeTruthy();
       expect(screen.getByText('缺 1 个必需输入')).toBeTruthy();
       expect(screen.getByTitle(/必需 · 连线无效/)).toBeTruthy();
+    });
+
+    it('allows an unconnected control input as a workflow entry point', () => {
+      render(component({ ...base, inputs: [{ name: 'exec', dataType: 'Control', required: true }] }));
+      expect(requiredMark('exec')).toBeNull();
+      expect(screen.queryByText('缺 1 个必需输入')).toBeNull();
     });
 
     it.each(['Image', 'Control'])('accepts a valid legacy %s connection without an explicit kind', (dataType) => {
