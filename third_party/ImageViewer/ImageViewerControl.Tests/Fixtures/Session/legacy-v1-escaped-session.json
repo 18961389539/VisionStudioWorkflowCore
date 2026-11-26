@@ -1,0 +1,9 @@
+{
+  "SessionName": "legacy-session",
+  "SavedAtUtc": "2026-01-15T08:30:00+00:00",
+  "ImagePath": "assets/source.png",
+  "RoiDocumentJson": "{\r\n  \u0022Version\u0022: 1,\r\n  \u0022PixelSize\u0022: 0.5,\r\n  \u0022PhysicalUnit\u0022: \u0022mm\u0022,\r\n  \u0022Items\u0022: [\r\n    {\r\n      \u0022Type\u0022: \u0022circle\u0022,\r\n      \u0022Label\u0022: \u0022legacy-circle\u0022,\r\n      \u0022StrokeColor\u0022: \u0022#FF00FFFF\u0022,\r\n      \u0022StrokeThickness\u0022: 2,\r\n      \u0022IsVisible\u0022: true,\r\n      \u0022IsLocked\u0022: false,\r\n      \u0022Center\u0022: {\r\n        \u0022X\u0022: 120,\r\n        \u0022Y\u0022: 84\r\n      },\r\n      \u0022Position\u0022: null,\r\n      \u0022P1\u0022: null,\r\n      \u0022P2\u0022: null,\r\n      \u0022P3\u0022: null,\r\n      \u0022Vertex\u0022: null,\r\n      \u0022Points\u0022: null,\r\n      \u0022Width\u0022: 0,\r\n      \u0022Height\u0022: 0,\r\n      \u0022RadiusX\u0022: 0,\r\n      \u0022RadiusY\u0022: 0,\r\n      \u0022Radius\u0022: 15,\r\n      \u0022Radius2\u0022: 0,\r\n      \u0022Angle\u0022: 0,\r\n      \u0022CaliperCount\u0022: 0,\r\n      \u0022CaliperSearchRange\u0022: 0,\r\n      \u0022CaliperSamplingHalfWidth\u0022: 0,\r\n      \u0022MinimumValidCalipers\u0022: 0,\r\n      \u0022CaliperMinimumGradient\u0022: 0,\r\n      \u0022CaliperOutlierThreshold\u0022: 0,\r\n      \u0022CaliperEdgePolarity\u0022: null,\r\n      \u0022MinimumEdgeGap\u0022: 0,\r\n      \u0022NominalEdgeGap\u0022: 0,\r\n      \u0022NominalEdgeGapTolerance\u0022: 0,\r\n      \u0022EdgeSelection\u0022: 1,\r\n      \u0022IsClosed\u0022: false,\r\n      \u0022IsFreehand\u0022: false,\r\n      \u0022UseOtsu\u0022: false,\r\n      \u0022ManualThreshold\u0022: 0,\r\n      \u0022DetectDark\u0022: false,\r\n      \u0022MinArea\u0022: 0\r\n    }\r\n  ]\r\n}",
+  "Scale": 1.25,
+  "TranslateX": 24,
+  "TranslateY": -12
+}

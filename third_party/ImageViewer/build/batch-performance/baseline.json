@@ -1,0 +1,5 @@
+{
+  "maximumPeakGrowthMiB": 128,
+  "slowRunMilliseconds": 5000,
+  "expectedCsvSha256": "F2CA2FFB890B88A78D642E76AAA5A021ECD0C58545C467DB61A3059B46AAB0D6"
+}

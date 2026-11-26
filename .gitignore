@@ -7,6 +7,10 @@ frontend/dist/
 **/bin/
 **/obj/
 .vs/
+**/TestResults/
+*.trx
+*.coverage
+*.coveragexml
 
 # IDE
 .idea/

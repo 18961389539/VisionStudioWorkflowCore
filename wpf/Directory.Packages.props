@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    WPF 端中央包管理（Central Package Management）。
+    版本严格对齐 backend/Directory.Packages.props 与本机离线包缓存。
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="MaterialDesignColors" Version="5.3.1" />
+    <PackageVersion Include="MaterialDesignThemes" Version="5.3.1" />
+    <PackageVersion Include="Microsoft.Net.Compilers.Toolset" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.77" />
+    <PackageVersion Include="Nodify" Version="7.2.0" />
+    <PackageVersion Include="Serilog" Version="4.2.0" />
+    <PackageVersion Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <!-- 若通过 NuGet 包方式接入 18961389539/ImageViewer，可在此固定对应包版本 -->
+    <PackageVersion Include="ImageViewerControl" Version="0.1.0" />
+  </ItemGroup>
+</Project>

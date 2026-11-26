@@ -1,0 +1,35 @@
+<UserControl
+    x:Class="ImageViewer.Controls.VolumeViewer"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:localization="clr-namespace:ImageViewer.Localization"
+    xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+    automation:AutomationProperties.Name="{localization:UiText VolumeViewerName}"
+    Background="Transparent">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ContentControl x:Name="sliceViewerHost" />
+        <Border Grid.Row="1" Padding="8,6" Background="{DynamicResource ViewerSurfaceAltBrush}">
+            <DockPanel LastChildFill="True">
+                <TextBlock x:Name="sliceStatusText"
+                           DockPanel.Dock="Left"
+                           Margin="0,0,12,0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource ViewerTextPrimaryBrush}"
+                           automation:AutomationProperties.Name="{localization:UiText VolumeSliceStatusName}"
+                           automation:AutomationProperties.LiveSetting="Polite" />
+                <Slider x:Name="sliceSlider" x:FieldModifier="internal"
+                        Minimum="0"
+                        Maximum="0"
+                        IsSnapToTickEnabled="True"
+                        TickFrequency="1"
+                        SmallChange="1"
+                        LargeChange="1"
+                        ValueChanged="OnSliceValueChanged" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</UserControl>

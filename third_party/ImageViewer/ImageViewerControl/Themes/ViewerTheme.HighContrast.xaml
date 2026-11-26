@@ -1,0 +1,84 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!--
+        ImageViewer 高对比度主题（黑底 / 亮黄强调，符合 WCAG AAA 文本对比度取向）。
+
+        用法（宿主，通常在 SystemParameters.HighContrastChanged 时切换）：
+            if (SystemParameters.HighContrast)
+            {
+                Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
+                {
+                    Source = new Uri("pack://application:,,,/ImageViewerControl;component/Themes/ViewerTheme.HighContrast.xaml")
+                });
+            }
+    -->
+
+    <!-- 背景与表面 -->
+    <Color x:Key="ViewerViewportBackgroundColor">#000000</Color>
+    <LinearGradientBrush x:Key="ViewerBackdropBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#000000" Offset="0" />
+        <GradientStop Color="#000000" Offset="0.55" />
+        <GradientStop Color="#000000" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="ViewerBackdropSolidBrush" Color="#000000" />
+    <SolidColorBrush x:Key="ViewerSurfaceBrush" Color="#000000" />
+    <SolidColorBrush x:Key="ViewerSurfaceAltBrush" Color="#0A0A0A" />
+    <SolidColorBrush x:Key="ViewerSurfaceOverlayBrush" Color="#F0000000" />
+    <SolidColorBrush x:Key="ViewerSurfaceOverlayAltBrush" Color="#E6000000" />
+    <SolidColorBrush x:Key="ViewerSurfaceInsetBrush" Color="#141414" />
+    <SolidColorBrush x:Key="ViewerMenuPopupBrush" Color="#000000" />
+    <SolidColorBrush x:Key="ViewerSurfaceOverlayMenuBrush" Color="#F0000000" />
+
+    <!-- 描边 -->
+    <SolidColorBrush x:Key="ViewerPanelBorderBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ViewerChipBorderBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ViewerMenuBorderBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ViewerPopupBorderBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ViewerInsetBorderBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ViewerOverlayBorderBrush" Color="#FFFF00" />
+    <SolidColorBrush x:Key="ViewerProgressTrackBrush" Color="#141414" />
+    <SolidColorBrush x:Key="ViewerProgressBorderBrush" Color="#FFFFFF" />
+
+    <!-- 强调色 -->
+    <SolidColorBrush x:Key="ViewerAccentBrush" Color="#FFFF00" />
+    <SolidColorBrush x:Key="ViewerAccentSoftBrush" Color="#33FFFF00" />
+    <SolidColorBrush x:Key="ViewerAccentBorderBrush" Color="#FFFF00" />
+    <SolidColorBrush x:Key="ViewerSelectionBrush" Color="#FFFF00" />
+
+    <!-- 文本 -->
+    <SolidColorBrush x:Key="ViewerTextPrimaryBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ViewerTextSecondaryBrush" Color="#FFFF00" />
+    <SolidColorBrush x:Key="ViewerTextMutedBrush" Color="#E0E0E0" />
+    <SolidColorBrush x:Key="ViewerTextDisabledBrush" Color="#A0A0A0" />
+
+    <!-- 交互态 -->
+    <SolidColorBrush x:Key="ViewerButtonHoverBrush" Color="#333333" />
+    <SolidColorBrush x:Key="ViewerButtonPressedBrush" Color="#4D4D4D" />
+    <SolidColorBrush x:Key="ViewerChipHoverBrush" Color="#333333" />
+
+    <!-- 网格线与十字线 -->
+    <SolidColorBrush x:Key="ViewerGridLineBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ViewerCrosshairBrush" Color="#FFFF00" />
+    <SolidColorBrush x:Key="ViewerSnapGridBrush" Color="#FFFFFF" />
+
+    <!-- 错误态 -->
+    <SolidColorBrush x:Key="ViewerErrorBrush" Color="#FF8080" />
+    <SolidColorBrush x:Key="ViewerErrorSoftBrush" Color="#330000" />
+    <SolidColorBrush x:Key="ViewerErrorBorderBrush" Color="#FF8080" />
+
+    <!-- 语义色（提示 / 说明文本） -->
+    <SolidColorBrush x:Key="ViewerWarningBrush" Color="#FFFF00" />
+    <SolidColorBrush x:Key="ViewerInfoBrush" Color="#FFFFFF" />
+
+    <!-- 阴影 -->
+    <Color x:Key="ViewerShadowColor">#000000</Color>
+    <sys:Double x:Key="ViewerShadowOpacity">0.0</sys:Double>
+
+    <!-- ROI 属性面板 / 列表 -->
+    <SolidColorBrush x:Key="ViewerListItemHoverBrush" Color="#333333" />
+    <SolidColorBrush x:Key="ViewerListItemSelectedBrush" Color="#33FFFF00" />
+
+</ResourceDictionary>

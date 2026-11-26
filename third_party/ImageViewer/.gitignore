@@ -1,0 +1,28 @@
+# Build outputs
+bin/
+obj/
+artifacts/
+
+# IDE / tooling
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test results
+TestResults/
+
+# NuGet
+*.nupkg
+packages/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Trae IDE local documents (plan/spec working files)
+.trae/
+# WorkBuddy local workspace (memory/notes) — never publish
+.workbuddy/

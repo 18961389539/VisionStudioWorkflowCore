@@ -1,0 +1,10 @@
+root = true
+
+[*.cs]
+dotnet_diagnostic.CA1805.severity = warning
+dotnet_diagnostic.CA1822.severity = warning
+dotnet_diagnostic.CA1859.severity = suggestion
+
+[ImageViewerControl.Tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1711.severity = none

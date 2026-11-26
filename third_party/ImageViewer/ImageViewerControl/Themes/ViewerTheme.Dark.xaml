@@ -1,0 +1,84 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!--
+        ImageViewer 深色主题（当前默认外观）。
+
+        覆盖方式（宿主）：
+          在应用启动时把本字典替换为自定义字典，键名保持下表不变即可整体换肤：
+              var dict = new ResourceDictionary { Source = new Uri("pack://application:,,,/YourApp;component/Themes/YourTheme.xaml") };
+              Application.Current.Resources.MergedDictionaries.Add(dict);
+          控件内部用 DynamicResource 引用这些键，运行时替换生效。
+
+        也可以用 ComponentResourceKey 做"逐键"覆盖（见 ViewerThemeKeys）。
+        高对比度：见 ViewerTheme.HighContrast.xaml。
+    -->
+
+    <!-- 背景与表面 -->
+    <Color x:Key="ViewerViewportBackgroundColor">#11151C</Color>
+    <LinearGradientBrush x:Key="ViewerBackdropBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#0E141D" Offset="0" />
+        <GradientStop Color="#0A0F16" Offset="0.55" />
+        <GradientStop Color="#080B11" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="ViewerBackdropSolidBrush" Color="#0A0F16" />
+    <SolidColorBrush x:Key="ViewerSurfaceBrush" Color="#18212E" />
+    <SolidColorBrush x:Key="ViewerSurfaceAltBrush" Color="#111824" />
+    <SolidColorBrush x:Key="ViewerSurfaceOverlayBrush" Color="#C0141D29" />
+    <SolidColorBrush x:Key="ViewerSurfaceOverlayAltBrush" Color="#66102133" />
+    <SolidColorBrush x:Key="ViewerSurfaceInsetBrush" Color="#1C2736" />
+    <SolidColorBrush x:Key="ViewerMenuPopupBrush" Color="#18212E" />
+    <SolidColorBrush x:Key="ViewerSurfaceOverlayMenuBrush" Color="#C018212E" />
+
+    <!-- 描边 -->
+    <SolidColorBrush x:Key="ViewerPanelBorderBrush" Color="#314158" />
+    <SolidColorBrush x:Key="ViewerChipBorderBrush" Color="#35506D" />
+    <SolidColorBrush x:Key="ViewerMenuBorderBrush" Color="#314158" />
+    <SolidColorBrush x:Key="ViewerPopupBorderBrush" Color="#334A63" />
+    <SolidColorBrush x:Key="ViewerInsetBorderBrush" Color="#36516E" />
+    <SolidColorBrush x:Key="ViewerOverlayBorderBrush" Color="#49627D" />
+    <SolidColorBrush x:Key="ViewerProgressTrackBrush" Color="#172433" />
+    <SolidColorBrush x:Key="ViewerProgressBorderBrush" Color="#28405B" />
+
+    <!-- 强调色 -->
+    <SolidColorBrush x:Key="ViewerAccentBrush" Color="#69AFFF" />
+    <SolidColorBrush x:Key="ViewerAccentSoftBrush" Color="#2869AFFF" />
+    <SolidColorBrush x:Key="ViewerAccentBorderBrush" Color="#567FD6FF" />
+    <SolidColorBrush x:Key="ViewerSelectionBrush" Color="#69AFFF" />
+
+    <!-- 文本 -->
+    <SolidColorBrush x:Key="ViewerTextPrimaryBrush" Color="#F5F8FC" />
+    <SolidColorBrush x:Key="ViewerTextSecondaryBrush" Color="#AAB5C3" />
+    <SolidColorBrush x:Key="ViewerTextMutedBrush" Color="#536172" />
+    <SolidColorBrush x:Key="ViewerTextDisabledBrush" Color="#5A6B7D" />
+
+    <!-- 交互态 -->
+    <SolidColorBrush x:Key="ViewerButtonHoverBrush" Color="#243245" />
+    <SolidColorBrush x:Key="ViewerButtonPressedBrush" Color="#2D3D54" />
+    <SolidColorBrush x:Key="ViewerChipHoverBrush" Color="#294055" />
+
+    <!-- 网格线与十字线 -->
+    <SolidColorBrush x:Key="ViewerGridLineBrush" Color="#36516E" />
+    <SolidColorBrush x:Key="ViewerCrosshairBrush" Color="#69AFFF" />
+    <SolidColorBrush x:Key="ViewerSnapGridBrush" Color="#36516E" />
+
+    <!-- 错误态 -->
+    <SolidColorBrush x:Key="ViewerErrorBrush" Color="#FF6B6B" />
+    <SolidColorBrush x:Key="ViewerErrorSoftBrush" Color="#3D1F2A" />
+    <SolidColorBrush x:Key="ViewerErrorBorderBrush" Color="#B94A5A" />
+
+    <!-- 语义色（提示 / 说明文本） -->
+    <SolidColorBrush x:Key="ViewerWarningBrush" Color="#F5C26B" />
+    <SolidColorBrush x:Key="ViewerInfoBrush" Color="#A8C7E8" />
+
+    <!-- 阴影 -->
+    <Color x:Key="ViewerShadowColor">#000000</Color>
+    <sys:Double x:Key="ViewerShadowOpacity">0.28</sys:Double>
+
+    <!-- ROI 属性面板 / 列表 -->
+    <SolidColorBrush x:Key="ViewerListItemHoverBrush" Color="#294055" />
+    <SolidColorBrush x:Key="ViewerListItemSelectedBrush" Color="#2869AFFF" />
+
+</ResourceDictionary>

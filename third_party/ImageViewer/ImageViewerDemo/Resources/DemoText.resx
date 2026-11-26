@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="WindowTitle" xml:space="preserve"><value>ImageViewer Demo</value></data>
+  <data name="WorkspaceTitle" xml:space="preserve"><value>图像测量工作台</value></data>
+  <data name="OpenImageButton" xml:space="preserve"><value>打开图像文件</value></data>
+  <data name="OpenVolumeButton" xml:space="preserve"><value>打开体数据</value></data>
+  <data name="MeasurementSampleButton" xml:space="preserve"><value>测量示例</value></data>
+  <data name="MeasurementSampleLoading" xml:space="preserve"><value>正在打开测量示例…</value></data>
+  <data name="MeasurementSampleGuide" xml:space="preserve"><value>测量练习：① 选中 100 px 基准线，点“尺寸标定”，输入 50 mm。② 选中 80 px 检查线，确认长度为 40 mm。③ 在右侧属性的“公差判定”中设标称值 40、上/下公差各 0.5。④ 点“导出 CSV”，核对 MeasuredValue 为 40、SpecificationStatus 为 Passed。</value></data>
+  <data name="CancelOpenButton" xml:space="preserve"><value>取消</value></data>
+  <data name="ImageLoadingStatus" xml:space="preserve"><value>正在读取图像…</value></data>
+  <data name="VolumeInspectingStatus" xml:space="preserve"><value>正在检查体数据切片和排序信息…</value></data>
+  <data name="VolumeVerifyingStatus" xml:space="preserve"><value>正在校验切片文件并估算内存…</value></data>
+  <data name="VolumeLoadingProgress" xml:space="preserve"><value>已读取 {0}/{1} 张切片</value></data>
+  <data name="VolumeAssemblingStatus" xml:space="preserve"><value>正在组装体数据…</value></data>
+  <data name="OpenVolumeMemoryWarning" xml:space="preserve"><value>这组切片预计需要约 {0} MB 内存，可能影响交互流畅度。仍要继续加载吗？</value></data>
+  <data name="OpenVolumeSpacingWarning" xml:space="preserve"><value>侧车元数据中的 {0} 方向体素间距不完整或不一致，将使用首个有效值；请确认导入后的间距摘要。</value></data>
+  <data name="OpenVolumeSpacingMissing" xml:space="preserve"><value>缺少 {0} 方向的有效间距，将使用默认值 {1:G6}。</value></data>
+  <data name="OpenVolumeSpacingDefaultSource" xml:space="preserve"><value>默认值</value></data>
+  <data name="OpenVolumeIrregularPositions" xml:space="preserve"><value>切片位置有重复或间隔不均匀。当前视图只能按固定层距重建，显示的空间比例是近似值。</value></data>
+  <data name="OpenVolumeDepthSpacingConflict" xml:space="preserve"><value>声明的 Z 轴层距与实际位置差不符，将采用位置差。</value></data>
+  <data name="OpenVolumeDepthSpacingFromPosition" xml:space="preserve"><value>相邻切片位置差</value></data>
+  <data name="OpenVolumeDepthSpacingApproximation" xml:space="preserve"><value>正位置差的中位数（近似值）</value></data>
+  <data name="OpenCancelledStatus" xml:space="preserve"><value>已取消打开操作</value></data>
+  <data name="OpenImageDialogTitle" xml:space="preserve"><value>选择图像文件</value></data>
+  <data name="OpenImageDialogFilter" xml:space="preserve"><value>图像文件|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff|所有文件|*.*</value></data>
+  <data name="OpenVolumeDialogTitle" xml:space="preserve"><value>选择体数据切片（可多选）</value></data>
+  <data name="OpenVolumeDialogFilter" xml:space="preserve"><value>图像切片|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff|所有文件|*.*</value></data>
+  <data name="OpenVolumeErrorTitle" xml:space="preserve"><value>无法打开体数据</value></data>
+  <data name="OpenVolumeNeedMultiple" xml:space="preserve"><value>请选择至少两个尺寸一致的图像切片。</value></data>
+  <data name="OpenVolumeOrderChangedTitle" xml:space="preserve"><value>确认体数据顺序和间距</value></data>
+  <data name="OpenVolumeConfirmImport" xml:space="preserve"><value>继续导入</value></data>
+  <data name="OpenVolumeOrderChangedMessage" xml:space="preserve"><value>已选择 {0} 张切片，程序将按{1}加载。
+文件名只作为缺少完整元数据时的回退依据。
+
+起始：{2} → {3}
+末尾：{4} → {5}
+拟采用间距：X={7:G6}，Y={8:G6}，Z={9:G6}
+{6}
+
+请确认这些文件属于同一序列，并按上述顺序和间距加载。</value></data>
+  <data name="OpenVolumeLoaded" xml:space="preserve"><value>已加载 {0} 层体数据（{1} × {2}），间距 {3:G6} × {4:G6} × {5:G6}</value></data>
+  <data name="OpenVolumeSourceSummary" xml:space="preserve"><value>排序依据：{0}；间距来源：X={1}，Y={2}，Z={3}</value></data>
+  <data name="OpenVolumeWarningSummary" xml:space="preserve"><value>导入警告：{0}</value></data>
+  <data name="OpenImageErrorTitle" xml:space="preserve"><value>无法打开图像文件</value></data>
+  <data name="OpenMeasurementSampleErrorTitle" xml:space="preserve"><value>无法打开测量示例</value></data>
+  <data name="UnsavedCloseTitle" xml:space="preserve"><value>有未保存的更改</value></data>
+  <data name="UnsavedCloseMessage" xml:space="preserve"><value>当前图像或 ROI 有未保存的更改。关闭前是否保存？</value></data>
+  <data name="UnsavedCloseAxialView" xml:space="preserve"><value>轴位视图有未保存的更改。关闭前是否保存？</value></data>
+  <data name="UnsavedCloseBothViews" xml:space="preserve"><value>主视图和轴位视图都有未保存的更改。关闭前是否分别保存两个会话？</value></data>
+  <data name="UnsavedCloseSaveFailed" xml:space="preserve"><value>保存未完成，窗口仍保持打开。</value></data>
+</root>

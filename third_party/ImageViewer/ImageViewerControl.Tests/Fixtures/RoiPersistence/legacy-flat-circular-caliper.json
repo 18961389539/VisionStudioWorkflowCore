@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "pixelSize": 1.25,
+  "physicalUnit": "px",
+  "items": [
+    {
+      "type": "circular-caliper-measure",
+      "label": "legacy-circular-caliper",
+      "center": {
+        "x": 25,
+        "y": 30
+      },
+      "radius": 11,
+      "caliperCount": 21,
+      "caliperSearchRange": 9,
+      "caliperSamplingHalfWidth": 2,
+      "minimumValidCalipers": 7,
+      "caliperMinimumGradient": 5.5,
+      "caliperOutlierThreshold": 1.75,
+      "caliperEdgePolarity": "LightToDark"
+    }
+  ]
+}

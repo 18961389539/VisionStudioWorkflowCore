@@ -1,0 +1,155 @@
+name: Publish NuGet packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SemVer package version, for example 0.1.0 or 0.1.0-rc.1'
+        required: true
+        type: string
+      publish:
+        description: 'Push packages to NuGet.org after packing'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+
+jobs:
+  verify:
+    name: Verify release commit
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.302
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', 'Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore locked dependencies
+        run: dotnet restore ImageViewer.sln --locked-mode
+
+      - name: Build Release
+        run: dotnet build ImageViewer.sln --configuration Release --no-restore --nologo
+
+      - name: Run full test suite
+        run: dotnet test ImageViewer.sln --configuration Release --no-build --nologo
+
+  pack:
+    name: Pack NuGet artifacts
+    runs-on: windows-latest
+    timeout-minutes: 20
+    needs: verify
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.302
+
+      - name: Resolve package version
+        id: version
+        shell: pwsh
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $version = $env:GITHUB_REF_NAME.Substring(1)
+          } else {
+            $version = $env:MANUAL_VERSION
+          }
+          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') {
+            throw "Invalid SemVer version: $version"
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Pack and validate artifacts
+        shell: pwsh
+        run: .\build\pack.ps1 -Version '${{ steps.version.outputs.value }}'
+
+      - name: Smoke test the packed libraries
+        shell: pwsh
+        run: |
+          $dependencySource = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget/packages' }
+          .\build\test-packages.ps1 -Version '${{ steps.version.outputs.value }}' -DependencySource $dependencySource
+
+      - name: Upload NuGet artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: imageviewer-nuget-${{ steps.version.outputs.value }}
+          path: artifacts/packages/*
+          if-no-files-found: error
+
+  publish:
+    name: Push packages to NuGet.org
+    runs-on: windows-latest
+    needs: pack
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
+    environment: nuget
+    steps:
+      - name: Download NuGet artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: imageviewer-nuget-${{ needs.pack.outputs.version }}
+          path: artifacts/packages
+
+      - name: Require NuGet API key
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
+            throw 'NUGET_API_KEY is not configured for the nuget environment.'
+          }
+
+      - name: Push packages
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          # Push the .nupkg files first; NuGet.org only accepts a .snupkg once its
+          # matching .nupkg already exists on the feed.
+          Get-ChildItem artifacts/packages -Filter *.nupkg |
+            Where-Object { $_.Name -notlike '*.symbols.nupkg' } |
+            Sort-Object Name |
+            ForEach-Object {
+              dotnet nuget push $_.FullName --api-key $env:NUGET_API_KEY --source $env:NUGET_SOURCE --skip-duplicate
+              if ($LASTEXITCODE -ne 0) { throw "Failed to push $($_.Name)." }
+            }
+
+          # Symbol packages (.snupkg) are accepted on the same source, so push them
+          # in a second pass now that their .nupkg counterparts exist.
+          Get-ChildItem artifacts/packages -Filter *.snupkg |
+            Sort-Object Name |
+            ForEach-Object {
+              dotnet nuget push $_.FullName --api-key $env:NUGET_API_KEY --source $env:NUGET_SOURCE --skip-duplicate
+              if ($LASTEXITCODE -ne 0) { throw "Failed to push symbol package $($_.Name)." }
+            }

@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <UseWPF>true</UseWPF>
+    <Version>0.63.0</Version>
+    <AssemblyName>VisionStudio.Wpf</AssemblyName>
+    <RootNamespace>VisionStudio.Wpf</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      方案 C（进程内集成）：直接引用后端宿主与引擎程序集，保留全部现有 Web API 与前端代码不变。
+      通过进程内 DI 容器直接解析 WorkflowStore / ProductionRuntimeService / CameraManager / IVisionWorkflowRunner，
+      图像 Mat/BitmapSource 直接在内存转换传递，不经过 HTTP/SignalR 序列化。
+    -->
+    <ProjectReference Include="..\..\..\backend\src\VisionStudio.Api\VisionStudio.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseExternalImageViewer)' == 'true' and '$(UseExternalImageViewerPackage)' != 'true'">
+    <ProjectReference Include="$(ExternalImageViewerProject)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseExternalImageViewer)' == 'true' and '$(UseExternalImageViewerPackage)' == 'true'">
+    <PackageReference Include="ImageViewerControl" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="MaterialDesignColors" />
+    <PackageReference Include="MaterialDesignThemes" />
+    <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" />
+    <PackageReference Include="Nodify" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Logging" />
+    <PackageReference Include="Serilog.Sinks.File" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 复用后端默认配置作为桌面端基础配置，运行期由数据根与桌面配置覆盖 -->
+    <Content Include="..\..\..\backend\src\VisionStudio.Api\appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="appsettings.Wpf.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\..\samples\linear-workflow.json" Link="samples\linear-workflow.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\..\samples\camera-workflow.json" Link="samples\camera-workflow.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\..\samples\camera_frames\*.png" Link="samples\camera_frames\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="ValidateExternalImageViewerProject" BeforeTargets="PrepareForBuild"
+          Condition="'$(UseExternalImageViewer)' == 'true' and '$(UseExternalImageViewerPackage)' != 'true'">
+    <Error Condition="!Exists('$(ExternalImageViewerProject)')"
+           Text="找不到 ImageViewer 控件项目：$(ExternalImageViewerProject)。请检查仓库内 third_party\ImageViewer 源码，或指定 ExternalImageViewerProject；仅需内建显示时显式设置 UseExternalImageViewer=false。" />
+  </Target>
+</Project>

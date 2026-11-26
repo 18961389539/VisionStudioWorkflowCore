@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "pixelSize": 0.5,
+  "physicalUnit": "mm",
+  "items": [
+    {
+      "type": "blob-analysis",
+      "label": "legacy-blob",
+      "strokeColor": "#FFFF0000",
+      "strokeThickness": 3.5,
+      "isVisible": true,
+      "isLocked": true,
+      "center": {
+        "x": 10,
+        "y": 12
+      },
+      "width": 14,
+      "height": 16,
+      "angle": 18,
+      "useOtsu": true,
+      "manualThreshold": 90,
+      "detectDark": true,
+      "minArea": 3
+    }
+  ]
+}

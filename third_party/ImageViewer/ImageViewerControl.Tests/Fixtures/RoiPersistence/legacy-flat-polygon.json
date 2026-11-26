@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "pixelSize": 2,
+  "physicalUnit": "um",
+  "items": [
+    {
+      "type": "polygon",
+      "label": "legacy-polygon",
+      "strokeColor": "#FF00FF00",
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 5,
+          "y": 0
+        },
+        {
+          "x": 5,
+          "y": 5
+        }
+      ],
+      "isClosed": true
+    }
+  ]
+}

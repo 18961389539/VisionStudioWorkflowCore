@@ -1,0 +1,33 @@
+{
+  "Version": 2,
+  "SessionName": "测量示例",
+  "ImagePath": "TestImage.png",
+  "RoiDocument": {
+    "Version": 1,
+    "PixelSize": 1,
+    "PhysicalUnit": "px",
+    "Items": [
+      {
+        "Type": "line-measure",
+        "Label": "基准线（100 px）",
+        "StrokeColor": "#FF00E5FF",
+        "StrokeThickness": 2,
+        "IsVisible": true,
+        "P1": { "X": 335, "Y": 105 },
+        "P2": { "X": 435, "Y": 105 }
+      },
+      {
+        "Type": "line-measure",
+        "Label": "检查线（80 px）",
+        "StrokeColor": "#FFFFA000",
+        "StrokeThickness": 2,
+        "IsVisible": true,
+        "P1": { "X": 140, "Y": 220 },
+        "P2": { "X": 220, "Y": 220 }
+      }
+    ]
+  },
+  "Scale": 0.85,
+  "TranslateX": 20,
+  "TranslateY": 12
+}

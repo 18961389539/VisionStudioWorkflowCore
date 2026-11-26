@@ -1,0 +1,26 @@
+<Solution>
+  <Folder Name="/Backend/">
+    <Project Path="backend/src/VisionStudio.Abstractions/VisionStudio.Abstractions.csproj" />
+    <Project Path="backend/src/VisionStudio.Algorithms/VisionStudio.Algorithms.csproj" />
+    <Project Path="backend/src/VisionStudio.Api/VisionStudio.Api.csproj" />
+    <Project Path="backend/src/VisionStudio.Benchmark.Cli/VisionStudio.Benchmark.Cli.csproj" />
+    <Project Path="backend/src/VisionStudio.Camera.Basler/VisionStudio.Camera.Basler.csproj" />
+    <Project Path="backend/src/VisionStudio.Camera.Hikrobot/VisionStudio.Camera.Hikrobot.csproj" />
+    <Project Path="backend/src/VisionStudio.CatalogExporter/VisionStudio.CatalogExporter.csproj" />
+    <Project Path="backend/src/VisionStudio.Engine/VisionStudio.Engine.csproj" />
+    <Project Path="backend/src/VisionStudio.Hardware.Abstractions/VisionStudio.Hardware.Abstractions.csproj" />
+    <Project Path="backend/src/VisionStudio.Imaging/VisionStudio.Imaging.csproj" />
+    <Project Path="backend/src/VisionStudio.Plugin.Packager/VisionStudio.Plugin.Packager.csproj" />
+    <Project Path="backend/src/VisionStudio.Plugin.Sample/VisionStudio.Plugin.Sample.csproj" />
+    <Project Path="backend/src/VisionStudio.Plugin.Worker/VisionStudio.Plugin.Worker.csproj" />
+    <Project Path="backend/src/VisionStudio.Script.Worker/VisionStudio.Script.Worker.csproj" />
+    <Project Path="backend/src/VisionStudio.Scripting/VisionStudio.Scripting.csproj" />
+    <Project Path="backend/src/VisionStudio.SqliteSnapshot/VisionStudio.SqliteSnapshot.csproj" />
+    <Project Path="backend/tests/VisionStudio.Api.Tests/VisionStudio.Api.Tests.csproj" />
+    <Project Path="backend/tests/VisionStudio.Engine.Tests/VisionStudio.Engine.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Wpf/">
+    <Project Path="wpf/src/VisionStudio.Wpf/VisionStudio.Wpf.csproj" />
+    <Project Path="wpf/tests/VisionStudio.Wpf.Tests/VisionStudio.Wpf.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,36 @@
+Detection recommendation dialog resource keys (parent owns UiText.resx):
+
+DetectionRecommendationTitle
+DetectionRecommendationParameters
+DetectionRecommendationParameter
+DetectionRecommendationBefore
+DetectionRecommendationAfter
+DetectionRecommendationReason
+DetectionRecommendationEvidence
+DetectionRecommendationContrast
+DetectionRecommendationNoise
+DetectionRecommendationPolarity
+DetectionRecommendationSampleBudget
+DetectionRecommendationMethod
+DetectionRecommendationHeuristicDisclaimer
+DetectionRecommendationBeforeTrial
+DetectionRecommendationAfterTrial
+DetectionRecommendationApply
+DetectionRecommendationCancel
+DetectionRecommendationSuccessfulBaseline
+DetectionRecommendationTrialUnavailable
+DetectionRecommendationTrialMetrics
+DetectionRecommendationPointTooltip
+RecommendationValueDarkToLight
+RecommendationValueLightToDark
+RecommendationValueAny
+RecommendationValueTrue
+RecommendationValueFalse
+
+Formatting contracts:
+- DetectionRecommendationTrialMetrics: score, residual, valid sample count, total sample count, plotted point count.
+- DetectionRecommendationPointTooltip: image-space x and y coordinates.
+- Polarity and Boolean values use the RecommendationValue* keys. Numeric parameter values remain in their source string format.
+
+Proposal failure and trial status strings use keys supplied by the recommendation engine, including its baseline-unavailable,
+no-change, unsupported-ROI, clipped-ROI, insufficient-support, low-contrast, ambiguous-polarity, and candidate-worsened keys.

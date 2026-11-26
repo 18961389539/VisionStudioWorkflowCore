@@ -1,0 +1,220 @@
+name: ImageViewer CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-core:
+    name: Build and Core coverage
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # The solution tests both target frameworks; install the .NET 8 runtime
+          # explicitly instead of relying on the runner image shipping it.
+          dotnet-version: |
+            8.0.x
+            10.0.302
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', 'Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore locked dependencies
+        run: dotnet restore ImageViewer.sln --locked-mode
+
+      - name: Build Release
+        run: dotnet build ImageViewer.sln --configuration Release --no-restore --nologo
+
+      - name: Validate package layout
+        shell: pwsh
+        run: .\build\pack.ps1 -Version '0.1.0-ci.${{ github.run_number }}' -NoBuild
+
+      - name: Test Core with coverage
+        run: >-
+          dotnet test ImageViewer.Core.Tests\ImageViewer.Core.Tests.csproj
+          --configuration Release --no-build --nologo
+          --settings coverage.runsettings
+          --collect:"XPlat Code Coverage"
+          --results-directory artifacts\coverage\core
+
+      - name: Enforce Core line coverage
+        shell: pwsh
+        run: .\build\coverage-summary.ps1 -CoverageRoot artifacts\coverage\core -AssemblyPattern 'ImageViewer.Core' -MinimumLineRate 0.82 -MinimumFiles 2
+
+      - name: Upload Core coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: imageviewer-core-coverage
+          path: artifacts/coverage/core
+          if-no-files-found: error
+
+  desktop-verification:
+    name: Desktop and batch verification
+    runs-on: windows-latest
+    timeout-minutes: 45
+    needs: build-and-core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # The solution tests both target frameworks; install the .NET 8 runtime
+          # explicitly instead of relying on the runner image shipping it.
+          dotnet-version: |
+            8.0.x
+            10.0.302
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', 'Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore locked dependencies
+        run: dotnet restore ImageViewer.sln --locked-mode
+
+      - name: Build Release
+        run: dotnet build ImageViewer.sln --configuration Release --no-restore --nologo
+
+      - name: Test export and batch paths
+        run: >-
+          dotnet test ImageViewerControl.Tests\ImageViewerControl.Tests.csproj
+          --configuration Release --no-build --nologo
+          --filter "FullyQualifiedName~BatchRoiAnalysisExportServiceTests|FullyQualifiedName~CaliperWidthMeasurementResultTests|FullyQualifiedName~ImageViewerFeatureMenuCommandControllerTests"
+
+      - name: Run Smoke tests
+        run: >-
+          dotnet test ImageViewerControl.Tests\ImageViewerControl.Tests.csproj
+          --configuration Release --no-build --nologo
+          --filter "Category=Smoke"
+
+      - name: Upload desktop test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: imageviewer-desktop-test-results
+          path: '**/TestResults/**'
+          if-no-files-found: ignore
+
+  full-regression:
+    name: Full regression gate
+    runs-on: windows-latest
+    timeout-minutes: 60
+    needs: build-and-core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # The solution tests both target frameworks; install the .NET 8 runtime
+          # explicitly instead of relying on the runner image shipping it.
+          dotnet-version: |
+            8.0.x
+            10.0.302
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', 'Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore locked dependencies
+        run: dotnet restore ImageViewer.sln --locked-mode
+
+      - name: Build Release
+        run: dotnet build ImageViewer.sln --configuration Release --no-restore --nologo
+
+      - name: Run full regression with coverage
+        run: >-
+          dotnet test ImageViewer.sln --configuration Release --no-build --nologo
+          --settings coverage.runsettings
+          --collect:"XPlat Code Coverage"
+          --logger "trx;LogFileName=full-regression.trx"
+          --results-directory artifacts\coverage\full
+
+      # 回归红了要能定位：把 TRX 里 Failed 的用例名与错误首行打进日志。
+      - name: Report failed tests
+        if: failure()
+        shell: pwsh
+        run: .\build\report-failed-tests.ps1 -ResultsRoot artifacts\coverage\full
+
+      - name: Print coverage summary
+        if: always()
+        shell: pwsh
+        run: .\build\coverage-summary.ps1 -CoverageRoot artifacts\coverage\full
+
+      # Baseline is ~69% line coverage; 0.68 keeps headroom while still catching regressions.
+      - name: Enforce ImageViewerControl line coverage
+        shell: pwsh
+        run: .\build\coverage-summary.ps1 -CoverageRoot artifacts\coverage\full -AssemblyPattern 'ImageViewerControl' -MinimumLineRate 0.68 -MinimumFiles 4
+
+      - name: Upload full regression and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: imageviewer-full-regression
+          path: artifacts/coverage/full
+          if-no-files-found: ignore
+
+      - name: Check batch memory and CSV baseline
+        shell: pwsh
+        run: .\build\test-batch-performance.ps1
+
+      - name: Upload batch performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: imageviewer-batch-performance
+          path: artifacts/performance/batch/report.json
+          if-no-files-found: ignore
+
+  docs-check:
+    name: Docs sync and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # docs/usage.html 由 docs/usage.md 生成：这一步拦住“改了 md 忘了重新生成”，
+      # 同时检查 31 个 ROI 工具、18 项高级测量与顶层菜单分组都在手册里写到。
+      # 离线打包还会验证 PDF 对应当前 HTML 和图片。
+      - name: Verify and package usage manual
+        run: python build/docs.py --offline

@@ -1,0 +1,3227 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ImageViewer 图像、ROI、分析和 3D/MPR 浏览使用手册。">
+  <meta name="color-scheme" content="light dark">
+  <title>ImageViewer 使用手册</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --ink: #16262f;
+      --ink-soft: #2f414c;
+      --muted: #5c6f7b;
+      --paper: #f6f8f7;
+      --surface: #ffffff;
+      --surface-sunken: #f1f5f4;
+      --th-bg: #e9f1ef;
+      --zebra: rgba(11, 122, 116, 0.055);
+      --meta-ink: #4f6572;
+      --line: #dbe3e6;
+      --line-strong: #c3d0d6;
+      --teal: #0b7a74;
+      --teal-dark: #055c58;
+      --link: #055c58;
+      --gold: #c1861d;
+      --soft-teal: #e6f3f1;
+      --soft-gold: #fbf2dd;
+      --code: #101e27;
+      --code-ink: #dff0ee;
+      --shadow: 0 18px 40px rgba(16, 33, 43, 0.09);
+      --radius: 10px;
+    }
+
+    /* 跟随系统，但手动选过浅色时以手动为准 */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ink: #dbe7ed;
+        --ink-soft: #bccfd8;
+        --muted: #8ba1ad;
+        --paper: #0d161c;
+        --surface: #14212a;
+        --surface-sunken: #111c23;
+        --th-bg: #1e2f39;
+        --zebra: rgba(255, 255, 255, 0.055);
+        --meta-ink: #9db3bf;
+        --line: #24343d;
+        --line-strong: #33474f;
+        --teal: #4fbdb4;
+        --teal-dark: #6fd0c7;
+        --link: #6fd0c7;
+        --gold: #d9a441;
+        --soft-teal: rgba(79, 189, 180, 0.14);
+        --soft-gold: rgba(217, 164, 65, 0.14);
+        --code: #081117;
+        --code-ink: #d7e9e6;
+        --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+      }
+    }
+
+    :root[data-theme="dark"] {
+        --ink: #dbe7ed;
+        --ink-soft: #bccfd8;
+        --muted: #8ba1ad;
+        --paper: #0d161c;
+        --surface: #14212a;
+        --surface-sunken: #111c23;
+        --th-bg: #1e2f39;
+        --zebra: rgba(255, 255, 255, 0.055);
+        --meta-ink: #9db3bf;
+        --line: #24343d;
+        --line-strong: #33474f;
+        --teal: #4fbdb4;
+        --teal-dark: #6fd0c7;
+        --link: #6fd0c7;
+        --gold: #d9a441;
+        --soft-teal: rgba(79, 189, 180, 0.14);
+        --soft-gold: rgba(217, 164, 65, 0.14);
+        --code: #081117;
+        --code-ink: #d7e9e6;
+        --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      font-size: calc(16px * var(--scale, 1));
+      scroll-behavior: smooth;
+      scroll-padding-top: 20px;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background-color: var(--paper);
+      background-image:
+        linear-gradient(90deg, rgba(11, 122, 116, 0.045) 1px, transparent 1px) 0 0 / 26px 26px;
+      font-family: "Segoe UI", "Microsoft YaHei", "Noto Sans CJK SC", "PingFang SC", sans-serif;
+      font-size: 1rem;
+      line-height: 1.75;
+      text-rendering: optimizeLegibility;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body { background-image: none; }
+    }
+
+    ::selection { background: rgba(11, 122, 116, 0.22); }
+
+    a {
+      color: var(--link);
+      text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+      text-underline-offset: 0.18em;
+    }
+
+    a:hover { text-decoration-color: var(--link); }
+
+    :focus-visible {
+      outline: 2px solid var(--teal);
+      outline-offset: 2px;
+      border-radius: 3px;
+    }
+
+    .skip-link {
+      position: absolute;
+      top: -100px;
+      left: 16px;
+      z-index: 20;
+      padding: 10px 16px;
+      color: #fff;
+      background: var(--teal-dark);
+      border-radius: 0 0 6px 6px;
+      text-decoration: none;
+      transition: top 0.15s ease-in-out;
+    }
+
+    .skip-link:focus { top: 0; }
+
+    code, kbd, pre {
+      font-family: Consolas, "Cascadia Mono", "Cascadia Code", ui-monospace, monospace;
+    }
+
+    code {
+      padding: 0.06em 0.34em;
+      color: var(--ink-soft);
+      background: color-mix(in srgb, var(--teal) 9%, transparent);
+      border: 1px solid color-mix(in srgb, var(--teal) 16%, transparent);
+      border-radius: 4px;
+      font-size: 0.88em;
+      white-space: nowrap;
+    }
+
+    kbd {
+      display: inline-block;
+      min-width: 1.7em;
+      margin: 0 0.06em;
+      padding: 0.1em 0.42em;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      box-shadow: 0 1px 0 rgba(16, 33, 43, 0.06);
+      font-size: 0.82em;
+      line-height: 1.6;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .page-header {
+      position: relative;
+      color: #f6fdfd;
+      background:
+        radial-gradient(1200px 240px at 12% -40%, rgba(79, 189, 180, 0.28), transparent 70%),
+        linear-gradient(180deg, #12222b, #0e1b23 62%, #0d1920);
+      border-bottom: 3px solid var(--gold);
+    }
+
+    .header-inner, .layout {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .header-inner { padding: 52px 0 42px; }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: #85d5cc;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { line-height: 1.28; text-wrap: balance; }
+
+    h1 {
+      max-width: 780px;
+      margin: 0;
+      font-size: clamp(2rem, 3.6vw, 3.05rem);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .subtitle {
+      max-width: 660px;
+      margin: 14px 0 0;
+      color: #b9cdd6;
+      font-size: 1.02rem;
+    }
+
+    .resume-link:not([hidden]) {
+      display: inline-block;
+      margin: 12px 8px 0 0;
+      padding: 7px 12px;
+      color: #c6f2ed;
+      border: 1px solid #5c888c;
+      border-radius: 7px;
+      font-size: 0.9rem;
+    }
+
+    .resume-link:hover { background: #253c44; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 232px minmax(0, 1fr);
+      gap: 48px;
+      align-items: start;
+      padding: 36px 0 64px;
+    }
+
+    .toc {
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      padding: 14px 12px;
+      overflow: auto;
+      background: color-mix(in srgb, var(--surface) 86%, transparent);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 0 rgba(16, 33, 43, 0.03);
+      backdrop-filter: blur(6px);
+      scrollbar-width: thin;
+    }
+
+    .toc-title {
+      margin: 2px 0 10px;
+      padding-left: 8px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .toc-toggle { display: none; }
+
+    @media screen {
+      .toc-chapters {
+        max-height: calc(100vh - 172px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+      }
+    }
+
+    .toc a {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      padding: 6px 8px;
+      color: var(--muted);
+      border-left: 2px solid transparent;
+      border-radius: 0 5px 5px 0;
+      font-size: 0.9rem;
+      text-decoration: none;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .toc a:hover, .toc a:focus-visible {
+      color: var(--teal-dark);
+      background: var(--soft-teal);
+      outline: none;
+    }
+
+    .toc a[aria-current="true"] {
+      color: var(--teal-dark);
+      background: var(--soft-teal);
+      border-left-color: var(--gold);
+      font-weight: 600;
+    }
+
+    .toc-num {
+      flex: none;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em;
+      opacity: 0.75;
+    }
+
+    .toc a[aria-current="true"] .toc-num { color: var(--teal-dark); opacity: 1; }
+
+    /* 桌面目录默认收起小节；指针、键盘焦点或当前章均可展开。 */
+    .toc-sub {
+      display: none;
+      margin: 0 0 6px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .toc-group:hover .toc-sub,
+    .toc-group:focus-within .toc-sub,
+    .toc-group:has(a[aria-current="true"]) .toc-sub { display: block; }
+
+    .toc-sub a {
+      padding: 3px 8px 3px 34px;
+      color: var(--muted);
+      border-left: 2px solid transparent;
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+
+    .toc-sub a:hover, .toc-sub a:focus-visible {
+      color: var(--teal-dark);
+      background: var(--soft-teal);
+    }
+
+    main { min-width: 0; }
+
+    section {
+      padding: 4px 0 38px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section + section { padding-top: 34px; }
+
+    section:last-child { border-bottom: 0; }
+
+    h2 {
+      position: relative;
+      margin: 0 0 16px;
+      padding-left: 14px;
+      font-size: 1.52rem;
+      font-weight: 700;
+      letter-spacing: -0.005em;
+    }
+
+    h2::before {
+      position: absolute;
+      top: 0.16em;
+      bottom: 0.16em;
+      left: 0;
+      width: 3px;
+      background: linear-gradient(180deg, var(--teal), color-mix(in srgb, var(--teal) 30%, transparent));
+      border-radius: 2px;
+      content: "";
+    }
+
+    h3 {
+      margin: 30px 0 10px;
+      padding-bottom: 6px;
+      color: var(--ink);
+      border-bottom: 1px dashed var(--line);
+      font-size: 1.08rem;
+      font-weight: 650;
+    }
+
+    .anchor {
+      position: absolute;
+      left: -0.72em;
+      padding: 0 0.16em;
+      color: var(--muted);
+      font-weight: 400;
+      text-decoration: none;
+      opacity: 0;
+      transition: opacity 0.12s ease;
+    }
+
+    h2:hover .anchor, .anchor:focus-visible { opacity: 1; }
+
+    .copy-link {
+      display: inline-block;
+      margin-inline-start: 0.6em;
+      padding: 2px 6px;
+      color: var(--teal-dark);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      font-family: inherit;
+      font-size: 0.72rem;
+      font-weight: 500;
+      line-height: 1.6;
+      vertical-align: middle;
+      cursor: pointer;
+    }
+
+    .copy-link:hover { background: var(--soft-teal); }
+
+    .copy-dialog {
+      width: min(calc(100% - 28px), 34rem);
+      padding: 20px;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .copy-dialog::backdrop { background: rgba(0, 0, 0, 0.46); }
+    .copy-dialog label { display: block; font-weight: 650; }
+    .copy-dialog input {
+      width: 100%;
+      margin: 8px 0 12px;
+      padding: 7px;
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      font: inherit;
+    }
+    .copy-dialog p { color: var(--muted); font-size: 0.88rem; }
+    .copy-dialog button {
+      padding: 5px 12px;
+      color: var(--teal-dark);
+      background: var(--soft-teal);
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    p, ul, ol { max-width: 74ch; }
+
+    p { margin: 0 0 14px; }
+
+    ol, ul { margin: 0 0 16px; padding-left: 1.45rem; }
+
+    li + li { margin-top: 5px; }
+
+    li::marker { color: var(--muted); }
+
+    li > code { white-space: nowrap; }
+
+    .meta {
+      display: grid;
+      gap: 4px;
+      margin: 0 0 28px;
+      padding: 14px 18px;
+      color: var(--meta-ink);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--gold);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      font-size: 0.92rem;
+      line-height: 1.65;
+    }
+
+    .meta-line { display: block; }
+
+    .meta code { background: color-mix(in srgb, var(--teal) 7%, transparent); }
+
+    .step-list { counter-reset: step; max-width: 74ch; padding: 0; list-style: none; }
+
+    .step-list > li {
+      position: relative;
+      min-height: 40px;
+      padding: 4px 0 8px 50px;
+    }
+
+    .step-list > li + li { margin-top: 4px; }
+
+    .step-list > li::before {
+      position: absolute;
+      top: 3px;
+      left: 0;
+      width: 30px;
+      height: 30px;
+      color: var(--teal-dark);
+      background: var(--soft-teal);
+      border: 1px solid color-mix(in srgb, var(--teal) 30%, transparent);
+      border-radius: 50%;
+      content: counter(step);
+      counter-increment: step;
+      font-size: 0.86rem;
+      font-weight: 700;
+      line-height: 29px;
+      text-align: center;
+    }
+
+    .table-scroll {
+      max-width: 100%;
+      margin: 18px 0 20px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      scrollbar-width: thin;
+    }
+
+    .table-scroll:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.94rem;
+      line-height: 1.62;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .table-scroll table { min-width: 420px; }
+    .table-scroll table.wide { min-width: 700px; }
+
+    /* 按列数分配首列宽度：两列表是"名称 / 说明"，三列表是"分类 / 命令 / 说明"。
+       Chinese: 用 :has 判断列数，避免在 Markdown 里写宽度；四列及以上保持自动分配。 */
+    table:has(> thead > tr > th:nth-child(2):last-child) > thead th:nth-child(1) { width: 26%; }
+    table:has(> thead > tr > th:nth-child(3):last-child) > thead th:nth-child(1) { width: 20%; }
+    table:has(> thead > tr > th:nth-child(3):last-child) > thead th:nth-child(2) { width: 34%; }
+
+    /* 只有真正溢出时才在右侧做渐隐，提示还能横向滑；滚到末尾撤掉，避免内容被永久冲淡。 */
+    .table-scroll.is-scrollable:not(.is-at-end) {
+      mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent);
+    }
+
+    .chapter-index {
+      margin: 34px 0 0;
+      padding: 18px 20px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .chapter-index-title {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .chapter-index ol {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 3px 28px;
+      margin: 0;
+      padding-left: 0;
+      max-width: none;
+      counter-reset: chapter;
+      list-style: none;
+      font-size: 0.93rem;
+    }
+
+    .chapter-index li {
+      display: flex;
+      gap: 7px;
+      align-items: baseline;
+      counter-increment: chapter;
+    }
+
+    .chapter-index li::before {
+      flex: none;
+      min-width: 1.7em;
+      color: var(--muted);
+      content: counter(chapter, decimal-leading-zero);
+      font-size: 0.76rem;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.8;
+    }
+
+    .chapter-index a { text-decoration: none; }
+
+    .chapter-index a:hover { text-decoration: underline; }
+
+    th, td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      position: relative;
+      color: var(--ink);
+      background: var(--th-bg);
+      border-bottom: 1px solid var(--line-strong);
+      font-size: 0.86rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+
+    th code {
+      background: var(--surface);
+      border-color: var(--line-strong);
+      font-weight: 600;
+    }
+
+    tbody tr:nth-child(even) { background: var(--zebra); }
+
+    tbody tr:hover { background: var(--soft-teal); }
+
+    tbody tr:last-child td { border-bottom: 0; }
+
+    td:first-child { color: var(--ink); }
+
+    td code { white-space: nowrap; }
+
+    figure {
+      margin: 20px 0 22px;
+    }
+
+    /* 原尺寸显示、超宽才缩：小图（面板、状态栏）不该被放大成马赛克。 */
+    figure img {
+      display: block;
+      width: auto;
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    figcaption {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.55;
+    }
+
+    pre {
+      position: relative;
+      margin: 18px 0 20px;
+      padding: 34px 18px 16px;
+      overflow-x: auto;
+      color: var(--code-ink);
+      background: var(--code);
+      border-radius: var(--radius);
+      line-height: 1.6;
+      tab-size: 4;
+    }
+
+    pre[data-lang]::before {
+      position: absolute;
+      top: 0;
+      right: 0;
+      left: 0;
+      padding: 7px 16px;
+      color: #8fb3ae;
+      background: rgba(255, 255, 255, 0.055);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+      content: attr(data-lang);
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: none;
+      border: 0;
+      font-size: 0.9rem;
+      white-space: pre;
+    }
+
+    .toc-search { margin-bottom: 10px; }
+
+    .toc-search input {
+      width: 100%;
+      padding: 7px 10px;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      font: inherit;
+      font-size: 0.88rem;
+    }
+
+    .toc-search input::placeholder { color: var(--muted); }
+
+    .toc-search input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+
+    .search-status {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    @media screen {
+      .toc.is-searching .toc-title,
+      .toc.is-searching .toc-chapters,
+      .toc.is-searching .toc-toggle,
+      .toc.is-searching .toc-nav { display: none; }
+
+      #toc-results:not([hidden]) {
+        display: grid;
+        gap: 2px;
+        max-height: min(55vh, 32rem);
+        overflow-y: auto;
+        overflow-wrap: anywhere;
+        overscroll-behavior: contain;
+      }
+    }
+
+    #toc-results a {
+      display: block;
+      padding: 7px 8px;
+      border-left: 0;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+
+    #toc-results a:hover { background: var(--soft-teal); }
+
+    .toc-result-chapter {
+      display: block;
+      color: var(--teal-dark);
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+    }
+
+    .toc-result-text {
+      display: block;
+      margin-top: 2px;
+      color: var(--ink-soft);
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+
+    #toc-results mark {
+      padding: 0 0.12em;
+      color: inherit;
+      background: color-mix(in srgb, var(--gold) 34%, transparent);
+      border-radius: 2px;
+      box-shadow: inset 0 -0.3em 0 color-mix(in srgb, var(--gold) 20%, transparent);
+    }
+
+    .toc-empty { margin: 6px 8px; color: var(--muted); font-size: 0.85rem; }
+
+    .toc-nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .toc-nav a {
+      padding: 4px 6px;
+      color: var(--muted);
+      border-left: 0;
+      border-radius: 5px;
+      font-size: 0.82rem;
+      text-decoration: none;
+    }
+
+    .toc-nav a:hover { color: var(--teal-dark); background: var(--soft-teal); }
+
+    .toc-nav a[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+
+    .reader-tools {
+      position: fixed;
+      right: 22px;
+      bottom: 74px;
+      z-index: 10;
+      display: grid;
+      gap: 6px;
+      padding: 6px;
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+    }
+
+    .reader-tools button {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      color: var(--ink);
+      background: transparent;
+      border: 0;
+      border-radius: 50%;
+      font: inherit;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .reader-tools button:hover { color: var(--teal-dark); background: var(--soft-teal); }
+
+    .to-top {
+      position: fixed;
+      right: 22px;
+      bottom: 22px;
+      z-index: 10;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 14px;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+      font-size: 0.85rem;
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    .to-top.is-visible { visibility: visible; opacity: 1; pointer-events: auto; transform: none; }
+
+    .to-top:hover { border-color: var(--teal); color: var(--teal-dark); }
+
+    @media (prefers-color-scheme: dark) {
+      pre { border: 1px solid rgba(255, 255, 255, 0.07); }
+    }
+
+    .footer {
+      padding: 26px 0 44px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 0.86rem;
+      text-align: center;
+    }
+
+    @media screen and (max-width: 900px) {
+      .layout { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 22px; }
+      .toc {
+        position: static;
+        max-height: none;
+        padding: 10px;
+        overflow: visible;
+      }
+      .toc-toggle:not([hidden]) {
+        display: block;
+        min-height: 42px;
+        padding: 7px 10px;
+        color: var(--teal-dark);
+        background: var(--surface);
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        font: inherit;
+        cursor: pointer;
+      }
+      .toc-toggle:not([hidden])[aria-expanded="false"] ~ .toc-title,
+      .toc-toggle:not([hidden])[aria-expanded="false"] ~ .toc-chapters,
+      .toc-nav { display: none; }
+      .toc-title { margin-top: 12px; }
+      .toc-chapters { max-height: min(52vh, 26rem); }
+      .toc-sub { display: block; }
+      .toc-sub a, #toc-results a { padding-top: 8px; padding-bottom: 8px; }
+      .toc-search input { font-size: max(16px, 0.88rem); }
+      .copy-link { min-height: 32px; }
+      .reader-tools {
+        position: static;
+        display: inline-flex;
+        gap: 3px;
+        margin-top: 12px;
+        padding: 3px;
+        box-shadow: none;
+      }
+      .reader-tools button { width: 38px; height: 38px; }
+      section + section { padding-top: 28px; }
+      p, ul, ol, .step-list { max-width: none; }
+      .chapter-index ol { grid-template-columns: 1fr; }
+    }
+
+    @media screen and (max-width: 560px) {
+      .header-inner, .layout { width: 100%; padding-right: 14px; padding-left: 14px; }
+      .header-inner { padding-top: 36px; padding-bottom: 28px; }
+      h1 { font-size: 1.72rem; overflow-wrap: anywhere; }
+      h2 { font-size: 1.3rem; }
+      main { overflow-wrap: anywhere; }
+      main :not(pre, td, th) > code { white-space: normal; }
+      th, td { padding: 9px 10px; }
+      /* 390 宽的屏幕上再保留 420px 最小宽度就会把整页撑出横向滚动 */
+      .table-scroll table, .table-scroll table.wide { min-width: 0; }
+      .to-top { right: 14px; bottom: 14px; }
+    }
+
+    @media print {
+      /* 打印必须强制浅色：系统处于暗色模式时，深色变量会一路带进纸张，
+         表头会变成深底黑字。这里把屏幕用的每个颜色变量都重置一遍。 */
+      :root[data-theme], :root:not([data-theme]) {
+        --ink: #16262f;
+        --ink-soft: #2f414c;
+        --muted: #5c6f7b;
+        --meta-ink: #4f6572;
+        --paper: #fff;
+        --surface: #fff;
+        --surface-sunken: #f5f7f6;
+        --th-bg: #edf3f1;
+        --zebra: #f7faf9;
+        --line: #d3dade;
+        --line-strong: #b9c7ce;
+        --link: #055c58;
+        --teal: #0b7a74;
+        --teal-dark: #055c58;
+        --soft-teal: #eef7f5;
+        --soft-gold: #fbf2dd;
+        --code-ink: #16262f;
+      }
+      html { font-size: 16px; color-scheme: light; }
+      @page { size: A4; margin: 14mm 12mm; }
+      body { background: #fff; font-size: 10.5pt; }
+      .page-header { color: #16262f; background: #fff; border-bottom: 2px solid var(--gold); }
+      .eyebrow { color: var(--teal-dark); }
+      .subtitle { color: var(--muted); }
+      .header-inner { padding: 0 0 14px; }
+      .layout { display: block; width: auto; padding: 14px 0 0; }
+      .skip-link, .to-top, .reader-tools, .toc-search, .toc-toggle, .search-status { display: none; }
+      .resume-link:not([hidden]), .copy-link, .copy-dialog { display: none; }
+      a[data-print-reference] { color: inherit; text-decoration: none; }
+      .toc-nav, #toc-results { display: none; }
+      /* 打印件也要目录：独立一页，排在正文之前 */
+      .toc {
+        position: static;
+        display: block;
+        max-height: none;
+        padding: 0;
+        overflow: visible;
+        background: none;
+        border: 0;
+        box-shadow: none;
+        column-count: 2;
+        column-gap: 24px;
+        line-height: 1.24;
+        break-after: page;
+      }
+      .toc-group { break-inside: avoid; }
+      .toc-chapters { display: contents; }
+      .toc a {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 2px 0;
+        color: #16262f;
+        border: 0;
+      }
+      .toc-sub { display: block; margin: 0 0 4px; }
+      .toc-sub a { padding: 1px 0 1px 40px; color: #5c6f7b; font-size: 9.5pt; }
+      figure { break-inside: avoid; margin: 10px 0; }
+      .toc a[aria-current="true"] { background: none; font-weight: 600; }
+      .toc-title { column-span: all; margin: 0 0 10px; color: #5c6f7b; font-size: 0.78rem; }
+      .toc-num { display: inline; flex: none; min-width: 2em; color: #5c6f7b; }
+      .toc a { border-bottom: 0; }
+      h1 { font-size: 22pt; }
+      .subtitle { margin-top: 8px; font-size: 10pt; }
+      p, ul, ol, .step-list { max-width: none; }
+      /* 纸质件已有完整目录，正文末尾的卡片只是屏幕导航，打印时去掉 */
+      .chapter-index, .footer { display: none; }
+      section { padding-bottom: 16px; }
+      section + section { padding-top: 18px; }
+      #appendix-print { padding-bottom: 8px; }
+      #integration { padding-top: 8px; padding-bottom: 0; }
+      #integration h2 { margin-bottom: 6px; }
+      .table-scroll { overflow: visible; border-radius: 0; }
+      .table-scroll.is-scrollable:not(.is-at-end) { mask-image: none; }
+      .table-scroll table, .table-scroll table.wide { min-width: 0; }
+      table { font-size: 9pt; overflow-wrap: anywhere; }
+      thead { display: table-header-group; }
+      tr, pre { break-inside: avoid; }
+      h2, h3 { break-after: avoid; }
+      pre { white-space: pre-wrap; background: #f5f7f6; color: #16262f; border: 1px solid var(--line); }
+      pre[data-lang]::before { display: none; }
+      pre code { color: inherit; white-space: pre-wrap; }
+      a { color: inherit; text-decoration: none; }
+      .anchor { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+
+  <header class="page-header">
+    <div class="header-inner">
+      <p class="eyebrow">ImageViewer / User Guide</p>
+      <h1>ImageViewer 使用手册</h1>
+      <p class="subtitle">从第一次标定和导出开始，逐步掌握图像浏览、ROI 测量、体数据与项目交付。</p>
+      <a class="resume-link" id="resume-reading" href="#" hidden></a>
+      <div class="reader-tools" role="group" aria-label="阅读设置">
+        <button type="button" data-action="font-smaller" aria-label="缩小字号">A−</button>
+        <button type="button" data-action="font-larger" aria-label="放大字号">A+</button>
+        <button type="button" data-action="toggle-theme" aria-label="切换深浅色">☾</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" id="manual-toc" aria-label="手册目录与搜索" tabindex="-1">
+      <div class="toc-search" hidden>
+        <input id="toc-search" type="search" placeholder="搜索手册…" aria-label="搜索手册" aria-controls="toc-results" autocomplete="off">
+      </div>
+      <button type="button" class="toc-toggle" aria-controls="toc-chapters" aria-expanded="false" hidden>展开目录</button>
+      <p class="toc-title">目录</p>
+      <div class="toc-chapters" id="toc-chapters">
+      <div class="toc-group">
+        <a href="#start"><span class="toc-num">01</span>启动与界面</a>
+      </div>
+      <div class="toc-group">
+        <a href="#image"><span class="toc-num">02</span>打开图像与浏览</a>
+      </div>
+      <div class="toc-group">
+        <a href="#roi"><span class="toc-num">03</span>绘制与编辑 ROI</a>
+        <ul class="toc-sub">
+          <li><a href="#s3-1">基础绘制与标注</a></li>
+          <li><a href="#s3-2">常用测量</a></li>
+          <li><a href="#s3-3">该用哪个工具</a></li>
+          <li><a href="#s3-4">调整已有 ROI</a></li>
+          <li><a href="#s3-5">用双边卡尺测宽</a></li>
+          <li><a href="#s3-6">用斑点分析统计亮斑或暗斑</a></li>
+          <li><a href="#s3-7">试用推荐检测参数</a></li>
+          <li><a href="#s3-8">高级测量示例：从两个圆心构造中点</a></li>
+        </ul>
+      </div>
+      <div class="toc-group">
+        <a href="#quick-measure"><span class="toc-num">04</span>第一次测量：从标定到 CSV</a>
+      </div>
+      <div class="toc-group">
+        <a href="#calibration"><span class="toc-num">05</span>标定与公差</a>
+        <ul class="toc-sub">
+          <li><a href="#s5-1">在自己的图像上标定</a></li>
+          <li><a href="#s5-2">标定对话框字段对照</a></li>
+          <li><a href="#s5-3">输入和解读公差</a></li>
+          <li><a href="#quality-profile">质量门限与判定阈值</a></li>
+          <li><a href="#circle-review">圆卡尺显示“需复核”怎么办</a></li>
+        </ul>
+      </div>
+      <div class="toc-group">
+        <a href="#analysis"><span class="toc-num">06</span>分析与结果导出</a>
+        <ul class="toc-sub">
+          <li><a href="#s6-1">导出单张图像</a></li>
+          <li><a href="#verify-export">复核与交付测量结果</a></li>
+          <li><a href="#s6-3">批量分析同类图像</a></li>
+          <li><a href="#s6-4">读懂批次报告</a></li>
+          <li><a href="#s6-5">查看过程能力与控制图</a></li>
+          <li><a href="#s6-6">显示与分析辅助</a></li>
+          <li><a href="#s6-7">大图卡顿与分析不刷新</a></li>
+        </ul>
+      </div>
+      <div class="toc-group">
+        <a href="#volume"><span class="toc-num">07</span>体数据与切片浏览</a>
+        <ul class="toc-sub">
+          <li><a href="#s7-1">导入一组切片</a></li>
+          <li><a href="#s7-2">切换视图和层号</a></li>
+          <li><a href="#s7-3">质量分析与分割</a></li>
+        </ul>
+      </div>
+      <div class="toc-group">
+        <a href="#files"><span class="toc-num">08</span>保存、恢复与配方</a>
+        <ul class="toc-sub">
+          <li><a href="#s8-1">选择文件类型</a></li>
+          <li><a href="#s8-2">打包交接与找回底图</a></li>
+          <li><a href="#s8-3">在已有图像上加载 ROI</a></li>
+          <li><a href="#s8-4">找回自动保存</a></li>
+          <li><a href="#s8-5">用两个基准点对齐测量配方</a></li>
+        </ul>
+      </div>
+      <div class="toc-group">
+        <a href="#shortcuts"><span class="toc-num">09</span>快捷键速查</a>
+      </div>
+      <div class="toc-group">
+        <a href="#faq"><span class="toc-num">10</span>常见问题</a>
+      </div>
+      <div class="toc-group">
+        <a href="#limits"><span class="toc-num">11</span>已知限制与边界</a>
+      </div>
+      <div class="toc-group">
+        <a href="#appendix-tools"><span class="toc-num">12</span>附录 A：工具清单</a>
+        <ul class="toc-sub">
+          <li><a href="#s12-1">A.1 绘制与标注（10 项，不算测量）</a></li>
+          <li><a href="#s12-2">A.2 测量（21 项，按菜单分组）</a></li>
+          <li><a href="#appendix-advanced">A.3 高级测量（18 项，测量 → 高级测量…）</a></li>
+        </ul>
+      </div>
+      <div class="toc-group">
+        <a href="#appendix-menu"><span class="toc-num">13</span>附录 B：菜单结构速查</a>
+      </div>
+      <div class="toc-group">
+        <a href="#appendix-errors"><span class="toc-num">14</span>附录 C：错误消息对照</a>
+      </div>
+      <div class="toc-group">
+        <a href="#appendix-print"><span class="toc-num">15</span>附录 D：打印与另存 PDF</a>
+      </div>
+      <div class="toc-group">
+        <a href="#integration"><span class="toc-num">16</span>宿主集成</a>
+      </div>
+      </div>
+      <p class="search-status" role="status"></p>
+      <div id="toc-results" hidden></div>
+      <div class="toc-nav">
+        <a id="toc-prev" href="#">‹ 上一章</a>
+        <a id="toc-next" href="#">下一章 ›</a>
+      </div>
+    </nav>
+
+    <main id="main">
+        <div class="meta">
+          <span class="meta-line">适用版本 0.1.0（<code>net8.0-windows</code> / <code>net10.0-windows</code>）。校对日期 2026-11-12，依据提交 <code>2be5103</code>。</span>
+          <span class="meta-line">本手册讲界面操作，以演示程序 ImageViewerDemo 为例。嵌入自有 WPF 程序请读<a href="integration.md">集成指南</a>。</span>
+          <span class="meta-line">记号约定：<strong>粗体</strong>是界面上的按钮或菜单命令；<code>等宽</code>是输入值、字段名或文件名。版本变化见<a href="../CHANGELOG.md">变更记录</a>，离线阅读可用 <a href="usage.pdf">PDF 版</a>。</span>
+        </div>
+    <section id="start">
+      <h2><a class="anchor" href="#start" aria-label="链接到本节">#</a>启动与界面</h2>
+        <p>直接启动已构建的 <code>ImageViewerDemo.exe</code>。如果从源码运行，在 Windows 上打开终端，进入仓库根目录，选择与本机 .NET SDK 对应的目标框架：</p>
+      <pre data-lang="powershell"><code class="language-powershell">dotnet run --project ImageViewerDemo/ImageViewerDemo.csproj --framework net10.0-windows</code></pre>
+        <p>使用 .NET 8 时，把参数改为 <code>--framework net8.0-windows</code>。Demo 启动时通常会打开随程序附带的灰度测试图；没有看到图像时，可手动选择 <strong>打开图像文件</strong> 或 <strong>测量示例</strong>。加上 <code>--sample</code> 参数（例如 <code>ImageViewerDemo.exe --sample</code>）会跳过测试图，直接载入测量示例，适合演示和录屏。</p>
+        <p><strong>运行环境。</strong> Windows 10 或更高版本；控件与 Demo 都提供 <code>net8.0-windows</code> 与 <code>net10.0-windows</code> 两份产物，按宿主的目标框架选择；需要可用的 DirectX 图形驱动，WPF 渲染依赖它。界面按系统 DPI 缩放，4K 屏 200% 缩放下布局与截图都以物理像素呈现；多显示器时窗口跟随所在屏幕的缩放比例。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="启动与界面：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">区域</th>
+        <th scope="col">能做什么</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>Demo 顶部</td>
+        <td><strong>打开图像文件</strong>、<strong>打开体数据</strong>、<strong>测量示例</strong>；打开过程中显示进度与 <strong>取消加载</strong>。</td>
+        </tr>
+        <tr>
+        <td>查看器工具栏</td>
+        <td>打开图像、保存会话、适应窗口、距离测量、尺寸标定、导出 CSV；“更多命令”进入完整菜单。</td>
+        </tr>
+        <tr>
+        <td>中间画布</td>
+        <td>浏览图像，绘制、选中并编辑 ROI。绘制时底部会显示当前工具、下一步提示与“取消”。</td>
+        </tr>
+        <tr>
+        <td>右侧 ROI 面板</td>
+        <td>查找、选择、锁定或隐藏 ROI；编辑选中项的属性。列表和属性可分别滚动。</td>
+        </tr>
+        <tr>
+        <td>底部状态栏</td>
+        <td>查看图像文件名、尺寸、交互模式、标定和未保存状态；悬停文件名或标定徽标可看详情。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <figure>
+          <img src="images/demo-window.png" alt="ImageViewer Demo 主界面：顶部是说明与文件入口，第二行是常用工具栏，中间画布显示测量结果，右侧是 ROI 列表与属性，底部状态栏显示文件、模式与标定" loading="lazy">
+          <figcaption>ImageViewer Demo 主界面：顶部是说明与文件入口，第二行是常用工具栏，中间画布显示测量结果，右侧是 ROI 列表与属性，底部状态栏显示文件、模式与标定</figcaption>
+        </figure>
+        <p>窗口窄时，点 <strong>ROI 面板</strong> 展开右侧栏。如果常用工具被手动隐藏，点 <strong>恢复工具栏</strong>。在画布空白处右键也可打开完整菜单；在 ROI 上右键会先选中该对象，再显示与它相关的操作。</p>
+        <p><strong>查找命令。</strong> 打开右键菜单后直接输入“槽孔”“显示灰度剖面图”等关键词。按 <kbd>↓</kbd> 移到第一个可执行结果；只有一个可执行结果时，可直接按 <kbd>Enter</kbd>。<kbd>Esc</kbd> 先清空搜索，再按一次关闭菜单。命令呈灰色时，悬停可查看缺少的图像、选区或其他条件。完整菜单树见<a href="#appendix-menu">附录 B</a>，逐条说明见<a href="context-menu.md">右键菜单</a>。</p>
+    </section>
+    <section id="image">
+      <h2><a class="anchor" href="#image" aria-label="链接到本节">#</a>打开图像与浏览</h2>
+        <ol>
+        <li>点击 <strong>打开图像文件</strong>、按 <kbd>Ctrl</kbd>+<kbd>O</kbd>，或把文件拖到画布。支持 <code>.png</code>、<code>.jpg</code>、<code>.jpeg</code>、<code>.bmp</code>、<code>.gif</code>、<code>.tif</code> 和 <code>.tiff</code>。</li>
+        <li>JPEG/TIFF 会按 EXIF Orientation 自动旋正，手机和相机照片不会横躺。单图解码上限约 1 亿像素（100,000,000），超过时程序拒绝解码并给出提示，而不是耗尽内存；这类图像请先在外部降采样或裁切后再打开。</li>
+        <li>等待解码。耗时较长时可点 <strong>取消加载</strong>；失败后可根据提示检查文件，再点 <strong>重试</strong>。加载失败或取消不会替换当前文档。</li>
+        <li>点击 <strong>适应窗口</strong>（<kbd>Ctrl</kbd>+<kbd>F</kbd>）看全图；在画布上双击也能适应窗口（正在用绘制工具时不生效）。把鼠标移到要检查的位置，滚轮缩放；按住中键拖动平移。</li>
+        <li>检查细节时，可用 <strong>实际大小（100%）</strong> 查看 1:1 视图，或先选中 ROI，再用 <strong>缩放到所选 ROI</strong>。<strong>填充窗口</strong> 会让图像覆盖视口，边缘可能超出画布。</li>
+        <li>需要改变观察方向时，用 <strong>视图 → 向左旋转 90°</strong>、<strong>向右旋转 90°</strong>、<strong>水平翻转</strong> 或 <strong>垂直翻转</strong>。标签、控制点与图像一起定位，旋转或翻转不会改变测量的图像坐标和数值。按 <kbd>Ctrl</kbd>+<kbd>0</kbd> 重置视图。</li>
+        </ol>
+        <p>画布还接受两类拖放：直接拖入 <code>.ivsession</code> 或 <code>.ivpkg</code> 会按“打开项目或会话”的流程载入；拖入图像则按新文档打开。从体数据切片打开普通图像时，程序会保护当前文档和轴位视图的未保存编辑；确认替换并成功打开后，旧体数据退出，显示新的单图文档。</p>
+        <p>图像超过约 400 万像素时，程序自动启用多分辨率金字塔与分块渲染，并按 16 MP、64 MP 两档提高瓦片缓存上限；缩放平移只处理当前视口。相关开关与缓存清理在 <strong>性能设置</strong> 中。</p>
+    </section>
+    <section id="roi">
+      <h2><a class="anchor" href="#roi" aria-label="链接到本节">#</a>绘制与编辑 ROI</h2>
+        <p>ROI 是图像上的感兴趣区域或测量对象。卡尺、拟合、基准这些词的确切含义见<a href="terminology.md">术语表</a>。工具分三类：<strong>绘制</strong>标记区域、点或文字；<strong>测量</strong>记录尺寸、几何关系；<strong>边缘检测</strong>沿着你给的参考线或圆搜索真实边缘（卡尺、拟合、斑点）。画布底部的提示会随工具更新。全部 31 个工具见<a href="#appendix-tools">附录 A</a>。</p>
+      <h3 id="s3-1">基础绘制与标注</h3>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="绘制与编辑 ROI：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">要画什么</th>
+        <th scope="col">选哪个工具</th>
+        <th scope="col">操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>矩形区域</td>
+        <td><strong>矩形 ROI</strong></td>
+        <td>拖出一个框；拖动控制点可旋转。</td>
+        </tr>
+        <tr>
+        <td>圆形或圆环</td>
+        <td><strong>圆形 ROI</strong> / <strong>圆环 ROI</strong></td>
+        <td>从圆心向外拖；圆环再拖内径。</td>
+        </tr>
+        <tr>
+        <td>椭圆</td>
+        <td><strong>椭圆 ROI</strong></td>
+        <td>拖出外接框，可旋转。</td>
+        </tr>
+        <tr>
+        <td>任意轮廓</td>
+        <td><strong>多边形 ROI</strong></td>
+        <td>依次单击顶点，回到起点或右键闭合。</td>
+        </tr>
+        <tr>
+        <td>折线或手绘曲线</td>
+        <td><strong>折线 ROI</strong> / <strong>自由曲线 ROI</strong></td>
+        <td>逐点单击；自由曲线按住左键连续画。</td>
+        </tr>
+        <tr>
+        <td>标一个点、箭头或说明</td>
+        <td><strong>点标注</strong> / <strong>箭头标注</strong> / <strong>文本标注</strong></td>
+        <td>点标注单击放置；箭头从起点按住左键拖到箭头尖端再松开；文本标注单击定位后，在弹出的对话框输入文字。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p>这些工具只画不测，适合圈出关注区域、写批注、给下游分析留位置。</p>
+      <h3 id="s3-2">常用测量</h3>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="绘制与编辑 ROI：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">要做什么</th>
+        <th scope="col">选工具后如何操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>测两点间距离</td>
+        <td>选 <strong>距离测量</strong>。在起点按住左键，拖到终点后松开。</td>
+        </tr>
+        <tr>
+        <td>测折线路径长度</td>
+        <td>选 <strong>折线测量</strong>。依次单击各节点，至少两点；右键或双击结束。结果含总长度、线段数和最短／最长段。</td>
+        </tr>
+        <tr>
+        <td>测不规则区域面积</td>
+        <td>选 <strong>面积测量</strong>。沿边界依次单击至少三个顶点，回到起点闭合，也可右键完成。闭合后查看面积、周长和质心。</td>
+        </tr>
+        <tr>
+        <td>测夹角</td>
+        <td>选 <strong>角度测量</strong>，依次点第一条边上的点、顶点、第二条边上的点。</td>
+        </tr>
+        <tr>
+        <td>测圆弧或圆</td>
+        <td><strong>圆弧测量</strong>依次点起点、终点、弧上的第三点；<strong>三点圆</strong>在圆周点三个不共线的点。</td>
+        </tr>
+        <tr>
+        <td>测两个圆的中心距</td>
+        <td>先建立两个圆形测量对象，再选 <strong>圆心距</strong>，依次点击两个圆。</td>
+        </tr>
+        <tr>
+        <td>记录像素坐标</td>
+        <td>选 <strong>点坐标测量</strong>后单击。用 <strong>自动边缘吸附点</strong> 时先把指针移近边缘，看到候选位置后再单击。</td>
+        </tr>
+        <tr>
+        <td>拟合边缘或测宽</td>
+        <td><strong>拟合直线</strong>沿目标边缘拖出参考线；<strong>宽度测量</strong>横跨要测的两条边拖出参考线。<strong>自动圆测量</strong>在目标圆内部单击，程序查找圆边缘。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <figure>
+          <img src="images/demo-canvas.png" alt="测量示例的画布：两条距离测量各自带标签与长度，选中项的标签会高亮" loading="lazy">
+          <figcaption>测量示例的画布：两条距离测量各自带标签与长度，选中项的标签会高亮</figcaption>
+        </figure>
+      <h3 id="s3-3">该用哪个工具</h3>
+        <p>同一条边可以有多种测法，差别在于“谁决定边缘位置”：手工点哪就是哪、卡尺亚像素搜索、还是先拟合再算形位。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="绘制与编辑 ROI：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">你的目标</th>
+        <th scope="col">推荐工具</th>
+        <th scope="col">理由</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>只要尺寸数字，边缘清晰、能手动对准</td>
+        <td>距离测量、角度测量、三点圆、圆弧测量</td>
+        <td>完全按你点的位置算，不依赖梯度，最稳、可复现。</td>
+        </tr>
+        <tr>
+        <td>边缘有毛刺、需要亚像素定位</td>
+        <td>宽度测量（双边）、拟合直线、拟合圆、拟合弧</td>
+        <td>沿参考线布置多条卡尺搜索梯度，再稳健拟合，抗噪。</td>
+        </tr>
+        <tr>
+        <td>只画了个大致的圆，希望程序自己找</td>
+        <td>自动圆测量</td>
+        <td>只需在圆内单击，程序自动定位圆并输出质量门控。</td>
+        </tr>
+        <tr>
+        <td>需要控制卡尺数量、搜索范围、边缘极性</td>
+        <td>拟合圆、拟合弧、拟合直线</td>
+        <td>打开 <strong>卡尺参数...</strong> 逐项调；自动圆测量也能调。</td>
+        </tr>
+        <tr>
+        <td>已有近似椭圆的轮廓点</td>
+        <td>拟合椭圆</td>
+        <td>从已有多边形或折线的顶点拟合，输出长短轴、倾角与拟合残差。</td>
+        </tr>
+        <tr>
+        <td>要面积、周长、质心</td>
+        <td>面积测量</td>
+        <td>闭合多边形直接给几何量。</td>
+        </tr>
+        <tr>
+        <td>要数斑点数量、面积、质心</td>
+        <td>斑点分析</td>
+        <td>Otsu 或手动阈值分割，可指定检测亮斑或暗斑、最小面积。</td>
+        </tr>
+        <tr>
+        <td>要两几何体之间的关系</td>
+        <td>圆心距、点到线距离、点到圆距离、平行度测量、垂直度测量、同心度测量</td>
+        <td>直接给出距离或偏差，不必自己换算。</td>
+        </tr>
+        <tr>
+        <td>要更复杂的构造与形位</td>
+        <td><strong>测量 → 高级测量…</strong></td>
+        <td>中点、交点、槽孔、位置度、节距等 18 项，见<a href="#appendix-advanced">附录 A.3</a>。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+      <h3 id="s3-4">调整已有 ROI</h3>
+        <p>在画布或右侧列表选中对象，拖动主体可移动，拖动控制点可调整几何。选中后按方向键可微移 1 px，按住 <kbd>Shift</kbd> 方向键微移 10 px（有多个选区时移动选中的那个）。在“当前对象”菜单可改标签和颜色，或缩放到该对象。已锁定的 ROI 要先解除锁定才能编辑；隐藏与删除是两个独立操作。用列表筛选可在对象较多时按名称、类型或标签定位。</p>
+        <figure>
+          <img src="images/demo-roi-panel.png" alt="右侧 ROI 面板：上方是带搜索与显示/锁定开关的列表，下方是选中项的对象属性（标签、线宽、坐标、公差判定）" loading="lazy">
+          <figcaption>右侧 ROI 面板：上方是带搜索与显示/锁定开关的列表，下方是选中项的对象属性（标签、线宽、坐标、公差判定）</figcaption>
+        </figure>
+        <p><strong>编辑属性。</strong> 在 ROI 上右键，选菜单顶部的 <strong>编辑属性...</strong>，可打开该对象的属性编辑器。支持专用卡尺参数对话框的对象会直接打开对应的设置。常用属性也可在右侧面板编辑。</p>
+        <p><strong>编辑路径。</strong> 拖动折线或多边形的节点可调整轮廓；单击线段可插入节点。右键命中某个节点后，选 <strong>当前对象 → 删除此节点</strong>。折线至少保留两个节点，闭合多边形至少保留三个。<kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销最近一项支持撤销的编辑，<kbd>Ctrl</kbd>+<kbd>Y</kbd> 重做；<strong>清空所有 ROI</strong> 之后也能用 <kbd>Ctrl</kbd>+<kbd>Z</kbd> 恢复。</p>
+      <h3 id="s3-5">用双边卡尺测宽</h3>
+        <ol>
+        <li>选 <strong>测量 → 基础尺寸 → 宽度测量</strong>。在两条目标边之间选一段平直、清晰的位置，从一侧拖到另一侧。让参考线尽量垂直于两条边，且中点落在两条边之间；测得的宽度沿参考线方向计算，斜着画会量出斜向间距。</li>
+        <li>打开 <strong>当前对象 → 卡尺参数...</strong>。先调整 <strong>搜索范围 (px)</strong>，让每条卡尺都能跨过两条目标边；<strong>区域长度</strong> 控制多条卡尺沿边铺开的长度，靠近拐角时可适当缩短。如果穿过目标时先变亮再变暗（或先变暗再变亮），边缘极性先选 <code>Any</code>，让两种变化都能进入候选。</li>
+        <li>在 <strong>图像显示 → 显示叠加</strong> 开启 <strong>显示卡尺得分</strong>，检查两组检测点是否分别落在正确的边上。点太少时先检查参考线、搜索范围和最小梯度；点落到邻近的纹理上时，先收窄搜索区，再考虑用最小间距排除挨得太近的边缘。卡尺对话框可勾选 <strong>实时预览</strong> 或点 <strong>立即预览</strong>；<strong>确定</strong> 提交，<strong>取消</strong> 恢复原参数与结果。</li>
+        <li>核对宽度、有效卡尺数和各处宽度的离散程度，再填写公差。<strong>标称边缘间距</strong>及其容差按 <code>px</code> 输入，只影响选哪一对边缘。产品的合格范围在 ROI 的 <strong>公差判定</strong> 中单独填写，使用当前测量单位。</li>
+        </ol>
+        <p><strong>其他卡尺。</strong> 拟合直线沿一条目标边画参考线；拟合圆和拟合弧先从近似圆心拖出参考半径。拟合弧选中后，可在右侧属性中调整 <strong>起始角度</strong> 和 <strong>扫掠角度</strong>。圆卡尺可点 <strong>调整圆测量参数</strong>。对双边、圆形和圆弧卡尺，<strong>梯度检测对齐（卡尺）</strong> 会重新检测并更新测量结果，原来画的参考几何会保留。拟合线的长度与质量指标见<a href="line-fit-result-definition.md">直线拟合结果定义</a>。</p>
+      <h3 id="s3-6">用斑点分析统计亮斑或暗斑</h3>
+        <ol>
+        <li>选 <strong>测量 → 边缘检测 → 斑点分析</strong>，拖出一个包含完整目标的搜索框。细长区域可拖动旋转控制点，让框贴合目标方向；阈值统计和检测都只看旋转后的框内像素。如果目标被搜索框截断，面积也只反映框内部分。</li>
+        <li>右键 <strong>编辑属性...</strong>，先用 <strong>使用 Otsu</strong> 自动选阈值；目标比背景暗时勾选 <strong>检测暗斑</strong>。自动阈值把背景或阴影也圈进去时，可缩小搜索区，或关闭 Otsu 后调 <strong>手动阈值</strong>。若只多出零散小点，提高 <strong>最小面积</strong>；这个值按像素数填写。</li>
+        <li>选中 ROI，检查画布上的编号、轮廓和质心。数量比预期少时，检查目标是否连成一块、被最小面积门限滤掉，或根本没落在搜索框内。打开 <strong>显示信息面板</strong> 可看斑点数、总面积和面积最大的五个斑点的详情。</li>
+        </ol>
+      <h3 id="s3-7">试用推荐检测参数</h3>
+        <ol>
+        <li>选中一个直线、双边、圆形或圆弧卡尺，或一个斑点分析 ROI。对象已锁定时先解锁。在画布上右键，选 <strong>当前对象 → 推荐检测参数…</strong>，也可从 <strong>测量 → 边缘检测</strong> 进入。</li>
+        <li>对照 <strong>当前参数试检测</strong> 与 <strong>建议参数试检测</strong>。卡尺先看检测点是否落在目标边缘，再比较评分、残差 RMS 和有效采样数；斑点分析看轮廓是否圈住目标，再核对区域数量与最大面积。试检测不可用或质量不足时，先按提示检查搜索区域和图像对比度，再重新生成建议。</li>
+        <li>点击 <strong>应用建议</strong> 才会修改参数和检测结果，可用 <kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销；点 <strong>取消</strong> 保留原结果。建议不会改动标定、公差或项目质量门限。批量使用前，用几张有代表性的图像复核检测结果。</li>
+        </ol>
+        <p>各工具可推荐的参数及限制见<a href="detection-parameter-recommendations.md">检测参数推荐</a>。</p>
+      <h3 id="s3-8">高级测量示例：从两个圆心构造中点</h3>
+        <ol>
+        <li>对两个孔分别用 <strong>三点圆</strong> 测量。再用 <strong>距离测量</strong> 沿参考边画一条线，并给这三个来源取容易区分的名字，例如“左孔”“右孔”和“参考边”。</li>
+        <li>打开 <strong>测量 → 高级测量</strong>，在 <strong>测量工具</strong> 选 <strong>中点</strong>，将 <strong>测量名称</strong> 填为“孔中心中点”。在 <strong>可用 ROI / 构造结果</strong> 中依次选中两个孔，每选一个就点 <strong>添加来源</strong>，再点 <strong>保存测量项</strong>。核对预览中的中点是否落在两孔圆心之间。</li>
+        <li>点 <strong>新建测量项</strong>，改选 <strong>垂足与点线距离</strong>。填写名称，先添加构造结果“孔中心中点”，再添加 ROI“参考边”。保存后在 <strong>已保存的测量项与结果</strong> 中查看中点到参考线的垂直距离。要用物理单位读数，先完成尺寸标定。</li>
+        <li>点 <strong>导出结果与元数据</strong>，保留 CSV 和同名 <code>.metadata.json</code>。如果以后还要编辑这两个测量项，另存会话以保留测量定义与来源关系。</li>
+        </ol>
+        <p>可用来源和其他测量示例见<a href="advanced-measurements.md">高级测量</a>。</p>
+    </section>
+    <section id="quick-measure">
+      <h2><a class="anchor" href="#quick-measure" aria-label="链接到本节">#</a>第一次测量：从标定到 CSV</h2>
+        <ol class="step-list">
+        <li><strong>打开练习。</strong> 点击 Demo 顶部的 <strong>测量示例</strong>。在右侧列表找到 <strong>基准线（100 px）</strong> 和 <strong>检查线（80 px）</strong>；如面板未显示，点击 <strong>ROI 面板</strong>。</li>
+        <li><strong>建立比例。</strong> 选中 <strong>基准线（100 px）</strong>，点 <strong>尺寸标定</strong>。实际长度填 <code>50</code>，单位填 <code>mm</code>；本练习不填写畸变参数。确认后，底部徽标显示 <code>1 px = 0.5000 mm</code>（徽标固定保留 4 位小数），状态为“仅比例标定”。</li>
+        <li><strong>核对独立尺寸。</strong> 选中 <strong>检查线（80 px）</strong>，画布应显示 <code>40.00 mm</code>，因为 <code>80 × 0.5 = 40</code>。如显示 <code>80 px</code>，先检查标定是否确认并生效。</li>
+        <li><strong>设置公差。</strong> 在检查线的 <strong>公差判定</strong> 属性中，标称值填 <code>40</code>，上公差和下公差各填 <code>0.5</code>。允许范围为 <code>39.5–40.5 mm</code>，包含上下限。三个字段填纯数字，不带单位。</li>
+        <li><strong>导出并核对。</strong> 点击 <strong>导出 CSV</strong>，保存到可写目录。打开 CSV，在标签为 <strong>检查线（80 px）</strong> 的一行核对以下字段。基准线没有配置公差，看到 <code>NotConfigured</code> 属于预期结果。</li>
+        <li><strong>保存练习。</strong> 按 <kbd>Ctrl</kbd>+<kbd>S</kbd>，另选一个文件名保存 <code>.ivsession</code>。下次通过 <strong>打开项目或会话</strong> 载入，继续查看标定、ROI 和公差。</li>
+        </ol>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="第一次测量：从标定到 CSV：表格">
+        <table class="wide">
+        <thead>
+        <tr>
+        <th scope="col"><code>MeasuredValue</code></th>
+        <th scope="col"><code>NominalValue</code></th>
+        <th scope="col"><code>TolerancePlus</code></th>
+        <th scope="col"><code>ToleranceMinus</code></th>
+        <th scope="col"><code>PhysicalUnit</code></th>
+        <th scope="col"><code>SpecificationStatus</code></th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td><code>40</code></td>
+        <td><code>40</code></td>
+        <td><code>0.5</code></td>
+        <td><code>0.5</code></td>
+        <td><code>mm</code></td>
+        <td><code>Passed</code></td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p>想练习超差分支，可把检查线的标称值改成 <code>41</code>，保留上下公差各 <code>0.5</code>，再导出到另一个文件。测量值仍为 <code>40 mm</code>，判定应变为 <code>Failed</code>。示例尺寸仅供练习。</p>
+    </section>
+    <section id="calibration">
+      <h2><a class="anchor" href="#calibration" aria-label="链接到本节">#</a>标定与公差</h2>
+      <h3 id="s5-1">在自己的图像上标定</h3>
+        <ol>
+        <li>让已知尺寸的参考物与待测特征处于同一成像条件下。打开图像后，用 <strong>距离测量</strong> 在参考物的两个已知位置之间画线并选中。</li>
+        <li>点工具栏的 <strong>尺寸标定</strong>，也可从 <strong>文件与项目 → 标定 → 像素/物理尺寸校准...</strong> 打开同一对话框。输入参考物的实际长度与单位，例如 <code>25</code> 和 <code>mm</code>。</li>
+        <li>仅知道实际长度时，保留高级区默认设置。已有对应镜头和图像尺寸的校准数据时，再展开畸变、几何基准及精度区，按标定记录填写系数、主点、归一化半径和精度信息。填写精度记录本身不会启用畸变校正。</li>
+        <li>确认后核对底部的比例和模型状态，再用另一段已知尺寸复核。画布、信息面板和导出采用同一套换算。长度按标定比例换算，面积使用平方单位，夹角用度。未标定时尺寸按像素表示。</li>
+        <li>启用畸变校正时，程序先校正参考线，再据此计算比例。如果参考线无法按新模型校正，保留原标定。已生效模型在某个 ROI 上反解失败时，该项显示 <strong>无法测量</strong>；CSV 的测量值留空，规格状态为 <code>NotEvaluable</code>。请检查模型参数、参考线和 ROI 位置后重测。</li>
+        </ol>
+        <p><strong>谁能当参考线。</strong> 只有 <strong>距离测量</strong> 和 <strong>宽度测量</strong> 两种 ROI 能打开标定对话框；拟合直线、拟合圆、三点圆等都不行（按钮保持可见但不可执行，悬停可看原因）。用 <strong>宽度测量</strong> 标定时，程序取你画的两点距离，<strong>不是</strong>卡尺检测到的边缘间距——如果两点没卡在真实边缘上，标定就会带上这个误差。</p>
+        <figure>
+          <img src="images/demo-status.png" alt="底部状态栏：左侧是图像尺寸与文件名，右侧是交互模式与标定徽标（未标定时显示“未标定 · px”）" loading="lazy">
+          <figcaption>底部状态栏：左侧是图像尺寸与文件名，右侧是交互模式与标定徽标（未标定时显示“未标定 · px”）</figcaption>
+        </figure>
+        <p>底部状态栏区分 <strong>仅比例标定</strong>、<strong>畸变校正已启用</strong>、<strong>标定模型无效</strong>。悬停可查看比例、畸变参数、重投影误差或不确定度。交付前可用 <strong>文件与项目 → 标定 → 标定检查</strong> 查看缺失项；若菜单分组难找，可直接搜索“标定检查”。</p>
+        <p>标定检查会报告比例或模型是否可用、是否缺少公差，以及配置了公差却没有可用测量值的情况。检查通过后仍需确认 ROI 覆盖的是正确特征，并用一段已知尺寸复核换算。</p>
+      <h3 id="s5-2">标定对话框字段对照</h3>
+        <p>对话框分四个区：实际长度与单位、可选的镜头畸变、可选的标定几何基准、可选的标定精度。实际长度必须大于 0，单位留空时用 <code>mm</code>。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="标定与公差：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">字段</th>
+        <th scope="col">含义</th>
+        <th scope="col">怎么填</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>实际长度</td>
+        <td>参考线在工件上的真实长度</td>
+        <td>与单位配套，例如 <code>25</code> + <code>mm</code></td>
+        </tr>
+        <tr>
+        <td>单位</td>
+        <td>长度单位</td>
+        <td>默认 <code>mm</code>；整个会话的物理单位跟随这里</td>
+        </tr>
+        <tr>
+        <td>一阶畸变系数 K1</td>
+        <td>归一化径向畸变的一阶项</td>
+        <td>照相机标定报告原值抄，量级常见 1e-3 到 1e-1</td>
+        </tr>
+        <tr>
+        <td>二阶畸变系数 K2</td>
+        <td>径向畸变的二阶项</td>
+        <td>报告里没有就留 <code>0</code></td>
+        </tr>
+        <tr>
+        <td>三阶畸变系数 K3</td>
+        <td>径向畸变的三阶项</td>
+        <td>多数工业镜头为 <code>0</code></td>
+        </tr>
+        <tr>
+        <td>切向畸变系数 P1</td>
+        <td>镜头与传感器不平行引起的切向畸变</td>
+        <td>报告里没有就留 <code>0</code></td>
+        </tr>
+        <tr>
+        <td>切向畸变系数 P2</td>
+        <td>同上，另一方向</td>
+        <td>报告里没有就留 <code>0</code></td>
+        </tr>
+        <tr>
+        <td>主点 X (px)</td>
+        <td>光学中心在图像上的横向像素坐标</td>
+        <td>与主点 Y、归一化半径一起填写</td>
+        </tr>
+        <tr>
+        <td>主点 Y (px)</td>
+        <td>光学中心的纵向像素坐标</td>
+        <td>与主点 X、归一化半径一起填写</td>
+        </tr>
+        <tr>
+        <td>归一化半径 (px)</td>
+        <td>畸变公式里用于归一化的半径</td>
+        <td>从同一份标定记录填写正值</td>
+        </tr>
+        <tr>
+        <td>重投影 RMS (px)</td>
+        <td>标定过程的整体拟合误差</td>
+        <td>照标定记录填写，可在徽标和报告中查看</td>
+        </tr>
+        <tr>
+        <td>测量不确定度 (px, 1σ)</td>
+        <td>标定给出的单点不确定度</td>
+        <td>照标定记录填写，可在徽标和报告中查看</td>
+        </tr>
+        <tr>
+        <td>标定标识 / 证书号</td>
+        <td>这次标定的编号或证书号</td>
+        <td>可选；写进去便于追溯，随会话保存</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p><strong>几何基准一起填或一起留空。</strong> 三项都留空时，程序在需要保存标定模型时按图像中心和短边的一半推算。只填一部分时，剩余字段可能沿用默认值（主点坐标为 <code>0</code>、归一化半径为 <code>1 px</code>），不会逐项按图像尺寸补齐。畸变系数全为零时不启用畸变校正；精度字段用于记录和复核，不改变尺寸换算。</p>
+        <p><strong>系数填反了会怎样。</strong> 畸变符号或主点偏差较大时，参考线校正后长度会明显偏离你量的像素距离，状态栏可能显示 <strong>标定模型无效</strong>。先核对符号与像素坐标原点（图像左上角为 0,0），再考虑换一条更长的参考线。</p>
+      <h3 id="s5-3">输入和解读公差</h3>
+        <p>选中支持判定的测量 ROI，在右侧 <strong>公差判定</strong> 中填写标称值、上公差、下公差：</p>
+        <ul>
+        <li><strong>标称值</strong>是目标尺寸。留空表示不启用此项的规格判定。</li>
+        <li><strong>上下公差</strong>分别填写允许偏差的大小，均为非负数。例如下偏差为 <code>−0.2 mm</code> 时，<strong>下公差</strong>填 <code>0.2</code>。有标称值时，留空的一侧按 <code>0</code> 计算。</li>
+        <li><strong>允许范围</strong>为 <code>[标称值 − 下公差, 标称值 + 上公差]</code>。例如 <code>40</code>、<code>0.5</code>、<code>0.2</code> 对应 <code>39.8–40.5 mm</code>。</li>
+        <li><strong>单位跟随主测量值。</strong> 长度用当前标定单位，角度项用度；圆和三点圆的主值是半径，同心度比较的是公差带直径（两倍中心距）。更换标定或单位后，核对已输入的标称值和公差。</li>
+        <li><strong>无效输入</strong>（文字、非有限数值或负的上下公差）会在字段旁提示。输入会留在原 ROI 上，切换选区不会清除。修正或清空无效字段后才能保存、导出或生成新的测量报告。</li>
+        </ul>
+        <p>判定要同时看两个状态：<strong>检测状态</strong> 说明算法有没有拿到可信证据，<strong>规格状态</strong> 才是尺寸是否合格。手工距离测量无需自动检测，其检测状态可以是 <code>NotApplicable</code>，同时尺寸仍可判定合格。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="标定与公差：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">检测状态 <code>DetectionStatus</code></th>
+        <th scope="col">含义</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td><code>NotApplicable</code></td>
+        <td>这类 ROI 不涉及自动检测，测量值直接来自几何（例如距离、三点圆）。</td>
+        </tr>
+        <tr>
+        <td><code>NotMeasured</code></td>
+        <td>还没执行检测，或图像不足，暂时没有证据。</td>
+        </tr>
+        <tr>
+        <td><code>Passed</code></td>
+        <td>检测证据达到质量门限，测量值可信。</td>
+        </tr>
+        <tr>
+        <td><code>Review</code></td>
+        <td>找到了边缘但指标临界。CSV 可以有测量值；即使配置了公差，规格仍为 <code>NotEvaluable</code>，需要先复核检测。</td>
+        </tr>
+        <tr>
+        <td><code>Failed</code></td>
+        <td>检测失败，测量值不可用于判定。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="标定与公差：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">规格状态 <code>SpecificationStatus</code></th>
+        <th scope="col">含义</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td><code>Passed</code></td>
+        <td>有可用测量值，且在公差范围内。</td>
+        </tr>
+        <tr>
+        <td><code>Failed</code></td>
+        <td>有可用测量值，但超出公差范围。</td>
+        </tr>
+        <tr>
+        <td><code>NotConfigured</code></td>
+        <td>有可用测量值，没有填写标称值。</td>
+        </tr>
+        <tr>
+        <td><code>NotEvaluable</code></td>
+        <td>无法判定，例如检测证据不足、标定无效或校正失败。</td>
+        </tr>
+        <tr>
+        <td><code>NotApplicable</code></td>
+        <td>此 ROI 没有可用于此类规格判定的主测量值，也没有配置判定。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+      <h3 id="quality-profile">质量门限与判定阈值</h3>
+        <p>检测状态里的 <code>Passed</code> / <code>Review</code> / <code>Failed</code> 受质量门限影响，默认值如下。这些值是控件的 <code>QualityProfile</code> 属性，<strong>Demo 不提供编辑入口</strong>；载入会话、测量配方或 ROI 文件时，可能应用文件保存的门限。</p>
+        <p>拟合圆和自动圆测量的圆形质量门控按固定顺序执行：任一“失败门槛”不满足即 <code>Failed</code>，全部“通过门槛”满足才是 <code>Passed</code>，其余落到 <code>Review</code>。拟合弧的检测状态取决于是否检出边缘，不使用这里的圆周覆盖门限。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="标定与公差：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">分组</th>
+        <th scope="col">字段</th>
+        <th scope="col">默认</th>
+        <th scope="col">作用</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>卡尺得分</td>
+        <td><code>MaxCaliperScore</code></td>
+        <td><code>255</code></td>
+        <td>卡尺得分的归一化上限，用于把原始梯度换算成 0–1 的置信度</td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 失败门槛</td>
+        <td><code>MinimumDetectionConfidence</code></td>
+        <td><code>0.05</code></td>
+        <td>置信度低于此值直接判为未检出</td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 失败门槛</td>
+        <td><code>MinimumReviewConfidence</code></td>
+        <td><code>0.15</code></td>
+        <td>低于此值判 <code>Failed</code></td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 失败门槛</td>
+        <td><code>MinimumReviewValidRatio</code></td>
+        <td><code>0.50</code></td>
+        <td>有效卡尺占比低于此值判 <code>Failed</code></td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 失败门槛</td>
+        <td><code>MinimumReviewAngularCoverageDegrees</code></td>
+        <td><code>180</code></td>
+        <td>有效点覆盖角度小于此值判 <code>Failed</code></td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 失败门槛</td>
+        <td><code>ReviewResidualRms</code></td>
+        <td><code>4.0</code></td>
+        <td>残差超过 <code>max(该值, 半径 × 0.15)</code> 判 <code>Failed</code></td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 通过门槛</td>
+        <td><code>PassConfidence</code></td>
+        <td><code>0.55</code></td>
+        <td>置信度达到才可能 <code>Passed</code></td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 通过门槛</td>
+        <td><code>PassValidRatio</code></td>
+        <td><code>0.70</code></td>
+        <td>有效卡尺占比门槛</td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 通过门槛</td>
+        <td><code>PassAngularCoverageDegrees</code></td>
+        <td><code>270</code></td>
+        <td>圆周覆盖角度门槛</td>
+        </tr>
+        <tr>
+        <td>圆卡尺 · 通过门槛</td>
+        <td><code>PassResidualRms</code></td>
+        <td><code>1.5</code></td>
+        <td>残差需不超过 <code>min(该值, max(0.5, 半径 × 0.04))</code></td>
+        </tr>
+        <tr>
+        <td>体数据质量分析</td>
+        <td><code>VolumeOverexposedMinimumBin</code></td>
+        <td><code>250</code></td>
+        <td>最暗像素高于此灰度即判过曝（256 级直方图）</td>
+        </tr>
+        <tr>
+        <td>体数据质量分析</td>
+        <td><code>VolumeUnderexposedMaximumBin</code></td>
+        <td><code>5</code></td>
+        <td>最亮像素低于此值即判欠曝</td>
+        </tr>
+        <tr>
+        <td>体数据质量分析</td>
+        <td><code>VolumeLowContrastMinimumRange</code></td>
+        <td><code>16</code></td>
+        <td>直方图跨度小于此值判低对比度</td>
+        </tr>
+        <tr>
+        <td>自动圆测量</td>
+        <td><code>AutomaticCircleMinimumValidCalipers</code></td>
+        <td><code>24</code></td>
+        <td>圆周卡尺的最少有效条数</td>
+        </tr>
+        <tr>
+        <td>自动圆测量</td>
+        <td><code>AutomaticCircleCaliperMinimumGradient</code></td>
+        <td><code>8</code></td>
+        <td>单条卡尺的最小梯度</td>
+        </tr>
+        <tr>
+        <td>自动圆测量</td>
+        <td><code>AutomaticCircleMinimumConfidence</code></td>
+        <td><code>0.15</code></td>
+        <td>自动圆的最低置信度</td>
+        </tr>
+        <tr>
+        <td>自动圆测量</td>
+        <td><code>AutomaticCircleMinimumAngularCoverageDegrees</code></td>
+        <td><code>180</code></td>
+        <td>自动圆的最低覆盖角度</td>
+        </tr>
+        <tr>
+        <td>自动圆测量</td>
+        <td><code>AutomaticCircleResidualFraction</code></td>
+        <td><code>0.08</code></td>
+        <td>残差相对半径的比例上限</td>
+        </tr>
+        <tr>
+        <td>自动圆测量</td>
+        <td><code>AutomaticCircleMinimumResidualPixels</code></td>
+        <td><code>3.0</code></td>
+        <td>残差像素下限（小圆时避免过度严格）</td>
+        </tr>
+        <tr>
+        <td>自动圆测量</td>
+        <td><code>AutomaticCircleBoundaryEvidenceRatio</code></td>
+        <td><code>0.60</code></td>
+        <td>圆周上必须有边界证据的比例</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p><strong>两个自适应项要留意。</strong> 通过门槛的残差上限不是固定 1.5 px，而是 <code>min(1.5, max(0.5, 半径 × 0.04))</code>；失败门槛的残差上限是 <code>max(4.0, 半径 × 0.15)</code>。大半径的圆允许更大的绝对残差，小圆更严格。调门限前先看实际半径，否则会误以为改了 <code>PassResidualRms</code> 却没生效。</p>
+      <h3 id="circle-review">圆卡尺显示“需复核”怎么办</h3>
+        <ol>
+        <li>选中拟合圆或自动圆测量 ROI。在 <strong>图像显示 → 显示叠加</strong> 开启 <strong>显示卡尺得分</strong> 和 <strong>显示信息面板</strong>。查看点是否落在要量的那一圈边缘，再读信息面板里的 <strong>质量门控</strong> 原因、覆盖角度、有效卡尺数和残差。</li>
+        <li>修改前先解锁 ROI。若点混到内外两圈或相邻纹理上，先让参考圆贴近目标边缘，再从 <strong>当前对象 → 卡尺参数...</strong> 收窄搜索范围。若只有一小段能取到点，检查搜索区是否漏掉目标边缘，或圆周是否被遮挡、反光覆盖。边缘本身不清楚时，优先改善成像再拍。</li>
+        <li>调整后从 <strong>测量 → 边缘检测 → 梯度检测对齐（卡尺）</strong> 重新检测。再次核对检测点和状态，再重新导出。仍为 <code>Review</code> 时，把该项留作人工复核。</li>
+        </ol>
+    </section>
+    <section id="analysis">
+      <h2><a class="anchor" href="#analysis" aria-label="链接到本节">#</a>分析与结果导出</h2>
+      <h3 id="s6-1">导出单张图像</h3>
+        <ol>
+        <li>给必检 ROI 取容易区分的标签，再检查单位、公差和检测证据。CSV 会包含当前文档里的 ROI，隐藏标注或取消选中不会把它从 CSV 排除。</li>
+        <li>点击顶部 <strong>导出 CSV</strong>，或选择 <strong>分析与报告 → 导出分析结果为 CSV...</strong>。</li>
+        <li>在输出目录保留同一基名的三个文件：</li>
+        </ol>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="分析与结果导出：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">示例文件</th>
+        <th scope="col">用途</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td><code>inspection.csv</code></td>
+        <td>数据表。先按 <code>Label</code> 找测量项，再看 <code>MeasuredValue</code>、<code>PhysicalUnit</code>、<code>DetectionStatus</code> 与 <code>SpecificationStatus</code>。</td>
+        </tr>
+        <tr>
+        <td><code>inspection.report.md</code></td>
+        <td>供人工复核的报告，含结论、测量明细和标定信息。</td>
+        </tr>
+        <tr>
+        <td><code>inspection.metadata.json</code></td>
+        <td>复核来源所需的图像指纹、标定、检测门限、ROI 定义和导出批次信息。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p><code>Metric1</code> 至 <code>Metric3</code> 是各 ROI 的补充指标，例如长度、方向或采样数，字段内容会随 ROI 类型变化。复核合格结论时，以 <code>MeasuredValue</code> 和 <code>SpecificationStatus</code> 为准。若 Excel 将整行读进一列，使用“数据 → 自文本/CSV”导入，选择 UTF-8 和逗号分隔。</p>
+        <p>需要截图时，用 <strong>分析与报告 → 导出当前视图为 PNG...</strong>；输出含当前缩放、平移和可见叠加层，适合交流当前看到的结果。需要纸质或固定版式报告时，选择 <strong>打印报告...</strong>，可打印或导出 XPS。打印窗口保留打开时的测量快照；编辑 ROI 后，关闭并重新打开报告再打印。</p>
+      <h3 id="verify-export">复核与交付测量结果</h3>
+        <ol>
+        <li>打开 <code>.report.md</code>，核对图像来源、标定比例、单位和 <strong>前置检查</strong>。如有标定标识，确认它与本次使用的标定记录一致。</li>
+        <li>在 CSV 中逐项找到必检标签，对照 <code>MeasuredValue</code>、<code>PhysicalUnit</code>、<code>DetectionStatus</code> 和 <code>SpecificationStatus</code>。报告 <strong>整体判定</strong> 为“通过”时仍可能有未判定项。例如 <a href="#quick-measure">40 mm 练习</a>里的检查线通过后，基准线仍是 <code>NotConfigured</code>；如果必检项出现这个状态，就补上公差并重新导出。如果有测量值但检测为 <code>Review</code>，先复核边缘，不能用该数值直接判合格。</li>
+        <li>一起交付同名的原始 CSV、报告和元数据。需要在 Excel 整理时编辑副本；若怀疑文件混用或被另存，可用 PowerShell 运行 <code>Get-FileHash -Algorithm SHA256 .\inspection.csv</code>，与同批元数据中的 <code>artifacts.csvSha256</code> 比较（不区分字母大小写）。需要接着编辑 ROI 时，另附 <code>.ivpkg</code>。</li>
+        </ol>
+      <h3 id="s6-3">批量分析同类图像</h3>
+        <ol>
+        <li>在参考图像上设置 ROI、标定和公差，用单图导出验证结果。确认批次图像使用同一成像尺度，且被测特征都落在同一像素区域。工件姿态逐张变化时，先在外部对齐整批图像，或逐张用配方对齐后单独导出。</li>
+        <li>选 <strong>分析与报告 → 批量分析并导出 CSV...</strong>，选择多张图像，再选择输出 CSV。程序在每张图上按相同位置和参数重新检测卡尺。手动画出的距离、三点圆等仍使用模板几何；斑点分析不会逐图重新分割。高级测量项要从 <strong>高级测量 → 导出结果与元数据</strong> 单独导出。</li>
+        <li>完成后按 <code>Source</code> 找输入文件，用 <code>MeasurementItemKey</code> 对应同一模板项。<code>Status</code> 为 <code>Geometry</code> 表示该行未重跑卡尺检测；<code>Measured</code> 表示卡尺产出了检测结果；<code>DetectionFailed</code> 时查看 <code>Error</code> 并检查对应图像。检测质量看 <code>DetectionStatus</code>，是否符合公差看 <code>SpecificationStatus</code>。</li>
+        <li>保留同时生成的 <code>.metadata.json</code>、<code>.summary.json</code> 和 <code>.repeatability.md</code>。按 <kbd>Esc</kbd> 取消批次时，可保留已完成的结果；未完成项不应当作合格或失败。</li>
+        </ol>
+      <h3 id="s6-4">读懂批次报告</h3>
+        <p>批量分析除了 CSV 还会写三个文件：</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="分析与结果导出：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">文件</th>
+        <th scope="col">用途</th>
+        <th scope="col">先看哪里</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td><code>.summary.json</code></td>
+        <td>核对批次完成情况</td>
+        <td>读取成功、部分成功、失败和未完成的图像数，以及导出的结果条数。</td>
+        </tr>
+        <tr>
+        <td><code>.repeatability.md</code></td>
+        <td>阅读同一模板测量项在各输入之间的变化</td>
+        <td>有效样本数、离散程度，以及报告末尾的过程能力章节（有足够样本时）。</td>
+        </tr>
+        <tr>
+        <td><code>.metadata.json</code></td>
+        <td>复核来源并读取机器可读的统计结果</td>
+        <td>输入图像记录和指纹、标定、门限、ROI 数量和类型；能力指数在 <code>processCapability</code> 中。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p><strong>批次取消后怎么补跑。</strong> 在 <code>.summary.json</code> 看 <code>IsCanceled</code> 和 <code>UnfinishedFileCount</code>，在元数据里对比计划输入 <code>inputs</code> 和已处理记录 <code>inputRecords</code>。后者也包含读取或检测失败的输入，不能把存在记录当成测量成功。补跑未完成的输入时换一个输出文件名，保留原来的批次记录。需要在相同位置和参数下重跑时，事先另存参考会话、项目包或测量配方；批量元数据不含完整的 ROI 定义。</p>
+        <p><strong>跨图结果怎样对应。</strong> 过程能力按 <code>MeasurementItemKey</code> 聚合同一个模板项，样本顺序是批次输入顺序。漏测值会跳过。文件名相似、ROI 标签相同都不能替代这个标识。</p>
+        <p><strong>什么时候能说“重复性”。</strong> Demo 的批量导出描述输入之间的变化。只有宿主在调用批量分析时明确指定这些输入是同一工件的多轮测量，报告才会给出同件重复性结论及其占用的公差比例。</p>
+      <h3 id="s6-5">查看过程能力与控制图</h3>
+        <ol>
+        <li>用 <strong>分析与报告 → 过程能力 / 控制图...</strong> 打开窗口，在 <strong>测量序列</strong> 中选择要看的量。窗口按当前图像的 ROI 顺序取样，同量名、同单位且至少有两个有效值才会列为一条序列；打开后编辑了 ROI，需要关闭并重新打开窗口。</li>
+        <li>在 <strong>子组大小</strong> 中选每组样本数。X̄-R 控制图至少需要两个完整子组，例如选择每组 2 个就至少需要 4 个有效样本，末尾不足一组的样本不画入控制图。</li>
+        <li>分开看图和能力指数。控制图可在未填公差时查看；<code>Cp</code>／<code>Pp</code> 需要双侧公差，<code>Cpk</code>／<code>Ppk</code> 也可按单侧公差计算。同序列公差冲突或用于计算的标准差为零时，相应指数可能显示 <code>—</code>。<code>Cp</code>／<code>Cpk</code> 用组内波动估计，<code>Pp</code>／<code>Ppk</code> 用序列的整体波动。</li>
+        </ol>
+        <p>界面控制图用于复核样本变化，不写入导出文件。跨图样本看批次报告；单项合格与否看 <code>SpecificationStatus</code>。字段定义见<a href="import-export-conventions.md">导入导出约定</a>。</p>
+      <h3 id="s6-6">显示与分析辅助</h3>
+        <p><strong>图像显示</strong> 菜单分两个子菜单：<strong>图像调整</strong> 管亮度、色带一类的视觉参数，<strong>显示叠加</strong> 管网格、直方图、比例尺这类附加层。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="分析与结果导出：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">想做的事</th>
+        <th scope="col">用哪个命令</th>
+        <th scope="col">说明</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>调亮度、对比度、窗宽窗位、伽马、反色</td>
+        <td><strong>图像显示 → 图像调整 → 显示调节...</strong></td>
+        <td>只影响显示，不改图像数据；参数随会话保存，改动会让文档进入“未保存”状态。</td>
+        </tr>
+        <tr>
+        <td>用色带看强度分布</td>
+        <td><strong>图像显示 → 图像调整 → 伪彩色</strong>（原始／Hot／Jet／Viridis）</td>
+        <td>伪彩色是纯浏览状态，<strong>不随会话保存</strong>，改它不会触发“未保存”。</td>
+        </tr>
+        <tr>
+        <td>让程序给个起点</td>
+        <td><strong>图像显示 → 图像调整 → 智能显示建议...</strong></td>
+        <td>按图像分位数推荐对比度、亮度与伪彩色，确认后才应用。</td>
+        </tr>
+        <tr>
+        <td>回到原始显示</td>
+        <td><strong>图像显示 → 图像调整 → 还原显示调节</strong></td>
+        <td>恢复窗宽窗位、亮度、对比度、伽马和反色的默认值。如开启了伪彩色，再选 <strong>伪彩色 → 原始</strong>。</td>
+        </tr>
+        <tr>
+        <td>对齐像素、精确定位</td>
+        <td><strong>图像显示 → 显示叠加 → 显示像素网格／显示吸附网格／启用网格吸附／显示十字准星</strong></td>
+        <td>吸附网格影响绘制落点，其余只影响显示。</td>
+        </tr>
+        <tr>
+        <td>看强度分布或某条边的灰度</td>
+        <td><strong>图像显示 → 显示叠加 → 显示直方图／显示灰度剖面图</strong></td>
+        <td>检查一条边缘时，画一条横跨边缘的距离线并选中，再打开灰度剖面。两者都有 <strong>暂停实时直方图／暂停实时剖面图</strong> 以减轻负载。</td>
+        </tr>
+        <tr>
+        <td>在图上标尺度</td>
+        <td><strong>图像显示 → 显示叠加 → 显示比例尺</strong></td>
+        <td>比例尺用的是标定比例；没标定时按像素。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p><strong>读取像素和区域统计。</strong> 把鼠标移到图像上，画布左下角会显示图像坐标 <code>X</code>／<code>Y</code> 和该处的灰度或颜色分量。要看区域统计，先选中 ROI，再从工具栏 <strong>更多命令 → 图像显示 → 显示叠加</strong> 开启 <strong>显示信息面板</strong>。如果菜单项已勾选但面板被对象属性收起，先关闭再打开。能够统计的区域会显示均值、最小值、最大值、标准差和像素数。</p>
+        <p><strong>先预览，再确认显示调节。</strong> 在 <strong>显示调节...</strong> 对话框里，修改字段会实时更新画面。点 <strong>自动窗宽窗位</strong> 可根据原图的灰度分布取得一个起点；点 <strong>全部重置</strong> 可预览默认参数。点 <strong>确定</strong> 保留，点 <strong>取消</strong> 恢复到打开对话框之前的参数。</p>
+        <p>显示变换有助于观察，不能替代尺寸标定。图像较大时程序会按需启用金字塔和分块；相关选项在 <strong>性能设置</strong> 中。</p>
+        <p><strong>分析控制。</strong> 直方图统计整张原图，灰度剖面沿所选距离线读取原始像素；亮度、窗宽窗位和伪彩色不会改变这些数据。<strong>分析与报告 → 分析控制</strong> 里的 <strong>启用异步分析</strong> 可减轻大图分析对界面的影响。<strong>显示分析摘要...</strong> 汇总当前文档的测量项。</p>
+      <h3 id="s6-7">大图卡顿与分析不刷新</h3>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="分析与结果导出：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">现象</th>
+        <th scope="col">先检查什么</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>图像能打开，但缩放或平移卡顿</td>
+        <td>在 <strong>性能设置</strong> 中确认已启用 <strong>大图多分辨率渲染</strong> 和 <strong>自动选择图像分辨率</strong>。再到 <strong>高级渲染性能</strong> 检查 <strong>启用大图分块渲染</strong>；可试着切换 <strong>预取邻近图像区域</strong>，用同一张图、同一缩放位置对比。</td>
+        </tr>
+        <tr>
+        <td>开了伪彩色才卡顿</td>
+        <td>先选 <strong>图像显示 → 图像调整 → 伪彩色 → 原始</strong> 对比。重现卡顿后查看渲染状态的 <code>Pseudo color</code>；<code>CPU fallback</code> 表示当前显示处理走 CPU。</td>
+        </tr>
+        <tr>
+        <td>直方图或剖面不再更新</td>
+        <td>检查 <strong>暂停实时直方图／暂停实时剖面图</strong> 是否打开。只想更新一次时，保持图表可见，选 <strong>分析与报告 → 分析控制 → 立即刷新分析</strong>。如果只有剖面空白，先选中一条距离线。</td>
+        </tr>
+        <tr>
+        <td>单张图像打开就报像素超限</td>
+        <td>单图解码上限约 1 亿像素。先在外部降采样或裁切；用处理后的图做测量前，重新核对标定和 ROI 位置。分块渲染只影响图像打开后的显示。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p>需要记录问题时，从 <strong>性能设置 → 显示渲染状态...</strong> 查看原图尺寸和当前帧。<code>Tiled rendering</code> 显示分块开关，<code>Current frame</code> 里的 <code>tiled=</code> 表示最近一帧是否实际分块；缩小后能用较低分辨率直接显示时，两者可以不同。若怀疑显示或分析结果仍在用旧缓存，可在 <strong>性能设置 → 缓存维护</strong> 清理对应缓存；首次重绘或刷新需要重新计算。</p>
+    </section>
+    <section id="volume">
+      <h2><a class="anchor" href="#volume" aria-label="链接到本节">#</a>体数据与切片浏览</h2>
+      <h3 id="s7-1">导入一组切片</h3>
+        <ol>
+        <li>在 Demo 顶部点 <strong>打开体数据</strong>，一次选择同一序列的多个切片文件。检查文件是否属于同一方向和同一组采集，宽、高应一致。</li>
+        <li>在导入确认中核对 <strong>张数、排序依据、首尾文件与体素间距</strong>。程序优先读取切片旁的 <code>.slice.json</code>，无法读取或缺少可用字段时尝试同名 <code>.json</code>。可用的排序信息包括空间位置、实例号与采集时间；信息不足时按文件名中的数字自然排序并要求确认，例如 <code>slice2</code> 排在 <code>slice10</code> 前。</li>
+        <li>如出现重复位置、层距不均匀或间距来源冲突，先核对采集记录。不均匀序列按固定层距显示，3D 空间比例是近似值。位置完整时，程序以相邻正位置差的中位数估算 Z 轴层距。</li>
+        <li>确认后等待解码，可随时取消。程序会检查尺寸、文件变化及内存估算；超过 768 MiB 时会先要求确认。读取失败时按提示核对相应切片，当前文档会保留。</li>
+        <li>加载完成后，Demo 顶部会保留一行摘要：层数、宽 × 高、X／Y／Z 间距与排序来源。尺寸以这行摘要为准，导入确认框本身不显示宽高。</li>
+        </ol>
+      <h3 id="s7-2">切换视图和层号</h3>
+        <p>顶部选 <strong>自动</strong> 时，有体数据就显示 3D，否则显示 2D。要逐层浏览原始切片，选 <strong>轴位</strong>；<strong>2D</strong> 按钮回到普通图像视图。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="体数据与切片浏览：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">视图</th>
+        <th scope="col">快捷键</th>
+        <th scope="col">用途</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>轴位</td>
+        <td><code>1</code></td>
+        <td>逐层检查原始切片，横纵方向为 X/Y。</td>
+        </tr>
+        <tr>
+        <td>冠状</td>
+        <td><code>2</code></td>
+        <td>浏览重建的 X/Z 平面。</td>
+        </tr>
+        <tr>
+        <td>矢状</td>
+        <td><code>3</code></td>
+        <td>浏览重建的 Z/Y 平面。</td>
+        </tr>
+        <tr>
+        <td>3D</td>
+        <td><code>4</code></td>
+        <td>查看体数据包围盒、坐标轴和三个切面所在位置。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p>三个二维视图的切层手段并不相同：</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="体数据与切片浏览：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">视图</th>
+        <th scope="col">切层方式</th>
+        <th scope="col">缩放</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>轴位</td>
+        <td>切片滑块、滚轮</td>
+        <td><code>Ctrl+滚轮</code></td>
+        </tr>
+        <tr>
+        <td>冠状 / 矢状</td>
+        <td>切片滑块、<strong>上一层／下一层</strong> 按钮、<kbd>↑</kbd> / <kbd>↓</kbd>、滚轮</td>
+        <td><code>Ctrl+滚轮</code></td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p><code>Shift+滚轮</code> 在任何切片视图里都是快速切层。轴位视图没有“上一层／下一层”按钮，也不响应 <kbd>↑</kbd> / <kbd>↓</kbd>——这两个键在体数据模式里只用于重建切片；切回普通单图后，它们又变成 ROI 的微移键。重建冠状或矢状切片时等待进度结束；<kbd>Esc</kbd> 或 <strong>取消</strong> 可保留上一次可用视图。切层时 3D 中对应平面会同步移动。</p>
+        <p>在 3D 视图里按住左键拖动可旋转相机，按住中键拖动可平移，滚轮缩放。按 <code>F</code> 适配体数据，按 <kbd>Home</kbd> 重置相机。右键菜单可切换正面、顶面、等轴测等预设，开关坐标系、包围盒和各方向的切面，也可调节包围盒透明度。</p>
+        <p>3D 用于空间定位。需要观察灰度或做 ROI 测量时，按 <code>1</code>、<code>2</code> 或 <code>3</code> 进入对应切片，也可右键选 <strong>切换到轴位切片</strong>。Gray16 切片重建保持 16 位输出。界面显示的体素间距用于空间定位，<strong>ROI 的物理尺寸仍按独立标定换算</strong>；在新平面测量前先核对标定和单位。</p>
+      <h3 id="s7-3">质量分析与分割</h3>
+        <ul>
+        <li><strong>质量分析</strong>（体数据工具栏）逐层看强度分布：空白切片、过曝、欠曝与低对比度会按当前质量门限列在质量面板里。点其中一条会切到轴位视图并跳到那一层。判定阈值来自质量门限（<code>QualityProfile</code>），同一组切片换门限后结论可能不同。层距、排序与尺寸的问题不在质量分析里报，它们在导入确认与顶部摘要中。</li>
+        <li><strong>分割候选</strong>分析当前选中的整张轴位切片，即使此时屏幕显示的是冠状、矢状或 3D。先按 <code>1</code> 回到轴位并选好层号，再开始分割。<strong>拒绝</strong> 会丢弃候选；<strong>接受</strong> 会用该切片打开 2D 视图，并将候选放进同一个“分割结果”斑点分析 ROI。选中该 ROI 可在画布上按编号复核候选。</li>
+        </ul>
+    </section>
+    <section id="files">
+      <h2><a class="anchor" href="#files" aria-label="链接到本节">#</a>保存、恢复与配方</h2>
+      <h3 id="s8-1">选择文件类型</h3>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="保存、恢复与配方：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">目标</th>
+        <th scope="col">入口与文件</th>
+        <th scope="col">保存内容</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>下次接着编辑</td>
+        <td><strong>保存会话...</strong>（<kbd>Ctrl</kbd>+<kbd>S</kbd>）→ <code>.ivsession</code></td>
+        <td>图像引用、ROI、标定、工件坐标系、配方基准点、<strong>显示调节</strong>（窗宽窗位／亮度／对比度／伽马／反色）及当前视口的缩放和平移。不保存伪彩色、直方图、剖面与显示叠加开关。每次保存都会让你选择文件。</td>
+        </tr>
+        <tr>
+        <td>交接给别人或归档</td>
+        <td><strong>文件与项目 → 导出项目包...</strong> → <code>.ivpkg</code></td>
+        <td>会话及关联的图像资产，可用“打开项目或会话”载入。</td>
+        </tr>
+        <tr>
+        <td>在已有图像上交换标注</td>
+        <td><strong>文件与项目 → 保存 ROI...</strong> → ROI JSON</td>
+        <td>ROI、比例（<code>PixelSize</code>）、物理单位与质量门限。<strong>不含完整的相机标定模型</strong>（畸变、主点、精度）；需要连标定一起移交时用会话或项目包。接收方先打开对应图像，再载入 ROI。</td>
+        </tr>
+        <tr>
+        <td>在新工件上复用测量方案</td>
+        <td><strong>测量 → 配方 → 保存测量配方…</strong> → <code>.ivrecipe</code></td>
+        <td>测量项、公差、标定、检测门限及已记录的参考基准，供后续复用。</td>
+        </tr>
+        <tr>
+        <td>交付测量结果</td>
+        <td><strong>导出 CSV</strong> 或 <strong>打印报告...</strong></td>
+        <td>测量数据及报告，不能用来恢复可编辑的项目。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p><strong>文档切换与脏状态。</strong> 图像、ROI、标定、工件坐标系或显示调节发生编辑后，底部显示“未保存”。只缩放、平移、切伪彩色、开关直方图或显示叠加不会触发提示（这些状态要么不保存，要么只是浏览偏好）；手动保存仍会记录这时的视角。替换文档时，选择“保存”会先打开保存对话框；保存成功才继续。取消、关闭保存对话框或保存失败会保留当前文档及撤销记录。</p>
+        <p><strong>自动保存与最近项目。</strong> <strong>文件与项目 → 自动保存</strong> 是一个开关：打开后按配置的间隔写恢复快照，关闭后不再产生新快照（已有快照仍可恢复）。<strong>文件与项目 → 最近项目</strong> 列出最近打开过的会话与项目包。如果点选的会话或项目包文件已经不存在，程序会提示并移除这条记录；文件移过位置时，用 <strong>打开项目或会话...</strong> 选择新路径。</p>
+        <p><strong>体数据的两份状态。</strong> 体数据模式下，主视图与轴位视图各自维护一份未保存状态。关闭窗口时若两者都有改动，会分别询问保存，不要以为保存一次就覆盖了两边。</p>
+      <h3 id="s8-2">打包交接与找回底图</h3>
+        <ol>
+        <li><strong>跨电脑交接：</strong> 用 <strong>文件与项目 → 导出项目包...</strong> 将当前会话和底图一起保存为 <code>.ivpkg</code>。发送前用 <strong>打开项目或会话...</strong> 打开导出的包，核对底图、标注和标定。测量报告需单独导出；体数据的整组原始切片也要另行保留。</li>
+        <li><strong>搬动普通会话：</strong> <code>.ivsession</code> 通常引用源图，搬动时保留源图；若旁边有 <code>ImageViewer.assets</code>（例如从项目包另存的会话），连同目录一起搬动。</li>
+        <li><strong>打开时要求定位底图：</strong> 选择原图或文件内容未变的副本。会话存有图像指纹时，重新编码过的图即使看起来相同也可能无法通过校验。定位成功后按 <kbd>Ctrl</kbd>+<kbd>S</kbd> 记录新路径；取消定位或校验失败会保留原先打开的文档。如果原图已丢失，先用替代图新建文档，再重新核对标定和测量位置。</li>
+        </ol>
+      <h3 id="s8-3">在已有图像上加载 ROI</h3>
+        <p>先打开对应的底图。如果要保留现有标注，先保存一份会话。选择 <strong>文件与项目 → 加载 ROI...</strong> 后，文件中的 ROI 会替换当前全部标注，撤销记录也会清空。加载后核对标注是否落在正确位置，以及文件带入的比例和物理单位；需要完整的相机标定时，请交接会话或项目包。</p>
+        <p>若状态栏提示有标注因缺少插件未载入，保留原始 JSON。等接收端装好对应 ROI 插件后再打开原文件；从当前视图重新导出不会补回缺失的标注。</p>
+      <h3 id="s8-4">找回自动保存</h3>
+        <ol>
+        <li>界面出现恢复提示时点击 <strong>恢复</strong>，也可从 <strong>文件与项目 → 恢复自动保存…</strong> 打开列表。</li>
+        <li>按时间和项目选择快照。底图已移动时按提示定位原图；取消定位或解码失败会保留当前文档。</li>
+        <li>检查恢复的图像、测量项和标定。恢复后尽快保存为正式会话或项目包。关闭恢复提示后仍可从菜单打开列表；不同窗口的自动保存相互独立。</li>
+        </ol>
+        <p><strong>列表为空或快照太早时。</strong> 默认约每 30 秒写一次快照，意外退出前最后几次修改可能还没写入。正常保存或关闭后，对应的旧快照会被清理；仍在使用中的窗口也不会出现在其他窗口的恢复列表中。列表为空时，先从 <strong>最近项目</strong> 打开上次手动保存的文件。</p>
+      <h3 id="s8-5">用两个基准点对齐测量配方</h3>
+        <ol>
+        <li>在参考图上建立测量 ROI，另用 <strong>点坐标测量</strong> 标记两个不同且容易复现的特征。依次选中点 ROI，在 <strong>测量 → 配方</strong> 中记录 <strong>参考基准点 1</strong>、<strong>参考基准点 2</strong>，然后保存配方。</li>
+        <li>打开待测图，按相同顺序标记对应的两个特征，记录 <strong>当前基准点 1</strong>、<strong>当前基准点 2</strong>。切换图像会同时清空界面上已记录的参考点与当前点（配方文件里的参考点不受影响）。</li>
+        <li>选 <strong>按基准对齐并载入配方...</strong>。系统按两个点平移和旋转模板，标定比例不随对齐缩放。若图像位置本来一致，或旧配方没有基准，可用 <strong>载入测量配方...</strong> 按原像素坐标加载。</li>
+        <li>核对模板是否覆盖正确特征，重新检测并执行标定检查，再导出。载入配方会替换当前测量项；参考图的拟合残差、吸附置信度等检测证据不能直接用于新图。重新保存配方时会使用当前图像的 ROI 和基准点。</li>
+        </ol>
+        <p><strong>对齐后仍有偏移时。</strong> 基准点 1 确定模板位置，基准点 1 指向基准点 2 的方向决定旋转。两个点要取自相同特征、顺序一致，尽量拉开距离。程序不会缩放模板：若两张图上基准点之间的像素距离明显不同，先检查点位和拍摄倍率；倍率改变时用新图重新标定并调整模板。对齐只作用于当前图像，加载一次配方不会给随后导入的每张图自动找基准。</p>
+        <p>格式版本、缓存和指纹细节见<a href="project-file-format.md">项目文件格式</a>。</p>
+    </section>
+    <section id="shortcuts">
+      <h2><a class="anchor" href="#shortcuts" aria-label="链接到本节">#</a>快捷键速查</h2>
+        <p>快捷键通常在画布或查看器获得焦点时生效。正在编辑文本时，先离开输入框再执行视图命令。3D 视图里只有相机快捷键生效，<kbd>Ctrl</kbd>+<kbd>S</kbd>、<kbd>Ctrl</kbd>+<kbd>F</kbd>、<kbd>Ctrl</kbd>+<kbd>Z</kbd> 等 2D 命令不响应——先按 <code>1</code>/<code>2</code>/<code>3</code> 回到二维视图再操作。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="快捷键速查：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">快捷键或手势</th>
+        <th scope="col">操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td><kbd>Ctrl</kbd>+<kbd>O</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd></td>
+        <td>打开图像 / 保存会话（3D 视图不响应 <kbd>Ctrl</kbd>+<kbd>S</kbd>）。</td>
+        </tr>
+        <tr>
+        <td><kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>0</kbd></td>
+        <td>适应窗口 / 重置视图；在画布上双击也能适应窗口。</td>
+        </tr>
+        <tr>
+        <td><kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd></td>
+        <td>放大 / 缩小（主键盘与小键盘的加号、减号都可用）。</td>
+        </tr>
+        <tr>
+        <td><kbd>Ctrl</kbd>+<kbd>R</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td>
+        <td>向右 / 向左旋转 90°。</td>
+        </tr>
+        <tr>
+        <td><kbd>Ctrl</kbd>+<kbd>H</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td>
+        <td>水平 / 垂直翻转。</td>
+        </tr>
+        <tr>
+        <td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td>
+        <td>撤销 / 重做。</td>
+        </tr>
+        <tr>
+        <td><kbd>Delete</kbd></td>
+        <td>删除选中的 ROI；删除后可撤销。</td>
+        </tr>
+        <tr>
+        <td><code>方向键</code> / <code>Shift+方向键</code></td>
+        <td>微移选中的 ROI：1 px / 10 px。</td>
+        </tr>
+        <tr>
+        <td><kbd>Esc</kbd></td>
+        <td>取消当前工具或批量操作；菜单中先清空搜索。</td>
+        </tr>
+        <tr>
+        <td>滚轮 / 中键拖动</td>
+        <td>普通图像缩放 / 平移。</td>
+        </tr>
+        <tr>
+        <td>左键拖动 / 中键拖动 / 滚轮</td>
+        <td>在 3D 视图中旋转 / 平移 / 缩放相机。</td>
+        </tr>
+        <tr>
+        <td><code>1</code> / <code>2</code> / <code>3</code> / <code>4</code></td>
+        <td>体数据模式切换轴位、冠状、矢状和 3D。</td>
+        </tr>
+        <tr>
+        <td><kbd>↑</kbd> / <kbd>↓</kbd></td>
+        <td>只在冠状、矢状视图切层。</td>
+        </tr>
+        <tr>
+        <td><code>Shift+滚轮</code> / <code>Ctrl+滚轮</code></td>
+        <td>切片视图中快速切层 / 缩放。</td>
+        </tr>
+        <tr>
+        <td><code>F</code> / <kbd>Home</kbd></td>
+        <td>3D 中适配体数据 / 重置相机；轴位与 MPR 中 <kbd>Home</kbd> 回到第一层。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+    </section>
+    <section id="faq">
+      <h2><a class="anchor" href="#faq" aria-label="链接到本节">#</a>常见问题</h2>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="常见问题：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">现象</th>
+        <th scope="col">怎么处理</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>打开后看不到原来的 ROI</td>
+        <td>普通图像开启新文档。要恢复旧编辑，打开对应 <code>.ivsession</code> 或 <code>.ivpkg</code>。也检查 ROI 列表的可见状态及是否缩放到图外。</td>
+        </tr>
+        <tr>
+        <td>“尺寸标定”是灰色</td>
+        <td>先画并选中一条 <strong>距离测量</strong> 或 <strong>宽度测量</strong> ROI；拟合直线、圆类 ROI 不能当参考线。再悬停按钮核对提示。</td>
+        </tr>
+        <tr>
+        <td>画面显示 <code>px</code>，需要 <code>mm</code></td>
+        <td>用已知实际长度做标定。仅旋转、放大或打开比例尺不会改变单位。</td>
+        </tr>
+        <tr>
+        <td>输入了公差但不能导出</td>
+        <td>根据状态栏指出的 ROI 和字段找回输入，去掉单位文字、负的上下公差或无效符号，修正或清空该字段。</td>
+        </tr>
+        <tr>
+        <td>CSV 某行是 <code>NotEvaluable</code></td>
+        <td>检测状态为 <code>Review</code> 时，即使有数值也要先<a href="#circle-review">复核圆卡尺的取点</a>。没有数值时，先看检测失败或标定校正的提示。</td>
+        </tr>
+        <tr>
+        <td>报告整体通过，但某项未判定</td>
+        <td>按<a href="#verify-export">交付步骤</a>逐项核对必检 ROI 的检测、规格和单位；有缺失项时先修正再交付。</td>
+        </tr>
+        <tr>
+        <td>检测“通过”，规格却是 <code>Failed</code></td>
+        <td>找到了可用边缘，但测量值超出公差。核对主测量值、单位和上下限。</td>
+        </tr>
+        <tr>
+        <td>画布显示两位小数，CSV 多出几位</td>
+        <td>画布为便于阅读会舍入；CSV 保留更多精度，规格判定使用未按画布显示精度舍入的数值。</td>
+        </tr>
+        <tr>
+        <td>徽标显示 <code>1 px = 0.5000 mm</code>，不是我输入的 0.5</td>
+        <td>徽标固定保留 4 位小数，数值本身没被改动；要看更多位可悬停徽标。</td>
+        </tr>
+        <tr>
+        <td>照片打开是横躺或倒置</td>
+        <td>正常情况会自动按 EXIF 旋正。若图像没有 EXIF 或方向标记被清除，用 <strong>视图 → 旋转 90°／翻转</strong> 手动摆正；旋转不改变测量坐标。</td>
+        </tr>
+        <tr>
+        <td>打开大图直接报像素超限</td>
+        <td>单图解码上限约 1 亿像素。先在外部降采样或裁切；用新图测量前重新核对标定和 ROI。</td>
+        </tr>
+        <tr>
+        <td>调完亮度直接关窗，再打开发现没保存</td>
+        <td>显示调节属于文档状态，改动后状态栏应显示“未保存”。确认没有在 3D 视图里操作（3D 不响应 <kbd>Ctrl</kbd>+<kbd>S</kbd>），并按提示保存会话；会话是唯一保存显示调节的地方。</td>
+        </tr>
+        <tr>
+        <td>换过伪彩，重开会话却恢复原色</td>
+        <td>伪彩、直方图、剖面与叠加层开关不随会话保存，属于浏览偏好。需要固定显示效果时用 <strong>导出当前视图为 PNG...</strong>。</td>
+        </tr>
+        <tr>
+        <td>会话打不开或找不到底图</td>
+        <td>选择原图或字节未变的副本，不能用同名的另一张图代替。跨电脑交接优先用 <code>.ivpkg</code>。</td>
+        </tr>
+        <tr>
+        <td>只交接标注，对方没有我的标定</td>
+        <td><strong>保存 ROI...</strong> 只带比例和单位，不带畸变与主点。要连标定一起给，用 <code>.ivsession</code> 或 <code>.ivpkg</code>。</td>
+        </tr>
+        <tr>
+        <td>切片中滚轮不缩放</td>
+        <td>切片的普通滚轮用于切层，按住 <kbd>Ctrl</kbd> 再滚动即可缩放。</td>
+        </tr>
+        <tr>
+        <td>在轴位视图按 <kbd>↑</kbd>/<kbd>↓</kbd> 没反应</td>
+        <td>轴位没有方向键切层，用滑块或滚轮；方向键切层只在冠状、矢状视图有效。</td>
+        </tr>
+        <tr>
+        <td>分割“接受”后只多了一个 ROI</td>
+        <td>所有候选装在同一个“分割结果”斑点分析 ROI 里。选中它可在画布查看候选编号和轮廓。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+    </section>
+    <section id="limits">
+      <h2><a class="anchor" href="#limits" aria-label="链接到本节">#</a>已知限制与边界</h2>
+        <p>这些是当前版本有意如此的行为，不是故障；遇到时按"替代做法"走。需要界面入口却找不到的项，多半属于"只能由宿主设置"。具体报错文案见<a href="#appendix-errors">附录 C</a>。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="已知限制与边界：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">行为</th>
+        <th scope="col">表现</th>
+        <th scope="col">原因</th>
+        <th scope="col">替代做法</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>轴位视图不能按方向键切层</td>
+        <td><kbd>↑</kbd>/<kbd>↓</kbd> 只在冠状、矢状有效</td>
+        <td>轴位沿用滑块 + 滚轮的模型</td>
+        <td>用滑块或滚轮；<code>Shift+滚轮</code> 快速切层</td>
+        </tr>
+        <tr>
+        <td>3D 视图不响应二维快捷键</td>
+        <td>在 3D 里按 <kbd>Ctrl</kbd>+<kbd>S</kbd>、<kbd>Ctrl</kbd>+<kbd>F</kbd> 无反应</td>
+        <td>3D 有自己的相机键位，二维命令未接线</td>
+        <td>先按 <code>1</code>/<code>2</code>/<code>3</code> 回到二维视图再操作</td>
+        </tr>
+        <tr>
+        <td>伪彩色与显示叠加不入会话</td>
+        <td>重开会话后色带、直方图、网格恢复默认</td>
+        <td>它们被当作浏览偏好，不写进 <code>.ivsession</code></td>
+        <td>需要固定效果时导出 PNG；显示调节（亮度、窗宽位）会保存</td>
+        </tr>
+        <tr>
+        <td>ROI JSON 不含相机标定</td>
+        <td>交接 ROI 后对方没有畸变与主点</td>
+        <td>ROI 文档只带比例、单位与质量门限</td>
+        <td>连标定一起移交就用 <code>.ivsession</code> 或 <code>.ivpkg</code></td>
+        </tr>
+        <tr>
+        <td>单图解码上限约 1 亿像素</td>
+        <td>超过时直接拒绝打开并提示</td>
+        <td>防止宿主内存被一张图耗尽</td>
+        <td>先在外部降采样或裁切</td>
+        </tr>
+        <tr>
+        <td>体数据导入有内存确认</td>
+        <td>估算超过 768 MiB 先弹确认</td>
+        <td>避免一次性分配过大</td>
+        <td>减少切片数或降采样</td>
+        </tr>
+        <tr>
+        <td>分割"接受"只生成一个 ROI</td>
+        <td>多个候选都装在一个"分割结果"斑点分析里</td>
+        <td>一个 ROI 承载全部候选</td>
+        <td>选中 ROI，在画布按编号复核</td>
+        </tr>
+        <tr>
+        <td>批量导出不会自动对齐工件</td>
+        <td>工件位置变化时可能量错边或无法检出</td>
+        <td>批处理复用当前 ROI 与检测参数</td>
+        <td>先对齐全部输入，或逐张用配方对齐后单独导出</td>
+        </tr>
+        <tr>
+        <td>只有两种 ROI 能当标定参考线</td>
+        <td>拟合直线、圆类 ROI 选中后标定按钮仍不可用</td>
+        <td>标定需要一条你亲手量出的已知长度</td>
+        <td>用距离测量或宽度测量画参考线</td>
+        </tr>
+        <tr>
+        <td>同心度按公差带直径判定</td>
+        <td>填 <code>0.1</code> 表示直径公差 0.1 mm</td>
+        <td>与图纸标注习惯一致</td>
+        <td>需要中心距判定时改用圆心距</td>
+        </tr>
+        <tr>
+        <td>质量门限在 Demo 里不可改</td>
+        <td>找不到设置入口</td>
+        <td>门限是控件属性，Demo 未暴露</td>
+        <td>由宿主设置，或按默认值使用（见<a href="#quality-profile">质量门限</a>）</td>
+        </tr>
+        <tr>
+        <td>界面只有中文</td>
+        <td>没有语言切换</td>
+        <td>仓库只有中文资源，无卫星程序集</td>
+        <td>需要其他语言时由宿主提供资源</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+    </section>
+    <section id="appendix-tools">
+      <h2><a class="anchor" href="#appendix-tools" aria-label="链接到本节">#</a>附录 A：工具清单</h2>
+        <p>菜单把工具分成 <strong>绘制</strong> 和 <strong>测量</strong> 两组：绘制组只标注，测量组参与计算。全部 31 个工具如下。</p>
+      <h3 id="s12-1">A.1 绘制与标注（10 项，不算测量）</h3>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="附录 A：工具清单：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">工具</th>
+        <th scope="col">作用</th>
+        <th scope="col">备注</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>矩形 ROI</td>
+        <td>圈定矩形区域</td>
+        <td>支持旋转，可用于高级测量的外接尺寸。</td>
+        </tr>
+        <tr>
+        <td>圆形 ROI</td>
+        <td>圈定圆形区域</td>
+        <td>圆心与半径可作高级测量的点源。</td>
+        </tr>
+        <tr>
+        <td>圆环 ROI</td>
+        <td>圈定内外径之间的环带</td>
+        <td>外径、内径分别填写。</td>
+        </tr>
+        <tr>
+        <td>椭圆 ROI</td>
+        <td>圈定椭圆区域</td>
+        <td>可旋转。</td>
+        </tr>
+        <tr>
+        <td>多边形 ROI</td>
+        <td>圈定任意闭合轮廓</td>
+        <td>至少 3 个顶点，可闭合。</td>
+        </tr>
+        <tr>
+        <td>折线 ROI</td>
+        <td>画折线或开放路径</td>
+        <td>至少 2 个节点。</td>
+        </tr>
+        <tr>
+        <td>自由曲线 ROI</td>
+        <td>按住左键连续画</td>
+        <td>顶点较密，适合沿轮廓描边。</td>
+        </tr>
+        <tr>
+        <td>点标注</td>
+        <td>在图上标一个点</td>
+        <td>不产生测量值，可作为基准点。</td>
+        </tr>
+        <tr>
+        <td>箭头标注</td>
+        <td>指向某个特征</td>
+        <td>从起点拖到箭头尖端。</td>
+        </tr>
+        <tr>
+        <td>文本标注</td>
+        <td>写一段说明</td>
+        <td>单击定位后输入文字，随会话保存。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+      <h3 id="s12-2">A.2 测量（21 项，按菜单分组）</h3>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="附录 A：工具清单：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">分组</th>
+        <th scope="col">工具</th>
+        <th scope="col">操作与输出</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>基础尺寸</td>
+        <td>距离测量</td>
+        <td>拖出两点，输出像素/物理长度，可作标定参考线。</td>
+        </tr>
+        <tr>
+        <td>基础尺寸</td>
+        <td>宽度测量</td>
+        <td>横跨两条边拖参考线，双边卡尺检测边缘对，输出宽度、极差、标准差与有效卡尺数。</td>
+        </tr>
+        <tr>
+        <td>基础尺寸</td>
+        <td>角度测量</td>
+        <td>依次点边1、顶点、边2，输出夹角（度）。</td>
+        </tr>
+        <tr>
+        <td>基础尺寸</td>
+        <td>点坐标测量</td>
+        <td>单击取点，输出坐标；可作配方基准点。</td>
+        </tr>
+        <tr>
+        <td>边缘检测</td>
+        <td>自动边缘吸附点</td>
+        <td>指针靠近边缘后单击，按梯度吸附到亚像素边缘并给出置信度。</td>
+        </tr>
+        <tr>
+        <td>边缘检测</td>
+        <td>自动圆测量</td>
+        <td>在圆内单击，自动布置圆周卡尺找圆，输出半径、圆心与质量门控。</td>
+        </tr>
+        <tr>
+        <td>边缘检测</td>
+        <td>拟合圆</td>
+        <td>拖出大致圆后按圆周取样拟合，可调卡尺数量、极性、离群阈值；输出半径、圆心与门控状态。</td>
+        </tr>
+        <tr>
+        <td>边缘检测</td>
+        <td>拟合弧</td>
+        <td>同上，只覆盖一段弧，输出半径、圆心、覆盖角度与门控状态。</td>
+        </tr>
+        <tr>
+        <td>边缘检测</td>
+        <td>拟合直线</td>
+        <td>沿边拖参考线，沿线布置卡尺稳健拟合，输出拟合长度、角度与拟合质量（RMS、内点/离群）。</td>
+        </tr>
+        <tr>
+        <td>边缘检测</td>
+        <td>斑点分析</td>
+        <td>拖出搜索区，用 Otsu 或手动阈值找出亮斑/暗斑，输出每个斑点的面积、质心、外接框与轮廓。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>圆心距</td>
+        <td>点两个圆，输出中心距；同心度判定用它的两倍作为公差带直径。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>点到线距离</td>
+        <td>点一个点、一条线，输出垂直距离。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>点到圆距离</td>
+        <td>点一个点、一个圆，输出到圆周的最近距离。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>平行度测量</td>
+        <td>点两条线，输出夹角与平行度偏差。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>垂直度测量</td>
+        <td>点两条线，输出与 90° 的偏差。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>同心度测量</td>
+        <td>点两个圆，输出中心偏移与公差带直径。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>面积测量</td>
+        <td>闭合多边形，输出面积、周长、质心。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>折线测量</td>
+        <td>折线路径，输出总长、线段数、最短/最长段。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>三点圆</td>
+        <td>点三个不共线的圆上点定圆，不做检测。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>圆弧测量</td>
+        <td>点起点、终点、弧上一点定弧，不做检测。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>拟合椭圆</td>
+        <td>先沿轮廓画至少 5 个有效顶点的多边形或折线，再用 <strong>拟合椭圆</strong> 单击该对象。输出长短轴、倾角与残差。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+      <h3 id="appendix-advanced">A.3 高级测量（18 项，测量 → 高级测量…）</h3>
+        <p>高级测量不画新 ROI，而是<strong>从已有 ROI 取几何</strong>再算，因此大多需要先选中满足条件的对象；菜单项置灰时悬停会说明缺什么。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="附录 A：工具清单：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">分组</th>
+        <th scope="col">项目</th>
+        <th scope="col">需要的前提</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>中点</td>
+        <td>两个点源（点坐标、点标注、圆心、有效拟合圆）。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>直线交点</td>
+        <td>两条可成线的对象（有效拟合直线、折线 ≥3 点、闭合多边形）。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>垂足与点线距离</td>
+        <td>一个点 + 一条线。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>平行线中心线</td>
+        <td>两条线。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>角平分线</td>
+        <td>三个点。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>对象最短边界距离</td>
+        <td>两个边界对象。</td>
+        </tr>
+        <tr>
+        <td>几何关系与构造</td>
+        <td>指定方向的中心投影距离</td>
+        <td>两个点。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>直线形状偏差（最小二乘）</td>
+        <td>有效拟合直线或 ≥3 点路径。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>圆形径向偏差（最小二乘）</td>
+        <td>有效拟合圆或 ≥3 点路径。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>自动矩形外接尺寸</td>
+        <td>闭合轮廓或矩形 ROI（需图像）。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>槽孔 / 胶囊轮廓拟合</td>
+        <td>闭合轮廓。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>连续间隙 / 厚度</td>
+        <td>两条路径。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>轮廓偏差比较</td>
+        <td>两条路径。</td>
+        </tr>
+        <tr>
+        <td>形状与轮廓</td>
+        <td>轮廓 / Blob 形状指标</td>
+        <td>闭合轮廓或矩形 ROI（需图像）。</td>
+        </tr>
+        <tr>
+        <td>位置、阵列与节距</td>
+        <td>二维位置偏差</td>
+        <td>至少一个点源。</td>
+        </tr>
+        <tr>
+        <td>位置、阵列与节距</td>
+        <td>孔阵列 / 周期节距</td>
+        <td>至少两个点。</td>
+        </tr>
+        <tr>
+        <td>位置、阵列与节距</td>
+        <td>孔阵列分布圆</td>
+        <td>至少三个点。</td>
+        </tr>
+        <tr>
+        <td>位置、阵列与节距</td>
+        <td>图像周期条纹 / 引脚节距</td>
+        <td>一张图 + 一条距离测量线作为扫描线。</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p>每一项的算法细节与结果字段见<a href="advanced-measurements.md">高级测量</a>。</p>
+    </section>
+    <section id="appendix-menu">
+      <h2><a class="anchor" href="#appendix-menu" aria-label="链接到本节">#</a>附录 B：菜单结构速查</h2>
+        <p>完整菜单是画布的右键菜单，点工具栏“更多命令”打开的是同一份。下面按顶层分组列出命令，方便对照界面找入口（末尾省略号表示会弹出对话框）。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="附录 B：菜单结构速查：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">分组</th>
+        <th scope="col">命令</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>顶层（不分组）</td>
+        <td>打开图像文件...（<kbd>Ctrl</kbd>+<kbd>O</kbd>）、保存会话...（<kbd>Ctrl</kbd>+<kbd>S</kbd>）、撤销（<kbd>Ctrl</kbd>+<kbd>Z</kbd>）、重做（<kbd>Ctrl</kbd>+<kbd>Y</kbd>）、适应窗口、填充窗口、实际大小（100%）、重置视图、编辑属性...</td>
+        </tr>
+        <tr>
+        <td>文件与项目</td>
+        <td>打开项目或会话...、恢复自动保存…、最近项目、保存 ROI...、加载 ROI...、标定（像素/物理尺寸校准...、标定检查）、导出项目包...、自动保存</td>
+        </tr>
+        <tr>
+        <td>绘制</td>
+        <td>矩形 ROI、圆形 ROI、圆环 ROI、椭圆 ROI、多边形 ROI、折线 ROI、自由曲线 ROI、点标注、箭头标注、文本标注</td>
+        </tr>
+        <tr>
+        <td>测量</td>
+        <td>基础尺寸、边缘检测（含梯度检测对齐、推荐检测参数…）、几何关系与构造、形状与轮廓、位置/阵列与节距、高级测量...</td>
+        </tr>
+        <tr>
+        <td>配方</td>
+        <td>保存测量配方…、载入测量配方…、记录参考基准点 1/2、记录当前基准点 1/2、按基准对齐并载入配方…</td>
+        </tr>
+        <tr>
+        <td>当前对象</td>
+        <td>重命名／改颜色、缩放到所选 ROI、卡尺参数...、删除此节点、删除所选 ROI</td>
+        </tr>
+        <tr>
+        <td>ROI 操作</td>
+        <td>删除所选 ROI、清空所有 ROI</td>
+        </tr>
+        <tr>
+        <td>视图</td>
+        <td>放大、缩小、旋转与翻转</td>
+        </tr>
+        <tr>
+        <td>图像显示</td>
+        <td><strong>图像调整</strong>：智能显示建议...、显示调节...、还原显示调节、伪彩色（原始/Hot/Jet/Viridis）；<strong>显示叠加</strong>：显示工具栏、显示信息面板、显示 ROI 列表、显示像素网格、显示吸附网格、启用网格吸附、显示十字准星、显示卡尺得分、显示直方图、暂停实时直方图、显示灰度剖面图、暂停实时剖面图、显示比例尺</td>
+        </tr>
+        <tr>
+        <td>分析与报告</td>
+        <td>导出当前视图为 PNG...、导出分析结果为 CSV...、批量分析并导出 CSV...、显示分析摘要...、过程能力/控制图、打印报告...；分析控制（启用异步分析、立即刷新分析）</td>
+        </tr>
+        <tr>
+        <td>性能设置</td>
+        <td>启用大图多分辨率渲染、自动选择图像分辨率、显示渲染状态...；高级渲染性能（启用大图分块渲染、预取邻近图像区域、启用 GPU 加速缓存、伪彩色处理方式）；缓存维护（清空大图渲染缓存、清空分析缓存）</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+    </section>
+    <section id="appendix-errors">
+      <h2><a class="anchor" href="#appendix-errors" aria-label="链接到本节">#</a>附录 C：错误消息对照</h2>
+        <p>出错时会弹出带标题的对话框，正文给出具体原因，同样的信息也会进入诊断日志。下表按标题列出全部 13 条，以及通常怎么处理。</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="附录 C：错误消息对照：表格">
+        <table>
+        <thead>
+        <tr>
+        <th scope="col">消息</th>
+        <th scope="col">常见触发</th>
+        <th scope="col">处理</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>打开图像失败</td>
+        <td>文件被占用、格式损坏、路径无权限</td>
+        <td>换一个可读副本；确认扩展名与内容一致</td>
+        </tr>
+        <tr>
+        <td>图像尺寸过大</td>
+        <td>像素数超过约 1 亿</td>
+        <td>先降采样或裁切；消息里会给出实际宽高与上限</td>
+        </tr>
+        <tr>
+        <td>加载项目失败</td>
+        <td><code>.ivsession</code> / <code>.ivpkg</code> 损坏或版本不受支持</td>
+        <td>用自动保存恢复，或回到原图 + ROI JSON</td>
+        </tr>
+        <tr>
+        <td>恢复自动保存失败</td>
+        <td>快照文件不完整，或被其他进程改写</td>
+        <td>保留现场并检查磁盘，必要时把快照交给维护者</td>
+        </tr>
+        <tr>
+        <td>保存会话失败</td>
+        <td>目标目录只读、磁盘满、底图在加载后被替换</td>
+        <td>换可写目录；底图被替换时先恢复原文件，提示会说明已有文件未被覆盖</td>
+        </tr>
+        <tr>
+        <td>保存 ROI 失败</td>
+        <td>路径无写权限</td>
+        <td>换目录后重试</td>
+        </tr>
+        <tr>
+        <td>加载 ROI 失败</td>
+        <td>JSON 格式无效，或不是本工具的 ROI 文件</td>
+        <td>确认文件来自「保存 ROI...」，不要手工改结构</td>
+        </tr>
+        <tr>
+        <td>保存配方失败</td>
+        <td>目标路径不可写，或配方引用了无效基准点</td>
+        <td>换目录；先补全两个基准点再保存</td>
+        </tr>
+        <tr>
+        <td>载入配方失败</td>
+        <td>配方损坏，或版本比当前更旧</td>
+        <td>载入未完成时现有测量结果保持原状，可重新选文件</td>
+        </tr>
+        <tr>
+        <td>导出分析失败</td>
+        <td>CSV 目标被 Excel 等程序占用</td>
+        <td>关闭占用程序后重试</td>
+        </tr>
+        <tr>
+        <td>导出 PNG 失败</td>
+        <td>目标被占用或路径无效</td>
+        <td>换路径；确认当前有可见文档</td>
+        </tr>
+        <tr>
+        <td>导出项目包失败</td>
+        <td>图像资产缺失，或目标盘空间不足</td>
+        <td>先确认底图可访问，再换目录导出</td>
+        </tr>
+        <tr>
+        <td>操作失败</td>
+        <td>菜单命令执行中抛异常，消息里带命令名</td>
+        <td>看诊断信息或 Trace 日志；重复出现时记录复现步骤</td>
+        </tr>
+        </tbody>
+        </table>
+        </div>
+        <p><strong>两条特殊提示。</strong> 保存会话时若磁盘上的底图在加载后被替换，会明确提示"已有保存文件未被覆盖"；两个视图共用一个会话文件时，会提示为当前视图另选文件名。这两句只出现在"保存会话失败"之后，不是独立错误类型。</p>
+    </section>
+    <section id="appendix-print">
+      <h2><a class="anchor" href="#appendix-print" aria-label="链接到本节">#</a>附录 D：打印与另存 PDF</h2>
+        <p>网页版每个章节和小节旁都有 <strong>复制链接</strong>，可以直接定位到该标题。浏览器若不允许自动复制，会显示可手动复制的地址。本地文件链接只在能访问该文件的地方可用。浏览器允许本地存储时，重新打开手册后可在页首点 <strong>继续阅读</strong>，返回上次读到的章节或小节。</p>
+        <p><strong>把手册发给别人。</strong> 分享离线 ZIP，对方解压后打开 <code>START.html</code>，就能阅读网页版和 PDF、查看截图和参考资料。练习会话和底图也在包里，按入口页的说明在 Demo 中打开即可。PDF 可点击页内目录；跨文档的参考资料请从网页版打开。</p>
+        <p>手册为打印做了适配：目录单独排在正文之前，表格跨页重复表头，图片不跨页，隐藏浮动按钮。浏览器按 <kbd>Ctrl</kbd>+<kbd>P</kbd> 后建议选 A4、使用默认页边距、勾选“背景图形”以保留表格底色，并关闭浏览器的页眉页脚以免打印本地文件路径。</p>
+        <p>需要一份现成的 PDF 时，仓库里有 <code>docs/usage.pdf</code>，它与 HTML 同源，由 <code>build/docs-pdf.ps1</code> 调用本机 Edge 的 headless 打印生成。换了手册内容后重新跑一次脚本即可，它会覆盖旧文件。</p>
+    </section>
+    <section id="integration">
+      <h2><a class="anchor" href="#integration" aria-label="链接到本节">#</a>宿主集成</h2>
+        <p>把控件嵌进自己的 WPF 程序、注册依赖注入、管理 runtime 生命周期与释放责任，见<a href="integration.md">集成指南</a>。</p>
+    </section>
+      <nav class="chapter-index" aria-label="全部章节">
+        <p class="chapter-index-title">全部章节</p>
+        <ol>
+          <li><a href="#start">启动与界面</a></li>
+          <li><a href="#image">打开图像与浏览</a></li>
+          <li><a href="#roi">绘制与编辑 ROI</a></li>
+          <li><a href="#quick-measure">第一次测量：从标定到 CSV</a></li>
+          <li><a href="#calibration">标定与公差</a></li>
+          <li><a href="#analysis">分析与结果导出</a></li>
+          <li><a href="#volume">体数据与切片浏览</a></li>
+          <li><a href="#files">保存、恢复与配方</a></li>
+          <li><a href="#shortcuts">快捷键速查</a></li>
+          <li><a href="#faq">常见问题</a></li>
+          <li><a href="#limits">已知限制与边界</a></li>
+          <li><a href="#appendix-tools">附录 A：工具清单</a></li>
+          <li><a href="#appendix-menu">附录 B：菜单结构速查</a></li>
+          <li><a href="#appendix-errors">附录 C：错误消息对照</a></li>
+          <li><a href="#appendix-print">附录 D：打印与另存 PDF</a></li>
+          <li><a href="#integration">宿主集成</a></li>
+        </ol>
+      </nav>
+    </main>
+  </div>
+
+  <a class="to-top" href="#main" aria-label="回到顶部">回到顶部</a>
+
+  <p class="search-status" id="copy-status" role="status"></p>
+  <dialog class="copy-dialog" id="copy-dialog" aria-labelledby="copy-link-label">
+    <form method="dialog">
+      <label for="copy-url" id="copy-link-label">手动复制本节链接</label>
+      <input type="text" id="copy-url" readonly autofocus>
+      <p id="copy-local-note" hidden>这是本机文件地址；其他读者需要能访问同一份手册。</p>
+      <button type="submit">关闭</button>
+    </form>
+  </dialog>
+
+  <footer class="footer">ImageViewer 使用手册 · 由 docs/usage.md 生成 · 可离线打开与打印</footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var toc = document.getElementById('manual-toc');
+      var chapterList = document.getElementById('toc-chapters');
+      var tocToggle = toc.querySelector('.toc-toggle');
+      var narrow = window.matchMedia('(max-width: 900px)');
+      var links = Array.prototype.slice.call(chapterList.querySelectorAll('a[href^="#"]'));
+      var byId = {};
+      links.forEach(function (link) { byId[link.getAttribute('href').slice(1)] = link; });
+      var sections = Array.prototype.slice.call(document.querySelectorAll('main > section[id]'));
+
+      function showDirectory(open) {
+        tocToggle.setAttribute('aria-expanded', String(open));
+        tocToggle.textContent = open ? '收起目录' : '展开目录';
+      }
+      tocToggle.hidden = false;
+      tocToggle.addEventListener('click', function () {
+        showDirectory(tocToggle.getAttribute('aria-expanded') !== 'true');
+      });
+
+      // ---- 阅读设置：字号与深浅色（存 localStorage，file:// 下可能被禁用，故都包了 try） ----
+      function readStore(key) {
+        try { return window.localStorage.getItem(key); } catch (error) { return null; }
+      }
+      function writeStore(key, value) {
+        try { window.localStorage.setItem(key, value); } catch (error) { /* 忽略 */ }
+      }
+
+      var scale = parseFloat(readStore('iv-scale') || '1');
+      if (isNaN(scale)) { scale = 1; }
+      function applyScale(value) {
+        scale = Math.min(1.3, Math.max(0.85, Math.round(value * 100) / 100));
+        root.style.setProperty('--scale', String(scale));
+        writeStore('iv-scale', String(scale));
+      }
+      applyScale(scale);
+
+      Array.prototype.forEach.call(document.querySelectorAll('[data-action="font-smaller"]'), function (button) {
+        button.addEventListener('click', function () { applyScale(scale - 0.05); });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-action="font-larger"]'), function (button) {
+        button.addEventListener('click', function () { applyScale(scale + 0.05); });
+      });
+
+      var themeButton = document.querySelector('[data-action="toggle-theme"]');
+      var storedTheme = readStore('iv-theme');
+      if (storedTheme === 'dark' || storedTheme === 'light') {
+        root.setAttribute('data-theme', storedTheme);
+      }
+      function effectiveDark() {
+        var attr = root.getAttribute('data-theme');
+        if (attr === 'dark') { return true; }
+        if (attr === 'light') { return false; }
+        return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      }
+      function syncThemeButton() {
+        if (!themeButton) { return; }
+        var dark = effectiveDark();
+        themeButton.textContent = dark ? '☀' : '☾';
+        themeButton.setAttribute('aria-label', dark ? '切换到浅色' : '切换到深色');
+      }
+      syncThemeButton();
+      if (themeButton) {
+        themeButton.addEventListener('click', function () {
+          var next = effectiveDark() ? 'light' : 'dark';
+          root.setAttribute('data-theme', next);
+          writeStore('iv-theme', next);
+          syncThemeButton();
+        });
+      }
+
+      // ---- 目录高亮与上一章/下一章 ----
+      var current = null;
+      var currentIndex = -1;
+
+      function setChapterLink(link, section) {
+        if (section) {
+          link.setAttribute('href', '#' + section.id);
+          link.removeAttribute('aria-disabled');
+        } else {
+          link.removeAttribute('href');
+          link.setAttribute('aria-disabled', 'true');
+        }
+      }
+
+      function updateChapterNav() {
+        var prev = document.getElementById('toc-prev');
+        var next = document.getElementById('toc-next');
+        if (!prev || !next) { return; }
+        setChapterLink(prev, sections[currentIndex - 1]);
+        setChapterLink(next, sections[currentIndex + 1]);
+      }
+
+      function setCurrent(id) {
+        if (!id || id === current) { return; }
+        var index = -1;
+        for (var i = 0; i < sections.length; i++) {
+          if (sections[i].id === id) { index = i; break; }
+        }
+        if (index < 0) { return; }
+        current = id;
+        currentIndex = index;
+        links.forEach(function (link) { link.removeAttribute('aria-current'); });
+        var active = byId[id];
+        if (active) {
+          active.setAttribute('aria-current', 'true');
+          // 只滚动桌面的目录列表，不能把窄屏上的正文拉回页首。
+          if (!narrow.matches && !toc.classList.contains('is-searching') && !toc.contains(document.activeElement)) {
+            var item = active.getBoundingClientRect();
+            var list = chapterList.getBoundingClientRect();
+            if (item.top < list.top) { chapterList.scrollTop += item.top - list.top; }
+            if (item.bottom > list.bottom) { chapterList.scrollTop += item.bottom - list.bottom; }
+          }
+        }
+        updateChapterNav();
+      }
+
+      if ('IntersectionObserver' in window && sections.length) {
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) { setCurrent(entry.target.id); }
+          });
+        }, { rootMargin: '-84px 0px -68% 0px', threshold: 0 });
+        sections.forEach(function (section) { observer.observe(section); });
+      }
+
+      function syncChapterFromHash() {
+        var target = document.getElementById(window.location.hash.slice(1));
+        var section = target && target.closest('main > section[id]');
+        if (section) { setCurrent(section.id); }
+      }
+      setCurrent(sections[0] && sections[0].id);
+      syncChapterFromHash();
+      window.addEventListener('hashchange', syncChapterFromHash);
+
+      function jumpTo(id) {
+        var target = document.getElementById(id);
+        if (!target) { return; }
+        if (window.location.hash === '#' + id) {
+          target.scrollIntoView();
+        } else {
+          window.location.hash = id;
+        }
+        var heading = target.matches('section') ? target.querySelector('h2') : target;
+        if (heading) {
+          heading.setAttribute('tabindex', '-1');
+          heading.focus({ preventScroll: true });
+        }
+        rememberReading(id);
+      }
+
+      function followJump(event, link, beforeJump) {
+        if (event.defaultPrevented || event.button !== 0 ||
+            event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) { return; }
+        event.preventDefault();
+        if (beforeJump) { beforeJump(); }
+        jumpTo(link.getAttribute('href').slice(1));
+      }
+
+      links.forEach(function (link) {
+        link.addEventListener('click', function (event) {
+          followJump(event, link, function () {
+            if (narrow.matches) { showDirectory(false); }
+          });
+        });
+      });
+
+      // ---- 站内搜索：按最接近的小节分组，优先匹配标题 ----
+      var searchInput = document.getElementById('toc-search');
+      var results = document.getElementById('toc-results');
+      var searchStatus = toc.querySelector('.search-status');
+      var searchIndex = [];
+      var readingHeadings = [];
+      var readingById = Object.create(null);
+
+      function cleanText(text) { return text.replace(/\s+/g, ' ').trim(); }
+
+      sections.forEach(function (section) {
+        var chapter = section.querySelector('h2');
+        var anchor = chapter && chapter.querySelector('.anchor');
+        var chapterTitle = chapter ? cleanText(chapter.textContent.slice(anchor ? anchor.textContent.length : 0)) : section.id;
+        var id = section.id;
+        var title = chapterTitle;
+        Array.prototype.forEach.call(section.querySelectorAll('h2, h3[id], p, li, td, th, figcaption, pre'), function (node) {
+          var text = node === chapter ? chapterTitle : cleanText(node.textContent);
+          if (node.matches('h3[id]')) {
+            id = node.id;
+            title = chapterTitle + ' › ' + text;
+          }
+          if (text) {
+            var isHeading = node.matches('h2, h3');
+            searchIndex.push({
+              id: id, title: title, text: text, normalized: text.toLowerCase(), heading: isHeading
+            });
+            if (isHeading) {
+              var heading = { id: id, title: text, node: node };
+              readingHeadings.push(heading);
+              readingById[id] = heading;
+            }
+          }
+        });
+      });
+
+      // ---- 本机阅读位置：仅显示返回入口，直接打开带锚点的地址仍走浏览器的跳转 ----
+      var resumeLink = document.getElementById('resume-reading');
+      var readingKey = 'iv-manual-reading-anchor-v1';
+      var readingId = readStore(readingKey);
+      var printing = window.matchMedia('print');
+      var readingTimer = null;
+
+      function updateResumeLink() {
+        var heading = readingById[readingId];
+        resumeLink.hidden = !heading;
+        if (!heading) { return; }
+        resumeLink.href = '#' + heading.id;
+        resumeLink.textContent = '继续阅读 · ' + heading.title;
+      }
+
+      function rememberReading(id) {
+        if (printing.matches || id === readingId || !readingById[id]) { return; }
+        readingId = id;
+        writeStore(readingKey, id);
+        updateResumeLink();
+      }
+
+      function recordVisibleHeading() {
+        if (printing.matches || !readingHeadings.length ||
+            readingHeadings[0].node.getBoundingClientRect().top > 0) { return; }
+        var readingLine = Math.min(108, window.innerHeight / 4);
+        for (var i = readingHeadings.length - 1; i >= 0; i--) {
+          var entry = readingHeadings[i];
+          var top = entry.node.getBoundingClientRect().top;
+          if (top <= readingLine) {
+            // 打开分享链接时，原生锚点定位本身不覆盖上次的位置。
+            if (top < 0 || window.location.hash !== '#' + entry.id) { rememberReading(entry.id); }
+            return;
+          }
+        }
+      }
+
+      updateResumeLink();
+      resumeLink.addEventListener('click', function (event) { followJump(event, resumeLink); });
+      window.addEventListener('scroll', function () {
+        window.clearTimeout(readingTimer);
+        readingTimer = window.setTimeout(function () {
+          readingTimer = null;
+          recordVisibleHeading();
+        }, 180);
+      }, { passive: true });
+      window.addEventListener('pagehide', function () {
+        if (readingTimer === null) { return; }
+        window.clearTimeout(readingTimer);
+        readingTimer = null;
+        recordVisibleHeading();
+      });
+
+      // ---- 复制小节链接：浏览器禁止剪贴板时提供可选择的地址 ----
+      var copyDialog = document.getElementById('copy-dialog');
+      var copyInput = document.getElementById('copy-url');
+      var copyLocalNote = document.getElementById('copy-local-note');
+      var copyStatus = document.getElementById('copy-status');
+
+      readingHeadings.forEach(function (entry) {
+        var button = document.createElement('button');
+        button.className = 'copy-link';
+        button.type = 'button';
+        button.textContent = '复制链接';
+        button.setAttribute('aria-label', '复制「' + entry.title + '」的链接');
+        entry.node.setAttribute('aria-label', entry.title);
+        entry.node.appendChild(button);
+        var feedbackTimer;
+        button.addEventListener('click', async function () {
+          var url = new URL(window.location.href);
+          url.hash = entry.id;
+          try {
+            await navigator.clipboard.writeText(url.href);
+            button.textContent = '已复制';
+            copyStatus.textContent = '已复制「' + entry.title + '」的链接';
+            window.clearTimeout(feedbackTimer);
+            feedbackTimer = window.setTimeout(function () { button.textContent = '复制链接'; }, 1500);
+          } catch (error) {
+            copyInput.value = url.href;
+            copyLocalNote.hidden = url.protocol !== 'file:';
+            if (!copyDialog.open) { copyDialog.showModal(); }
+            copyInput.select();
+          }
+        });
+      });
+
+      function clearResults() {
+        results.textContent = '';
+        results.hidden = true;
+        searchStatus.textContent = '';
+        toc.classList.remove('is-searching');
+      }
+
+      function resetSearch() {
+        searchInput.value = '';
+        clearResults();
+      }
+
+      function buildResult(match, length) {
+        var item = match.item;
+        var position = match.position;
+        var link = document.createElement('a');
+        link.href = '#' + item.id;
+        var chapter = document.createElement('span');
+        chapter.className = 'toc-result-chapter';
+        chapter.textContent = item.title;
+        link.appendChild(chapter);
+        var snippet = document.createElement('span');
+        snippet.className = 'toc-result-text';
+        var start = Math.max(0, position - 16);
+        var end = Math.min(item.text.length, position + length + 28);
+        if (start > 0) { snippet.appendChild(document.createTextNode('…')); }
+        snippet.appendChild(document.createTextNode(item.text.slice(start, position)));
+        var mark = document.createElement('mark');
+        mark.textContent = item.text.slice(position, position + length);
+        snippet.appendChild(mark);
+        snippet.appendChild(document.createTextNode(item.text.slice(position + length, end)));
+        if (end < item.text.length) { snippet.appendChild(document.createTextNode('…')); }
+        link.appendChild(snippet);
+        link.addEventListener('click', function (event) {
+          followJump(event, link, function () {
+            resetSearch();
+            if (narrow.matches) { showDirectory(false); }
+          });
+        });
+        return link;
+      }
+
+      function showResults(query) {
+        var needle = query.toLowerCase();
+        var best = Object.create(null);
+        results.textContent = '';
+        searchIndex.forEach(function (item, index) {
+          var position = item.normalized.indexOf(needle);
+          if (position < 0) { return; }
+          var rank = item.heading ? (item.normalized === needle ? 3 : 2) : 1;
+          if (!best[item.id] || rank > best[item.id].rank) {
+            best[item.id] = { item: item, index: index, position: position, rank: rank };
+          }
+        });
+        var matches = Object.keys(best).map(function (id) { return best[id]; });
+        matches.sort(function (a, b) { return b.rank - a.rank || a.index - b.index; });
+        var limit = 12;
+        var summary = matches.length ? '找到 ' + matches.length + ' 处匹配' : '没有匹配的内容';
+        if (matches.length > limit) { summary += '，显示前 ' + limit + ' 处'; }
+        var message = document.createElement('p');
+        message.className = 'toc-empty';
+        message.setAttribute('aria-hidden', 'true');
+        message.textContent = summary;
+        results.appendChild(message);
+        matches.slice(0, limit).forEach(function (match) {
+          results.appendChild(buildResult(match, needle.length));
+        });
+        results.hidden = false;
+        results.scrollTop = 0;
+        searchStatus.textContent = summary;
+        toc.classList.add('is-searching');
+      }
+
+      function refreshSearch() {
+        var value = cleanText(searchInput.value);
+        if (value) { showResults(value); } else { clearResults(); }
+      }
+      var composing = false;
+      searchInput.parentElement.hidden = false;
+      searchInput.addEventListener('compositionstart', function () { composing = true; });
+      searchInput.addEventListener('compositionend', function () { composing = false; refreshSearch(); });
+      searchInput.addEventListener('input', function (event) {
+        if (!composing && !event.isComposing) { refreshSearch(); }
+      });
+      toc.addEventListener('keydown', function (event) {
+        if (composing || event.isComposing || event.keyCode === 229) { return; }
+        if (event.key === 'Escape' && !results.hidden) {
+          event.preventDefault();
+          resetSearch();
+          searchInput.focus();
+        } else if (event.target === searchInput && (event.key === 'Enter' || event.key === 'ArrowDown')) {
+          var first = results.querySelector('a');
+          if (!first) { return; }
+          event.preventDefault();
+          if (event.key === 'Enter') { first.click(); } else { first.focus(); }
+        }
+      });
+
+      // ---- 回顶按钮与表格横向溢出提示 ----
+      var toTop = document.querySelector('.to-top');
+      function updateReturnLink() {
+        var label = narrow.matches ? '目录与搜索' : '回到正文顶部';
+        toTop.setAttribute('href', narrow.matches ? '#manual-toc' : '#main');
+        toTop.textContent = label;
+        toTop.setAttribute('aria-label', label);
+      }
+      updateReturnLink();
+      narrow.addEventListener('change', updateReturnLink);
+      function onScroll() {
+        if (!toTop) { return; }
+        toTop.classList.toggle('is-visible', window.scrollY > 640);
+      }
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+
+      var scrollers = Array.prototype.slice.call(document.querySelectorAll('.table-scroll'));
+      function updateScroller(box) {
+        var overflow = box.scrollWidth - box.clientWidth;
+        var atEnd = overflow <= 4 || box.scrollLeft >= overflow - 4;
+        box.classList.toggle('is-scrollable', overflow > 4);
+        box.classList.toggle('is-at-end', atEnd);
+      }
+      scrollers.forEach(function (box) {
+        updateScroller(box);
+        box.addEventListener('scroll', function () { updateScroller(box); }, { passive: true });
+      });
+      window.addEventListener('resize', function () {
+        scrollers.forEach(updateScroller);
+      }, { passive: true });
+
+      // 跨文件相对链接在打印时会被 Chromium 写成本机绝对路径。
+      // 纸质与 PDF 仅保留页内目录和可独立访问的网页链接。
+      var printReferences = [];
+      window.addEventListener('beforeprint', function () {
+        document.querySelectorAll('a[href]').forEach(function (link) {
+          var href = link.getAttribute('href');
+          if (!href || href.charAt(0) === '#' || /^(?:https?:)?\/\//i.test(href)) { return; }
+          printReferences.push({ link: link, href: href });
+          link.removeAttribute('href');
+          link.setAttribute('data-print-reference', '');
+        });
+      });
+      window.addEventListener('afterprint', function () {
+        printReferences.forEach(function (reference) {
+          reference.link.setAttribute('href', reference.href);
+          reference.link.removeAttribute('data-print-reference');
+        });
+        printReferences = [];
+      });
+    })();
+  </script>
+</body>
+</html>
