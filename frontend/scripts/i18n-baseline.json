@@ -1,0 +1,748 @@
+{
+  "generatedAt": "2026-11-26",
+  "messageKeys": 636,
+  "inlineBilingual": 151,
+  "hardcoded": 4163,
+  "files": [
+    {
+      "file": "src/components/NodeConfigurationDialogView.tsx",
+      "hardcoded": 172,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/PluginPackagePanel.tsx",
+      "hardcoded": 160,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/JobPanel.tsx",
+      "hardcoded": 155,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/NodeExecutionResult.tsx",
+      "hardcoded": 133,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CalibrationIntrinsicsWizard.tsx",
+      "hardcoded": 117,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CameraMediaTab.tsx",
+      "hardcoded": 115,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CalibrationHandEye3DWizard.tsx",
+      "hardcoded": 109,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/SecurityAdminPanel.tsx",
+      "hardcoded": 106,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ScriptEditor.tsx",
+      "hardcoded": 103,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CameraPanel.tsx",
+      "hardcoded": 98,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CalibrationHandEyeWizard.tsx",
+      "hardcoded": 97,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/appEditorMenus.tsx",
+      "hardcoded": 92,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/DatasetValidationPanel.tsx",
+      "hardcoded": 91,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CameraDiagnosticsTab.tsx",
+      "hardcoded": 81,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/LocalParallelRuntimes.tsx",
+      "hardcoded": 80,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/TracePanel.tsx",
+      "hardcoded": 74,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ProductionStations.tsx",
+      "hardcoded": 73,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/DevicePanel.tsx",
+      "hardcoded": 72,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ModelAssetPanel.tsx",
+      "hardcoded": 66,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/RobotPanel.tsx",
+      "hardcoded": 64,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ParameterTuningPanel.tsx",
+      "hardcoded": 60,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CalibrationPanel.tsx",
+      "hardcoded": 59,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/PropertyPanel.tsx",
+      "hardcoded": 56,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ProductionRecipeRollouts.tsx",
+      "hardcoded": 50,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/toolboxModel.ts",
+      "hardcoded": 50,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/InvestigationPanel.tsx",
+      "hardcoded": 49,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/nodeConfigurationState.ts",
+      "hardcoded": 48,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useRunController.ts",
+      "hardcoded": 48,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/scriptSignature.ts",
+      "hardcoded": 47,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/WorkflowModulePanel.tsx",
+      "hardcoded": 46,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CaliperEdgeDiagnosticsPanel.tsx",
+      "hardcoded": 45,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/HardwareProvenancePanel.tsx",
+      "hardcoded": 44,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CameraParametersTab.tsx",
+      "hardcoded": 42,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/DiagnosticsPanel.tsx",
+      "hardcoded": 42,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ReplayDebuggerPanel.tsx",
+      "hardcoded": 41,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CaliperCircleDiagnosticsPanel.tsx",
+      "hardcoded": 40,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/RunPanel.tsx",
+      "hardcoded": 40,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/StationSetupWizard.tsx",
+      "hardcoded": 38,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useEditorGraphOperations.ts",
+      "hardcoded": 37,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ImageViewerToolbar.tsx",
+      "hardcoded": 33,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ModelPackagePanel.tsx",
+      "hardcoded": 31,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/security.tsx",
+      "hardcoded": 31,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/MatchingAutoTuneReport.tsx",
+      "hardcoded": 30,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/TraceAnalysisPanel.tsx",
+      "hardcoded": 30,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CaliperCircleQuickSettings.tsx",
+      "hardcoded": 28,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/NodeConfigurationDialog.tsx",
+      "hardcoded": 28,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/StoragePanel.tsx",
+      "hardcoded": 28,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CameraSyncTab.tsx",
+      "hardcoded": 27,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/appEditorShared.tsx",
+      "hardcoded": 26,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CaliperEdgeQuickSettings.tsx",
+      "hardcoded": 26,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ShortcutHelpModal.tsx",
+      "hardcoded": 25,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/MatchingAutoTunePanel.tsx",
+      "hardcoded": 24,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/OperatorDashboard.tsx",
+      "hardcoded": 24,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/RecipePublicationDialog.tsx",
+      "hardcoded": 24,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/WorkflowImagePreview.tsx",
+      "hardcoded": 23,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/EditorShell.tsx",
+      "hardcoded": 23,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/TemplateAssetTable.tsx",
+      "hardcoded": 22,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/i18n/catalog.ts",
+      "hardcoded": 21,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/EditorPanels.tsx",
+      "hardcoded": 20,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/MetrologyObjectEditor.tsx",
+      "hardcoded": 20,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/RunObservabilityPanel.tsx",
+      "hardcoded": 20,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/TemplateAssetPicker.tsx",
+      "hardcoded": 20,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/useShapeMatchWorkspace.ts",
+      "hardcoded": 19,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/VisionNode.tsx",
+      "hardcoded": 19,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/stationConfigDraft.ts",
+      "hardcoded": 18,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useWorkflowInspection.ts",
+      "hardcoded": 18,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CameraAcquisitionTab.tsx",
+      "hardcoded": 17,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/productionDemoData.ts",
+      "hardcoded": 17,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ImageViewerDrawingHint.tsx",
+      "hardcoded": 16,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/nodeConfigurationMeasurementNotices.ts",
+      "hardcoded": 16,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/TemplateGalleryModal.tsx",
+      "hardcoded": 16,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/validation.ts",
+      "hardcoded": 16,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/AboutPanel.tsx",
+      "hardcoded": 15,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/FrameTreePanel.tsx",
+      "hardcoded": 15,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/OperatorLayoutDialog.tsx",
+      "hardcoded": 15,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/metrologyObjects.ts",
+      "hardcoded": 15,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useWorkflowSave.ts",
+      "hardcoded": 15,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CameraRegistrationTab.tsx",
+      "hardcoded": 14,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/OperatorInspectionPreview.tsx",
+      "hardcoded": 14,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useRunImages.ts",
+      "hardcoded": 14,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/WorkflowPickerModal.tsx",
+      "hardcoded": 13,
+      "inlineBilingual": 6
+    },
+    {
+      "file": "src/caliperCircleDiagnostics.ts",
+      "hardcoded": 12,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CommandPalette.tsx",
+      "hardcoded": 12,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/useNodeConfigurationDialogModel.ts",
+      "hardcoded": 12,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useProductionMonitor.ts",
+      "hardcoded": 12,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ErrorBoundary.tsx",
+      "hardcoded": 11,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/caliperEdgeDiagnostics.ts",
+      "hardcoded": 10,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/ProductionShell.tsx",
+      "hardcoded": 10,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useEditorWorkflowDocument.ts",
+      "hardcoded": 10,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CanvasAnnotationNodes.tsx",
+      "hardcoded": 9,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/EditorOverlays.tsx",
+      "hardcoded": 9,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ExecutionStatus.tsx",
+      "hardcoded": 9,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/OnboardingCard.tsx",
+      "hardcoded": 9,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/OperatorAlarmQueue.tsx",
+      "hardcoded": 9,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/SaveAsWorkflowModal.tsx",
+      "hardcoded": 9,
+      "inlineBilingual": 3
+    },
+    {
+      "file": "src/parameterValidation.ts",
+      "hardcoded": 9,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/traceQuery.ts",
+      "hardcoded": 9,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useProductionActions.ts",
+      "hardcoded": 9,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/canvasAnnotations.ts",
+      "hardcoded": 8,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/nodeConfigurationMeasurementConflicts.ts",
+      "hardcoded": 8,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/smartBranching.ts",
+      "hardcoded": 8,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useTuningCandidates.ts",
+      "hardcoded": 8,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/MatrixEditor.tsx",
+      "hardcoded": 7,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useTuningData.ts",
+      "hardcoded": 7,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useWorkflowPicker.ts",
+      "hardcoded": 7,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CanvasEditingToolbar.tsx",
+      "hardcoded": 6,
+      "inlineBilingual": 22
+    },
+    {
+      "file": "src/components/EditorBottomDock.tsx",
+      "hardcoded": 6,
+      "inlineBilingual": 8
+    },
+    {
+      "file": "src/components/InstanceSegmentationPackagePicker.tsx",
+      "hardcoded": 6,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/switchPorts.ts",
+      "hardcoded": 6,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ImageViewerReadout.tsx",
+      "hardcoded": 5,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/nodeMaturity.ts",
+      "hardcoded": 5,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useTraceQuery.ts",
+      "hardcoded": 5,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useWorkflowChanges.ts",
+      "hardcoded": 5,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CaliperSamplingField.tsx",
+      "hardcoded": 4,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CanvasMiniMap.tsx",
+      "hardcoded": 4,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/imageViewerUtils.tsx",
+      "hardcoded": 4,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useTuningPreview.ts",
+      "hardcoded": 4,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useWorkflowImport.ts",
+      "hardcoded": 4,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ImageViewerStage.tsx",
+      "hardcoded": 3,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/JsonTextarea.tsx",
+      "hardcoded": 3,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/nodeConfigurationGeometry.ts",
+      "hardcoded": 3,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/SplitHandle.tsx",
+      "hardcoded": 3,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/useNodeMeasurementGeometry.ts",
+      "hardcoded": 3,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/modelAssets.ts",
+      "hardcoded": 3,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useCatalogState.ts",
+      "hardcoded": 3,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/DataErrorAlert.tsx",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/EditorCanvasArea.tsx",
+      "hardcoded": 2,
+      "inlineBilingual": 12
+    },
+    {
+      "file": "src/components/NodeDescription.tsx",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/PanelTable.tsx",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/TemplateFlowPreview.tsx",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/useImageViewerInteractions.ts",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/documentSync.ts",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/roiReference.ts",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useEditorShortcuts.ts",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/workflowDocument.ts",
+      "hardcoded": 2,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/apiErrors.ts",
+      "hardcoded": 1,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/App.tsx",
+      "hardcoded": 1,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/cameraPanelShared.ts",
+      "hardcoded": 1,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/EditorHeader.tsx",
+      "hardcoded": 1,
+      "inlineBilingual": 28
+    },
+    {
+      "file": "src/components/handEyeWizardShared.ts",
+      "hardcoded": 1,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/ImageViewer.tsx",
+      "hardcoded": 1,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/SpcChart.tsx",
+      "hardcoded": 1,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/editorContexts.tsx",
+      "hardcoded": 1,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/useProductionPoll.ts",
+      "hardcoded": 1,
+      "inlineBilingual": 0
+    },
+    {
+      "file": "src/components/CanvasDraftRecovery.tsx",
+      "hardcoded": 0,
+      "inlineBilingual": 4
+    },
+    {
+      "file": "src/components/CanvasLayoutToolbar.tsx",
+      "hardcoded": 0,
+      "inlineBilingual": 7
+    },
+    {
+      "file": "src/components/SwitchCaseEditor.tsx",
+      "hardcoded": 0,
+      "inlineBilingual": 22
+    },
+    {
+      "file": "src/components/Toolbox.tsx",
+      "hardcoded": 0,
+      "inlineBilingual": 39
+    }
+  ]
+}

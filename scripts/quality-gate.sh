@@ -137,6 +137,7 @@ if [[ "$RUN_FRONTEND" -eq 1 ]]; then
     npm audit --audit-level=high
     npm run lint
     npm run check:theme
+    npm run check:i18n
     npm run test:coverage
     npm run build
     python3 "$ROOT/scripts/check-bundle-budget.py"

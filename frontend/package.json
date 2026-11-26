@@ -10,6 +10,7 @@
     "test": "vitest run",
     "lint": "oxlint src --max-warnings 0",
     "check:theme": "node scripts/check-theme-tokens.mjs",
+    "check:i18n": "node scripts/check-i18n-coverage.mjs",
     "lint:fix": "oxlint src --fix",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",

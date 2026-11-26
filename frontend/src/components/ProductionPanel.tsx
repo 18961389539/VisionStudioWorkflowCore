@@ -4,7 +4,8 @@ import {
   Tabs, Tag, Typography
 } from 'antd';
 import type { AlarmRecord, ProductionRuntimeStatus } from '../types';
-import { localizeStatus } from '../i18n';
+import { localizeStatus, type MessageKey, type MessageParams } from '../i18n';
+import { useI18n } from '../i18n/provider';
 import { isProductionConfig, isProductionStatus } from '../productionConfig';
 import { ALARM_PAGE_SIZE, useProductionMonitor, type DeviceActionPendingState } from '../useProductionMonitor';
 import { useProductionConfigDraft, type ProductionConfigMerge } from '../useProductionConfigDraft';
@@ -30,18 +31,39 @@ type Props = { open: boolean; onClose: () => void; embedded?: boolean; runtimeOn
   /** 车间大屏形态：只渲染操作员工作台，隐藏标签栏与工程师入口（`?view=operator&kiosk=1`）。 */
   kiosk?: boolean };
 
-const severityLabels: Record<string, string> = { Critical: '严重', Error: '错误', Warning: '警告', Info: '信息' };
-const maxStopTimeoutMs = 60_000;
-const configFieldLabels: Record<string, string> = {
-  jobId: '生产作业', autoStart: '自动启动', cycleDelayMs: '周期延迟', maxCycleMs: '单周期超时',
-  maxConsecutiveFailures: '连续失败上限', autoRecover: '自动恢复', recoveryDelayMs: '恢复等待',
-  maxRecoveryAttempts: '自动恢复次数', stopTimeoutMs: '停止超时', ptpDriftGuardEnabled: 'PTP 漂移保护',
-  synchronizationHealthGuardEnabled: '同步健康保护',
-};
+type Translate = (key: MessageKey, params?: MessageParams) => string;
 
-function displayConfigValue(value: unknown): string {
+const severityLabelKeys = {
+  Critical: 'production.severity.critical',
+  Error: 'production.severity.error',
+  Warning: 'production.severity.warning',
+  Info: 'production.severity.info'
+} as const satisfies Record<string, MessageKey>;
+
+const maxStopTimeoutMs = 60_000;
+const configFieldLabelKeys = {
+  jobId: 'production.configField.jobId',
+  autoStart: 'production.configField.autoStart',
+  cycleDelayMs: 'production.configField.cycleDelayMs',
+  maxCycleMs: 'production.configField.maxCycleMs',
+  maxConsecutiveFailures: 'production.configField.maxConsecutiveFailures',
+  autoRecover: 'production.configField.autoRecover',
+  recoveryDelayMs: 'production.configField.recoveryDelayMs',
+  maxRecoveryAttempts: 'production.configField.maxRecoveryAttempts',
+  stopTimeoutMs: 'production.configField.stopTimeoutMs',
+  ptpDriftGuardEnabled: 'production.configField.ptpDriftGuardEnabled',
+  synchronizationHealthGuardEnabled: 'production.configField.synchronizationHealthGuardEnabled'
+} as const satisfies Record<string, MessageKey>;
+
+/** 配置字段可能来自服务端新增字段：未登记的一律回落到原始字段名，不隐藏信息。 */
+function configFieldLabel(field: string, t: Translate): string {
+  const key = (configFieldLabelKeys as Record<string, MessageKey | undefined>)[field];
+  return key ? t(key) : field;
+}
+
+function displayConfigValue(value: unknown, t: Translate): string {
   if (value == null) return '—';
-  if (typeof value === 'boolean') return value ? '启用' : '关闭';
+  if (typeof value === 'boolean') return value ? t('production.value.enabled') : t('production.value.disabled');
   return String(value);
 }
 
@@ -50,31 +72,32 @@ function ProductionConfigConflict({ merge, disabled, onStale }: {
   disabled: boolean;
   onStale: () => void;
 }) {
+  const { t } = useI18n();
   const [choices, setChoices] = useState<Parameters<ProductionConfigMerge['apply']>[0]>({});
   const overlapping = merge.fields.filter(({ source }) => source === 'choice');
-  return <Alert type="warning" showIcon title="服务端配置已变更，当前编辑已保留" description={
+  return <Alert type="warning" showIcon title={t('production.merge.title')} description={
     <Space orientation="vertical" align="start">
-      <div>{overlapping.length > 0 ? '请为同时修改的字段选择要保留的值。' : '草稿与服务端修改了不同字段，可以直接合并。'}合并只更新草稿。</div>
+      <div>{overlapping.length > 0 ? t('production.merge.choiceRequired') : t('production.merge.disjoint')}{t('production.merge.onlyDraft')}</div>
       <details open={overlapping.length > 0}>
-        <summary>比较配置差异</summary>
+        <summary>{t('production.merge.compare')}</summary>
         <ul>{merge.fields.map(({ field, draft, latest, source }) => {
-          const label = configFieldLabels[field] ?? field;
+          const label = configFieldLabel(field, t);
           return <li key={field}>
-            <span>{label} · 当前草稿 {displayConfigValue(draft)} · 服务端 {displayConfigValue(latest)}</span>
+            <span>{t('production.merge.fieldDelta', { label, draft: displayConfigValue(draft, t), latest: displayConfigValue(latest, t) })}</span>
             {source === 'choice' && <Radio.Group
-              aria-label={`${label}合并方式`}
+              aria-label={t('production.merge.aria', { label })}
               value={choices[field]} disabled={disabled}
               onChange={(event) => setChoices((previous) => ({ ...previous, [field]: event.target.value }))}
             >
-              <Radio value="draft">保留草稿值</Radio>
-              <Radio value="remote">使用服务端值</Radio>
+              <Radio value="draft">{t('production.merge.keepDraft')}</Radio>
+              <Radio value="remote">{t('production.merge.useRemote')}</Radio>
             </Radio.Group>}
           </li>;
         })}</ul>
       </details>
       <Button disabled={disabled || overlapping.some(({ field }) => !choices[field])}
         onClick={() => { if (!merge.apply(choices)) onStale(); }}>
-        合并到最新配置
+        {t('production.merge.apply')}
       </Button>
     </Space>
   } />;
@@ -82,6 +105,9 @@ function ProductionConfigConflict({ merge, disabled, onStale }: {
 
 export default function ProductionPanel({ open, onClose, embedded = false, runtimeOnly = false, initialView, initialJobId, kiosk = false, stationId, headerActions }: Props) {
   const [messageApi, contextHolder] = message.useMessage();
+  const { t, dateLocale: locale } = useI18n();
+  // 列表分隔符随语言切换：中文用顿号，英文用逗号加空格。
+  const listSeparator = locale.startsWith('zh') ? '、' : ', ';
   const { enabled: securityEnabled, user } = useSecurityAccount();
   const canReconcile = !securityEnabled || user?.role === 'Administrator';
   const canEngineer = !securityEnabled || user?.role === 'Engineer' || user?.role === 'Administrator';
@@ -117,26 +143,26 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   }, [open]);
 
   const applyStatus = (data: unknown) => {
-    if (!isProductionStatus(data)) throw new Error('响应未包含有效的生产状态');
+    if (!isProductionStatus(data)) throw new Error(t('production.error.invalidStatus'));
     monitor.acceptStatus(data);
     return data;
   };
   const acceptStatus = (data: unknown) => { applyStatus(data); };
   const stopProduction = () => {
     void call({
-      url: stationActionUrl.stop, action: 'stop', timeoutMs: maxStopTimeoutMs + 10_000, successMessage: '生产已停止',
+      url: stationActionUrl.stop, action: 'stop', timeoutMs: maxStopTimeoutMs + 10_000, successMessage: t('production.toast.stopped'),
       onSuccess: (data) => {
         const next = applyStatus(data);
         if (next.state === 'Stopped' && !next.productionLocked) return;
         return { error: typeof next.lastError === 'string' && next.lastError
-          ? next.lastError : '生产尚未完成停止，请查看运行状态。' };
+          ? next.lastError : t('production.error.stopIncomplete') };
       },
     });
   };
   const startProduction = () => {
     const current = readCurrent();
     if (!statusFresh || !configReady || locked || current.dirty || current.conflict || !current.config?.jobId) return;
-    void call({ url: stationActionUrl.start, body: { jobId: current.config.jobId }, successMessage: '生产已启动', action: 'start', onSuccess: acceptStatus });
+    void call({ url: stationActionUrl.start, body: { jobId: current.config.jobId }, successMessage: t('production.toast.started'), action: 'start', onSuccess: acceptStatus });
   };
   const saveConfig = async () => {
     const current = readCurrent();
@@ -146,10 +172,10 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
     if (!finishSave) return;
     try {
       await call({ url: stationActionUrl.config, method: 'PUT', body: submitted, headers: { 'If-Match': monitor.configRevision },
-        successMessage: '生产配置已保存', action: 'save', onSuccess: (data, response) => {
-        if (!isProductionConfig(data)) throw new Error('响应未包含有效的生产配置');
+        successMessage: t('production.toast.configSaved'), action: 'save', onSuccess: (data, response) => {
+        if (!isProductionConfig(data)) throw new Error(t('production.error.invalidConfig'));
         const revision = response.headers.get('ETag');
-        if (!revision) throw new Error('响应未包含生产配置修订号');
+        if (!revision) throw new Error(t('production.error.missingRevision'));
         acceptSaved(submitted, data);
         monitor.acceptConfig(data, revision);
       } });
@@ -168,17 +194,17 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   const latestActiveMessage = alarmSummary?.latestActiveMessage;
   const jobLabel = activeJob
     ? activeJob.name
-    : selectedJobId ?? '未选择';
+    : selectedJobId ?? t('production.hero.noJob');
   const jobVersion = status?.lockedJobVersion ?? activeJob?.publishedVersion ?? null;
-  const stateDetail = !statusFresh ? '生产状态尚未确认'
-    : locked ? `已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}`
-      : canConfigure ? '当前已停止：可以编辑生产配置' : '当前已停止';
-  const startBlockedReason = !statusFresh ? '生产状态尚未确认，请等待刷新或核对连接。'
-    : locked ? '生产运行中：启动前需要先停止当前运行。'
-      : !configReady ? '生产配置尚未读取成功，暂不能启动。'
-        : conflict ? '服务端配置已变更，请先核对最新配置。'
-          : dirty ? '配置有未保存修改，请先保存配置再启动。'
-            : !config.jobId ? '尚未选择生产作业：请在“生产配置”中选择已发布的配方版本。' : undefined;
+  const stateDetail = !statusFresh ? t('production.state.unconfirmed')
+    : locked ? t('production.state.lockedTo', { jobId: status?.jobId ?? '-', version: status?.lockedJobVersion ?? '-' })
+      : canConfigure ? t('production.state.stoppedEditable') : t('production.state.stopped');
+  const startBlockedReason = !statusFresh ? t('production.blocked.statusUnconfirmed')
+    : locked ? t('production.blocked.locked')
+      : !configReady ? t('production.blocked.configNotReady')
+        : conflict ? t('production.blocked.conflict')
+          : dirty ? t('production.blocked.dirty')
+            : !config.jobId ? t('production.blocked.noJob') : undefined;
 
   useEffect(() => {
     if (!open) {
@@ -197,39 +223,42 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
     <div className="production-hero">
       <div className="production-hero-state">
         {/* 过期时不再用绿/红表示状态：颜色本身会被读成"当前在线"，与"状态未确认"矛盾 */}
-        <Tag color={!status || !statusFresh ? 'default' : stateColor}>{status ? localizeStatus(state) : '读取中'}</Tag>
+        <Tag color={!status || !statusFresh ? 'default' : stateColor}>{status ? localizeStatus(state) : t('production.hero.reading')}</Tag>
         <span className="production-hero-sub">{stateDetail}</span>
       </div>
       <div className="production-hero-metrics">
-        <div className="production-hero-metric"><b title={jobLabel}>{jobLabel}</b><span>作业 / 配方</span></div>
-        <div className="production-hero-metric"><b>{jobVersion != null ? `V${jobVersion}` : '-'}</b><span>{locked ? '运行版本' : '已发布版本'}</span></div>
+        <div className="production-hero-metric"><b title={jobLabel}>{jobLabel}</b><span>{t('production.hero.jobRecipe')}</span></div>
+        <div className="production-hero-metric"><b>{jobVersion != null ? `V${jobVersion}` : '-'}</b><span>{locked ? t('production.hero.runningVersion') : t('production.hero.publishedVersion')}</span></div>
         {activeTab !== 'operator' && <>
-          <div className="production-hero-metric"><b>{status?.cycleCount ?? 0}</b><span>周期数</span></div>
-          <div className="production-hero-metric"><b>{status?.okCount ?? 0}</b><span>合格</span></div>
-          <div className="production-hero-metric"><b>{status?.ngCount ?? 0}</b><span>不合格</span></div>
-          <div className="production-hero-metric"><b>{(status?.lastDurationMs ?? 0).toFixed(1)}</b><span>最近耗时（毫秒）</span></div>
+          <div className="production-hero-metric"><b>{status?.cycleCount ?? 0}</b><span>{t('production.hero.cycles')}</span></div>
+          <div className="production-hero-metric"><b>{status?.okCount ?? 0}</b><span>{t('production.hero.ok')}</span></div>
+          <div className="production-hero-metric"><b>{status?.ngCount ?? 0}</b><span>{t('production.hero.ng')}</span></div>
+          <div className="production-hero-metric"><b>{(status?.lastDurationMs ?? 0).toFixed(1)}</b><span>{t('production.hero.lastDuration')}</span></div>
         </>}
       </div>
       <span className={`production-hero-updated${!statusFresh ? ' stale' : ''}`}>
         {!statusFresh
-          ? `数据已过期 · 最后成功更新 ${lastUpdatedAt?.toLocaleTimeString('zh-CN') ?? '—'}${errors.status ? ` · ${errors.status}` : ''}`
-          : `数据更新于 ${lastUpdatedAt?.toLocaleTimeString('zh-CN') ?? '-'}`}
+          ? t('production.hero.stale', {
+            time: lastUpdatedAt?.toLocaleTimeString(locale) ?? '—',
+            error: errors.status ? ` · ${errors.status}` : ''
+          })
+          : t('production.hero.updatedAt', { time: lastUpdatedAt?.toLocaleTimeString(locale) ?? '-' })}
       </span>
     </div>
   );
 
   const actions = (
     <div className="production-actions">
-      <Button type="primary" disabled={Boolean(startBlockedReason) || busy.size > 0} loading={busy.has('start')} onClick={() => void startProduction()}>启动生产</Button>
+      <Button type="primary" disabled={Boolean(startBlockedReason) || busy.size > 0} loading={busy.has('start')} onClick={() => void startProduction()}>{t('production.action.start')}</Button>
       <Popconfirm
-        title="停止生产运行"
-        description={`当前锁定在 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}。停止后产线不再接受触发，恢复需要重新启动。`}
-        okText="停止" cancelText="取消" okButtonProps={{ danger: true }}
+        title={t('production.action.stopConfirmTitle')}
+        description={t('production.action.stopConfirmBody', { jobId: status?.jobId ?? '-', version: status?.lockedJobVersion ?? '-' })}
+        okText={t('production.action.stop')} cancelText={t('production.action.cancel')} okButtonProps={{ danger: true }}
         onConfirm={stopProduction}
         disabled={!locked && statusFresh}>
-        <Button danger disabled={!locked && statusFresh} loading={busy.has('stop')}>停止</Button>
+        <Button danger disabled={!locked && statusFresh} loading={busy.has('stop')}>{t('production.action.stop')}</Button>
       </Popconfirm>
-      <Button disabled={state !== 'Faulted' || !statusFresh || dirty || !configReady || busy.size > 0} loading={busy.has('recover')} onClick={() => void call({ url: stationActionUrl.recover, successMessage: '已发送恢复请求', action: 'recover', onSuccess: acceptStatus })}>恢复</Button>
+      <Button disabled={state !== 'Faulted' || !statusFresh || dirty || !configReady || busy.size > 0} loading={busy.has('recover')} onClick={() => void call({ url: stationActionUrl.recover, successMessage: t('production.toast.recoverSent'), action: 'recover', onSuccess: acceptStatus })}>{t('production.action.recover')}</Button>
       {startBlockedReason && <span className="production-actions-hint">{startBlockedReason}</span>}
     </div>
   );
@@ -239,16 +268,19 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
       <Alert
         type={locked ? 'warning' : 'info'}
         showIcon
-        title={statusFresh && locked ? `生产已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}` : stateDetail}
-        description={locked ? `工作流：${status?.lockedWorkflowHash ?? '-'} · 依赖：${status?.lockedDependencyManifestHash?.slice(0, 12) ?? '-'}。发布作业或编辑依赖不会热切换当前运行时。` : '启动时会校验并锁定当前已发布作业及运行时依赖清单，直到停止。'}
+        title={statusFresh && locked ? t('production.monitor.lockedTo', { jobId: status?.jobId ?? '-', version: status?.lockedJobVersion ?? '-' }) : stateDetail}
+        description={locked ? t('production.monitor.lockedDescription', {
+          workflow: status?.lockedWorkflowHash ?? '-',
+          dependency: status?.lockedDependencyManifestHash?.slice(0, 12) ?? '-'
+        }) : t('production.monitor.lockHint')}
       />
 
       {status?.ptpGuard?.enabled && (
         <Alert
           type={status.ptpGuard.healthy ? 'success' : 'error'}
           showIcon
-          title={`PTP 生产保护 · ${status.ptpGuard.healthy ? '正常' : '已阻止 / 故障'}`}
-          description={status.ptpGuard.summary ?? `${status.ptpGuard.groups.length} 个受保护的同步组`}
+          title={t('production.monitor.ptpTitle', { state: status.ptpGuard.healthy ? t('production.value.normal') : t('production.value.blockedFault') })}
+          description={status.ptpGuard.summary ?? t('production.monitor.guardGroups', { count: status.ptpGuard.groups.length })}
         />
       )}
 
@@ -256,48 +288,51 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
         <Alert
           type={status.synchronizationGuard.healthy ? 'success' : status.synchronizationGuard.liveRecoverableOnly ? 'warning' : 'error'}
           showIcon
-          title={`同步健康保护 · ${status.synchronizationGuard.healthy ? '正常' : status.synchronizationGuard.liveRecoverableOnly ? '可恢复' : '已降级 / 故障'}`}
-          description={status.synchronizationGuard.summary ?? `${status.synchronizationGuard.groups.length} 个同步相机组`}
+          title={t('production.monitor.syncTitle', {
+            state: status.synchronizationGuard.healthy ? t('production.value.normal')
+              : status.synchronizationGuard.liveRecoverableOnly ? t('production.value.recoverable') : t('production.value.degradedFault')
+          })}
+          description={status.synchronizationGuard.summary ?? t('production.monitor.syncGroups', { count: status.synchronizationGuard.groups.length })}
         />
       )}
 
       <Descriptions bordered size="small" column={4}>
-        <Descriptions.Item label="开始时间">{status?.startedAt ? new Date(status.startedAt).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
-        <Descriptions.Item label="最近周期">{status?.lastCycleAt ? new Date(status.lastCycleAt).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
-        <Descriptions.Item label="错误数">{status?.errorCount ?? 0}</Descriptions.Item>
-        <Descriptions.Item label="看门狗触发次数">{status?.watchdogTrips ?? 0}</Descriptions.Item>
-        <Descriptions.Item label="连续失败次数">{status?.consecutiveFailures ?? 0}</Descriptions.Item>
-        <Descriptions.Item label="最近判定">{localizeStatus(status?.lastDisposition) ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="运行 ID" span={2}>{status?.currentRunId ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="依赖哈希" span={2}>{status?.lockedDependencyManifestHash?.slice(0, 20) ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="最近错误" span={2}>{status?.lastError ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="PTP 保护">
+        <Descriptions.Item label={t('production.desc.startedAt')}>{status?.startedAt ? new Date(status.startedAt).toLocaleString(locale) : '-'}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.lastCycle')}>{status?.lastCycleAt ? new Date(status.lastCycleAt).toLocaleString(locale) : '-'}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.errorCount')}>{status?.errorCount ?? 0}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.watchdogTrips')}>{status?.watchdogTrips ?? 0}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.consecutiveFailures')}>{status?.consecutiveFailures ?? 0}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.lastDisposition')}>{localizeStatus(status?.lastDisposition) ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.runId')} span={2}>{status?.currentRunId ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.dependencyHash')} span={2}>{status?.lockedDependencyManifestHash?.slice(0, 20) ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.lastError')} span={2}>{status?.lastError ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.ptpGuard')}>
           <Tag color={!status?.ptpGuard?.enabled ? 'default' : status.ptpGuard.healthy ? 'green' : 'red'}>
-            {!status?.ptpGuard?.enabled ? '关闭' : status.ptpGuard.healthy ? '正常' : '故障'}
+            {!status?.ptpGuard?.enabled ? t('production.value.disabled') : status.ptpGuard.healthy ? t('production.value.normal') : t('production.value.fault')}
           </Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="PTP 同步组">{status?.ptpGuard?.groups?.length ?? 0}</Descriptions.Item>
-        <Descriptions.Item label="同步保护">
+        <Descriptions.Item label={t('production.desc.ptpGroups')}>{status?.ptpGuard?.groups?.length ?? 0}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.syncGuard')}>
           <Tag color={!status?.synchronizationGuard?.enabled ? 'default' : status.synchronizationGuard.healthy ? 'green' : status.synchronizationGuard.liveRecoverableOnly ? 'orange' : 'red'}>
-            {!status?.synchronizationGuard?.enabled ? '关闭' : status.synchronizationGuard.healthy ? '正常' : status.synchronizationGuard.liveRecoverableOnly ? '可恢复' : '故障'}
+            {!status?.synchronizationGuard?.enabled ? t('production.value.disabled') : status.synchronizationGuard.healthy ? t('production.value.normal') : status.synchronizationGuard.liveRecoverableOnly ? t('production.value.recoverable') : t('production.value.fault')}
           </Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="同步组">{status?.synchronizationGuard?.groups?.length ?? 0}</Descriptions.Item>
+        <Descriptions.Item label={t('production.desc.syncGroups')}>{status?.synchronizationGuard?.groups?.length ?? 0}</Descriptions.Item>
       </Descriptions>
 
       {status?.ptpGuard?.enabled && status.ptpGuard.groups.length > 0 && (
         <>
-          <div className="panel-title">PTP 生产保护</div>
+          <div className="panel-title">{t('production.monitor.ptpSection')}</div>
           <Table
             size="small" rowKey="groupId" pagination={false} dataSource={status.ptpGuard.groups}
             columns={[
-              { title: '分组', dataIndex: 'groupName' },
-              { title: '状态', width: 90, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['ptpGuard']>['groups'][number]) => <Tag color={g.healthy ? 'green' : 'red'}>{g.healthy ? '正常' : '故障'}</Tag> },
-              { title: '样本数', width: 95, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['ptpGuard']>['groups'][number]) => `${g.evidenceRuns}/${g.windowRuns}` },
-              { title: '就绪率', width: 90, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['ptpGuard']>['groups'][number]) => g.ptpReadyRate == null ? '-' : `${(g.ptpReadyRate * 100).toFixed(1)}%` },
-              { title: '偏移绝对值 P95', width: 120, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['ptpGuard']>['groups'][number]) => g.p95MaxAbsOffsetNs == null ? '-' : `${g.p95MaxAbsOffsetNs.toFixed(0)} ns` },
-              { title: '主时钟变更次数', dataIndex: 'masterClockChanges', width: 115 },
-              { title: '原因', dataIndex: 'reason' }
+              { title: t('production.col.group'), dataIndex: 'groupName' },
+              { title: t('production.col.status'), width: 90, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['ptpGuard']>['groups'][number]) => <Tag color={g.healthy ? 'green' : 'red'}>{g.healthy ? t('production.value.normal') : t('production.value.fault')}</Tag> },
+              { title: t('production.col.samples'), width: 95, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['ptpGuard']>['groups'][number]) => `${g.evidenceRuns}/${g.windowRuns}` },
+              { title: t('production.col.readyRate'), width: 90, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['ptpGuard']>['groups'][number]) => g.ptpReadyRate == null ? '-' : `${(g.ptpReadyRate * 100).toFixed(1)}%` },
+              { title: t('production.col.p95Offset'), width: 120, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['ptpGuard']>['groups'][number]) => g.p95MaxAbsOffsetNs == null ? '-' : `${g.p95MaxAbsOffsetNs.toFixed(0)} ns` },
+              { title: t('production.col.masterClockChanges'), dataIndex: 'masterClockChanges', width: 115 },
+              { title: t('production.col.reason'), dataIndex: 'reason' }
             ]}
           />
         </>
@@ -305,21 +340,21 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
 
       {status?.synchronizationGuard?.enabled && status.synchronizationGuard.groups.length > 0 && (
         <>
-          <div className="panel-title">同步健康保护</div>
+          <div className="panel-title">{t('production.monitor.syncSection')}</div>
           <Table
             size="small" rowKey="groupId" pagination={false} dataSource={status.synchronizationGuard.groups}
             columns={[
-              { title: '分组', dataIndex: 'groupName' },
-              { title: '状态', width: 90, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => <Tag color={g.healthy ? 'green' : g.liveReady ? 'orange' : 'red'}>{g.healthy ? '正常' : g.liveReady ? '降级' : '离线'}</Tag> },
-              { title: '完成率', width: 100, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => `${(g.completionRate * 100).toFixed(1)}%` },
-              { title: '超时率', width: 90, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => `${(g.frameTimeoutRate * 100).toFixed(1)}%` },
-              { title: '动作确认缺失', dataIndex: 'actionAckShortfallRuns', width: 90 },
-              { title: '连续偏差次数', dataIndex: 'consecutiveSkewViolations', width: 95 },
-              { title: '传输证据', width: 135, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => g.transport ? <Tag color={g.transport.evidenceMode === 'vendor-native' ? 'green' : g.transport.nativeCameras > 0 ? 'gold' : 'default'}>{g.transport.evidenceMode === 'vendor-native' ? '厂商原生' : '序号估算'}</Tag> : '-' },
-              { title: '原生帧丢失率', width: 100, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => g.transport?.nativeFrameLossRate == null ? '-' : `${(g.transport.nativeFrameLossRate * 100).toFixed(3)}%` },
-              { title: '丢包 / 重发', width: 115, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => g.transport ? `${g.transport.lostPackets + g.transport.failedPackets} / ${g.transport.resendRequests}` : '-' },
-              { title: '序号间隔回退率', width: 100, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => `${(g.estimatedSequenceGapRate * 100).toFixed(2)}%` },
-              { title: '原因', dataIndex: 'reason' }
+              { title: t('production.col.group'), dataIndex: 'groupName' },
+              { title: t('production.col.status'), width: 90, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => <Tag color={g.healthy ? 'green' : g.liveReady ? 'orange' : 'red'}>{g.healthy ? t('production.value.normal') : g.liveReady ? t('production.value.degraded') : t('production.value.offline')}</Tag> },
+              { title: t('production.col.completionRate'), width: 100, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => `${(g.completionRate * 100).toFixed(1)}%` },
+              { title: t('production.col.timeoutRate'), width: 90, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => `${(g.frameTimeoutRate * 100).toFixed(1)}%` },
+              { title: t('production.col.actionAckShortfall'), dataIndex: 'actionAckShortfallRuns', width: 90 },
+              { title: t('production.col.consecutiveSkew'), dataIndex: 'consecutiveSkewViolations', width: 95 },
+              { title: t('production.col.transportEvidence'), width: 135, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => g.transport ? <Tag color={g.transport.evidenceMode === 'vendor-native' ? 'green' : g.transport.nativeCameras > 0 ? 'gold' : 'default'}>{g.transport.evidenceMode === 'vendor-native' ? t('production.transport.vendorNative') : t('production.transport.sequenceEstimate')}</Tag> : '-' },
+              { title: t('production.col.nativeFrameLoss'), width: 100, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => g.transport?.nativeFrameLossRate == null ? '-' : `${(g.transport.nativeFrameLossRate * 100).toFixed(3)}%` },
+              { title: t('production.col.lostResend'), width: 115, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => g.transport ? `${g.transport.lostPackets + g.transport.failedPackets} / ${g.transport.resendRequests}` : '-' },
+              { title: t('production.col.sequenceGapRate'), width: 100, render: (_: unknown, g: NonNullable<ProductionRuntimeStatus['synchronizationGuard']>['groups'][number]) => `${(g.estimatedSequenceGapRate * 100).toFixed(2)}%` },
+              { title: t('production.col.reason'), dataIndex: 'reason' }
             ]}
           />
         </>
@@ -328,42 +363,42 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   );
 
   const acknowledgeAlarm = (id: string) => call({
-    url: alarmEndpoints.ack(id), successMessage: '告警已确认', action: `ack:${id}`,
+    url: alarmEndpoints.ack(id), successMessage: t('production.toast.alarmAcked'), action: `ack:${id}`,
     onSuccess: (data) => {
       const alarm = data as Partial<AlarmRecord> | undefined;
-      if (alarm?.id !== id || alarm.acknowledged !== true) throw new Error('告警确认回执无效');
+      if (alarm?.id !== id || alarm.acknowledged !== true) throw new Error(t('production.error.invalidAckReceipt'));
       monitor.invalidateAlarmReads();
     },
   });
 
   const alarmsTab = (
     <>
-      <Radio.Group aria-label="告警筛选" value={alarmFilter} onChange={(event) => setAlarmFilter(event.target.value)}>
-        <Radio.Button value="all">全部</Radio.Button>
-        <Radio.Button value="active">活动告警</Radio.Button>
-        <Radio.Button value="pending">待确认</Radio.Button>
+      <Radio.Group aria-label={t('production.alarms.filter')} value={alarmFilter} onChange={(event) => setAlarmFilter(event.target.value)}>
+        <Radio.Button value="all">{t('production.alarms.filterAll')}</Radio.Button>
+        <Radio.Button value="active">{t('production.alarms.filterActive')}</Radio.Button>
+        <Radio.Button value="pending">{t('production.alarms.filterPending')}</Radio.Button>
       </Radio.Group>
       <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
-        活动告警全部保留，已恢复告警按时间保留至总数上限（2000 条）。
+        {t('production.alarms.retention')}
       </Typography.Text>
     <Table
       size="small"
       rowKey="id"
       loading={alarmsLoading && alarms.length === 0}
-      locale={{ emptyText: errors.alarms ? '告警记录暂不可用'
-        : alarmFilter === 'pending' ? '没有待确认的活动告警'
-          : alarmFilter === 'active' ? '没有活动告警' : '暂无告警记录' }}
+      locale={{ emptyText: errors.alarms ? t('production.alarms.emptyUnavailable')
+        : alarmFilter === 'pending' ? t('production.alarms.emptyPending')
+          : alarmFilter === 'active' ? t('production.alarms.emptyActive') : t('production.alarms.empty') }}
       pagination={{ current: alarmPage, pageSize: ALARM_PAGE_SIZE, total: alarmTotal, showSizeChanger: false, onChange: setAlarmPage }}
       dataSource={alarms}
       columns={[
-        { title: '状态', width: 90, render: (_: unknown, a: AlarmRecord) => <Tag color={a.active ? 'red' : 'green'}>{a.active ? '活动' : '已恢复'}</Tag> },
-        { title: '级别', dataIndex: 'severity', width: 90, render: (v: string) => severityLabels[v] ?? v },
-        { title: '代码', dataIndex: 'code', width: 150 },
-        { title: '消息', dataIndex: 'message' },
-        { title: '最近发生', width: 180, render: (_: unknown, a: AlarmRecord) => new Date(a.lastRaisedAt ?? a.raisedAt).toLocaleString('zh-CN') },
-        { title: '次数', dataIndex: 'occurrenceCount', width: 72, render: (value: AlarmRecord['occurrenceCount']) => value ?? 1 },
-        { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> :
-          <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void acknowledgeAlarm(a.id)}>确认</Button> }
+        { title: t('production.alarms.col.status'), width: 90, render: (_: unknown, a: AlarmRecord) => <Tag color={a.active ? 'red' : 'green'}>{a.active ? t('production.alarms.active') : t('production.alarms.recovered')}</Tag> },
+        { title: t('production.alarms.col.severity'), dataIndex: 'severity', width: 90, render: (v: string) => (severityLabelKeys as Record<string, MessageKey | undefined>)[v] ? t((severityLabelKeys as Record<string, MessageKey>)[v]) : v },
+        { title: t('production.alarms.col.code'), dataIndex: 'code', width: 150 },
+        { title: t('production.alarms.col.message'), dataIndex: 'message' },
+        { title: t('production.alarms.col.lastRaised'), width: 180, render: (_: unknown, a: AlarmRecord) => new Date(a.lastRaisedAt ?? a.raisedAt).toLocaleString(locale) },
+        { title: t('production.alarms.col.count'), dataIndex: 'occurrenceCount', width: 72, render: (value: AlarmRecord['occurrenceCount']) => value ?? 1 },
+        { title: t('production.alarms.col.ack'), width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>{t('production.alarms.acked')}</Tag> :
+          <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void acknowledgeAlarm(a.id)}>{t('production.alarms.ack')}</Button> }
       ]}
       />
     </>
@@ -371,37 +406,37 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
 
   const saveRow = (
     <Space>
-      <Button loading={busy.has('save')} disabled={configLocked || !dirty || conflict || busy.size > 0} onClick={() => void saveConfig()}>保存配置</Button>
-      <Button disabled={!dirty || busy.has('save') || !configReady} onClick={discard}>放弃修改，载入最新配置</Button>
-      <span className="production-actions-hint">{locked ? '运行期间配置已锁定，停止后可编辑。' : dirty ? '配置有未保存修改，保存后才可启动。' : configReady ? '配置已与服务端同步。' : '正在读取生产配置…'}</span>
+      <Button loading={busy.has('save')} disabled={configLocked || !dirty || conflict || busy.size > 0} onClick={() => void saveConfig()}>{t('production.save.save')}</Button>
+      <Button disabled={!dirty || busy.has('save') || !configReady} onClick={discard}>{t('production.save.discard')}</Button>
+      <span className="production-actions-hint">{locked ? t('production.save.lockedHint') : dirty ? t('production.save.dirtyHint') : configReady ? t('production.save.syncedHint') : t('production.save.readingHint')}</span>
     </Space>
   );
 
   const configTab = (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       {initialJobId && config.jobId === initialJobId && dirty && <Alert type="info" showIcon
-        title="已将刚发布的配方选为本机候选生产作业"
-        description="这是未保存的生产配置草稿；请核对后保存。不会自动启动生产。" />}
+        title={t('production.config.publishedCandidateTitle')}
+        description={t('production.config.publishedCandidateBody')} />}
       <Space wrap>
-        <label htmlFor="prod-cfg-job">生产作业</label>
+        <label htmlFor="prod-cfg-job">{t('production.config.job')}</label>
         <Select
           id="prod-cfg-job"
-          style={{ width: 320 }} aria-label="生产作业"
+          style={{ width: 320 }} aria-label={t('production.config.job')}
           disabled={configLocked}
           value={config.jobId ?? undefined}
-          placeholder="选择已发布的配方"
+          placeholder={t('production.config.selectPublished')}
           options={jobs.filter(x => x.publishedVersion != null).map(x => ({ value: x.id, label: `${x.name} · V${x.publishedVersion}` }))}
           onChange={(jobId) => changeConfig({ jobId })}
         />
-        <Checkbox disabled={configLocked} checked={config.autoStart} onChange={e => changeConfig({ autoStart: e.target.checked })}>自动启动</Checkbox>
-        <Checkbox disabled={configLocked} checked={config.autoRecover} onChange={e => changeConfig({ autoRecover: e.target.checked })}>自动恢复</Checkbox>
+        <Checkbox disabled={configLocked} checked={config.autoStart} onChange={e => changeConfig({ autoStart: e.target.checked })}>{t('production.config.autoStart')}</Checkbox>
+        <Checkbox disabled={configLocked} checked={config.autoRecover} onChange={e => changeConfig({ autoRecover: e.target.checked })}>{t('production.config.autoRecover')}</Checkbox>
       </Space>
       <Space wrap>
-        <label htmlFor="prod-cfg-cycle-delay">周期延迟</label><Space.Compact><InputNumber id="prod-cfg-cycle-delay" aria-label="周期延迟" disabled={configLocked} min={0} max={60000} value={config.cycleDelayMs} onChange={v => changeConfig({ cycleDelayMs: Number(v ?? 0) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
-        <label htmlFor="prod-cfg-max-cycle">看门狗超时</label><Space.Compact><InputNumber id="prod-cfg-max-cycle" aria-label="看门狗超时" disabled={configLocked} min={100} max={600000} value={config.maxCycleMs} onChange={v => changeConfig({ maxCycleMs: Number(v ?? 15000) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
-        <label htmlFor="prod-cfg-max-failures">最大连续失败次数</label><InputNumber id="prod-cfg-max-failures" disabled={configLocked} min={1} max={1000} value={config.maxConsecutiveFailures} onChange={v => changeConfig({ maxConsecutiveFailures: Number(v ?? 3) })} />
-        <label htmlFor="prod-cfg-recovery-delay">恢复延迟</label><Space.Compact><InputNumber id="prod-cfg-recovery-delay" disabled={configLocked} min={0} max={600000} value={config.recoveryDelayMs} onChange={v => changeConfig({ recoveryDelayMs: Number(v ?? 1000) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
-        <label htmlFor="prod-cfg-stop-timeout">停止超时</label><Space.Compact><InputNumber id="prod-cfg-stop-timeout" disabled={configLocked} min={100} max={maxStopTimeoutMs} value={config.stopTimeoutMs} onChange={v => changeConfig({ stopTimeoutMs: Number(v ?? 5000) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
+        <label htmlFor="prod-cfg-cycle-delay">{t('production.config.cycleDelay')}</label><Space.Compact><InputNumber id="prod-cfg-cycle-delay" aria-label={t('production.config.cycleDelay')} disabled={configLocked} min={0} max={60000} value={config.cycleDelayMs} onChange={v => changeConfig({ cycleDelayMs: Number(v ?? 0) })} /><Space.Addon>{t('production.unit.ms')}</Space.Addon></Space.Compact>
+        <label htmlFor="prod-cfg-max-cycle">{t('production.config.watchdogTimeout')}</label><Space.Compact><InputNumber id="prod-cfg-max-cycle" aria-label={t('production.config.watchdogTimeout')} disabled={configLocked} min={100} max={600000} value={config.maxCycleMs} onChange={v => changeConfig({ maxCycleMs: Number(v ?? 15000) })} /><Space.Addon>{t('production.unit.ms')}</Space.Addon></Space.Compact>
+        <label htmlFor="prod-cfg-max-failures">{t('production.config.maxConsecutiveFailures')}</label><InputNumber id="prod-cfg-max-failures" disabled={configLocked} min={1} max={1000} value={config.maxConsecutiveFailures} onChange={v => changeConfig({ maxConsecutiveFailures: Number(v ?? 3) })} />
+        <label htmlFor="prod-cfg-recovery-delay">{t('production.config.recoveryDelay')}</label><Space.Compact><InputNumber id="prod-cfg-recovery-delay" disabled={configLocked} min={0} max={600000} value={config.recoveryDelayMs} onChange={v => changeConfig({ recoveryDelayMs: Number(v ?? 1000) })} /><Space.Addon>{t('production.unit.ms')}</Space.Addon></Space.Compact>
+        <label htmlFor="prod-cfg-stop-timeout">{t('production.config.stopTimeout')}</label><Space.Compact><InputNumber id="prod-cfg-stop-timeout" disabled={configLocked} min={100} max={maxStopTimeoutMs} value={config.stopTimeoutMs} onChange={v => changeConfig({ stopTimeoutMs: Number(v ?? 5000) })} /><Space.Addon>{t('production.unit.ms')}</Space.Addon></Space.Compact>
       </Space>
       {saveRow}
     </Space>
@@ -409,13 +444,13 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
 
   const ptpTab = (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-      <Checkbox disabled={configLocked} checked={config.ptpDriftGuardEnabled} onChange={e => changeConfig({ ptpDriftGuardEnabled: e.target.checked })}>启用 PTP 漂移保护</Checkbox>
+      <Checkbox disabled={configLocked} checked={config.ptpDriftGuardEnabled} onChange={e => changeConfig({ ptpDriftGuardEnabled: e.target.checked })}>{t('production.ptp.enable')}</Checkbox>
       <Space wrap>
-        <label htmlFor="prod-ptp-window">统计窗口</label><Space.Compact><InputNumber id="prod-ptp-window" disabled={configLocked || !config.ptpDriftGuardEnabled} min={5} max={500} value={config.ptpGuardWindowRuns} onChange={v => changeConfig({ ptpGuardWindowRuns: Number(v ?? 20) })} /><Space.Addon>次</Space.Addon></Space.Compact>
-        <label htmlFor="prod-ptp-min-evidence">最少样本数</label><Space.Compact><InputNumber id="prod-ptp-min-evidence" disabled={configLocked || !config.ptpDriftGuardEnabled} min={1} max={config.ptpGuardWindowRuns} value={config.ptpGuardMinimumEvidenceRuns} onChange={v => changeConfig({ ptpGuardMinimumEvidenceRuns: Number(v ?? 5) })} /><Space.Addon>次</Space.Addon></Space.Compact>
-        <label htmlFor="prod-ptp-ready-rate">最低就绪率</label><Space.Compact><InputNumber id="prod-ptp-ready-rate" disabled={configLocked || !config.ptpDriftGuardEnabled} min={50} max={100} value={Math.round(config.ptpGuardMinimumReadyRate * 1000) / 10} onChange={v => changeConfig({ ptpGuardMinimumReadyRate: Number(v ?? 99) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
-        <label htmlFor="prod-ptp-check-cycles">检查周期</label><Space.Compact><InputNumber id="prod-ptp-check-cycles" disabled={configLocked || !config.ptpDriftGuardEnabled} min={1} max={10000} value={config.ptpGuardCheckEveryCycles} onChange={v => changeConfig({ ptpGuardCheckEveryCycles: Number(v ?? 10) })} /><Space.Addon>周期</Space.Addon></Space.Compact>
-        <Checkbox disabled={configLocked || !config.ptpDriftGuardEnabled} checked={config.ptpGuardFaultOnMasterClockChange} onChange={e => changeConfig({ ptpGuardFaultOnMasterClockChange: e.target.checked })}>主时钟变更时触发故障</Checkbox>
+        <label htmlFor="prod-ptp-window">{t('production.ptp.window')}</label><Space.Compact><InputNumber id="prod-ptp-window" disabled={configLocked || !config.ptpDriftGuardEnabled} min={5} max={500} value={config.ptpGuardWindowRuns} onChange={v => changeConfig({ ptpGuardWindowRuns: Number(v ?? 20) })} /><Space.Addon>{t('production.unit.runs')}</Space.Addon></Space.Compact>
+        <label htmlFor="prod-ptp-min-evidence">{t('production.ptp.minEvidence')}</label><Space.Compact><InputNumber id="prod-ptp-min-evidence" disabled={configLocked || !config.ptpDriftGuardEnabled} min={1} max={config.ptpGuardWindowRuns} value={config.ptpGuardMinimumEvidenceRuns} onChange={v => changeConfig({ ptpGuardMinimumEvidenceRuns: Number(v ?? 5) })} /><Space.Addon>{t('production.unit.runs')}</Space.Addon></Space.Compact>
+        <label htmlFor="prod-ptp-ready-rate">{t('production.ptp.minReadyRate')}</label><Space.Compact><InputNumber id="prod-ptp-ready-rate" disabled={configLocked || !config.ptpDriftGuardEnabled} min={50} max={100} value={Math.round(config.ptpGuardMinimumReadyRate * 1000) / 10} onChange={v => changeConfig({ ptpGuardMinimumReadyRate: Number(v ?? 99) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+        <label htmlFor="prod-ptp-check-cycles">{t('production.ptp.checkCycles')}</label><Space.Compact><InputNumber id="prod-ptp-check-cycles" disabled={configLocked || !config.ptpDriftGuardEnabled} min={1} max={10000} value={config.ptpGuardCheckEveryCycles} onChange={v => changeConfig({ ptpGuardCheckEveryCycles: Number(v ?? 10) })} /><Space.Addon>{t('production.unit.cycles')}</Space.Addon></Space.Compact>
+        <Checkbox disabled={configLocked || !config.ptpDriftGuardEnabled} checked={config.ptpGuardFaultOnMasterClockChange} onChange={e => changeConfig({ ptpGuardFaultOnMasterClockChange: e.target.checked })}>{t('production.ptp.faultOnMasterClockChange')}</Checkbox>
       </Space>
       {saveRow}
     </Space>
@@ -484,42 +519,42 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   const syncTab = (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Space wrap align="center">
-        <Checkbox disabled={configLocked} checked={config.synchronizationHealthGuardEnabled} onChange={e => changeConfig({ synchronizationHealthGuardEnabled: e.target.checked })}>启用同步健康保护</Checkbox>
-        <Typography.Text type="secondary">预设：</Typography.Text>
-        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('strict')}>严苛产线</Button>
-        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('balanced')}>标准均衡</Button>
-        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('relaxed')}>宽松调试</Button>
+        <Checkbox disabled={configLocked} checked={config.synchronizationHealthGuardEnabled} onChange={e => changeConfig({ synchronizationHealthGuardEnabled: e.target.checked })}>{t('production.sync.enable')}</Checkbox>
+        <Typography.Text type="secondary">{t('production.sync.preset')}</Typography.Text>
+        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('strict')}>{t('production.sync.presetStrict')}</Button>
+        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('balanced')}>{t('production.sync.presetBalanced')}</Button>
+        <Button size="small" disabled={configLocked} onClick={() => applySyncPreset('relaxed')}>{t('production.sync.presetRelaxed')}</Button>
       </Space>
 
       <div>
-        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>1. 采样窗口与检查频率</Typography.Text>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>{t('production.sync.sectionWindow')}</Typography.Text>
         <Space wrap>
-          <label htmlFor="prod-sync-window">统计窗口</label><Space.Compact><InputNumber id="prod-sync-window" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={5} max={500} value={config.synchronizationGuardWindowRuns} onChange={v => changeConfig({ synchronizationGuardWindowRuns: Number(v ?? 20) })} /><Space.Addon>次</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-min-evidence">最少样本数</label><Space.Compact><InputNumber id="prod-sync-min-evidence" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={config.synchronizationGuardWindowRuns} value={config.synchronizationGuardMinimumEvidenceRuns} onChange={v => changeConfig({ synchronizationGuardMinimumEvidenceRuns: Number(v ?? 5) })} /><Space.Addon>次</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-check-cycles">检查周期</label><Space.Compact><InputNumber id="prod-sync-check-cycles" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={10000} value={config.synchronizationGuardCheckEveryCycles} onChange={v => changeConfig({ synchronizationGuardCheckEveryCycles: Number(v ?? 5) })} /><Space.Addon>周期</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-window">{t('production.ptp.window')}</label><Space.Compact><InputNumber id="prod-sync-window" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={5} max={500} value={config.synchronizationGuardWindowRuns} onChange={v => changeConfig({ synchronizationGuardWindowRuns: Number(v ?? 20) })} /><Space.Addon>{t('production.unit.runs')}</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-min-evidence">{t('production.ptp.minEvidence')}</label><Space.Compact><InputNumber id="prod-sync-min-evidence" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={config.synchronizationGuardWindowRuns} value={config.synchronizationGuardMinimumEvidenceRuns} onChange={v => changeConfig({ synchronizationGuardMinimumEvidenceRuns: Number(v ?? 5) })} /><Space.Addon>{t('production.unit.runs')}</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-check-cycles">{t('production.ptp.checkCycles')}</label><Space.Compact><InputNumber id="prod-sync-check-cycles" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={10000} value={config.synchronizationGuardCheckEveryCycles} onChange={v => changeConfig({ synchronizationGuardCheckEveryCycles: Number(v ?? 5) })} /><Space.Addon>{t('production.unit.cycles')}</Space.Addon></Space.Compact>
         </Space>
       </div>
 
       <div>
-        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>2. 容错与帧丢失门限</Typography.Text>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>{t('production.sync.sectionThresholds')}</Typography.Text>
         <Space wrap>
-          <label htmlFor="prod-sync-max-fail">最大失败率</label><Space.Compact><InputNumber id="prod-sync-max-fail" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFailureRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumFailureRate: Number(v ?? 5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-max-timeout">最大帧超时率</label><Space.Compact><InputNumber id="prod-sync-max-timeout" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFrameTimeoutRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumFrameTimeoutRate: Number(v ?? 5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-consec-fail">连续失败阈值</label><Space.Compact><InputNumber id="prod-sync-consec-fail" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveFailures} onChange={v => changeConfig({ synchronizationGuardMaxConsecutiveFailures: Number(v ?? 2) })} /><Space.Addon>次</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-consec-skew">连续偏差阈值</label><Space.Compact><InputNumber id="prod-sync-consec-skew" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveSkewViolations} onChange={v => changeConfig({ synchronizationGuardMaxConsecutiveSkewViolations: Number(v ?? 3) })} /><Space.Addon>次</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-native-loss">原生帧丢失率</label><Space.Compact><InputNumber id="prod-sync-native-loss" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.05} value={config.synchronizationGuardMaximumNativeFrameLossRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumNativeFrameLossRate: Number(v ?? 0.5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-underruns">最大缓冲区欠载</label><InputNumber id="prod-sync-underruns" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumBufferUnderruns} onChange={v => changeConfig({ synchronizationGuardMaximumBufferUnderruns: Number(v ?? 0) })} />
-          <label htmlFor="prod-sync-resyncs">最大重新同步次数</label><InputNumber id="prod-sync-resyncs" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumResynchronizations} onChange={v => changeConfig({ synchronizationGuardMaximumResynchronizations: Number(v ?? 0) })} />
-          <label htmlFor="prod-sync-seq-gap">序号间隔回退率</label><Space.Compact><InputNumber id="prod-sync-seq-gap" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.1} value={config.synchronizationGuardMaximumSequenceGapRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumSequenceGapRate: Number(v ?? 1) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-max-fail">{t('production.sync.maxFailureRate')}</label><Space.Compact><InputNumber id="prod-sync-max-fail" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFailureRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumFailureRate: Number(v ?? 5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-max-timeout">{t('production.sync.maxFrameTimeoutRate')}</label><Space.Compact><InputNumber id="prod-sync-max-timeout" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFrameTimeoutRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumFrameTimeoutRate: Number(v ?? 5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-consec-fail">{t('production.sync.maxConsecutiveFailures')}</label><Space.Compact><InputNumber id="prod-sync-consec-fail" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveFailures} onChange={v => changeConfig({ synchronizationGuardMaxConsecutiveFailures: Number(v ?? 2) })} /><Space.Addon>{t('production.unit.runs')}</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-consec-skew">{t('production.sync.maxConsecutiveSkew')}</label><Space.Compact><InputNumber id="prod-sync-consec-skew" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveSkewViolations} onChange={v => changeConfig({ synchronizationGuardMaxConsecutiveSkewViolations: Number(v ?? 3) })} /><Space.Addon>{t('production.unit.runs')}</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-native-loss">{t('production.sync.maxNativeFrameLoss')}</label><Space.Compact><InputNumber id="prod-sync-native-loss" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.05} value={config.synchronizationGuardMaximumNativeFrameLossRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumNativeFrameLossRate: Number(v ?? 0.5) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-underruns">{t('production.sync.maxBufferUnderruns')}</label><InputNumber id="prod-sync-underruns" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumBufferUnderruns} onChange={v => changeConfig({ synchronizationGuardMaximumBufferUnderruns: Number(v ?? 0) })} />
+          <label htmlFor="prod-sync-resyncs">{t('production.sync.maxResync')}</label><InputNumber id="prod-sync-resyncs" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumResynchronizations} onChange={v => changeConfig({ synchronizationGuardMaximumResynchronizations: Number(v ?? 0) })} />
+          <label htmlFor="prod-sync-seq-gap">{t('production.sync.maxSequenceGap')}</label><Space.Compact><InputNumber id="prod-sync-seq-gap" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.1} value={config.synchronizationGuardMaximumSequenceGapRate * 100} onChange={v => changeConfig({ synchronizationGuardMaximumSequenceGapRate: Number(v ?? 1) / 100 })} /><Space.Addon>%</Space.Addon></Space.Compact>
         </Space>
       </div>
 
       <div>
-        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>3. 故障判定与自动恢复</Typography.Text>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>{t('production.sync.sectionRecovery')}</Typography.Text>
         <Space wrap>
-          <label htmlFor="prod-sync-unhealthy-fault">触发故障连续检查数</label><Space.Compact><InputNumber id="prod-sync-unhealthy-fault" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardUnhealthyChecksToFault} onChange={v => changeConfig({ synchronizationGuardUnhealthyChecksToFault: Number(v ?? 2) })} /><Space.Addon>次</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-healthy-recover">恢复连续检查数</label><Space.Compact><InputNumber id="prod-sync-healthy-recover" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardHealthyChecksToRecover} onChange={v => changeConfig({ synchronizationGuardHealthyChecksToRecover: Number(v ?? 3) })} /><Space.Addon>次</Space.Addon></Space.Compact>
-          <label htmlFor="prod-sync-recover-timeout">恢复超时</label><Space.Compact><InputNumber id="prod-sync-recover-timeout" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1000} max={600000} step={1000} value={config.synchronizationGuardRecoveryTimeoutMs} onChange={v => changeConfig({ synchronizationGuardRecoveryTimeoutMs: Number(v ?? 30000) })} /><Space.Addon>毫秒</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-unhealthy-fault">{t('production.sync.unhealthyToFault')}</label><Space.Compact><InputNumber id="prod-sync-unhealthy-fault" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardUnhealthyChecksToFault} onChange={v => changeConfig({ synchronizationGuardUnhealthyChecksToFault: Number(v ?? 2) })} /><Space.Addon>{t('production.unit.runs')}</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-healthy-recover">{t('production.sync.healthyToRecover')}</label><Space.Compact><InputNumber id="prod-sync-healthy-recover" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardHealthyChecksToRecover} onChange={v => changeConfig({ synchronizationGuardHealthyChecksToRecover: Number(v ?? 3) })} /><Space.Addon>{t('production.unit.runs')}</Space.Addon></Space.Compact>
+          <label htmlFor="prod-sync-recover-timeout">{t('production.sync.recoveryTimeout')}</label><Space.Compact><InputNumber id="prod-sync-recover-timeout" disabled={configLocked || !config.synchronizationHealthGuardEnabled} min={1000} max={600000} step={1000} value={config.synchronizationGuardRecoveryTimeoutMs} onChange={v => changeConfig({ synchronizationGuardRecoveryTimeoutMs: Number(v ?? 30000) })} /><Space.Addon>{t('production.unit.ms')}</Space.Addon></Space.Compact>
         </Space>
       </div>
       {saveRow}
@@ -536,34 +571,34 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
         <Alert
           type="warning"
           showIcon
-          title="待核对动作清单暂不可用"
-          description={`${errors.pending}。保留最后读取到的清单，请核对连接和权限。`}
+          title={t('production.reconcile.pendingUnavailable')}
+          description={t('production.reconcile.pendingUnavailableBody', { error: errors.pending })}
         />
       )}
       {canReconcile && pendingActions && (
         <Alert
           type="error"
           showIcon
-          title="存在待核对的设备动作：核对前所有设备动作入口都会被拒绝"
+          title={t('production.reconcile.pendingTitle')}
           description={
             <Space orientation="vertical" size={4}>
-              <span>原因：{pendingActions.reason ?? '上一周期的设备动作结果未确认'}{pendingActions.unreadable ? '（安全状态文件不可读，需人工处理）' : ''}</span>
-              {pendingActions.runId && <span>运行：{pendingActions.runId}</span>}
-              {(pendingActions.deviceIds?.length ?? 0) > 0 && <span>涉及设备：{(pendingActions.deviceIds ?? []).join('、')}</span>}
-              {(pendingActions.robotIds?.length ?? 0) > 0 && <span>涉及机器人：{(pendingActions.robotIds ?? []).join('、')}</span>}
+              <span>{t('production.label.reason')}{pendingActions.reason ?? t('production.reconcile.reasonFallback')}{pendingActions.unreadable ? t('production.reconcile.unreadable') : ''}</span>
+              {pendingActions.runId && <span>{t('production.reconcile.runLabel')}{pendingActions.runId}</span>}
+              {(pendingActions.deviceIds?.length ?? 0) > 0 && <span>{t('production.reconcile.devicesLabel')}{(pendingActions.deviceIds ?? []).join(listSeparator)}</span>}
+              {(pendingActions.robotIds?.length ?? 0) > 0 && <span>{t('production.reconcile.robotsLabel')}{(pendingActions.robotIds ?? []).join(listSeparator)}</span>}
               {(pendingActions.manualIntents ?? []).map((intent) => (
                 <span key={intent.runId}>
-                  未闭合动作：<b>{intent.action}</b>（{intent.state}{intent.closedReason ? ` · ${intent.closedReason}` : ''}）
-                  {intent.deviceIds.length > 0 ? ` · 设备 ${intent.deviceIds.join('、')}` : ''}
-                  {intent.robotIds.length > 0 ? ` · 机器人 ${intent.robotIds.join('、')}` : ''}
+                  {t('production.reconcile.openIntent')}<b>{intent.action}</b>（{intent.state}{intent.closedReason ? ` · ${intent.closedReason}` : ''}）
+                  {intent.deviceIds.length > 0 ? t('production.reconcile.deviceSuffix', { ids: intent.deviceIds.join(listSeparator) }) : ''}
+                  {intent.robotIds.length > 0 ? t('production.reconcile.robotSuffix', { ids: intent.robotIds.join(listSeparator) }) : ''}
                   {' '}
                   <Button danger size="small" onClick={() => { setResolveTarget({ kind: 'manual', runId: intent.runId, action: intent.action }); setResolveOpen(true); }}>
-                    核对这条动作
+                    {t('production.reconcile.resolveThis')}
                   </Button>
                 </span>
               ))}
-              <span>步骤：现场核对设备物理状态与身份 → 提交核对证据（写入审计）→ 生产/手动动作恢复可用。</span>
-              <Button danger size="small" onClick={() => { setResolveTarget({ kind: 'production', pending: pendingActions }); setResolveOpen(true); }}>提交核对证据</Button>
+              <span>{t('production.reconcile.steps')}</span>
+              <Button danger size="small" onClick={() => { setResolveTarget({ kind: 'production', pending: pendingActions }); setResolveOpen(true); }}>{t('production.reconcile.submit')}</Button>
             </Space>
           }
         />
@@ -573,8 +608,8 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
         onCancel={() => { if (!resolveRequest.current) setResolveOpen(false); }}
         closable={!resolveSubmitting} keyboard={!resolveSubmitting} mask={{ closable: !resolveSubmitting }}
         confirmLoading={resolveSubmitting} cancelButtonProps={{ disabled: resolveSubmitting }}
-        title={resolveTarget.kind === 'manual' ? `核对动作：${resolveTarget.action}` : '提交设备动作核对证据'}
-        okText="提交核对" cancelText="取消"
+        title={resolveTarget.kind === 'manual' ? t('production.reconcile.manualTitle', { action: resolveTarget.action }) : t('production.reconcile.modalTitle')}
+        okText={t('production.reconcile.ok')} cancelText={t('production.action.cancel')}
         okButtonProps={{ danger: true }}
         onOk={async () => {
           if (resolveRequest.current) return;
@@ -585,7 +620,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
           try {
             const values = await resolveForm.validateFields();
             if (!owns()) return;
-            const result = await call({ url: stationActionUrl.resolve, action: 'resolve', successMessage: '核对证据已提交并写入审计', body: {
+            const result = await call({ url: stationActionUrl.resolve, action: 'resolve', successMessage: t('production.toast.reconcileSubmitted'), body: {
               runId: resolveTarget.kind === 'production' ? (resolveTarget.pending.runId ?? '') : '',
               manifestHash: resolveTarget.kind === 'production' ? (resolveTarget.pending.manifestHash ?? '') : '',
               deviceIds: resolveTarget.kind === 'production' ? (resolveTarget.pending.deviceIds ?? []) : [],
@@ -599,16 +634,16 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
           finally { if (owns()) { resolveRequest.current = undefined; setResolveSubmitting(false); } }
         }}
       >
-        <div>本次核对目标：{resolveTarget.kind === 'manual' ? resolveTarget.runId : resolveTarget.pending.runId ?? '安全状态文件中的未确认动作'}</div>
+        <div>{t('production.reconcile.target')}{resolveTarget.kind === 'manual' ? resolveTarget.runId : resolveTarget.pending.runId ?? t('production.reconcile.targetFallback')}</div>
         <Form form={resolveForm} layout="vertical" disabled={resolveSubmitting}>
-          <Form.Item name="evidence" label="现场核对证据（必填）" rules={[{ required: true, message: '请填写现场核对证据' }]}>
-            <Input.TextArea rows={3} placeholder="例：PLC 触发位已复位为 0，机器人回到安全位，示教器无待处理指令（含时间与执行人）" />
+          <Form.Item name="evidence" label={t('production.reconcile.evidenceLabel')} rules={[{ required: true, message: t('production.reconcile.evidenceRequired') }]}>
+            <Input.TextArea rows={3} placeholder={t('production.reconcile.evidencePlaceholder')} />
           </Form.Item>
-          <Form.Item name="identityEvidence" label="设备身份证据（必填）" rules={[{ required: true, message: '请填写设备身份证据' }]}>
-            <Input.TextArea rows={2} placeholder="例：设备铭牌/序列号、在线诊断中的端点与驱动版本，与待核对清单一致" />
+          <Form.Item name="identityEvidence" label={t('production.reconcile.identityLabel')} rules={[{ required: true, message: t('production.reconcile.identityRequired') }]}>
+            <Input.TextArea rows={2} placeholder={t('production.reconcile.identityPlaceholder')} />
           </Form.Item>
-          <Form.Item name="reason" label="核对说明（可选）">
-            <Input placeholder="例：现场确认上一周期动作已完成/已撤销" />
+          <Form.Item name="reason" label={t('production.reconcile.reasonInputLabel')}>
+            <Input placeholder={t('production.reconcile.reasonPlaceholder')} />
           </Form.Item>
         </Form>
       </Modal>
@@ -616,40 +651,44 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
         <Alert
           type="error"
           showIcon
-          title={`生产已进入故障状态${status?.consecutiveFailures ? ` · 连续失败 ${status.consecutiveFailures} 次` : ''}`}
+          title={status?.consecutiveFailures
+            ? t('production.fault.titleWithFailures', { count: status.consecutiveFailures })
+            : t('production.fault.title')}
           description={<>
-            <div>原因：{status?.lastError ?? '运行时未提供错误详情，请查看下方保护状态与告警记录。'}</div>
-            <div>下一步：检查设备与同步健康后点击“恢复”；若故障持续，先“停止”再重新“启动”。</div>
+            <div>{t('production.label.reason')}{status?.lastError ?? t('production.fault.reasonFallback')}</div>
+            <div>{t('production.fault.nextStep')}</div>
           </>}
         />
       )}
-      {operationError && <Alert type="error" showIcon title="生产操作未完成或结果未确认" description={operationError} />}
-      {errors.config && <Alert type="warning" showIcon title="生产配置暂不可用" description={errors.config} action={<Button onClick={monitor.refresh}>重试读取</Button>} />}
-      {errors.jobs && <Alert type="warning" showIcon title="配方列表已过期" description={errors.jobs} />}
-      {errors.alarms && <Alert type="warning" showIcon title="告警记录已过期" description={errors.alarms} />}
-      {errors.alarmSummary && <Alert type="warning" showIcon title="活动告警统计未更新" description={errors.alarmSummary} />}
+      {operationError && <Alert type="error" showIcon title={t('production.alert.operationFailed')} description={operationError} />}
+      {errors.config && <Alert type="warning" showIcon title={t('production.alert.configUnavailable')} description={errors.config} action={<Button onClick={monitor.refresh}>{t('production.alert.retry')}</Button>} />}
+      {errors.jobs && <Alert type="warning" showIcon title={t('production.alert.jobsStale')} description={errors.jobs} />}
+      {errors.alarms && <Alert type="warning" showIcon title={t('production.alert.alarmsStale')} description={errors.alarms} />}
+      {errors.alarmSummary && <Alert type="warning" showIcon title={t('production.alert.alarmSummaryStale')} description={errors.alarmSummary} />}
       {merge && <ProductionConfigConflict key={JSON.stringify(merge.fields)} merge={merge} disabled={configLocked || busy.size > 0}
-        onStale={() => { void messageApi.warning('配置已再次变更，请重新核对差异。'); }} />}
-      {dirty && !conflict && <Alert type="info" showIcon title="生产配置有未保存修改" description="实时监控继续刷新，配置草稿会保留；保存配置后才可启动生产。" />}
+        onStale={() => { void messageApi.warning(t('production.merge.stale')); }} />}
+      {dirty && !conflict && <Alert type="info" showIcon title={t('production.alert.dirtyTitle')} description={t('production.alert.dirtyBody')} />}
       {status?.ptpGuard?.enabled && !status.ptpGuard.healthy && (
-        <Alert type="error" showIcon title="PTP 生产保护已阻止运行" description={status.ptpGuard.summary ?? `${status.ptpGuard.groups.length} 个受保护的同步组未就绪。`} />
+        <Alert type="error" showIcon title={t('production.alert.ptpBlocked')} description={status.ptpGuard.summary ?? t('production.alert.ptpBlockedBody', { count: status.ptpGuard.groups.length })} />
       )}
       {status?.synchronizationGuard?.enabled && !status.synchronizationGuard.healthy && (
         <Alert
           type={status.synchronizationGuard.liveRecoverableOnly ? 'warning' : 'error'}
           showIcon
-          title="同步健康保护降级"
-          description={status.synchronizationGuard.summary ?? `${status.synchronizationGuard.groups.length} 个同步相机组未达标。`}
+          title={t('production.alert.syncDegraded')}
+          description={status.synchronizationGuard.summary ?? t('production.alert.syncDegradedBody', { count: status.synchronizationGuard.groups.length })}
         />
       )}
       {activeAlarmCount > 0 && (
         <Alert
           type="warning"
           showIcon
-          title={`${activeAlarmCount} 条活动告警${criticalAlarmCount ? ` · ${criticalAlarmCount} 条严重` : ''}`}
-          description={latestActiveMessage ? `最近：${latestActiveMessage}` : undefined}
+          title={criticalAlarmCount
+            ? t('production.alert.activeAlarmsWithCritical', { count: activeAlarmCount, critical: criticalAlarmCount })
+            : t('production.alert.activeAlarms', { count: activeAlarmCount })}
+          description={latestActiveMessage ? t('production.alert.latest', { message: latestActiveMessage }) : undefined}
           action={!kiosk && pendingAlarmCount > 0 && <Button size="small" onClick={() => { setAlarmFilter('pending'); setActiveTab('alarms'); }}>
-            查看待确认告警（{pendingAlarmCount}）
+            {t('production.alert.viewPending', { count: pendingAlarmCount })}
           </Button>}
         />
       )}
@@ -657,7 +696,7 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   );
 
   const operatorTab = open && <div className="operator-workspace-content">
-    {pendingAlarmCount > 0 && <Suspense fallback={<span role="status">正在读取待确认告警…</span>}>
+    {pendingAlarmCount > 0 && <Suspense fallback={<span role="status">{t('production.loading.alarmQueue')}</span>}>
       <OperatorAlarmQueue key={stationScoped ? stationId : 'default'} busy={busy} onAcknowledge={acknowledgeAlarm} stationId={stationScoped ? stationId : undefined} />
     </Suspense>}
     <OperatorDashboard key={`${stationId ?? 'default'}-${selectedJobId ?? ''}-${layoutRevision}`} jobId={selectedJobId} status={status} statusFresh={statusFresh}
@@ -681,26 +720,26 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
     if (!keys.includes(activeTab)) setActiveTab(next === 'run' ? runFallbackTab : 'config');
   };
   const runTabItems = [
-    { key: 'operator', label: '操作员', children: shownTab === 'operator' && operatorTab },
-    { key: 'monitor', label: '运行监控', children: monitorTab },
-    { key: 'parallel', label: '本机并行', children: open && shownTab === 'parallel' &&
-      <Suspense fallback={<span role="status">正在加载本机多工位…</span>}>
+    { key: 'operator', label: t('production.tab.operator'), children: shownTab === 'operator' && operatorTab },
+    { key: 'monitor', label: t('production.tab.monitor'), children: monitorTab },
+    { key: 'parallel', label: t('production.tab.parallel'), children: open && shownTab === 'parallel' &&
+      <Suspense fallback={<span role="status">{t('production.loading.parallel')}</span>}>
         <LocalParallelRuntimes jobs={jobs} canConfigure={canConfigure} canReconcile={canReconcile} />
       </Suspense> },
-    { key: 'alarms', label: `告警${activeAlarmCount ? `（${activeAlarmCount}）` : ''}`, children: alarmsTab },
-    { key: 'stations', label: '多工位', children: open && shownTab === 'stations' &&
-      <Suspense fallback={<span role="status">正在加载工位总览…</span>}>
+    { key: 'alarms', label: activeAlarmCount ? t('production.tab.alarmsWithCount', { count: activeAlarmCount }) : t('production.tab.alarms'), children: alarmsTab },
+    { key: 'stations', label: t('production.tab.stations'), children: open && shownTab === 'stations' &&
+      <Suspense fallback={<span role="status">{t('production.loading.stations')}</span>}>
         <ProductionStations canSend={canConfigure} canControl />
       </Suspense> },
-    ...(canEngineer ? [{ key: 'deliveries', label: '配方收件箱', children: open && shownTab === 'deliveries' &&
-      <Suspense fallback={<span role="status">正在加载配方收件箱…</span>}>
+    ...(canEngineer ? [{ key: 'deliveries', label: t('production.tab.deliveries'), children: open && shownTab === 'deliveries' &&
+      <Suspense fallback={<span role="status">{t('production.loading.deliveries')}</span>}>
         <RecipeDeliveryInbox onPublished={monitor.refresh} />
       </Suspense> }] : []),
   ];
   const configTabItems = canConfigure ? [
-    { key: 'config', label: '生产配置', children: configTab },
-    { key: 'ptp', label: 'PTP 保护', children: ptpTab },
-    { key: 'sync', label: '同步健康保护', children: syncTab },
+    { key: 'config', label: t('production.tab.config'), children: configTab },
+    { key: 'ptp', label: t('production.tab.ptp'), children: ptpTab },
+    { key: 'sync', label: t('production.tab.sync'), children: syncTab },
   ] : [];
 
   const body = kiosk ? (
@@ -715,13 +754,13 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
       {shownTab !== 'stations' && shownTab !== 'deliveries' && shownTab !== 'parallel' && localDetails}
       {canConfigure && <Segmented size="small" value={tabGroup}
         onChange={(value) => switchTabGroup(value as 'run' | 'configure')}
-        options={[{ label: '运行', value: 'run' }, { label: '配置', value: 'configure' }]} />}
+        options={[{ label: t('production.group.run'), value: 'run' }, { label: t('production.group.configure'), value: 'configure' }]} />}
       <Tabs
         activeKey={shownTab}
         onChange={setActiveTab}
         items={tabGroup === 'run' ? runTabItems : configTabItems}
       />
-      {open && canConfigure && layoutEditorOpen && <Suspense fallback={<span role="status">正在加载操作员布局…</span>}>
+      {open && canConfigure && layoutEditorOpen && <Suspense fallback={<span role="status">{t('production.loading.layout')}</span>}>
         <OperatorLayoutDialog jobs={jobs} initialJobId={selectedJobId}
           onClose={() => setLayoutEditorOpen(false)} onSaved={() => setLayoutRevision((revision) => revision + 1)} />
       </Suspense> }
@@ -731,11 +770,11 @@ export default function ProductionPanel({ open, onClose, embedded = false, runti
   if (embedded) return <div className={`runtime-only-page${kiosk ? ' is-kiosk' : ''}`}>
     {!kiosk && (
       <header className="runtime-only-header">
-        <div className="runtime-only-title">VisionStudio · 生产运行</div>
+        <div className="runtime-only-title">{t('production.title.runtime')}</div>
         {headerActions && <div className="runtime-only-actions">{headerActions}</div>}
       </header>
     )}
     {body}
   </div>;
-  return <Modal open={open} onCancel={onClose} footer={null} title="生产运行" width="min(1120px, calc(100vw - 32px))">{body}</Modal>;
+  return <Modal open={open} onCancel={onClose} footer={null} title={t('production.title.panel')} width="min(1120px, calc(100vw - 32px))">{body}</Modal>;
 }

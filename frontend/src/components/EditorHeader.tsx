@@ -101,10 +101,10 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
         <Dropdown trigger={['click']} menu={menus.more}>
           <Button className="topbar-more">{text('更多', 'More')} <span className="menu-caret">▾</span></Button>
         </Dropdown>
-        {/* 英文覆盖是增量的（顶栏菜单、多数面板内部文案仍在迁移中），
-            tooltip 如实说明，避免用户以为切换失效。 */}
-        <Tooltip title={lang === 'zh' ? '切换到英文界面（英文覆盖仍在完善：部分面板内部文案可能仍为中文）' : 'Switch to Chinese'}>
-          <Button className="topbar-lang" type="text" aria-label="切换界面语言" onClick={toggleLang}>{lang === 'zh' ? 'EN' : '中'}</Button>
+        {/* 英文覆盖是增量的：生产运行与编辑器外壳已完整，其余面板按批次迁移
+            （`npm run check:i18n` 给出实时缺口清单），tooltip 如实说明边界。 */}
+        <Tooltip title={text('切换到英文界面（生产运行与编辑器外壳已完整，其余面板仍在迁移）', 'Switch to Chinese')}>
+          <Button className="topbar-lang" type="text" aria-label={text('切换界面语言', 'Switch interface language')} onClick={toggleLang}>{lang === 'zh' ? 'EN' : '中'}</Button>
         </Tooltip>
         <div className="topbar-account"><SecurityAccountBadge /></div>
       </div>
