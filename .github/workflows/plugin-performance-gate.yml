@@ -39,7 +39,7 @@ jobs:
             -TimeoutSeconds ${{ inputs.timeout_seconds }}
       - name: Upload benchmark evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: plugin-performance-gate
           path: artifacts/
