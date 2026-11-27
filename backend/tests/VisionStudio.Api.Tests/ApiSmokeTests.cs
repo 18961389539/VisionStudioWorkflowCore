@@ -71,6 +71,11 @@ public sealed class ApiSmokeTests : IClassFixture<VisionStudioApiFactory>
         Assert.True(meta.GetProperty("nodeCount").GetInt32() >= 39);
         Assert.Equal(64, meta.GetProperty("hash").GetString()!.Length);
 
+        using var notModifiedRequest = new HttpRequestMessage(HttpMethod.Get, "/api/catalog");
+        notModifiedRequest.Headers.TryAddWithoutValidation("If-None-Match", catalogResponse.Headers.ETag!.Tag);
+        var notModifiedResponse = await _client.SendAsync(notModifiedRequest);
+        Assert.Equal(HttpStatusCode.NotModified, notModifiedResponse.StatusCode);
+
         var devicesJson = await _client.GetStringAsync("/api/devices");
         Assert.Contains("virtual-modbus-1", devicesJson.ToLowerInvariant());
     }

@@ -40,7 +40,7 @@ public sealed class ParameterTuningService(
         var item = dataset.Items.FirstOrDefault(x => x.ItemId.Equals(request.ItemId, StringComparison.OrdinalIgnoreCase))
             ?? throw new ApiNotFoundException($"Dataset item '{request.ItemId}' was not found in '{request.DatasetId}'.");
         if (!item.ReplayReady) throw new ApiConflictException("The selected dataset sample is not replay-ready.");
-        if (request.Workflow.Nodes.Any(x => x.Type.Equals("camera.syncCapture", StringComparison.OrdinalIgnoreCase)))
+        if (request.Workflow.Nodes.Any(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.CameraSyncCapture)))
             throw new ApiConflictException("V0.49 tuning does not replay synchronized FrameSet workflows yet.");
 
         var topology = DatasetValidationStore.TopologyHash(request.Workflow);

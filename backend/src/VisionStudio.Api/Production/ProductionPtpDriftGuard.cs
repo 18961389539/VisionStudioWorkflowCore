@@ -167,7 +167,7 @@ public sealed class ProductionPtpDriftGuardService(CameraSynchronizationService 
     public static IReadOnlyDictionary<string, (bool Scheduled, string NodeId)> ResolveRequirements(WorkflowDefinition workflow)
     {
         var output = new Dictionary<string, (bool Scheduled, string NodeId)>(StringComparer.OrdinalIgnoreCase);
-        foreach (var node in workflow.Nodes.Where(x => string.Equals(x.Type, "camera.syncCapture", StringComparison.OrdinalIgnoreCase)))
+        foreach (var node in workflow.Nodes.Where(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.CameraSyncCapture)))
         {
             if (node.Parameters is null || !node.Parameters.TryGetValue("groupId", out var groupElement)) continue;
             var groupId = ReadString(groupElement)?.Trim();

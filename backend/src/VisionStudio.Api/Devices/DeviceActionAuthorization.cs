@@ -456,9 +456,9 @@ public static class DeviceSideEffectClassifier
     /// </summary>
     private static readonly HashSet<string> SideEffectNodeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "device.writeTag",
-        "device.writeVisionResult",
-        "robot.executeTarget"
+        BuiltInNodeTypes.DeviceWriteTag,
+        BuiltInNodeTypes.DeviceWriteVisionResult,
+        BuiltInNodeTypes.RobotExecuteTarget
     };
 
     /// <summary>解析显式动作声明；目录未注册或未声明时返回 null（调用方走兼容回退）。</summary>
@@ -499,7 +499,7 @@ public static class DeviceSideEffectClassifier
     {
         if (TryResolveDeclaredActions(nodeType, nodes) is { } declared)
             return declared.Any(x => x.Kind == NodeActionKind.RobotCommand);
-        return nodeType.Equals("robot.executeTarget", StringComparison.OrdinalIgnoreCase);
+        return BuiltInNodeTypes.Is(nodeType, BuiltInNodeTypes.RobotExecuteTarget);
     }
 
     /// <summary>

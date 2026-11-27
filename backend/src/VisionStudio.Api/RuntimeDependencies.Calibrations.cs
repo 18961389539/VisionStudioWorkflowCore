@@ -24,7 +24,7 @@ public sealed partial class RuntimeDependencyManifestService
         {
             if (!registry.IsRegistered(node.Type)) continue;
             var catalog = registry.Require(node.Type).Catalog;
-            if (string.Equals(node.Type, "calibration.planar", StringComparison.OrdinalIgnoreCase))
+            if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.CalibrationPlanar))
             {
                 var assetId = ResolveString(node, catalog, "assetId");
                 var version = ResolveInt(node, catalog, "assetVersion");
@@ -34,7 +34,7 @@ public sealed partial class RuntimeDependencyManifestService
                     throw new InvalidOperationException($"Planar calibration node '{node.Id}' must specify both assetId and a positive assetVersion, or leave both unset.");
                 if (hasAssetId) await ValidatePlanarCalibrationBindingAsync(node, assetId!, version, ct);
             }
-            else if (string.Equals(node.Type, "image.undistort", StringComparison.OrdinalIgnoreCase))
+            else if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.ImageUndistort))
             {
                 var assetId = ResolveString(node, catalog, "intrinsicsAssetId");
                 var version = ResolveInt(node, catalog, "intrinsicsAssetVersion");
@@ -49,7 +49,7 @@ public sealed partial class RuntimeDependencyManifestService
                     throw new InvalidOperationException($"Image undistort node '{node.Id}' cannot pin an intrinsic asset while calibrationJson is connected from another node. Pin a static model or remove the asset reference.");
                 await cameraIntrinsicAssets.RequireModelMatchAsync(assetId!, version, node.GetString("calibrationJson", "{}"), ct);
             }
-            else if (string.Equals(node.Type, "calibration.handEye2D", StringComparison.OrdinalIgnoreCase))
+            else if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.CalibrationHandEye2D))
             {
                 var assetId = ResolveString(node, catalog, "handEyeAssetId");
                 var version = ResolveInt(node, catalog, "handEyeAssetVersion");
@@ -65,7 +65,7 @@ public sealed partial class RuntimeDependencyManifestService
                 var result = await handEyeSolver.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, ct);
                 await handEyeAssets.RequireModelMatchAsync(assetId!, version, result.Outputs["calibrationJson"].Require<string>("calibrationJson"), ct);
             }
-            else if (string.Equals(node.Type, "calibration.handEye3D", StringComparison.OrdinalIgnoreCase))
+            else if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.CalibrationHandEye3D))
             {
                 var assetId = ResolveString(node, catalog, "handEye3DAssetId");
                 var version = ResolveInt(node, catalog, "handEye3DAssetVersion");

@@ -107,6 +107,15 @@ export function useRunController({
         unsubscribe = subscribeRunProgress((event) => {
           if (cancelled || !mounted.current) return;
           if (event.workflowId && event.workflowId !== workflowIdRef.current) return;
+          if (event.state === 'canceled') {
+            setRunProgress(undefined);
+            setNodes((current) => current.map((node) => (
+              node.data.status === 'running'
+                ? { ...node, data: { ...node.data, status: undefined } }
+                : node
+            )));
+            return;
+          }
           setRunProgress({ completed: event.completedCount, total: event.totalCount });
           setNodes((current) => current.map((node) => {
             if (node.id !== event.nodeId) return node;

@@ -246,10 +246,11 @@ export default function TracePanel({ open, onClose, initialRunId, onSelectNode }
       <div className="trace-grid">
         <Table
           size="small" rowKey="runId" loading={loading}
+          virtual scroll={{ x: 'max-content', y: 420 }}
           dataSource={data?.items ?? []}
           pagination={{
             current: page.current, pageSize: page.pageSize, total: data?.total ?? 0,
-            showSizeChanger: true, pageSizeOptions: [20, 50, 100],
+            showSizeChanger: true, pageSizeOptions: [20, 50, 100, 500],
             showTotal: (total) => `共 ${total.toLocaleString('zh-CN')} 条历史记录`,
             onChange: (current, pageSize) => setPage({ current, pageSize }),
           }}
@@ -266,7 +267,7 @@ export default function TracePanel({ open, onClose, initialRunId, onSelectNode }
             { title: '判定', dataIndex: 'disposition', width: 90, render: (v: string) => <Tag color={dispositionColor[v]}>{localizeStatus(v)}</Tag> },
             { title: '错误码', dataIndex: 'errorCode', width: 100, render: (v: string | null) => v ? <Tag color="volcano">{v}</Tag> : '—' },
             { title: '耗时', dataIndex: 'totalDurationMs', width: 80, render: (v: number) => `${v.toFixed(1)} 毫秒` },
-            { title: '运行 ID', dataIndex: 'runId', render: (v: string) => <Typography.Text code>{v.slice(0, 12)}</Typography.Text> }
+            { title: '运行 ID', dataIndex: 'runId', width: 130, render: (v: string) => <Typography.Text code>{v.slice(0, 12)}</Typography.Text> }
           ]}
         />
 
@@ -297,6 +298,7 @@ export default function TracePanel({ open, onClose, initialRunId, onSelectNode }
             </div>
             <Table
               size="small" pagination={false} rowKey={(row) => row.nodeId} dataSource={selectedReports}
+              virtual scroll={{ x: 'max-content', y: 300 }}
               loading={reportLoading}
               locale={{ emptyText: reportLoading ? '正在加载节点报告…' : '该运行没有节点报告（可能在执行前失败）' }}
               columns={[
@@ -310,7 +312,7 @@ export default function TracePanel({ open, onClose, initialRunId, onSelectNode }
                 },
                 { title: '阶段', dataIndex: 'phase', width: 80, render: (v: string) => v === 'Warmup' ? '预热' : '运行' },
                 { title: '耗时（毫秒）', dataIndex: 'durationMs', width: 90, render: (v: number) => v.toFixed(2) },
-                { title: '摘要', dataIndex: 'summary', render: (v: unknown) => <Typography.Text code>{JSON.stringify(v)}</Typography.Text> }
+                { title: '摘要', dataIndex: 'summary', width: 320, render: (v: unknown) => <Typography.Text code>{JSON.stringify(v)}</Typography.Text> }
               ]}
             />
             <TraceAnalysisPanel runId={selected.runId} onReplay={openReplay} />

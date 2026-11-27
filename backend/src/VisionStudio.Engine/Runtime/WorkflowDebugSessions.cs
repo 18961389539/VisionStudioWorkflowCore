@@ -160,7 +160,7 @@ public sealed class WorkflowDebugSessionService(
             throw new InvalidOperationException("Debug sessions currently support Breakpoints mode only.");
         if (options.Breakpoints is null || options.Breakpoints.Count == 0)
             throw new InvalidOperationException("Breakpoint debug requires at least one breakpoint node.");
-        if (workflow.Nodes.Any(n => n.Type.Equals("flow.parallel", StringComparison.OrdinalIgnoreCase)))
+        if (workflow.Nodes.Any(n => FlowSemantics.IsParallel(n.Type)))
             throw new InvalidOperationException("Debug sessions do not support workflows containing Parallel yet.");
         if (VisionExecutionPolicy.HasIterativeOrRetryControl(workflow.Nodes))
             throw new InvalidOperationException("Breakpoint debug sessions are disabled for workflows containing flow.forEach or flow.try because cached node state cannot resume iteration or retry progress safely.");

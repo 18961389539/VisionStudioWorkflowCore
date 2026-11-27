@@ -9,7 +9,7 @@ internal static class ImageOperationGeometry
 {
     internal static readonly HashSet<string> Operations = new(StringComparer.Ordinal)
         { "cropPart", "cropRectangle2", "cropDomainRel", "rotateImage", "zoomImageFactor", "addBorder", "changeFormat" };
-    internal static bool IsSpatial(NodeDefinition node) => node.Type.Equals("jlvision.imageOp", StringComparison.OrdinalIgnoreCase)
+    internal static bool IsSpatial(NodeDefinition node) => BuiltInNodeTypes.Is(node, BuiltInNodeTypes.JlVisionImageOp)
         && Operations.Contains(node.GetString("operator", "abs").Trim());
 
     internal static NodeExecutorResult Execute(VisionImage source, NodeDefinition node, string operation, CancellationToken token)

@@ -18,6 +18,9 @@ namespace VisionStudio.Api;
 internal sealed class WizardSessionStore<TDocument> where TDocument : class
 {
     private readonly ConcurrentDictionary<string, TDocument> _sessions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _persistLock = new();
+    private readonly int _maxRetainedSessions;
+    private readonly TimeSpan _retention;
     private readonly string _root;
     private readonly string _label;
     private readonly string _currentFormatVersion;
@@ -39,7 +42,9 @@ internal sealed class WizardSessionStore<TDocument> where TDocument : class
         Func<TDocument, string, TDocument> withSessionId,
         JsonSerializerOptions readJson,
         JsonSerializerOptions writeJson,
-        Action<string>? warn = null)
+        Action<string>? warn = null,
+        int maxRetainedSessions = 200,
+        TimeSpan? retention = null)
     {
         _root = root;
         _label = label;
@@ -51,8 +56,11 @@ internal sealed class WizardSessionStore<TDocument> where TDocument : class
         _readJson = readJson;
         _writeJson = writeJson;
         _warn = warn;
+        _maxRetainedSessions = Math.Max(1, maxRetainedSessions);
+        _retention = retention ?? TimeSpan.FromDays(90);
         Directory.CreateDirectory(_root);
         Hydrate();
+        PruneExpiredOrOverflow();
     }
 
     public IReadOnlyList<TDocument> All()
@@ -81,6 +89,7 @@ internal sealed class WizardSessionStore<TDocument> where TDocument : class
     {
         _sessions[_sessionId(document)] = document;
         Persist(document);
+        PruneExpiredOrOverflow();
         return document;
     }
 
@@ -101,17 +110,44 @@ internal sealed class WizardSessionStore<TDocument> where TDocument : class
 
     private void Persist(TDocument document)
     {
-        try
+        var path = PathFor(_sessionId(document));
+        var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
+        lock (_persistLock)
         {
-            var path = PathFor(_sessionId(document));
-            var tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(document, _writeJson));
-            File.Move(tmp, path, overwrite: true);
+            try
+            {
+                File.WriteAllText(tmp, JsonSerializer.Serialize(document, _writeJson));
+                File.Move(tmp, path, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                // Persistence is best-effort; the in-memory session remains authoritative for this process.
+                _warn?.Invoke($"{_label} session persistence failed: {ex.Message}");
+            }
+            finally
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* best-effort temp cleanup */ }
+            }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+    }
+
+    private void PruneExpiredOrOverflow()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var ordered = _sessions.Values
+            .Select(doc => (
+                Id: _sessionId(doc),
+                UpdatedAt: DateTimeOffset.TryParse(_updatedAt(doc), out var parsed) ? parsed : now))
+            .OrderByDescending(x => x.UpdatedAt)
+            .ToArray();
+
+        for (var i = 0; i < ordered.Length; i++)
         {
-            // Persistence is best-effort; the in-memory session remains authoritative for this process.
-            _warn?.Invoke($"{_label} session persistence failed: {ex.Message}");
+            var entry = ordered[i];
+            var expired = _retention > TimeSpan.Zero && now - entry.UpdatedAt > _retention;
+            var overflow = i >= _maxRetainedSessions;
+            if (!expired && !overflow) continue;
+            Delete(entry.Id);
         }
     }
 

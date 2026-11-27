@@ -664,7 +664,7 @@ public sealed class MediaLibraryService
         }
         finally
         {
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort temp cleanup */ }
         }
         if (updateIndex)
         {
@@ -1062,7 +1062,7 @@ public sealed class MediaLibraryService
         }
         catch
         {
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort temp cleanup */ }
             throw;
         }
     }

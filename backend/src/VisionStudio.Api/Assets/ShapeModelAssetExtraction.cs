@@ -36,7 +36,7 @@ public sealed class ShapeModelAssetExtraction(ShapeModelAssetStore store, Workfl
             ?? throw new ApiNotFoundException($"Workflow '{workflowId}' does not exist.");
         var node = loaded.Workflow.Nodes.FirstOrDefault(x => x.Id.Equals(nodeId, StringComparison.OrdinalIgnoreCase))
             ?? throw new ApiNotFoundException($"Workflow '{workflowId}' has no node '{nodeId}'.");
-        if (!node.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
+        if (!BuiltInNodeTypes.Is(node, BuiltInNodeTypes.MatchShape))
             throw new ApiValidationException($"Node '{node.Id}' is '{node.Type}'; only match.shape nodes carry an inline shape model.");
 
         var parameters = node.Parameters ?? new Dictionary<string, JsonElement>();

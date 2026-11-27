@@ -29,7 +29,7 @@ public sealed class VisionNodeStep(VisionNodeRuntime nodeRuntime) : StepBodyAsyn
         }
 
         await nodeRuntime.ExecuteAsync(data, NodeId, context.CancellationToken);
-        if (data.RequireNode(NodeId).Type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase))
+        if (FlowSemantics.IsForEach(data.RequireNode(NodeId).Type))
         {
             if (!data.OutputsByNode.TryGetValue(NodeId, out var outputs) ||
                 !outputs.TryGetValue("detections", out var listValue) ||

@@ -159,9 +159,9 @@ public sealed class OfflineReplayService(
         var expanded = await modules.ExpandAsync(workflow, ct);
         await dependencies.ValidateCalibrationBindingsAsync(expanded.Workflow, ct);
         var executableWorkflow = expanded.Workflow;
-        if (executableWorkflow.Nodes.Any(x => x.Type.Equals("camera.syncCapture", StringComparison.OrdinalIgnoreCase)))
+        if (executableWorkflow.Nodes.Any(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.CameraSyncCapture)))
             throw new ApiConflictException("Dataset image validation does not support synchronized FrameSet acquisition yet.");
-        var acquisitionNodes = executableWorkflow.Nodes.Where(x => x.Type.Equals("image.acquire", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var acquisitionNodes = executableWorkflow.Nodes.Where(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.ImageAcquire)).ToArray();
         if (acquisitionNodes.Length != 1)
             throw new ApiConflictException("Media-library validation requires exactly one image.acquire node in the candidate workflow.");
         if (!File.Exists(imagePath))
@@ -186,7 +186,7 @@ public sealed class OfflineReplayService(
 
     private WorkflowDefinition PrepareExecutableWorkflowFromImagePath(WorkflowDefinition workflow, string imagePath)
     {
-        var acquisition = workflow.Nodes.Single(x => x.Type.Equals("image.acquire", StringComparison.OrdinalIgnoreCase));
+        var acquisition = workflow.Nodes.Single(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.ImageAcquire));
         var nodes = workflow.Nodes.Select(node =>
         {
             if (!node.Id.Equals(acquisition.Id, StringComparison.OrdinalIgnoreCase)) return node;
@@ -203,10 +203,10 @@ public sealed class OfflineReplayService(
 
     private (bool Replayable, string? Reason) EvaluateCapability(RunTraceRecord trace, WorkflowDefinition workflow)
     {
-        if (workflow.Nodes.Any(x => x.Type.Equals("camera.syncCapture", StringComparison.OrdinalIgnoreCase)))
+        if (workflow.Nodes.Any(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.CameraSyncCapture)))
             return (false, "V0.47 does not replay synchronized FrameSet acquisition. Use single-image traces for offline replay; multi-camera replay will require persisted FrameSet artifacts.");
 
-        var acquisitionNodes = workflow.Nodes.Where(x => x.Type.Equals("image.acquire", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var acquisitionNodes = workflow.Nodes.Where(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.ImageAcquire)).ToArray();
         if (acquisitionNodes.Length > 1)
             return (false, "V0.47 supports one image.acquire source per replay workflow.");
         if (acquisitionNodes.Length == 1 && !trace.HasReplayInput)
@@ -216,7 +216,7 @@ public sealed class OfflineReplayService(
 
     private WorkflowDefinition PrepareExecutableWorkflow(string sourceRunId, WorkflowDefinition workflow, RunTraceRecord baseline)
     {
-        var acquisition = workflow.Nodes.FirstOrDefault(x => x.Type.Equals("image.acquire", StringComparison.OrdinalIgnoreCase));
+        var acquisition = workflow.Nodes.FirstOrDefault(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.ImageAcquire));
         if (acquisition is null) return workflow;
 
         var replayPath = traces.FindReplayInputPath(sourceRunId)

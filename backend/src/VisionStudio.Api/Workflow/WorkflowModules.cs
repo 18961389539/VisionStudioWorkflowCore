@@ -531,7 +531,7 @@ public sealed class WorkflowModuleAuthoringService(WorkflowModuleStore store,Vis
             ["__moduleParameters"]=JsonSerializer.SerializeToElement(module.Parameters,Json)
         };
         foreach(var parameter in module.Parameters) parameters[parameter.Name]=parameter.DefaultValue.Clone();
-        var call=new NodeDefinition(instanceId,"module.call",module.ModuleId,centroid,parameters);
+        var call=new NodeDefinition(instanceId,BuiltInNodeTypes.ModuleCall,module.ModuleId,centroid,parameters);
         var nodes=source.Nodes.Where(x=>!selected.Contains(x.Id)).Append(call).ToArray();
         var edges=source.Edges.Where(x=>!selected.Contains(x.SourceNodeId)&&!selected.Contains(x.TargetNodeId)).ToList();
         foreach(var edge in incoming)
@@ -555,7 +555,7 @@ public sealed class WorkflowModuleAuthoringService(WorkflowModuleStore store,Vis
             ["__moduleInputs"]=JsonSerializer.SerializeToElement(module.Inputs.Select(ToPortDescriptor).ToArray(),Json),["__moduleOutputs"]=JsonSerializer.SerializeToElement(module.Outputs.Select(ToPortDescriptor).ToArray(),Json),["__moduleParameters"]=JsonSerializer.SerializeToElement(module.Parameters,Json)
         };
         foreach(var parameter in module.Parameters) parameters[parameter.Name]=parameter.DefaultValue.Clone();
-        return new NodeDefinition(id,"module.call",module.ModuleId,position,parameters);
+        return new NodeDefinition(id,BuiltInNodeTypes.ModuleCall,module.ModuleId,position,parameters);
     }
 
     private static object ToPortDescriptor(WorkflowModulePort port)=>new{port.Name,dataType=port.DataType.ToString(),port.Required};

@@ -143,7 +143,7 @@ public sealed class ShapeModelAssetGc(IVisionStudioDbFactory dbFactory, Workflow
                 }
                 continue;
             }
-            if (!node.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!BuiltInNodeTypes.Is(node, BuiltInNodeTypes.MatchShape)) continue;
             if (!node.Parameters.TryGetValue("modelAssetId", out var idElement)) continue;
             var assetId = idElement.ValueKind == JsonValueKind.String ? idElement.GetString() : idElement.ToString();
             if (string.IsNullOrWhiteSpace(assetId)) continue;

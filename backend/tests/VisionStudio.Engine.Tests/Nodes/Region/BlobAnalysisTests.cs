@@ -98,6 +98,27 @@ public sealed class BlobAnalysisTests
     }
 
     [Fact]
+    public async Task SingleBlobConvenienceOutputs_ReflectLargestBlobRegardlessOfSortBy()
+    {
+        // 左边是小斑点 (4x4=16)，右边是大斑点 (8x8=64)。
+        // 按 x 升序排序时 detections[0] 是小斑点，但单斑点便利口必须仍反映最大斑点。
+        using var img = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(img, new Rect(5, 5, 4, 4), Scalar.All(255), -1);
+        Cv2.Rectangle(img, new Rect(30, 30, 8, 8), Scalar.All(255), -1);
+
+        var result = await new MultiBlobNode().ExecuteAsync(Ctx(new() { ["image"] = Img(img) }),
+            Def("measure.blobs", """{"mode":"all","minArea":1,"sortBy":"x","descending":false,"maxCount":2}"""),
+            CancellationToken.None);
+
+        var detections = Assert.IsAssignableFrom<IReadOnlyList<VisionDetection>>(result.Outputs["detections"].Value);
+        Assert.Equal(2, detections.Count);
+        Assert.Equal(16d, detections[0].Area, 9);
+        Assert.Equal(64d, Convert.ToDouble(result.Outputs["area"].Value), 9);
+        Assert.Equal(8d, Convert.ToDouble(result.Outputs["width"].Value), 9);
+        Assert.Equal(8d, Convert.ToDouble(result.Outputs["height"].Value), 9);
+    }
+
+    [Fact]
     public async Task Analysis_HonorsCancellation()
     {
         using var img = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));

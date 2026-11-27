@@ -157,6 +157,35 @@ public sealed class FeatureRegionNodeTests : IDisposable
         using var floatImage = VisionImage.Own(new Mat(4, 4, MatType.CV_32FC1, Scalar.All(0)));
         await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new ImageTopHatNode(), new() { ["image"] = VisionValue.Image(floatImage) }));
     }
+
+    [Theory]
+    [InlineData("image.topHat", "whiteTopHat")]
+    [InlineData("image.bottomHat", "blackBottomHat")]
+    [InlineData("image.morphGradient", "gradient")]
+    public async Task MorphologyAliases_ApplyRoiIdenticallyToCanonicalMorphologyNode(string aliasType, string operation)
+    {
+        // 回归守卫：形态学兼容别名在带 ROI 时必须与规范节点 image.morphology 逐像素一致。
+        using var mat = new Mat(32, 32, MatType.CV_8UC1, Scalar.All(100));
+        Cv2.Rectangle(mat, new OpenCvSharp.Rect(6, 6, 3, 3), Scalar.All(240), -1);
+        Cv2.Rectangle(mat, new OpenCvSharp.Rect(22, 22, 3, 3), Scalar.All(240), -1);
+        Cv2.Rectangle(mat, new OpenCvSharp.Rect(2, 10, 3, 3), Scalar.All(20), -1);
+        Cv2.Rectangle(mat, new OpenCvSharp.Rect(20, 10, 3, 3), Scalar.All(20), -1);
+        using var source = VisionImage.Own(mat.Clone());
+        var input = new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(source) };
+        const string roiJson = """{"type":"rectangle","x":0,"y":0,"width":16,"height":16}""";
+
+        var aliasResult = await Run(Executor(aliasType), input,
+            $$"""{"kernelWidth":5,"kernelHeight":5,"roi":{{roiJson}}}""");
+        var canonicalResult = await Run(new MorphologyNode(), input,
+            $$"""{"operation":"{{operation}}","kernelWidth":5,"kernelHeight":5,"roi":{{roiJson}}}""");
+
+        var aliasImg = aliasResult.Outputs["image"].Require<VisionImage>("image");
+        var canonicalImg = canonicalResult.Outputs["image"].Require<VisionImage>("image");
+        using var diff = new Mat();
+        Cv2.Absdiff(aliasImg.Mat, canonicalImg.Mat, diff);
+        Assert.Equal(0, Cv2.CountNonZero(diff));
+    }
+
     [Theory]
     [InlineData("image.topHat")]
     [InlineData("image.bottomHat")]

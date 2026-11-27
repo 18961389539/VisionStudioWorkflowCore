@@ -172,7 +172,7 @@ public sealed class DatasetValidationStore(IVisionStudioDbFactory dbFactory, Tra
                 var trace = await traces.GetAsync(sourceRef, ct) ?? throw new ApiNotFoundException($"Trace '{sourceRef}' was not found.");
                 if (!trace.HasReplayInput) throw new ApiConflictException($"Trace '{sourceRef}' has no persisted replay input.");
                 var workflow = await traces.GetWorkflowSnapshotAsync(sourceRef, ct) ?? throw new ApiConflictException($"Trace '{sourceRef}' has no workflow snapshot.");
-                if (workflow.Nodes.Any(x => x.Type.Equals("camera.syncCapture", StringComparison.OrdinalIgnoreCase))) throw new ApiConflictException("Synchronized FrameSet traces are not supported by V0.48 batch validation.");
+                if (workflow.Nodes.Any(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.CameraSyncCapture))) throw new ApiConflictException("Synchronized FrameSet traces are not supported by V0.48 batch validation.");
                 var itemTopology = TopologyHash(workflow);
                 if (topology is null) topology = itemTopology;
                 if (!string.Equals(topology, itemTopology, StringComparison.OrdinalIgnoreCase)) throw new ApiConflictException($"Trace '{sourceRef}' has a different workflow topology from this dataset.");
@@ -460,8 +460,8 @@ public sealed class DatasetValidationService(DatasetValidationStore store, Trace
             candidate = await traces.GetWorkflowSnapshotAsync(sourceWorkflowRunId, ct)
                 ?? throw new ApiNotFoundException($"Workflow source trace '{sourceWorkflowRunId}' was not found. Supply an explicit candidate Workflow for a Media-only dataset.");
         }
-        if (candidate.Nodes.Any(x => x.Type.Equals("camera.syncCapture", StringComparison.OrdinalIgnoreCase))) throw new ApiConflictException("V0.48 does not batch-validate synchronized FrameSet workflows yet.");
-        if (dataset.Items.Any(x => x.SourceKind == "MEDIA") && candidate.Nodes.Count(x => x.Type.Equals("image.acquire", StringComparison.OrdinalIgnoreCase)) != 1)
+        if (candidate.Nodes.Any(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.CameraSyncCapture))) throw new ApiConflictException("V0.48 does not batch-validate synchronized FrameSet workflows yet.");
+        if (dataset.Items.Any(x => x.SourceKind == "MEDIA") && candidate.Nodes.Count(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.ImageAcquire)) != 1)
             throw new ApiConflictException("A Dataset containing Media Library images requires exactly one image.acquire node in the candidate workflow.");
         var topology = DatasetValidationStore.TopologyHash(candidate);
         await store.EnsureTopologyAsync(datasetId, topology, ct);

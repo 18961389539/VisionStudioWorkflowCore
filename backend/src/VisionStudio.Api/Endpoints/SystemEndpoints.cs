@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using VisionStudio.Api.Contracts;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
@@ -13,6 +14,42 @@ public sealed record HostModeStatus(bool RuntimeOnly, string Mode);
 
 public static class SystemEndpoints
 {
+    private sealed record CachedCatalogSnapshot(
+        long Revision,
+        IReadOnlyList<NodeCatalogItem> Catalog,
+        string Hash,
+        string ETag,
+        CatalogMetaResponse Meta);
+
+    private static readonly ConditionalWeakTable<VisionNodeRegistry, CachedCatalogSnapshot> CatalogSnapshotCache = new();
+    private static readonly object CatalogCacheSync = new();
+
+    private static CachedCatalogSnapshot GetOrBuildCatalogSnapshot(VisionNodeRegistry registry)
+    {
+        var revision = registry.Revision;
+        if (CatalogSnapshotCache.TryGetValue(registry, out var cached) && cached.Revision == revision)
+            return cached;
+
+        lock (CatalogCacheSync)
+        {
+            revision = registry.Revision;
+            if (CatalogSnapshotCache.TryGetValue(registry, out cached) && cached.Revision == revision)
+                return cached;
+
+            var catalog = registry.Catalog;
+            var hash = VisionCatalogSnapshot.ComputeHash(catalog);
+            var meta = new CatalogMetaResponse(
+                VisionCatalogSnapshot.SchemaVersion,
+                hash,
+                catalog.Count,
+                catalog.Count(x => string.Equals(x.PluginId, "builtin", StringComparison.OrdinalIgnoreCase)),
+                catalog.Count(x => !string.Equals(x.PluginId, "builtin", StringComparison.OrdinalIgnoreCase)));
+            var next = new CachedCatalogSnapshot(revision, catalog, hash, $"\"{hash}\"", meta);
+            CatalogSnapshotCache.AddOrUpdate(registry, next);
+            return next;
+        }
+    }
+
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
         // N04：管理员显式释放已放弃的租约（TTL 过期且持有者从未释放）——要求设备空闲并写入审计。
@@ -125,25 +162,26 @@ public static class SystemEndpoints
 
         app.MapGet("/api/catalog", (HttpContext http, VisionNodeRegistry registry) =>
         {
-            var catalog = registry.Catalog;
-            var hash = VisionCatalogSnapshot.ComputeHash(catalog);
-            http.Response.Headers["ETag"] = $"\"{hash}\"";
+            var snapshot = GetOrBuildCatalogSnapshot(registry);
+            http.Response.Headers["ETag"] = snapshot.ETag;
             http.Response.Headers["X-VisionStudio-Catalog-Schema"] = VisionCatalogSnapshot.SchemaVersion.ToString();
-            http.Response.Headers["X-VisionStudio-Catalog-Hash"] = hash;
-            return Results.Ok(catalog);
+            http.Response.Headers["X-VisionStudio-Catalog-Hash"] = snapshot.Hash;
+            var ifNoneMatch = http.Request.Headers.IfNoneMatch.ToString();
+            if (!string.IsNullOrWhiteSpace(ifNoneMatch) &&
+                (string.Equals(ifNoneMatch.Trim(), snapshot.ETag, StringComparison.Ordinal) ||
+                 string.Equals(ifNoneMatch.Trim(), snapshot.Hash, StringComparison.Ordinal)))
+            {
+                return Results.StatusCode(StatusCodes.Status304NotModified);
+            }
+            return Results.Ok(snapshot.Catalog);
         // 契约单一真相源：声明响应类型后 NodeCatalogItem 及其嵌套类型进入 OpenAPI spec，
         // 前端 types.ts 才能由生成替换手写镜像（见 docs/improvement-backlog-2026-10-23.md P1-4）。
         }).Produces<IReadOnlyList<NodeCatalogItem>>();
 
         app.MapGet("/api/catalog/meta", (VisionNodeRegistry registry) =>
         {
-            var catalog = registry.Catalog;
-            return Results.Ok(new CatalogMetaResponse(
-                VisionCatalogSnapshot.SchemaVersion,
-                VisionCatalogSnapshot.ComputeHash(catalog),
-                catalog.Count,
-                catalog.Count(x => string.Equals(x.PluginId, "builtin", StringComparison.OrdinalIgnoreCase)),
-                catalog.Count(x => !string.Equals(x.PluginId, "builtin", StringComparison.OrdinalIgnoreCase))));
+            var snapshot = GetOrBuildCatalogSnapshot(registry);
+            return Results.Ok(snapshot.Meta);
         }).Produces<CatalogMetaResponse>();
         app.MapPost("/api/frames/resolve", (FrameResolveRequest request) =>
         {

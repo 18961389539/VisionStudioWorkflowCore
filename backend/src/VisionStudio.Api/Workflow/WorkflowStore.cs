@@ -120,7 +120,14 @@ public sealed class WorkflowStore
                     await stream.WriteAsync(payload, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 File.Move(tempPath, finalPath, overwrite: true);
-                _summaryCache.TryRemove(finalPath, out _);
+                var info = new FileInfo(finalPath);
+                var summary = new WorkflowDocumentSummary(
+                    id,
+                    string.IsNullOrWhiteSpace(workflow.Name) ? id : workflow.Name,
+                    workflow.Nodes.Count,
+                    workflow.Edges.Count,
+                    new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero));
+                _summaryCache[finalPath] = new SummaryCacheEntry(info.Length, info.LastWriteTimeUtc, summary);
                 return new SaveOutcome(revision);
             }
             finally

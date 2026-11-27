@@ -52,14 +52,14 @@ public sealed partial class RuntimeDependencyManifestService
             if (!string.IsNullOrWhiteSpace(assetId) && assetVersion > 0)
                 calibrationRefs.Add((assetId, assetVersion));
 
-            if (string.Equals(node.Type, "match.shape", StringComparison.OrdinalIgnoreCase))
+            if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.MatchShape))
             {
                 var modelAssetId = ResolveString(node, registration.Catalog, "modelAssetId");
                 if (!string.IsNullOrWhiteSpace(modelAssetId))
                     modelAssetRefs.Add((modelAssetId!, ResolveInt(node, registration.Catalog, "modelAssetVersion")));
             }
             if (MatchingTemplateAsset.SupportsNode(node.Type)
-                && (!string.Equals(node.Type, "match.feature", StringComparison.OrdinalIgnoreCase)
+                && (!BuiltInNodeTypes.Is(node, BuiltInNodeTypes.MatchFeature)
                     || !workflow.Edges.Any(edge => !edge.IsControl && edge.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase)
                         && edge.TargetPort.Equals("template", StringComparison.OrdinalIgnoreCase))))
             {
@@ -69,21 +69,21 @@ public sealed partial class RuntimeDependencyManifestService
                     modelAssetRefs.Add((templateAssetId!, ResolveInt(node, registration.Catalog, "templateAssetVersion")));
             }
 
-            if (string.Equals(node.Type, "image.undistort", StringComparison.OrdinalIgnoreCase))
+            if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.ImageUndistort))
             {
                 var intrinsicAssetId = ResolveString(node, registration.Catalog, "intrinsicsAssetId");
                 var intrinsicAssetVersion = ResolveInt(node, registration.Catalog, "intrinsicsAssetVersion");
                 if (!string.IsNullOrWhiteSpace(intrinsicAssetId) && intrinsicAssetVersion > 0)
                     calibrationRefs.Add((IntrinsicCalibrationReference(intrinsicAssetId!), intrinsicAssetVersion));
             }
-            if (string.Equals(node.Type, "calibration.handEye2D", StringComparison.OrdinalIgnoreCase))
+            if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.CalibrationHandEye2D))
             {
                 var handEyeAssetId = ResolveString(node, registration.Catalog, "handEyeAssetId");
                 var handEyeAssetVersion = ResolveInt(node, registration.Catalog, "handEyeAssetVersion");
                 if (!string.IsNullOrWhiteSpace(handEyeAssetId) && handEyeAssetVersion > 0)
                     calibrationRefs.Add((HandEyeCalibrationReference(handEyeAssetId!), handEyeAssetVersion));
             }
-            if (string.Equals(node.Type, "calibration.handEye3D", StringComparison.OrdinalIgnoreCase))
+            if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.CalibrationHandEye3D))
             {
                 var handEye3DAssetId = ResolveString(node, registration.Catalog, "handEye3DAssetId");
                 var handEye3DAssetVersion = ResolveInt(node, registration.Catalog, "handEye3DAssetVersion");

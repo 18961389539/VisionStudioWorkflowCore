@@ -48,13 +48,13 @@ public sealed partial class VisionWorkflowCompiler
         }
 
         foreach (var circleNode in workflow.Nodes.Where(node =>
-            string.Equals(node.Type, "measure.caliperCircle", StringComparison.OrdinalIgnoreCase)))
+            BuiltInNodeTypes.Is(node, BuiltInNodeTypes.MeasureCaliperCircle)))
         {
             var circleSource = workflow.Edges.FirstOrDefault(edge =>
                 edge.TargetNodeId.Equals(circleNode.Id, StringComparison.OrdinalIgnoreCase)
                 && edge.TargetPort.Equals("circle", StringComparison.OrdinalIgnoreCase));
             if (circleSource is null || !byId.TryGetValue(circleSource.SourceNodeId, out var sourceNode)
-                || !string.Equals(sourceNode.Type, "roi.transform", StringComparison.OrdinalIgnoreCase))
+                || !BuiltInNodeTypes.Is(sourceNode, BuiltInNodeTypes.RoiTransform))
                 continue;
 
             var transformSource = workflow.Edges.FirstOrDefault(edge =>
@@ -70,7 +70,7 @@ public sealed partial class VisionWorkflowCompiler
         ValidateMeasurementImageFrames(workflow, byId);
         ValidateMeasurementGeometryFrames(workflow, byId);
         ValidatePlaneMapInputs(workflow, byId);
-        foreach (var node in workflow.Nodes.Where(n => n.Type == "geometry.intersections"))
+        foreach (var node in workflow.Nodes.Where(n => BuiltInNodeTypes.Is(n, BuiltInNodeTypes.GeometryIntersections)))
         {
             var operation = node.GetString("operator", "lineCircle");
             string[] ports = operation == "circles" ? ["circle", "circle2"] : operation == "segments" ? ["line", "line2"] : ["line", "circle"];
@@ -110,7 +110,7 @@ public sealed partial class VisionWorkflowCompiler
                 // before reading its ROI while capturing a reference, allowing users to replace it.
                 if (roiParameter.Equals("roi", StringComparison.OrdinalIgnoreCase)
                     && (roiInputConnected
-                        || catalog.Type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)
+                        || BuiltInNodeTypes.Is(catalog.Type, BuiltInNodeTypes.RoiTransform)
                         && node.GetBool("captureReference", false)))
                     continue;
                 try { _ = node.GetRoi(roiParameter); }

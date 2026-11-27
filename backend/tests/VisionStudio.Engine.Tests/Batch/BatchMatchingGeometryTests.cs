@@ -205,4 +205,30 @@ public sealed class BatchMatchingGeometryTests
         Assert.InRange(result.Outputs["z"].Require<double>("z"), 518, 522);
         Assert.InRange(result.Outputs["reprojectionRms"].Require<double>("reprojectionRms"), 0, 0.05);
     }
+
+    [Theory]
+    [InlineData("[0]")]
+    [InlineData("[0.1,0.2,0.3]")]
+    public async Task Pose3D_RejectsInvalidDistortionCoefficientLength(string distortionJson)
+    {
+        var objects = new[]
+        {
+            new Point3f(0, 0, 0), new Point3f(100, 0, 0),
+            new Point3f(100, 60, 0), new Point3f(0, 60, 0)
+        };
+        var imagePoints = new[]
+        {
+            new VisionPoint2D(200, 180), new VisionPoint2D(400, 180),
+            new VisionPoint2D(400, 300), new VisionPoint2D(200, 300)
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await new PnpPoseNode().ExecuteAsync(
+            Ctx(new() { ["imagePoints"] = Points(imagePoints) }),
+            Def("match.pose3d", JsonSerializer.Serialize(new
+            {
+                objectPointsJson = JsonSerializer.Serialize(objects.Select(point => new[] { point.X, point.Y, point.Z })),
+                cameraMatrixJson = "[800,0,320,0,800,240,0,0,1]",
+                distortionJson
+            })), CancellationToken.None));
+    }
 }

@@ -8,14 +8,14 @@ public sealed partial class VisionWorkflowCompiler
 {
     private void ValidatePlaneMapInputs(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
     {
-        foreach (var node in workflow.Nodes.Where(n => n.Type == "jlvision.worldPlane" && n.GetString("operator", "image") == "applyMap"))
+        foreach (var node in workflow.Nodes.Where(n => BuiltInNodeTypes.Is(n, BuiltInNodeTypes.JlVisionWorldPlane) && n.GetString("operator", "image") == "applyMap"))
         {
             var bindings = new[] { "mapRows", "mapColumns", "mapInfo" }.Select(port => FindInputEdge(workflow.Edges, node.Id, port)).ToArray();
             if (bindings.Any(edge => edge is null))
                 throw new InvalidOperationException($"Node '{node.Id}': 应用映射需配套连接 mapRows/mapColumns/mapInfo，请重新生成并连接映射。");
             var producerId = bindings[0]!.SourceNodeId;
             if (bindings.Any(edge => !edge!.SourceNodeId.Equals(producerId, StringComparison.OrdinalIgnoreCase) || edge.SourcePort != edge.TargetPort) ||
-                !byId.TryGetValue(producerId, out var producer) || producer.Type != "jlvision.worldPlane" || producer.GetString("operator", "image") != "map")
+                !byId.TryGetValue(producerId, out var producer) || !BuiltInNodeTypes.Is(producer, BuiltInNodeTypes.JlVisionWorldPlane) || producer.GetString("operator", "image") != "map")
                 throw new InvalidOperationException($"Node '{node.Id}': 映射行图、列图和描述必须来自同一个映射生成节点的对应端口。");
             var original = ResolveImageInputFrame(producer.Id, "image", workflow, byId);
             var actual = ResolveImageInputFrame(node.Id, "image", workflow, byId);
@@ -66,7 +66,7 @@ public sealed partial class VisionWorkflowCompiler
 
     private void ValidateImageWarpFrames(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
     {
-        foreach (var node in workflow.Nodes.Where(item => item.Type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase)))
+        foreach (var node in workflow.Nodes.Where(item => BuiltInNodeTypes.Is(item, BuiltInNodeTypes.ImageWarpAffine)))
         {
             var transformEdge = FindInputEdge(workflow.Edges, node.Id, "transform");
             var imageEdge = FindInputEdge(workflow.Edges, node.Id, "image");
@@ -367,8 +367,8 @@ public sealed partial class VisionWorkflowCompiler
     private CoordinateFrame? ResolveContourFrame(string nodeId, WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId, HashSet<string> visited)
     {
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
-        if (node.Type == "jlvision.worldPlane") return new($"world:{nodeId}:plane:{node.GetString("unit", "mm")}", $"{nodeId}.contours (world plane)");
-        if (node.Type == "jlvision.dxf" && node.GetString("operator", "read") == "read") return new($"cad:{nodeId}:{node.GetString("unit", "unspecified")}", $"{nodeId}.contours (CAD coordinates)");
+        if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.JlVisionWorldPlane)) return new($"world:{nodeId}:plane:{node.GetString("unit", "mm")}", $"{nodeId}.contours (world plane)");
+        if (BuiltInNodeTypes.Is(node, BuiltInNodeTypes.JlVisionDxf) && node.GetString("operator", "read") == "read") return new($"cad:{nodeId}:{node.GetString("unit", "unspecified")}", $"{nodeId}.contours (CAD coordinates)");
         var catalog = registry.Require(node.Type).Catalog;
         if (catalog.Inputs.Any(p => p.Name == "image")) return ResolveImageInputFrame(nodeId, "image", workflow, byId);
         var input = workflow.Edges.FirstOrDefault(e => e.TargetNodeId == nodeId && !WorkflowGraph.IsControlEdge(e) && catalog.Inputs.Any(p => p.Name == e.TargetPort && p.DataType == VisionDataType.Contour));

@@ -77,6 +77,7 @@ public static class WorkflowExecutionEndpoints
             WorkflowModuleExpander modules,
             VisionNodeRegistry nodes,
             IHubContext<DiagnosticsHub> diagnosticsHub,
+            IHubContext<RunsHub> runsHub,
             CancellationToken ct) =>
         {
             var context = new RunTraceContext("AdHoc");
@@ -98,12 +99,29 @@ public static class WorkflowExecutionEndpoints
                 await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, workflow, context);
             else
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, workflow, context);
+            var completedCount = 0;
             // 交互式运行：捕获逐节点图像以支持检查中间结果（生产/后台运行保持关闭）
             var runOptions = new VisionRunOptions(
                 DebugRunMode.Full,
                 CaptureNodeImages: true,
-                ProgressObserver: evt => _ = BroadcastNodeProgressAsync(diagnosticsHub, evt));
-            var result = await runner.RunAsync(workflow, runOptions, runId, ct);
+                ProgressObserver: evt =>
+                {
+                    if (evt.State is "ok" or "error") Volatile.Write(ref completedCount, evt.CompletedCount);
+                    _ = BroadcastNodeProgressAsync(diagnosticsHub, runsHub, evt);
+                });
+            WorkflowRunResult result;
+            try
+            {
+                result = await runner.RunAsync(workflow, runOptions, runId, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                await BroadcastNodeProgressAsync(
+                    diagnosticsHub,
+                    runsHub,
+                    new NodeRunProgressEvent(runId, workflow.Id, string.Empty, "canceled", Volatile.Read(ref completedCount), workflow.Nodes.Count, false));
+                throw;
+            }
             await recorder.FinalizeAsync(RedactTrainingModelAssets(result), workflow, context);
             // C01/F02：成功 + 追溯证据已提交 + **设备动作确认完成** 三者齐全才解除意图。
             // 仅"流程返回成功"不够——异步机器人命令（SendTarget/未等待到位）只是"已受理"。
@@ -128,13 +146,19 @@ public static class WorkflowExecutionEndpoints
             WorkflowModuleExpander modules,
             VisionNodeRegistry nodes,
             IHubContext<DiagnosticsHub> diagnosticsHub,
+            IHubContext<RunsHub> runsHub,
             CancellationToken ct) =>
         {
+            var completedCount = 0;
             // 交互式调试：捕获逐节点图像以支持按节点检查中间结果
             var options = (request.Options ?? new VisionRunOptions()) with
             {
                 CaptureNodeImages = true,
-                ProgressObserver = evt => _ = BroadcastNodeProgressAsync(diagnosticsHub, evt)
+                ProgressObserver = evt =>
+                {
+                    if (evt.State is "ok" or "error") Volatile.Write(ref completedCount, evt.CompletedCount);
+                    _ = BroadcastNodeProgressAsync(diagnosticsHub, runsHub, evt);
+                }
             };
             var context = new RunTraceContext("Debug", DebugMode: options.Mode.ToString());
             var runId = RunTraceRecorder.NewRunId();
@@ -152,7 +176,19 @@ public static class WorkflowExecutionEndpoints
                 await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
             else
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
-            var result = await runner.RunAsync(request.Workflow, options, runId, ct);
+            WorkflowRunResult result;
+            try
+            {
+                result = await runner.RunAsync(request.Workflow, options, runId, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                await BroadcastNodeProgressAsync(
+                    diagnosticsHub,
+                    runsHub,
+                    new NodeRunProgressEvent(runId, request.Workflow.Id, string.Empty, "canceled", Volatile.Read(ref completedCount), request.Workflow.Nodes.Count, false));
+                throw;
+            }
             await recorder.FinalizeAsync(RedactTrainingModelAssets(result), request.Workflow, context);
             if (actionIntent is not null)
             {
@@ -257,11 +293,16 @@ public static class WorkflowExecutionEndpoints
         return app;
     }
 
-    private static async Task BroadcastNodeProgressAsync(IHubContext<DiagnosticsHub> hub, NodeRunProgressEvent evt)
+    private static async Task BroadcastNodeProgressAsync(
+        IHubContext<DiagnosticsHub> diagnosticsHub,
+        IHubContext<RunsHub> runsHub,
+        NodeRunProgressEvent evt)
     {
         try
         {
-            await hub.Clients.All.SendAsync("runNodeProgress", evt, CancellationToken.None);
+            await Task.WhenAll(
+                runsHub.Clients.All.SendAsync("runNodeProgress", evt, CancellationToken.None),
+                diagnosticsHub.Clients.All.SendAsync("runNodeProgress", evt, CancellationToken.None));
         }
         catch
         {

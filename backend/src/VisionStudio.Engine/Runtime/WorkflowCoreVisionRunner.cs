@@ -238,7 +238,7 @@ public sealed class WorkflowCoreVisionRunner(
         if (options.Mode == DebugRunMode.Breakpoints && (options.Breakpoints is null || options.Breakpoints.Count == 0))
             throw new InvalidOperationException("Breakpoint debug requires at least one breakpoint node.");
 
-        if (options.Mode != DebugRunMode.Full && workflow.Nodes.Any(n => n.Type.Equals("flow.parallel", StringComparison.OrdinalIgnoreCase)))
+        if (options.Mode != DebugRunMode.Full && workflow.Nodes.Any(n => FlowSemantics.IsParallel(n.Type)))
             throw new InvalidOperationException("V0.29 node debugging remains intentionally disabled for workflows containing Parallel. Parallel-safe stepping requires a stateful debug session and will be added later.");
 
         if (options.Mode != DebugRunMode.Full && VisionExecutionPolicy.HasIterativeOrRetryControl(workflow.Nodes))

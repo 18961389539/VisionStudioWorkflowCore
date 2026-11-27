@@ -306,7 +306,7 @@ public sealed class ProductionSynchronizationHealthGuardService(CameraSynchroniz
     public static IReadOnlySet<string> ResolveGroupIds(WorkflowDefinition workflow)
     {
         var output = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var node in workflow.Nodes.Where(x => string.Equals(x.Type, "camera.syncCapture", StringComparison.OrdinalIgnoreCase)))
+        foreach (var node in workflow.Nodes.Where(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.CameraSyncCapture)))
         {
             if (node.Parameters is null || !node.Parameters.TryGetValue("groupId", out var element)) continue;
             var groupId = ReadString(element)?.Trim();

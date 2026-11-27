@@ -368,7 +368,7 @@ public sealed class PluginPerformanceBenchmarkService(
         if (!validation.DatasetId.Equals(request.DatasetId, StringComparison.OrdinalIgnoreCase)) throw new ApiValidationException("ValidationRunId must belong to the selected Dataset.");
         if (!validation.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase)) throw new ApiConflictException("Benchmark requires a completed Dataset Validation run so the candidate Workflow is frozen and reproducible.");
         var workflow = await datasets.GetRunWorkflowAsync(request.ValidationRunId, ct);
-        if (workflow.Nodes.Any(x => x.Type.Equals("camera.syncCapture", StringComparison.OrdinalIgnoreCase))) throw new ApiConflictException("Plugin benchmark does not execute synchronized hardware acquisition workflows.");
+        if (workflow.Nodes.Any(x => BuiltInNodeTypes.Is(x, BuiltInNodeTypes.CameraSyncCapture))) throw new ApiConflictException("Plugin benchmark does not execute synchronized hardware acquisition workflows.");
 
         var plugin = plugins.Plugins.FirstOrDefault(x => x.Id.Equals(request.PluginId, StringComparison.OrdinalIgnoreCase) && x.Loaded)
             ?? throw new ApiNotFoundException($"Loaded plugin '{request.PluginId}' was not found.");

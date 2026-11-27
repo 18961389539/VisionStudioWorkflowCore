@@ -7,25 +7,26 @@ namespace VisionStudio.Engine.Runtime;
 /// </summary>
 public static class FlowSemantics
 {
-    private static bool Is(string type, string candidate) => type.Equals(candidate, StringComparison.OrdinalIgnoreCase);
+    private static bool Is(string type, string candidate) => BuiltInNodeTypes.Is(type, candidate);
 
-    public static bool IsConditional(string type) => Is(type, "flow.if") || Is(type, "flow.ifBoolean");
-    public static bool IsLoop(string type) => Is(type, "flow.forEach") || Is(type, "flow.while") || Is(type, "flow.repeat");
-    public static bool IsWhile(string type) => Is(type, "flow.while");
-    public static bool IsRepeat(string type) => Is(type, "flow.repeat");
-    public static bool IsLoopEnd(string type) => Is(type, "flow.loopEnd");
-    public static bool IsBreak(string type) => Is(type, "flow.break");
-    public static bool IsSwitch(string type) => Is(type, "flow.switch");
-    public static bool IsTry(string type) => Is(type, "flow.try");
-    public static bool IsParallel(string type) => Is(type, "flow.parallel");
-    public static bool IsJoin(string type) => Is(type, "flow.join");
-    public static bool IsMerge(string type) => Is(type, "flow.merge");
+    public static bool IsConditional(string type) => Is(type, BuiltInNodeTypes.FlowIf) || Is(type, BuiltInNodeTypes.FlowIfBoolean);
+    public static bool IsForEach(string type) => Is(type, BuiltInNodeTypes.FlowForEach);
+    public static bool IsLoop(string type) => IsForEach(type) || IsWhile(type) || IsRepeat(type);
+    public static bool IsWhile(string type) => Is(type, BuiltInNodeTypes.FlowWhile);
+    public static bool IsRepeat(string type) => Is(type, BuiltInNodeTypes.FlowRepeat);
+    public static bool IsLoopEnd(string type) => Is(type, BuiltInNodeTypes.FlowLoopEnd);
+    public static bool IsBreak(string type) => Is(type, BuiltInNodeTypes.FlowBreak);
+    public static bool IsSwitch(string type) => Is(type, BuiltInNodeTypes.FlowSwitch);
+    public static bool IsTry(string type) => Is(type, BuiltInNodeTypes.FlowTry);
+    public static bool IsParallel(string type) => Is(type, BuiltInNodeTypes.FlowParallel);
+    public static bool IsJoin(string type) => Is(type, BuiltInNodeTypes.FlowJoin);
+    public static bool IsMerge(string type) => Is(type, BuiltInNodeTypes.FlowMerge);
     public static bool IsJoinOrMerge(string type) => IsJoin(type) || IsMerge(type);
-    public static bool IsResult(string type) => Is(type, "flow.result");
+    public static bool IsResult(string type) => Is(type, BuiltInNodeTypes.FlowResult);
     public static bool IsIterativeOrRetry(string type) => IsLoop(type) || IsTry(type);
 
     public static string LoopKind(string type) =>
-        Is(type, "flow.while") ? "while" : Is(type, "flow.repeat") ? "repeat" : "forEach";
+        IsWhile(type) ? "while" : IsRepeat(type) ? "repeat" : "forEach";
 
-    public static string ConditionalLabel(string type) => Is(type, "flow.ifBoolean") ? "IfBoolean" : "If";
+    public static string ConditionalLabel(string type) => Is(type, BuiltInNodeTypes.FlowIfBoolean) ? "IfBoolean" : "If";
 }

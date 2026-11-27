@@ -4,7 +4,7 @@ export type RunProgressEvent = {
   runId: string;
   workflowId: string;
   nodeId: string;
-  state: 'running' | 'ok' | 'error';
+  state: 'running' | 'ok' | 'error' | 'canceled';
   completedCount: number;
   totalCount: number;
   success?: boolean | null;
@@ -19,7 +19,7 @@ function ensureConnected() {
   try {
     if (!connection) {
       connection = new HubConnectionBuilder()
-        .withUrl('/hubs/diagnostics')
+        .withUrl('/hubs/runs')
         .configureLogging(LogLevel.Warning)
         .build();
       connection.on('runNodeProgress', (event: RunProgressEvent) => {

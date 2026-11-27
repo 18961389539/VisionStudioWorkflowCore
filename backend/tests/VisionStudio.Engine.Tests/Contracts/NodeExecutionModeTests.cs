@@ -71,4 +71,19 @@ public sealed class NodeExecutionModeTests
         Assert.True(VisionExecutionPolicy.HasIterativeOrRetryControl([Node("flow.forEach")]));
         Assert.False(VisionExecutionPolicy.HasIterativeOrRetryControl([Node("flow.if"), Node("image.threshold")]));
     }
+
+    [Fact]
+    public void BuiltInNodeTypesConstants_ExistInBuiltInCatalogExceptModuleCall()
+    {
+        var constants = typeof(BuiltInNodeTypes)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+            .Select(field => (string)field.GetRawConstantValue()!)
+            .Where(type => !BuiltInNodeTypes.Is(type, BuiltInNodeTypes.ModuleCall))
+            .ToArray();
+
+        Assert.NotEmpty(constants);
+        foreach (var type in constants)
+            Assert.NotNull(BuiltInNodeCatalog.Require(type));
+    }
 }

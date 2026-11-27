@@ -115,6 +115,29 @@ public sealed class BatchDefectAnalysisTests
     }
 
     [Fact]
+    public async Task Geometry_AngleModeMeanDiffersFromLengthWeighted()
+    {
+        // 回归守卫：1 条长水平划痕 (100x2, 0°) + 2 条短垂直划痕 (10x2, 90°)，
+        // length-weighted 按长度加权应偏向 0°，mean 按条数等权应偏向 90°。
+        var horizontal = Det(0, 10, 10, 100, 2, area: 200);
+        var vertical1 = Det(1, 10, 30, 10, 2, area: 20) with { BoundingBox = new VisionRectangle2D(10, 30, 10, 2, 90) };
+        var vertical2 = Det(2, 30, 30, 10, 2, area: 20) with { BoundingBox = new VisionRectangle2D(30, 30, 10, 2, 90) };
+        var detections = new[] { horizontal, vertical1, vertical2 };
+
+        var weighted = await new DefectGeometryNode().ExecuteAsync(
+            Ctx(new() { ["detections"] = Dets(detections) }),
+            Def("defect.geometry", """{"elongationThreshold":3,"angleMode":"length-weighted"}"""),
+            CancellationToken.None);
+        var mean = await new DefectGeometryNode().ExecuteAsync(
+            Ctx(new() { ["detections"] = Dets(detections) }),
+            Def("defect.geometry", """{"elongationThreshold":3,"angleMode":"mean"}"""),
+            CancellationToken.None);
+
+        Assert.InRange(Math.Abs((double)weighted.Outputs["dominantAngleDeg"].Value!), 0, 1);
+        Assert.InRange(Math.Abs((double)mean.Outputs["dominantAngleDeg"].Value!), 89, 90.1);
+    }
+
+    [Fact]
     public async Task EdgeDefect_SplitsChipsFromOneProfile()
     {
         // 水平名义线 y=50；在 x=50..59 与 x=120..124 各有一个向 +y 的缺口。

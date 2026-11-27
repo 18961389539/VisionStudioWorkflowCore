@@ -250,6 +250,28 @@ public sealed class WorkflowStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Save_UpdatesSummaryCacheImmediatelyForListAsync()
+    {
+        var first = (await _store.SaveAsync("cached", new WorkflowDefinition("cached", "Initial", [], []), CancellationToken.None)).Revision;
+        var initialList = await _store.ListAsync(CancellationToken.None);
+        var entry1 = Assert.Single(initialList, x => x.Id == "cached");
+        Assert.Equal("Initial", entry1.Name);
+        Assert.Equal(0, entry1.NodeCount);
+
+        var updated = new WorkflowDefinition(
+            "cached",
+            "Renamed",
+            [new NodeDefinition("n1", "image.threshold", null, null, null)],
+            []);
+        await _store.SaveAsync("cached", updated, CancellationToken.None, expectedRevision: first);
+
+        var nextList = await _store.ListAsync(CancellationToken.None);
+        var entry2 = Assert.Single(nextList, x => x.Id == "cached");
+        Assert.Equal("Renamed", entry2.Name);
+        Assert.Equal(1, entry2.NodeCount);
+    }
+
+    [Fact]
     public async Task Save_WithLockedLegacyRevisionFile_AcceptsNextWriteWithoutReload()
     {
         var baseline = (await _store.SaveAsync("defer", new WorkflowDefinition("defer", "V1", [], []), CancellationToken.None)).Revision;

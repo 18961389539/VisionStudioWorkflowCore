@@ -109,7 +109,7 @@ public static class MatchingEndpoints
             LockedParameters: request.LockedParameters,
             Parameters: request.Parameters);
 
-        var recommendation = nodeType == "match.template"
+        var recommendation = BuiltInNodeTypes.Is(nodeType, BuiltInNodeTypes.MatchTemplate)
             ? MatchingAutoTune.DetermineNcc(template, tuneRequest)
             : MatchingAutoTune.DetermineShape(template, tuneRequest);
 
@@ -143,10 +143,10 @@ public static class MatchingEndpoints
 
     private static string NormalizeNodeType(string? nodeType)
     {
-        var value = string.IsNullOrWhiteSpace(nodeType) ? "match.shape" : nodeType.Trim().ToLowerInvariant();
+        var value = string.IsNullOrWhiteSpace(nodeType) ? BuiltInNodeTypes.MatchShape : nodeType.Trim().ToLowerInvariant();
         return value switch
         {
-            "match.shape" or "match.template" => value,
+            BuiltInNodeTypes.MatchShape or BuiltInNodeTypes.MatchTemplate => value,
             _ => throw new ApiValidationException($"nodeType must be match.shape or match.template (got '{nodeType}').")
         };
     }
