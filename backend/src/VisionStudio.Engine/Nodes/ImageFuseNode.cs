@@ -37,6 +37,9 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
             "legacy" => ("legacy", "unchecked"),
             _ => throw new InvalidOperationException("image.fuse alignmentPolicy must be sameFrame, prealigned or legacy.")
         };
+        var referenceGrid = node.GetString("referenceGrid", "").Trim();
+        if (alignmentPolicy == "prealigned" && referenceGrid.Length == 0)
+            throw new InvalidOperationException("image.fuse alignmentPolicy=prealigned requires referenceGrid to name the shared reference grid.");
 
         var images = new List<VisionImage>(MaxInputs);
         var inputSources = new List<string>(MaxInputs);
@@ -64,12 +67,25 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
         }
         else
         {
+            if (context.TryGetValue("frameSet", out _))
+                throw new InvalidOperationException("image.fuse sourceMode=images cannot also receive frameSet; choose one source mode.");
+            var seen = new HashSet<VisionImage>(ReferenceEqualityComparer.Instance);
+            var emptyBefore = false;
             for (var index = 1; index <= MaxInputs; index++)
             {
                 var port = $"image{index}";
-                if (!context.TryGetValue(port, out _)) continue;
+                if (!context.TryGetValue(port, out _))
+                {
+                    emptyBefore = true;
+                    continue;
+                }
+                if (emptyBefore)
+                    throw new InvalidOperationException($"image.fuse image ports must be contiguous from image1; '{port}' leaves an empty slot.");
+                var input = context.RequireImage(port);
+                if (!seen.Add(input))
+                    throw new InvalidOperationException($"image.fuse port '{port}' duplicates an earlier image reference; connect distinct frames.");
                 inputSources.Add(port);
-                images.Add(context.RequireImage(port));
+                images.Add(input);
             }
         }
         if (images.Count < 2)
@@ -123,11 +139,22 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
 
         var sourceNames = inputSources.ToArray();
         var cameraIds = frameSet is null ? Array.Empty<string>() : sourceNames;
+        var inputContracts = images.Select((input, index) => new
+        {
+            source = sourceNames[index],
+            cameraId = frameSet is null ? null : sourceNames[index],
+            width = input.Width,
+            height = input.Height,
+            depth = input.Mat.Depth().ToString(),
+            channels = input.Mat.Channels(),
+            coordinateFrame = input.CoordinateFrame
+        }).ToArray();
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("mode", mode), ("sourceMode", sourceMode), ("inputCount", images.Count),
             ("width", reference.Cols), ("height", reference.Rows), ("channels", reference.Channels()),
             ("alignmentPolicy", alignmentPolicy), ("alignmentStatus", alignmentStatus),
-            ("inputSources", sourceNames), ("inputCoordinateFrames", coordinateFrames),
+            ("referenceGrid", referenceGrid.Length == 0 ? null : referenceGrid),
+            ("inputSources", sourceNames), ("inputContracts", inputContracts), ("inputCoordinateFrames", coordinateFrames),
             ("cameraIds", cameraIds), ("frameSetGroupId", frameSet?.GroupId),
             ("timestampBasis", frameSet?.TimestampBasis), ("triggerSkewUs", frameSet?.TriggerSkewUs),
             ("withinTolerance", frameSet?.WithinTolerance));

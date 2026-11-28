@@ -91,6 +91,10 @@ var sourceImage = context.RequireImage("image");
                 x = c.Length == 0 ? 0 : c.Min(p => p.X), y = c.Length == 0 ? 0 : c.Min(p => p.Y),
                 width = c.Length == 0 ? 0 : c.Max(p => p.X) - c.Min(p => p.X) + 1,
                 height = c.Length == 0 ? 0 : c.Max(p => p.Y) - c.Min(p => p.Y) + 1,
+                sampled = subpixel && c.Length > 0,
+                truncated = subpixel && c.Length > 200,
+                originalPointCount = c.Length,
+                stride = subpixel && c.Length > 0 ? Math.Max(1, (int)Math.Ceiling(c.Length / 200d)) : 1,
                 points
             };
         }).OrderByDescending(c => c.length).ToArray();
@@ -136,7 +140,7 @@ var sourceImage = context.RequireImage("image");
         var angleTolerance = node.GetDouble("angleToleranceDeg", 5);
         var distanceTolerance = node.GetDouble("distanceTolerance", 6);
         if (houghThreshold < 1) throw new InvalidOperationException("houghThreshold must be at least 1.");
-        if (!double.IsFinite(minLength) || minLength < 1) throw new InvalidOperationException("minLength must be finite and at least 1.");
+        if (!double.IsFinite(minLength) || minLength < 0) throw new InvalidOperationException("minLength must be finite and non-negative.");
         if (!double.IsFinite(maxGap) || maxGap < 0) throw new InvalidOperationException("maxGap must be finite and non-negative.");
         if (!double.IsFinite(cannyLow) || !double.IsFinite(cannyHigh) || cannyLow < 0 || cannyHigh > 255 || cannyLow > cannyHigh)
             throw new InvalidOperationException("Canny thresholds must satisfy 0 <= cannyLow <= cannyHigh <= 255.");
@@ -149,6 +153,7 @@ var sourceImage = context.RequireImage("image");
         using var analysis = VisionGeometryHelpers.ApplyRoi(gray, roi);
         using var edges = new Mat();
         JLVisionOperators.Canny(analysis, edges, cannyLow, cannyHigh);
+        var edgePixels = JLVisionOperators.CountNonZero(edges);
         var segments = JLVisionOperators.HoughLinesP(edges, 1, Math.PI / 180.0, houghThreshold, minLength, maxGap);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -193,12 +198,19 @@ var sourceImage = context.RequireImage("image");
             try { var fit = MultiPointFit.LineFit(points.ToArray(), cancellationToken); if (fit.Line.Length >= minLength * 0.5) fits.Add((fit, cluster.Count)); }
             catch (InvalidOperationException) { /* degenerate cluster: no usable line */ }
         }
-        var ordered = fits.OrderByDescending(f => f.Fit.Line.Length).ThenBy(f => f.Fit.RmsError).Take(maxLines).ToArray();
+        var survivors = fits.OrderByDescending(f => f.Fit.Line.Length).ThenBy(f => f.Fit.RmsError).ToArray();
+        var ordered = survivors.Take(maxLines).ToArray();
+        var truncated = survivors.Length > ordered.Length;
+        var reasonCode = ordered.Length > 0 ? "none" : edgePixels == 0 ? "noEdges" : segments.Length == 0 ? "noCandidates" : fits.Count == 0 ? "allFilteredByLength" : "emptyAfterMerge";
         var outputs = new Dictionary<string, VisionValue>
         {
             ["image"] = VisionValue.Image(sourceImage),
             ["found"] = VisionValue.Boolean(ordered.Length > 0),
             ["count"] = VisionValue.Integer(ordered.Length),
+            ["candidateCount"] = VisionValue.Integer(segments.Length),
+            ["mergedCount"] = VisionValue.Integer(survivors.Length),
+            ["truncated"] = VisionValue.Boolean(truncated),
+            ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(Type, ("reasonCode", reasonCode), ("candidateCount", segments.Length), ("mergedCount", survivors.Length), ("truncated", truncated))),
             ["lines"] = VisionValue.String(JsonSerializer.Serialize(ordered.Select(f => new
             {
                 x1 = f.Fit.Line.Start.X, y1 = f.Fit.Line.Start.Y, x2 = f.Fit.Line.End.X, y2 = f.Fit.Line.End.Y,
@@ -265,6 +277,12 @@ var sourceImage = context.RequireImage("image");
         if (blurSize is not (3 or 5 or 7 or 9 or 11 or 15)) throw new InvalidOperationException("blurSize must be one of 3, 5, 7, 9, 11, 15.");
         if (!double.IsFinite(refineBand) || refineBand is < 0.5 or > 25) throw new InvalidOperationException("refineBand must be between 0.5 and 25.");
         if (maxCircles is < 1 or > 100) throw new InvalidOperationException("maxCircles must be between 1 and 100.");
+        var minInliers = node.GetInt("minInliers", 0);
+        var maxRmsError = node.GetDouble("maxRmsError", 0);
+        var minCoverageDeg = node.GetDouble("minCoverageDeg", 0);
+        if (minInliers is < 0 or > 10000000) throw new InvalidOperationException("minInliers must be non-negative.");
+        if (!double.IsFinite(maxRmsError) || maxRmsError < 0 || !double.IsFinite(minCoverageDeg) || minCoverageDeg is < 0 or > 360)
+            throw new InvalidOperationException("Circle quality gates must be finite with maxRmsError >= 0 and 0 <= minCoverageDeg <= 360.");
         var roi = node.GetRoi();
 
         using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
@@ -310,12 +328,18 @@ var sourceImage = context.RequireImage("image");
             }
             refined.Add((new VisionCircle(cx, cy, candidate.Radius), null, 0, 0, 0));
         }
-        var ordered = refined.OrderByDescending(c => c.Inliers).ThenBy(c => c.Rms ?? double.MaxValue).Take(maxCircles).ToArray();
+        var qualified = refined.Where(c => c.Inliers >= minInliers &&
+            (maxRmsError <= 0 || c.Rms is { } rms && rms <= maxRmsError) && c.CoverageDeg >= minCoverageDeg).ToArray();
+        var ordered = qualified.OrderByDescending(c => c.Inliers).ThenBy(c => c.Rms ?? double.MaxValue).Take(maxCircles).ToArray();
+        var candidateCount = qualified.Length;
+        var truncated = candidateCount > ordered.Length;
         var outputs = new Dictionary<string, VisionValue>
         {
             ["image"] = VisionValue.Image(sourceImage),
             ["found"] = VisionValue.Boolean(ordered.Length > 0),
             ["count"] = VisionValue.Integer(ordered.Length),
+            ["candidateCount"] = VisionValue.Integer(candidateCount),
+            ["truncated"] = VisionValue.Boolean(truncated),
             ["circles"] = VisionValue.String(JsonSerializer.Serialize(ordered.Select(c => new { x = c.Circle.X, y = c.Circle.Y, radius = c.Circle.Radius, rmsError = c.Rms, inliers = c.Inliers, coverageDeg = c.CoverageDeg, confidence = c.Confidence })))
         };
         var overlays = new List<VisionOverlay>();
@@ -343,7 +367,8 @@ var sourceImage = context.RequireImage("image");
                 ["y"] = ordered.Length > 0 ? Math.Round(ordered[0].Circle.Y, 3) : null,
                 ["radius"] = ordered.Length > 0 ? Math.Round(ordered[0].Circle.Radius, 3) : null,
                 ["rmsError"] = ordered.Length > 0 ? ordered[0].Rms : null,
-                ["candidates"] = circles.Length,
+                ["candidates"] = circles.Length, ["candidateCount"] = candidateCount, ["truncated"] = truncated,
+                ["minInliers"] = minInliers, ["maxRmsError"] = maxRmsError, ["minCoverageDeg"] = minCoverageDeg,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage"
             }, overlays));
     }
@@ -394,7 +419,8 @@ public sealed class CaliperNode : IVisionNodeExecutor, IVisionNodeDefinitionVali
                 var clippedLine = new VisionLine2D(start, end);
                 var searchLine = intersects ? clippedLine : search;
                 var clippedLength = MeasurementMath.Hypot(end.X - start.X, end.Y - start.Y);
-                var candidates = CaliperEdgeDiagnosticCapture.Enabled ? new List<CaliperEdgeCandidate>() : null;
+                // measure.caliper 需要候选集来判定歧义，不能只在诊断捕获开启时才收集。
+                var candidates = CaliperEdgeDiagnosticCapture.Enabled || nodeType == "measure.caliper" ? new List<CaliperEdgeCandidate>() : null;
                 double[] profile = [];
                 var spacing = 0d;
                 var edge = !intersects
@@ -414,6 +440,14 @@ public sealed class CaliperNode : IVisionNodeExecutor, IVisionNodeDefinitionVali
                     ["searchLine"] = VisionValue.Line(searchLine),
                     ["sampleCount"] = VisionValue.Integer(edge.SampleCount)
                 };
+                if (nodeType == "feature.edgeSubpixel")
+                {
+                    var fallbackUsed = profile.Length > 0 && profile.Length < 8;
+                    outputs["searchLineSource"] = VisionValue.String(context.TryGetValue("searchLine", out _) ? "port" : "parameters");
+                    outputs["effectiveSampleWidth"] = VisionValue.Integer(sampleWidth);
+                    outputs["fallbackUsed"] = VisionValue.Boolean(fallbackUsed);
+                    outputs["fallbackReason"] = VisionValue.String(fallbackUsed ? "short-profile-gradient" : "none");
+                }
                 var overlays = new List<VisionOverlay>();
                 if (intersects) overlays.Add(VisionGeometryHelpers.OverlayLine((nodeType == "feature.edgeSubpixel" ? "edge-search" : "caliper-search"), searchLine, "#597ef7", 1.5));
                 VisionPoint2D? edgePoint = null;
@@ -429,6 +463,47 @@ public sealed class CaliperNode : IVisionNodeExecutor, IVisionNodeDefinitionVali
                     overlays.Add(new VisionOverlay("caliper-label", VisionOverlayType.Text,
                         Label: $"G={edge.Strength:0.0}", X: edgePoint.Value.X + 7, Y: edgePoint.Value.Y - 7,
                         Stroke: "#ff7875", StrokeWidth: 1));
+                }
+
+                var found = edge.Found;
+                var reason = edge.Reason;
+                if (nodeType == "measure.caliper")
+                {
+                    var requestedLength = MeasurementMath.Hypot(search.End.X - search.Start.X, search.End.Y - search.Start.Y);
+                    outputs["requestedSearchLine"] = VisionValue.Line(search);
+                    outputs["effectiveSearchLine"] = VisionValue.Line(searchLine);
+                    outputs["clippedLengthRatio"] = VisionValue.Double(requestedLength > 0 ? clippedLength / requestedLength : 0);
+                    outputs["reason"] = VisionValue.String(reason);
+                    var ambiguityMargin = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "ambiguityMargin", 0));
+                    var rivals = candidates is null || !edge.Found
+                        ? []
+                        : candidates.Where(candidate => Math.Sign(candidate.Amplitude) == Math.Sign(edge.Strength)
+                                && Math.Abs(candidate.Position - edge.Position) > 1e-9)
+                            .OrderByDescending(candidate => Math.Abs(candidate.Amplitude)).ToArray();
+                    outputs["candidateCount"] = VisionValue.Integer(candidates?.Count ?? 0);
+                    if (candidates is null || candidates.Count == 0)
+                    {
+                        outputs["ambiguous"] = VisionValue.Boolean(false);
+                    }
+                    else
+                    {
+                        var runnerUp = rivals.Length == 0 ? (CaliperEdgeCandidate?)null : rivals[0];
+                        var margin = runnerUp is null ? double.PositiveInfinity : Math.Abs(edge.Strength) - Math.Abs(runnerUp.Amplitude);
+                        var ambiguous = ambiguityMargin > 0 && runnerUp is not null && margin < ambiguityMargin;
+                        outputs["ambiguous"] = VisionValue.Boolean(ambiguous);
+                        if (double.IsFinite(margin)) outputs["strengthMargin"] = VisionValue.Double(margin);
+                        if (runnerUp is not null) outputs["runnerUpPoint"] = VisionValue.Point(SubpixelEdgeCore.Locate(start, end, runnerUp.Position));
+                        if (ambiguous)
+                        {
+                            // 强度余量低于门限时两个候选都可能才是真边缘：不给出唯一测量点，让下游显式处理。
+                            found = false;
+                            reason = "ambiguous-edge";
+                            outputs["found"] = VisionValue.Boolean(false);
+                            outputs["reason"] = VisionValue.String(reason);
+                            outputs.Remove("point");
+                            overlays.RemoveAll(overlay => overlay.Id is "caliper-edge" or "caliper-label");
+                        }
+                    }
                 }
 
                 if (candidates is not null)
@@ -449,16 +524,21 @@ public sealed class CaliperNode : IVisionNodeExecutor, IVisionNodeDefinitionVali
                 }
 
                 var diag = NodeCompletionGuards.BuildDiagnostics(nodeType, NodeCompletionGuards.DiagnosticsLevel(node), 0, 1,
-                    ("found", edge.Found), ("reason", edge.Reason), ("sampleCount", edge.SampleCount),
+                    ("found", found), ("reason", reason), ("sampleCount", edge.SampleCount),
                     ("polarity", polarity), ("direction", direction), ("refine", refine), ("sigma", sigma),
                     (contrastParameter, minContrast), ("sampleWidth", sampleWidth),
                     ("lineClampedToImage", clamped), ("roi", roi?.Type.ToString() ?? "FullImage"));
+                if (nodeType == "feature.edgeSubpixel")
+                    diag += " " + CoordinateValidation.Diagnostics(nodeType,
+                        ("searchLineSource", context.TryGetValue("searchLine", out _) ? "port" : "parameters"),
+                        ("effectiveSampleWidth", sampleWidth), ("fallbackUsed", profile.Length > 0 && profile.Length < 8),
+                        ("fallbackReason", profile.Length > 0 && profile.Length < 8 ? "short-profile-gradient" : "none"));
                 outputs["diagnostics"] = VisionValue.String(diag);
                 return ValueTask.FromResult(new NodeExecutorResult(outputs,
                     new Dictionary<string, object?>
                     {
-                        ["found"] = edge.Found,
-                        ["reason"] = edge.Reason,
+                        ["found"] = found,
+                        ["reason"] = reason,
                         ["position"] = edge.Found ? Math.Round(edge.Position, 4) : null,
                         ["x"] = edge.Found ? Math.Round(edgePoint!.Value.X, 4) : null,
                         ["y"] = edge.Found ? Math.Round(edgePoint!.Value.Y, 4) : null,
@@ -558,31 +638,44 @@ public sealed class IntersectionNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
 var a = context.Require<VisionLine2D>("lineA"); var b = context.Require<VisionLine2D>("lineB");
         var lenA = CoordinateValidation.RequireLine(a, "lineA"); var lenB = CoordinateValidation.RequireLine(b, "lineB");
-        var tolerance = node.GetDouble("parallelTolerance", 1e-9);
-        if (!double.IsFinite(tolerance) || tolerance < 0 || tolerance > 0.1) throw new InvalidOperationException("geometry.intersection parallelTolerance must be finite and in [0, 0.1].");
+        var tolerance = node.GetDouble("parallelTolerance", 0.000001);
+        if (!double.IsFinite(tolerance) || tolerance < 0 || tolerance > 0.1) throw new InvalidOperationException("geometry.intersection parallelTolerance must be a finite angle in degrees within [0, 0.1].");
+        var endpointTolerance = node.GetDouble("endpointTolerance", 1e-6);
+        if (!double.IsFinite(endpointTolerance) || endpointTolerance < 0 || endpointTolerance > 1e6)
+            throw new InvalidOperationException("geometry.intersection endpointTolerance must be finite and non-negative.");
         var requireWithin = node.GetBool("requireWithinSegments", false);
         var ux = (a.End.X - a.Start.X) / lenA; var uy = (a.End.Y - a.Start.Y) / lenA;
         var vx = (b.End.X - b.Start.X) / lenB; var vy = (b.End.Y - b.Start.Y) / lenB;
         var denominator = ux * vy - uy * vx;
-        // Preserve the absolute determinant tolerance without forming lenA * lenB,
-        // which can overflow even when the intersection is representable.
-        var scaledTolerance = Math.Max(tolerance, 1e-12) / lenA / lenB;
-        if (denominator == 0 || Math.Abs(denominator) < scaledTolerance)
-            throw new InvalidOperationException("Lines are parallel or coincident; intersection is undefined.");
+        // parallelTolerance is an angular tolerance. Comparing sin(angle) keeps the decision
+        // invariant when either segment is scaled, unlike a raw determinant threshold.
+        var parallelThreshold = Math.Sin(tolerance * Math.PI / 180d);
         var offsetX = CoordinateValidation.RequireFinite(b.Start.X - a.Start.X, "intersection.offsetX");
         var offsetY = CoordinateValidation.RequireFinite(b.Start.Y - a.Start.Y, "intersection.offsetY");
+        if (Math.Abs(denominator) <= parallelThreshold)
+        {
+            var perpendicularDistance = Math.Abs(offsetX * -uy + offsetY * ux);
+            if (perpendicularDistance <= endpointTolerance)
+                throw new InvalidOperationException("geometry.intersection.coincident: lines are coincident; no unique intersection point exists.");
+            throw new InvalidOperationException($"geometry.intersection.parallel: lines are parallel (angleDeg={Math.Abs(denominator) * 180 / Math.PI:0.######}, toleranceDeg={tolerance:0.######}).");
+        }
         var alongA = CoordinateValidation.RequireFinite((offsetX * vy - offsetY * vx) / denominator, "intersection.alongA");
         var alongB = CoordinateValidation.RequireFinite((offsetX * uy - offsetY * ux) / denominator, "intersection.alongB");
         var x = CoordinateValidation.RequireFinite(double.FusedMultiplyAdd(alongA, ux, a.Start.X), "intersection.x");
         var y = CoordinateValidation.RequireFinite(double.FusedMultiplyAdd(alongA, uy, a.Start.Y), "intersection.y");
         var tA = CoordinateValidation.RequireFinite(alongA / lenA, "intersection.tA");
         var tB = CoordinateValidation.RequireFinite(alongB / lenB, "intersection.tB");
-        var within = tA >= -1e-9 && tA <= 1+1e-9 && tB >= -1e-9 && tB <= 1+1e-9;
-        if (requireWithin && !within) throw new InvalidOperationException($"geometry.intersection lies outside the finite segments (tA={tA:0.###}, tB={tB:0.###}); disable requireWithinSegments for infinite lines.");
+        var endpointDistance = Math.Min(
+            Math.Min(double.Hypot(x - a.Start.X, y - a.Start.Y), double.Hypot(x - a.End.X, y - a.End.Y)),
+            Math.Min(double.Hypot(x - b.Start.X, y - b.Start.Y), double.Hypot(x - b.End.X, y - b.End.Y)));
+        var within = tA >= -endpointTolerance / lenA && tA <= 1 + endpointTolerance / lenA &&
+                     tB >= -endpointTolerance / lenB && tB <= 1 + endpointTolerance / lenB;
+        if (requireWithin && !within) throw new InvalidOperationException($"geometry.intersection.outsideSegments: intersection lies outside the finite segments (tA={tA:0.###}, tB={tB:0.###}, endpointTolerance={endpointTolerance:0.######}); disable requireWithinSegments for infinite lines.");
         var angle = VisionGeometryHelpers.NormalizeAngleDifference(a.AngleDeg, b.AngleDeg);
         var point=new VisionPoint2D(x,y);
-        var diag=CoordinateValidation.Diagnostics(Type,("x",x),("y",y),("tA",tA),("tB",tB),("withinSegments",within),("angleDeg",angle),("lineALength",lenA),("lineBLength",lenB));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"point",VisionValue.Point(point)},{"x",VisionValue.Double(x)},{"y",VisionValue.Double(y)},{"withinSegments",VisionValue.Boolean(within)},{"angleDeg",VisionValue.Double(angle)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"x",Math.Round(x,3)},{"y",Math.Round(y,3)},{"withinSegments",within},{"diagnostics",diag}},[new VisionOverlay("intersection",VisionOverlayType.Point,X:x,Y:y,Stroke:"#eb2f96",StrokeWidth:3)]));
+        var intersectionType = endpointDistance <= endpointTolerance ? "endpoint" : within ? "withinSegments" : "infiniteLines";
+        var diag=CoordinateValidation.Diagnostics(Type,("x",x),("y",y),("tA",tA),("tB",tB),("withinSegments",within),("intersectionType",intersectionType),("endpointDistance",endpointDistance),("endpointTolerance",endpointTolerance),("parallelToleranceDeg",tolerance),("angleDeg",angle),("lineALength",lenA),("lineBLength",lenB));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"point",VisionValue.Point(point)},{"x",VisionValue.Double(x)},{"y",VisionValue.Double(y)},{"withinSegments",VisionValue.Boolean(within)},{"intersectionType",VisionValue.String(intersectionType)},{"endpointDistance",VisionValue.Double(endpointDistance)},{"angleDeg",VisionValue.Double(angle)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"x",Math.Round(x,3)},{"y",Math.Round(y,3)},{"withinSegments",within},{"intersectionType",intersectionType},{"endpointDistance",endpointDistance},{"diagnostics",diag}},[new VisionOverlay("intersection",VisionOverlayType.Point,X:x,Y:y,Stroke:"#eb2f96",StrokeWidth:3)]));
     }
 }
 public sealed class DistanceNode : IVisionNodeExecutor
@@ -597,14 +690,34 @@ public sealed class DistanceNode : IVisionNodeExecutor
 var a=CoordinateValidation.RequireFinitePoint(context.Require<VisionPoint2D>("pointA"),"pointA"); var b=CoordinateValidation.RequireFinitePoint(context.Require<VisionPoint2D>("pointB"),"pointB");
         var dx=CoordinateValidation.RequireFinite(b.X-a.X,"distance.dx"); var dy=CoordinateValidation.RequireFinite(b.Y-a.Y,"distance.dy");
         var metric=node.GetString("metric","euclidean").Trim().ToLowerInvariant();
+        var sourceFrame=node.GetString("sourceFrame","Image").Trim();
+        var sourceUnit=node.GetString("sourceUnit","px").Trim().ToLowerInvariant();
+        if (sourceFrame.Length == 0) throw new InvalidOperationException("geometry.distance sourceFrame must not be empty.");
+        if (sourceUnit.Length == 0) throw new InvalidOperationException("geometry.distance sourceUnit must not be empty.");
+        if (sourceUnit == "px" && !sourceFrame.Equals("Image", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("geometry.distance.calibratedFrameRequiresPhysicalUnit: pixel coordinates in a calibrated frame cannot be reported as a physical distance; convert points explicitly or set sourceUnit to the physical unit.");
         var distance=metric switch { "euclidean" => double.Hypot(dx, dy), "manhattan" => Math.Abs(dx)+Math.Abs(dy), _ => throw new InvalidOperationException("geometry.distance metric must be euclidean or manhattan.") };
         if (!double.IsFinite(distance)) throw new InvalidOperationException("geometry.distance produced a non-finite distance.");
         var midX = CoordinateValidation.RequireFinite(a.X + dx / 2, "distance.midX");
         var midY = CoordinateValidation.RequireFinite(a.Y + dy / 2, "distance.midY");
-        var angle=Math.Atan2(dy,dx)*180/Math.PI; CoordinateValidation.RequireFinite(angle,"distance.angleDeg");
+        var coincident = distance == 0;
+        var angle=coincident ? 0 : Math.Atan2(dy,dx)*180/Math.PI; CoordinateValidation.RequireFinite(angle,"distance.angleDeg");
         var line=new VisionLine2D(a,b);
-        var diag=CoordinateValidation.Diagnostics(Type,("distance",distance),("dx",dx),("dy",dy),("metric",metric),("midX",midX),("midY",midY),("angleDeg",angle),("coincident",distance<1e-12));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"distance",VisionValue.Double(distance)},{"dx",VisionValue.Double(dx)},{"dy",VisionValue.Double(dy)},{"midX",VisionValue.Double(midX)},{"midY",VisionValue.Double(midY)},{"angleDeg",VisionValue.Double(angle)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"distance",Math.Round(distance,3)},{"diagnostics",diag}},[VisionGeometryHelpers.OverlayLine("distance-line",line,"#722ed1",1.5),new VisionOverlay("distance-label",VisionOverlayType.Text,Label:$"D={distance:0.00}px",X:midX+5,Y:midY-5,Stroke:"#b37feb",StrokeWidth:1)]));
+        var diag=CoordinateValidation.Diagnostics(Type,("distance",distance),("dx",dx),("dy",dy),("metric",metric),("midX",midX),("midY",midY),("angleDeg",angle),("coincident",coincident),("coordinateFrame",sourceFrame),("unit",sourceUnit));
+        return ValueTask.FromResult(new NodeExecutorResult(
+            new Dictionary<string, VisionValue>
+            {
+                ["distance"] = VisionValue.Double(distance), ["dx"] = VisionValue.Double(dx), ["dy"] = VisionValue.Double(dy),
+                ["midX"] = VisionValue.Double(midX), ["midY"] = VisionValue.Double(midY), ["angleDeg"] = VisionValue.Double(angle),
+                ["coincident"] = VisionValue.Boolean(coincident), ["diagnostics"] = VisionValue.String(diag)
+            },
+            new Dictionary<string, object?>
+            {
+                ["distance"] = Math.Round(distance, 3), ["coincident"] = coincident,
+                ["coordinateFrame"] = sourceFrame, ["unit"] = sourceUnit, ["diagnostics"] = diag
+            },
+            [VisionGeometryHelpers.OverlayLine("distance-line", line, "#722ed1", 1.5),
+             new VisionOverlay("distance-label", VisionOverlayType.Text, Label: $"D={distance:0.00}{sourceUnit}", X: midX + 5, Y: midY - 5, Stroke: "#b37feb", StrokeWidth: 1)]));
     }
 }
 public sealed class AngleNode : IVisionNodeExecutor
@@ -617,10 +730,37 @@ public sealed class AngleNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 var a=context.Require<VisionLine2D>("lineA"); var b=context.Require<VisionLine2D>("lineB");
-        var lenA=CoordinateValidation.RequireLine(a,"lineA"); var lenB=CoordinateValidation.RequireLine(b,"lineB");
+        var lenA=RequireAngleLine(a,"lineA"); var lenB=RequireAngleLine(b,"lineB");
         var angle=VisionGeometryHelpers.NormalizeAngleDifference(a.AngleDeg,b.AngleDeg); CoordinateValidation.RequireFinite(angle,"angle");
-        var signed=VisionTransform2D.NormalizeAngleDeg(b.AngleDeg-a.AngleDeg);
-        var diag=CoordinateValidation.Diagnostics(Type,("angleDeg",angle),("signedAngleDeg",signed),("lineAAngleDeg",a.AngleDeg),("lineBAngleDeg",b.AngleDeg),("lineALength",lenA),("lineBLength",lenB),("parallel",angle<1e-9),("perpendicular",Math.Abs(angle-90)<1e-9));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"angle",VisionValue.Double(angle)},{"signedAngleDeg",VisionValue.Double(signed)},{"lineALength",VisionValue.Double(lenA)},{"lineBLength",VisionValue.Double(lenB)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"angleDeg",Math.Round(angle,3)},{"lineA",Math.Round(a.AngleDeg,3)},{"lineB",Math.Round(b.AngleDeg,3)},{"diagnostics",diag}},[VisionGeometryHelpers.OverlayLine("angle-a",a,"#1677ff",1.5),VisionGeometryHelpers.OverlayLine("angle-b",b,"#fa541c",1.5)]));
+        var signed=(b.AngleDeg-a.AngleDeg)%360d;
+        if (signed >= 180d) signed -= 360d;
+        if (signed < -180d) signed += 360d;
+        CoordinateValidation.RequireFinite(signed,"signedAngleDeg");
+        var diag=CoordinateValidation.Diagnostics(Type,("angleDeg",angle),("signedAngleDeg",signed),("signedAngleConvention","[-180,180); +180 maps to -180"),("acuteAngleConvention","min(|delta| mod 180, 180-|delta| mod 180)"),("lineAAngleDeg",a.AngleDeg),("lineBAngleDeg",b.AngleDeg),("lineALength",lenA),("lineBLength",lenB),("parallel",angle<1e-9),("perpendicular",Math.Abs(angle-90)<1e-9));
+        return ValueTask.FromResult(new NodeExecutorResult(
+            new Dictionary<string, VisionValue>
+            {
+                ["angle"] = VisionValue.Double(angle), ["signedAngleDeg"] = VisionValue.Double(signed),
+                ["lineALength"] = VisionValue.Double(lenA), ["lineBLength"] = VisionValue.Double(lenB),
+                ["diagnostics"] = VisionValue.String(diag)
+            },
+            new Dictionary<string, object?>
+            {
+                ["angleDeg"] = Math.Round(angle, 3), ["signedAngleDeg"] = Math.Round(signed, 3),
+                ["lineA"] = Math.Round(a.AngleDeg, 3), ["lineB"] = Math.Round(b.AngleDeg, 3), ["diagnostics"] = diag
+            },
+            [VisionGeometryHelpers.OverlayLine("angle-a", a, "#1677ff", 1.5),
+             VisionGeometryHelpers.OverlayLine("angle-b", b, "#fa541c", 1.5)]));
+    }
+
+    private static double RequireAngleLine(VisionLine2D line, string name)
+    {
+        if (!double.IsFinite(line.Start.X) || !double.IsFinite(line.Start.Y) ||
+            !double.IsFinite(line.End.X) || !double.IsFinite(line.End.Y))
+            throw new InvalidOperationException($"geometry.angle.nonFiniteEndpoint:{name}: line endpoints must be finite.");
+        var length = double.Hypot(line.End.X - line.Start.X, line.End.Y - line.Start.Y);
+        if (!double.IsFinite(length) || length <= 0)
+            throw new InvalidOperationException($"geometry.angle.degenerateLine:{name}: line length must be greater than zero.");
+        return length;
     }
 }

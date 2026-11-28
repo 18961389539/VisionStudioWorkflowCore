@@ -48,10 +48,29 @@ var pairsJson = context.TryGetValue("pairsJson", out var connected)
         var method = inputMode == "poses" ? "average" : node.GetString("method", "average").Trim().ToLowerInvariant();
         if (method is not ("average" or "stereocalibrate"))
             throw new InvalidOperationException("method must be average or stereoCalibrate.");
+        var maxPoseOutlierRatio = node.GetDouble("maxPoseOutlierRatio", 0.34);
+        if (!double.IsFinite(maxPoseOutlierRatio) || maxPoseOutlierRatio is < 0 or > 1)
+            throw new InvalidOperationException("maxPoseOutlierRatio must be finite and between 0 and 1.");
 
         var pairs = request.Pairs ?? [];
         if (pairs.Count < 3) throw new InvalidOperationException("Dual-camera extrinsics require at least three synchronized board pairs.");
         if (pairs.Count > 500) throw new InvalidOperationException("Dual-camera extrinsics accept at most 500 pairs.");
+        var intrinsicsVersion = string.IsNullOrWhiteSpace(request.IntrinsicsVersion)
+            ? node.GetString("intrinsicsVersion", "unspecified").Trim()
+            : request.IntrinsicsVersion.Trim();
+        var cameraModelA = string.IsNullOrWhiteSpace(request.CameraModelA)
+            ? node.GetString("cameraModelA", "unspecified").Trim()
+            : request.CameraModelA.Trim();
+        var cameraModelB = string.IsNullOrWhiteSpace(request.CameraModelB)
+            ? node.GetString("cameraModelB", "unspecified").Trim()
+            : request.CameraModelB.Trim();
+        if (inputMode == "points" && method == "stereocalibrate")
+        {
+            if (request.ImageWidth is { } requestWidth && node.GetInt("imageWidth", 0) > 0 && requestWidth != node.GetInt("imageWidth", 0))
+                throw new InvalidOperationException($"stereoCalibrate imageWidth conflict: pairsJson={requestWidth}, parameter={node.GetInt("imageWidth", 0)}.");
+            if (request.ImageHeight is { } requestHeight && node.GetInt("imageHeight", 0) > 0 && requestHeight != node.GetInt("imageHeight", 0))
+                throw new InvalidOperationException($"stereoCalibrate imageHeight conflict: pairsJson={requestHeight}, parameter={node.GetInt("imageHeight", 0)}.");
+        }
 
         List<double[]> relatives;
         string solvePath;
@@ -73,6 +92,14 @@ var pairsJson = context.TryGetValue("pairsJson", out var connected)
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        var preliminaryMean = method == "stereocalibrate" ? relatives[0] : MeanRigid(relatives);
+        var poseDistribution = BuildPoseDistribution(relatives, preliminaryMean);
+        var poseOutlierIndices = inputMode == "poses" && method == "average"
+            ? DetectPoseOutliers(relatives, preliminaryMean)
+            : [];
+        var poseOutlierRatio = relatives.Count == 0 ? 0 : (double)poseOutlierIndices.Length / relatives.Count;
+        if (poseOutlierRatio > maxPoseOutlierRatio)
+            throw new InvalidOperationException($"Pose-average outlier ratio {poseOutlierRatio:0.0%} exceeds maxPoseOutlierRatio={maxPoseOutlierRatio:0.0%}; outlierPairIndex=[{string.Join(",", poseOutlierIndices)}]. Remove or re-capture those pairs.");
         var mean = method == "stereocalibrate" ? relatives[0] : MeanRigid(relatives);
         ValidateRigid(mean, "dual-camera solution");
 
@@ -128,7 +155,12 @@ var pairsJson = context.TryGetValue("pairsJson", out var connected)
             matrix = mean,
             baseline,
             solvePath,
-            pairCount = pairs.Count
+            pairCount = pairs.Count,
+            intrinsicsVersion,
+            cameraModelA,
+            cameraModelB,
+            imageWidth = method == "stereocalibrate" ? node.GetInt("imageWidth", request.ImageWidth ?? 0) : (int?)null,
+            imageHeight = method == "stereocalibrate" ? node.GetInt("imageHeight", request.ImageHeight ?? 0) : (int?)null
         });
 
         var summary = new Dictionary<string, object?>
@@ -146,6 +178,12 @@ var pairsJson = context.TryGetValue("pairsJson", out var connected)
             ["worstRotationSampleIndex"] = worstRotationIndex,
             ["baseline"] = baseline,
             ["rotationWeight"] = rotationWeight,
+            ["intrinsicsVersion"] = intrinsicsVersion,
+            ["cameraModelA"] = cameraModelA,
+            ["cameraModelB"] = cameraModelB,
+            ["poseOutlierIndices"] = poseOutlierIndices,
+            ["poseOutlierRatio"] = poseOutlierRatio,
+            ["poseDistribution"] = poseDistribution,
             ["transform"] = transform,
             ["calibrationBackend"] = "opencv",
             ["algorithmBackend"] = "opencv",
@@ -165,9 +203,46 @@ var pairsJson = context.TryGetValue("pairsJson", out var connected)
             ["worstTranslationSampleIndex"] = VisionValue.Integer(worstTranslationIndex),
             ["worstRotationSampleIndex"] = VisionValue.Integer(worstRotationIndex),
             ["pairCount"] = VisionValue.Integer(pairs.Count),
+            ["outlierPairIndicesJson"] = VisionValue.String(JsonSerializer.Serialize(poseOutlierIndices)),
+            ["poseDistributionJson"] = VisionValue.String(JsonSerializer.Serialize(poseDistribution)),
             ["sampleResidualsJson"] = VisionValue.String(JsonSerializer.Serialize(sampleResiduals))
         };
         return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
+    }
+
+    private static object BuildPoseDistribution(IReadOnlyList<double[]> poses, double[] mean)
+    {
+        var translations = poses.Select(pose => Math.Sqrt(pose[3] * pose[3] + pose[7] * pose[7] + pose[11] * pose[11])).ToArray();
+        var rotations = poses.Select(pose => RotationDistanceDeg(pose, mean)).ToArray();
+        return new
+        {
+            pairCount = poses.Count,
+            baselineMin = translations.Min(),
+            baselineMax = translations.Max(),
+            baselineMean = translations.Average(),
+            rotationFromMeanMinDeg = rotations.Min(),
+            rotationFromMeanMaxDeg = rotations.Max(),
+            rotationFromMeanRmsDeg = Math.Sqrt(rotations.Average(value => value * value))
+        };
+    }
+
+    private static int[] DetectPoseOutliers(IReadOnlyList<double[]> poses, double[] mean)
+    {
+        var translations = poses.Select(pose => TranslationDistance(pose, mean)).ToArray();
+        var rotations = poses.Select(pose => RotationDistanceDeg(pose, mean)).ToArray();
+        var translationMedian = Median(translations);
+        var rotationMedian = Median(rotations);
+        var translationThreshold = Math.Max(3 * translationMedian, 1e-6);
+        var rotationThreshold = Math.Max(3 * rotationMedian, 0.01);
+        return Enumerable.Range(0, poses.Count)
+            .Where(index => translations[index] > translationThreshold || rotations[index] > rotationThreshold)
+            .ToArray();
+    }
+
+    private static double Median(IReadOnlyList<double> values)
+    {
+        var sorted = values.OrderBy(value => value).ToArray();
+        return sorted.Length % 2 == 1 ? sorted[sorted.Length / 2] : (sorted[sorted.Length / 2 - 1] + sorted[sorted.Length / 2]) / 2;
     }
 
     private static List<double[]> SolveFromPoses(IReadOnlyList<DualCameraPair> pairs, CancellationToken ct)
@@ -474,7 +549,10 @@ var pairsJson = context.TryGetValue("pairsJson", out var connected)
         double[]? DistCoeffsA = null,
         double[]? DistCoeffsB = null,
         int? ImageWidth = null,
-        int? ImageHeight = null);
+        int? ImageHeight = null,
+        string? IntrinsicsVersion = null,
+        string? CameraModelA = null,
+        string? CameraModelB = null);
 
     private sealed record DualCameraPair(
         double[]? TargetToCameraA = null,

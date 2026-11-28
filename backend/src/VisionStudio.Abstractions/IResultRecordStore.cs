@@ -20,7 +20,11 @@ public sealed record ResultRecord(
     /// <summary>工作流编译计划标识（同一份内容复用同一标识）；宿主可选记录。</summary>
     string? WorkflowScope,
     string NodeId,
-    DateTimeOffset CreatedAt)
+    DateTimeOffset CreatedAt,
+    /// <summary>SHA-256 of the exact UTF-8 payload, retained for audit and conflict diagnostics.</summary>
+    string? PayloadSha256 = null,
+    /// <summary>Version of the business-key normalization used by the writer.</summary>
+    string RecordKeyNormalizationVersion = "v1-trim")
 {
     /// <summary>负载字节数（UTF-8），用于体积统计与配额。</summary>
     public int PayloadBytes => System.Text.Encoding.UTF8.GetByteCount(PayloadJson);

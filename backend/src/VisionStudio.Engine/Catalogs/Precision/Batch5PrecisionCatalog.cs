@@ -35,6 +35,7 @@ public static class Batch5PrecisionCatalog
         HostKey("trainingOriginOverrideX", "number", "Forced origin X for this training pass; NaN follows trainingOriginMode."),
         HostKey("trainingOriginOverrideY", "number", "Forced origin Y for this training pass; NaN follows trainingOriginMode."),
         HostKey("trainedModelData", "text", "Trained shape model blob (base64, 16 MB limit) stored with the node together with trainedModelConfig."),
+        HostKey("trainedModelHash", "text", "SHA-256 of the decoded trainedModelData bytes. When present, the executor rejects a model blob whose bytes no longer match the training-time hash."),
         HostKey("trainedModelConfig", "text", "Fingerprint of the training parameters; the executor refuses to reuse a model trained with different settings."),
         HostKey("trainedSourceImage", "text", "Base64 training source image used to echo the model contour in the dialog."),
         HostKey("trainedWidth", "number", "Training source image width in pixels."),
@@ -85,6 +86,7 @@ public static class Batch5PrecisionCatalog
                 new("invert", "Dark Objects", "boolean", false, Group: "Binarize", Description: "Treat dark-on-light as foreground."),
                 new("minArea", "Min Area", "number", 0, 0, 99999999, 1, Unit: "px²", Group: "Filter", Description: "Minimum contour area in pixels."),
                 new("maxCount", "Max Contours", "number", 200, 1, 2000, 1, Group: "Filter", Description: "Keep the first 1..2000 contours that pass the area filter; additional qualifying contours are truncated."),
+                new("failOnTruncate", "Fail On Truncation", "boolean", false, Group: "Filter", Description: "When enabled, candidateCount > maxCount fails atomically instead of emitting a truncated list."),
                 new("maxPoints", "Point Budget", "number", 2000, 16, 20000, 1, Group: "Filter",
                     Description: "Contours are evenly subsampled to this budget so graph data stays bounded.")
             ],
@@ -115,7 +117,8 @@ public static class Batch5PrecisionCatalog
                     new("External only", "external"),
                     new("Holes only", "holes")
                 ], Group: "Hierarchy", Description: "Retain any, external-only, or hole-only contours."),
-                new("windowX", "Window X (-1=off)", "number", -1, -1, 100000, 1, Unit: "px", Group: "Position", Description: "Position-window origin X; window is off when X/Y < 0 or width/height is 0."),
+                new("windowEnabled", "Enable Position Window", "boolean", false, Group: "Position", Description: "Explicit enable switch. Disabled windows (including all-zero values) do not filter; enabled windows require positive finite dimensions."),
+                new("windowX", "Window X", "number", -1, -1000000, 1000000, 1, Unit: "px", Group: "Position", Description: "Position-window origin X in the original image coordinate system."),
                 new("windowY", "Window Y (-1=off)", "number", -1, -1, 100000, 1, Unit: "px", Group: "Position", Description: "Position-window origin Y; bounding-box center must fall inside the window."),
                 new("windowWidth", "Window Width", "number", 0, 0, 100000, 1, Unit: "px", Group: "Position", Description: "Position-window width in pixels; 0 disables the window."),
                 new("windowHeight", "Window Height", "number", 0, 0, 100000, 1, Unit: "px", Group: "Position", Description: "Position-window height in pixels; 0 disables the window."),
@@ -145,6 +148,7 @@ public static class Batch5PrecisionCatalog
                 new("extent", VisionDataType.Double),
                 new("aspectRatio", VisionDataType.Double),
                 new("equivalentDiameter", VisionDataType.Double),
+                new("geometryValid", VisionDataType.Boolean), new("invalidFields", VisionDataType.String),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
             [
@@ -181,6 +185,10 @@ public static class Batch5PrecisionCatalog
                 new("strength", VisionDataType.Double, Required: false),
                 new("fitError", VisionDataType.Double, Required: false),
                 new("sampleCount", VisionDataType.Integer, Required: false),
+                new("searchLineSource", VisionDataType.String),
+                new("effectiveSampleWidth", VisionDataType.Integer),
+                new("fallbackUsed", VisionDataType.Boolean),
+                new("fallbackReason", VisionDataType.String),
                 new("searchLine", VisionDataType.Line2D),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
@@ -234,6 +242,9 @@ public static class Batch5PrecisionCatalog
                 new("line", VisionDataType.Line2D, Required: false),
                 new("strength", VisionDataType.Double, Required: false),
                 new("fitError", VisionDataType.Double, Required: false),
+                new("allRms", VisionDataType.Double, Required: false), new("allMaxResidual", VisionDataType.Double, Required: false),
+                new("robustRms", VisionDataType.Double, Required: false), new("robustMaxResidual", VisionDataType.Double, Required: false),
+                new("ignoredStationsJson", VisionDataType.String, Required: false), new("acceptanceMetric", VisionDataType.String),
                 new("sampleCount", VisionDataType.Integer, Required: false),
                 new("ignoredCount", VisionDataType.Integer, Required: false),
                 new("searchLine", VisionDataType.Line2D),
@@ -274,7 +285,10 @@ public static class Batch5PrecisionCatalog
                 new("fitOutlierThreshold", "Fit Outlier Threshold", "number", 2, 0, 100, 0.1, Unit: "px", Group: "Fit",
                     Description: "A point can be excluded when its distance from the fitted line exceeds this value."),
                 new("maxFitError", "Max Fit Error (0=off)", "number", 0, 0, 100, 0.1, Unit: "px", Group: "Fit",
-                    Description: "Return found=false when the final orthogonal RMS fit error exceeds this value; zero disables this quality gate.")
+                    Description: "Return found=false when the selected acceptance residual exceeds this value; zero disables this quality gate."),
+                new("acceptanceMetric", "Acceptance Metric", "select", "all", Group: "Fit", Options:
+                    [new("All points (maximum residual)", "all"), new("Robust inliers (RMS)", "robust")],
+                    Description: "Default all prevents outlier rejection from hiding defects. robust explicitly accepts the post-rejection RMS.")
             ,
                 ],
             "Caliper line measurement with orthogonal RMS fit error, bounded outlier rejection, and an optional maximum fit-error quality gate. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. The minimum valid caliper gate is checked after outlier rejection.",
@@ -301,6 +315,9 @@ public static class Batch5PrecisionCatalog
                 new("radiusMax", VisionDataType.Double, Required: false),
                 new("radiusSpread", VisionDataType.Double, Required: false),
                 new("fitError", VisionDataType.Double, Required: false),
+                new("allRms", VisionDataType.Double, Required: false), new("allMaxResidual", VisionDataType.Double, Required: false),
+                new("robustRms", VisionDataType.Double, Required: false), new("robustMaxResidual", VisionDataType.Double, Required: false),
+                new("ignoredSamplesJson", VisionDataType.String, Required: false), new("acceptanceMetric", VisionDataType.String),
                 new("sampleCount", VisionDataType.Integer, Required: false),
                 new("ignoredCount", VisionDataType.Integer, Required: false),
                 new("diagnostics", VisionDataType.String),
@@ -352,7 +369,10 @@ public static class Batch5PrecisionCatalog
                 new("fitRadiusTolerance", "Fit Radius Tolerance (0=off)", "number", 0, 0, 5000, 0.1, Unit: "px", Group: "Fit",
                     Description: "Reject the fitted circle when its radius differs from the nominal radius by more than this amount."),
                 new("maxFitError", "Max Fit Error (0=off)", "number", 0, 0, 100, 0.1, Unit: "px", Group: "Fit",
-                    Description: "Return found=false when the final radial RMS fit error exceeds this value; zero disables this quality gate.")
+                    Description: "Return found=false when the selected acceptance residual exceeds this value; zero disables this quality gate."),
+                new("acceptanceMetric", "Acceptance Metric", "select", "all", Group: "Fit", Options:
+                    [new("All points (maximum residual)", "all"), new("Robust inliers (RMS)", "robust")],
+                    Description: "Default all keeps real local defects in the quality gate even when robust fitting excludes them.")
             ],
             "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and an optional maximum fit-error quality gate. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image. The minimum valid caliper gate is checked after outlier rejection.",
             "builtin",
@@ -370,7 +390,19 @@ public static class Batch5PrecisionCatalog
                 new("width", VisionDataType.Double),
                 new("height", VisionDataType.Double),
                 new("angle", VisionDataType.Double),
+                new("angleMod180", VisionDataType.Double),
+                new("semiMajor", VisionDataType.Double),
+                new("semiMinor", VisionDataType.Double),
+                new("axisPolarityKnown", VisionDataType.Boolean),
                 new("axisRatio", VisionDataType.Double),
+                new("rmsError", VisionDataType.Double),
+                new("maxRadialError", VisionDataType.Double),
+                new("selectedIndex", VisionDataType.Integer),
+                new("candidateCount", VisionDataType.Integer),
+                new("selectionMetric", VisionDataType.String),
+                new("found", VisionDataType.Boolean),
+                new("reason", VisionDataType.String),
+                new("evaluationState", VisionDataType.String),
                 new("count", VisionDataType.Integer),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
@@ -383,9 +415,13 @@ public static class Batch5PrecisionCatalog
                     new("Last", "last"),
                     new("By index", "index")
                 ], Group: "Selection", Description: "Which contour the ellipse outputs describe: largest/smallest area, first/last in the list, or an explicit index."),
-                new("index", "Index", "number", 0, 0, 100000, 1, Group: "Selection", Description: "Used when Select = by index; out of range fails.")
+                new("index", "Index", "number", 0, 0, 100000, 1, Group: "Selection", Description: "Used when Select = by index; out of range fails."),
+                new("maxRmsError", "Max RMS Radial Error (0=off)", "number", 0, 0, 100000, 0.05, Group: "Quality",
+                    Description: "Optional gate on the RMS radial residual of all selected contour points. 0 disables."),
+                new("maxRadialError", "Max Single Radial Error (0=off)", "number", 0, 0, 100000, 0.05, Group: "Quality",
+                    Description: "Optional gate on the worst single radial residual, so one stray edge point cannot hide behind a small RMS. 0 disables.")
             ],
-            "Fit an ellipse to a contour (needs >= 5 non-collinear points). Output is the rotated rectangle of the ellipse: width = major axis, height = minor axis, angle = major-axis direction (degrees, CCW), plus axisRatio and diagnostics. Strict selectBy/index validation.",
+            "Fit an ellipse to a contour (needs >= 5 non-collinear points). Output is the rotated rectangle of the ellipse: width = major axis, height = minor axis, angle = major-axis direction (degrees, CCW), plus axisMod180/semi axes/axisRatio and diagnostics. Selected contour is reported as selectedIndex with candidateCount and selectionMetric=contour-area; largest/smallest break ties by lower index so repeated runs pick the same contour. Quality gates maxRmsError/maxRadialError return found=false with reason=rms-exceeded|radial-error-exceeded while keeping residuals for review; gates off yields evaluationState=not-evaluated. Strict selectBy/index validation.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
 
@@ -423,6 +459,11 @@ public static class Batch5PrecisionCatalog
                 new("pose", VisionDataType.Pose2D, Required: false),
                 new("rectangle", VisionDataType.Rectangle2D, Required: false),
                 new("detections", VisionDataType.DetectionList, Required: false),
+                new("suppressedCount", VisionDataType.Integer, Required: false),
+                new("hardIgnoredCount", VisionDataType.Integer, Required: false),
+                new("softIgnoredCount", VisionDataType.Integer, Required: false),
+                new("softIgnoreMeanWeight", VisionDataType.Double, Required: false),
+                new("suppressionReasonsJson", VisionDataType.String, Required: false),
                 new("count", VisionDataType.Integer, Required: false),
                 new("pyramidLevels", VisionDataType.Double, Required: false),
                 new("maxDeformationPx", VisionDataType.Double, Required: false),
@@ -498,11 +539,11 @@ public static class Batch5PrecisionCatalog
                 new("maxClutterScore", "Maximum Clutter Score", "number", 0.2, 0, 1, 0.01, Group: "Matching", Description: "When a Clutter ROI is trained, reject candidates whose clutter-region edge score exceeds this value."),
                 new("scoreUsingClutter", "Score Using Clutter", "boolean", false, Group: "Matching", Description: "When a Clutter ROI is trained, multiply the native match score by (1 - clutter score). The unadjusted score is also available as nativeScore."),
                 new("greediness", "Greediness", "number", 0.8, 0, 1, 0.05, Group: "Matching", VisibleWhen: new("engine", ["native", "auto"]), Description: "Native search greediness: 0 evaluates every pyramid candidate completely (safest, slowest); 1 prunes candidates aggressively (fastest, may miss weak matches). The default 0.8 preserves previous behavior."),
-                new("maxOverlap", "Max Overlap", "number", 0.5, 0, 1, 0.05, Group: "Matching", VisibleWhen: new("engine", ["native", "auto"]), Description: "Maximum overlap fraction allowed between accepted matches: a worse match overlapping a better one by more than this fraction is suppressed. 0 keeps only the best match per object. The default 0.5 preserves previous behavior."),
+                new("maxOverlap", "Max Overlap", "number", 0.5, 0, 1, 0.05, Group: "Matching", VisibleWhen: new("engine", ["native", "auto"]), Description: "Maximum axis-aligned IoU in scene pixels allowed between accepted matches. Candidates are ranked by score, then |angle|, |scale-1|, x, y and source index; suppressed candidates are retained in suppressionReasonsJson with their reason."),
                 new("runtimeContrastThreshold", "Runtime Contrast Threshold", "number", 0, 0, 255, 1, Group: "Matching", Description: "Minimum average gradient strength (0–255) at matched model features. Zero disables this run-time filter; it does not require retraining."),
                 new("contrastFractionThreshold", "Contrast Fraction Threshold", "number", 0, 0, 1, 0.01, Group: "Matching", Description: "Minimum run-time feature contrast divided by the trained-image feature contrast, capped at 1. Zero disables this check; it needs the lossless original training image."),
                 new("maxTargets", "Max Targets", "number", 5, 1, 100, 1, Group: "Multi-target", Description: "Accepted matches per run. Template Match defaults the same key to 1 (single result), so a switched-in shape node returns up to 5 unless this is set explicitly."),
-                new("minCenterDistance", "Min Center Distance", "number", 20, 0, 10000, 1, Unit: "px", Group: "Multi-target", Description: "Candidates closer than this to a better match are dropped. Template Match defaults the same key to 0 (keep every accepted center)."),
+                new("minCenterDistance", "Min Center Distance", "number", 20, 0, 10000, 1, Unit: "px", Group: "Multi-target", Description: "Minimum Euclidean center distance in scene pixels. Candidates closer than this to a deterministically better match are dropped and reported in suppressionReasonsJson. Template Match defaults the same key to 0 (keep every accepted center)."),
                 new("engine", "Shape Engine", "select", "native", Options:
                 [
                     new("Native JLVision shape model", "native"),

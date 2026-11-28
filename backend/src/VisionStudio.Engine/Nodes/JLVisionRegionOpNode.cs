@@ -42,6 +42,7 @@ public sealed class JLVisionRegionOpNode : IVisionNodeExecutor
             throw new InvalidOperationException($"JLVision region operator '{key}' requires an image input.");
 
         using var native = JLVisionRegions.ToNative(source);
+        var inputArea = JLVisionRegions.PixelArea(source);
         JlRegion? second = null;
         JlRegion? structuringElement = null;
         JlImage? image = null;
@@ -51,6 +52,8 @@ public sealed class JLVisionRegionOpNode : IVisionNodeExecutor
             second = context.TryGetValue("region2", out var secondValue) && secondValue.Value is VisionRegion secondRegion
                 ? JLVisionRegions.ToNative(secondRegion)
                 : native;
+            if (context.TryGetValue("region2", out var secondCheck) && secondCheck.Value is VisionRegion checkedSecond)
+                RegionNodeHelpers.ValidateCompatible(source, checkedSecond, $"jlvision.regionOp/{key}");
 
             if (op.NeedsStructuringElement)
             {
@@ -98,9 +101,25 @@ public sealed class JLVisionRegionOpNode : IVisionNodeExecutor
                     area += run.EndColumn - run.StartColumn + 1;
             using var overlaySurface = JLVisionNodeSupport.Canvas(source.Width, source.Height);
             JLVisionNodeSupport.DrawRegionRuns(overlaySurface, output, new OpenCvSharp.Scalar(0, 200, 0));
+            var actualParameters = new
+            {
+                size = OperatorParameterForms.Number(node, "size", 5), count = node.GetInt("count", 1),
+                row = OperatorParameterForms.Number(node, "row", 10), column = OperatorParameterForms.Number(node, "column", 10),
+                phi = OperatorParameterForms.Number(node, "phi", 0), length1 = OperatorParameterForms.Number(node, "length1", 10),
+                length2 = OperatorParameterForms.Number(node, "length2", 10), min = OperatorParameterForms.Number(node, "min", 0),
+                max = OperatorParameterForms.Number(node, "max", 1e9), percent = OperatorParameterForms.Number(node, "percent", 50),
+                mode = node.GetString("mode", string.Empty).Trim()
+            };
+            var parametersJson = System.Text.Json.JsonSerializer.Serialize(actualParameters);
+            var warnings = new List<object>();
+            if (output.Components.Count == 0) warnings.Add(new { code = "empty-output", message = "Operator produced an empty region." });
+            if (output.Components.Count > source.Components.Count || area > Math.Max(1000, inputArea * 4))
+                warnings.Add(new { code = "abnormal-growth", inputArea, outputArea = area, inputObjects = source.Components.Count, outputObjects = output.Components.Count });
             var diagnostics = JLVisionNodeSupport.Diagnostics(
-                node.Type, "standard", 0, ("operator", key), ("inputComponents", source.Components.Count),
-                ("outputComponents", output.Components.Count), ("area", area));
+                node.Type, warnings.Count > 0 ? "warning" : "standard", warnings.Count, ("operator", key), ("inputComponents", source.Components.Count),
+                ("outputComponents", output.Components.Count), ("inputArea", inputArea), ("outputArea", area),
+                ("secondRegionParticipated", op.NeedsSecondRegion), ("imageParticipated", op.NeedsImage),
+                ("nativeReturnCode", 0), ("parameters", actualParameters), ("warnings", warnings));
             var outputs = new Dictionary<string, VisionValue>
             {
                 ["region"] = VisionValue.Region(output),
@@ -108,6 +127,8 @@ public sealed class JLVisionRegionOpNode : IVisionNodeExecutor
                 ["operator"] = VisionValue.String(key),
                 ["components"] = VisionValue.Integer(output.Components.Count),
                 ["area"] = VisionValue.Integer(area),
+                ["parametersJson"] = VisionValue.String(parametersJson),
+                ["warningCount"] = VisionValue.Integer(warnings.Count),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             };
             var summary = new Dictionary<string, object?>
@@ -118,6 +139,9 @@ public sealed class JLVisionRegionOpNode : IVisionNodeExecutor
                 ["parametersUsed"] = op.Note,
                 ["inputComponents"] = source.Components.Count,
                 ["outputComponents"] = output.Components.Count,
+                ["inputArea"] = inputArea, ["outputArea"] = area,
+                ["secondRegionParticipated"] = op.NeedsSecondRegion, ["imageParticipated"] = op.NeedsImage,
+                ["nativeReturnCode"] = 0, ["parameters"] = actualParameters, ["warningCount"] = warnings.Count,
                 ["structuringElement"] = op.NeedsStructuringElement
                     ? $"{Math.Clamp((int)Math.Round(OperatorParameterForms.Number(node, "size", 5)), 1, 511)}x{Math.Clamp((int)Math.Round(OperatorParameterForms.Number(node, "size", 5)), 1, 511)}"
                     : null

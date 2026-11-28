@@ -61,7 +61,8 @@ internal static class PreprocessEnhancementAlgorithms
         InterpolationFlags interpolation, CancellationToken cancellationToken)
     {
         var band = outer - inner;
-        var sign = direction == "clockwise" ? -1 : 1;
+        // Image coordinates are y-down: increasing atan2(y, x) is clockwise.
+        var sign = direction == "clockwise" ? 1 : -1;
         var mapX = new float[(long)angular * radial];
         var mapY = new float[mapX.Length];
         for (var y = 0; y < radial; y++)
@@ -107,7 +108,7 @@ internal static class PreprocessEnhancementAlgorithms
 
     internal static WhiteBalanceResult WhiteBalance(
         Mat source, Mat? mask, string mode, double percentile, bool preserve, double[] manualGains,
-        CancellationToken cancellationToken)
+        bool applyRoi, CancellationToken cancellationToken)
     {
         Cv2.Split(source, out var channels);
         var means = new double[3];
@@ -161,7 +162,7 @@ internal static class PreprocessEnhancementAlgorithms
             try
             {
                 Cv2.Merge(channels, merged);
-                var output = PreprocessGapMath.Composite(merged, source, mask);
+                var output = PreprocessGapMath.Composite(merged, source, applyRoi ? mask : null);
                 merged = null;
                 try
                 {

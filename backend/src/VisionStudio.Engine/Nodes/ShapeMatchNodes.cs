@@ -30,6 +30,13 @@ public sealed class ShapeMatchNode : IVisionNodeExecutor
         ValidateShapePolicies(node);
 
         var engine = node.GetString("engine", "native").Trim().ToLowerInvariant();
+        if (engine is "managedchamfer" or "chamfer")
+        {
+            if (!string.IsNullOrWhiteSpace(node.GetString("modelAssetId", string.Empty)) ||
+                !string.IsNullOrWhiteSpace(node.GetString("trainedModelData", string.Empty)))
+                throw new InvalidOperationException(
+                    "match.shape managedChamfer does not consume trained native model assets; select engine=native or clear the model asset/trained model to avoid silently matching a different template.");
+        }
         NodeExecutorResult result;
         if (engine is "managedchamfer" or "chamfer")
             result = ManagedShapeMatch.Execute(context, node, cancellationToken);
@@ -75,6 +82,9 @@ public sealed class ShapeMatchNode : IVisionNodeExecutor
         EmitBool(outputs, summary, "modelCacheHit", "modelCacheHit");
         EmitString(outputs, summary, "polarityMode", "polarityMode");
         EmitString(outputs, summary, "subpixelMethod", "subpixelMethod");
+        EmitDouble(outputs, summary, "suppressedCount", "suppressedCount");
+        if (summary.TryGetValue("suppressionReasons", out var suppressionReasons))
+            outputs["suppressionReasonsJson"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(suppressionReasons));
 
         if (!summary.ContainsKey("subpixelMethod"))
         {
@@ -115,6 +125,10 @@ public sealed class ShapeMatchNode : IVisionNodeExecutor
             ("xldSnapDeltaPx", summary.GetValueOrDefault("xldSnapDeltaPx")),
             ("modelMeanRadiusPx", summary.GetValueOrDefault("modelMeanRadiusPx")),
             ("subpixelMethod", summary.GetValueOrDefault("subpixelMethod")),
+            ("suppressedCount", summary.GetValueOrDefault("suppressedCount")),
+            ("overlapMetric", summary.GetValueOrDefault("overlapMetric")),
+            ("duplicateOverlap", summary.GetValueOrDefault("duplicateOverlap")),
+            ("minCenterDistanceUnit", summary.GetValueOrDefault("minCenterDistanceUnit")),
             ("limits", "native least_squares + deformation/clutter/aniso; managed chamfer is explicit opt-in only (no auto silent fallback); short of PatMax feature vectors / trained clutter"));
 
         outputs["diagnostics"] = VisionValue.String(diag);

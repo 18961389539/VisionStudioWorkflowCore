@@ -1,4 +1,5 @@
 using JLVisionLib;
+using VisionStudio.Abstractions;
 
 namespace VisionStudio.Engine.Algorithms;
 
@@ -19,6 +20,7 @@ public sealed class JlGeometryArgs
     public double Angle { get; init; } = Math.PI / 2;
     public double Size { get; init; } = 1;
     public string Mode { get; init; } = string.Empty;
+    public string AllowedRoot { get; init; } = ".";
 }
 
 public sealed record JlGeometryResult(double Value, IReadOnlyList<(string Name, double Value)> Extra, string? Text = null);
@@ -184,20 +186,30 @@ public static class JlGeometryOperations
         }),
 
         // ── 文件 / 线选择 / 卡尔曼 ───────────────────────────────────
-        ["getCurrentDir"] = new("getCurrentDir", "Get current directory", "无参数", a =>
+        ["getCurrentDir"] = new("getCurrentDir", "Get current directory", "allowedRoot 根目录", a =>
         {
-            var directory = JlMisc.GetCurrentDir();
-            return R(directory.Length, ("length", directory.Length));
+            var root = WorkspacePathSecurity.ResolveRoot(a.AllowedRoot, Directory.GetCurrentDirectory());
+            return R(root.Length, ("length", root.Length));
         }),
-        ["fileExists"] = new("fileExists", "File exists", "mode=文件名（默认 .）", a =>
+        ["fileExists"] = new("fileExists", "File exists", "mode=allowedRoot 内相对路径", a =>
         {
-            var exists = JlMisc.FileExists(a.Mode.Length == 0 ? "." : a.Mode);
-            return R(exists, ("exists", exists));
+            var root = WorkspacePathSecurity.ResolveRoot(a.AllowedRoot, Directory.GetCurrentDirectory());
+            var path = WorkspacePathSecurity.ResolveRelative(root, a.Mode.Length == 0 ? "." : a.Mode, "fileExists");
+            var exists = File.Exists(path) || Directory.Exists(path);
+            return R(exists ? 1 : 0, ("exists", exists ? 1 : 0));
         }),
-        ["listFiles"] = new("listFiles", "List files", "mode=目录（默认 .）", a =>
+        ["listFiles"] = new("listFiles", "List files", "mode=allowedRoot 内相对目录", a =>
         {
-            using var files = JlMisc.ListFiles(a.Mode.Length == 0 ? "." : a.Mode, "files");
-            return R(files.Length, ("count", files.Length));
+            var root = WorkspacePathSecurity.ResolveRoot(a.AllowedRoot, Directory.GetCurrentDirectory());
+            var path = WorkspacePathSecurity.ResolveRelative(root, a.Mode.Length == 0 ? "." : a.Mode, "listFiles");
+            if (!Directory.Exists(path)) return R(0, ("count", 0));
+            var count = 0;
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly))
+            {
+                WorkspacePathSecurity.ResolveRelative(root, Path.GetRelativePath(root, file), "listFiles entry");
+                count++;
+            }
+            return R(count, ("count", count));
         }),
         ["selectLinesLongest"] = new("selectLinesLongest", "Select longest lines", "row1/column1/row2/column2=单条线段端点；条数固定为 1（count 未使用）", a =>
         {

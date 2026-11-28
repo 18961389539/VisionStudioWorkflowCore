@@ -29,8 +29,12 @@ internal static partial class JLVisionMatching
                 || !double.IsFinite(item.OriginX) || !double.IsFinite(item.OriginY)
                 || item.OriginX < 0 || item.OriginY < 0 || item.OriginX >= item.Width || item.OriginY >= item.Height)
                 throw new InvalidOperationException("A shape model set contains invalid training geometry.");
-            try { totalBytes += Convert.FromBase64String(item.Data).Length; }
+            byte[] decoded;
+            try { decoded = Convert.FromBase64String(item.Data); }
             catch (FormatException ex) { throw new InvalidOperationException("A shape model set contains invalid model data.", ex); }
+            if (decoded.Length == 0)
+                throw new InvalidOperationException("A shape model set contains empty model data.");
+            totalBytes += decoded.Length;
             if (totalBytes > 16 * 1024 * 1024) throw new InvalidOperationException("The saved shape model set exceeds the 16 MB combined limit.");
         }
         return envelope;

@@ -50,4 +50,8 @@ public sealed record VisionContourProperties(
     double Solidity,
     double Extent,
     double AspectRatio,
-    double EquivalentDiameter);
+    double EquivalentDiameter)
+{
+    public bool IsValid { get; init; } = true;
+    public IReadOnlyList<string> InvalidFields { get; init; } = [];
+}

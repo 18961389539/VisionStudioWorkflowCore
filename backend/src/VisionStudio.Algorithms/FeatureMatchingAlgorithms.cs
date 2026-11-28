@@ -18,6 +18,7 @@ internal static class FeatureMatchingAlgorithms
         int MinMatches,
         int MinInliers,
         double MinInlierRatio,
+        double MaxReprojErrorPx,
         double AngleRangeDeg,
         double ScaleMinPercent,
         double ScaleMaxPercent,
@@ -122,7 +123,7 @@ internal static class FeatureMatchingAlgorithms
             new VisionPoint2D(double.NaN, double.NaN), Identity3x3(), [], [], default, 0, 0, []);
 
         if (sceneDescriptors.Empty())
-            return empty with { Reason = "no-scene-keypoints" };
+            return empty with { Reason = "feature-insufficient:no-scene-keypoints" };
 
         // SIFT 是浮点描述子（L2），ORB 是二进制描述子（Hamming）；用错范数会让匹配全废。
         using DescriptorMatcher matcher = options.Detector == "orb"
@@ -151,7 +152,7 @@ internal static class FeatureMatchingAlgorithms
 
         var matchCount = templatePoints.Count;
         if (matchCount < options.MinMatches)
-            return empty with { Reason = "too-few-matches", MatchCount = matchCount };
+            return empty with { Reason = "ratio-test-failed", MatchCount = matchCount };
 
         using var from = Mat.FromArray(templatePoints);
         using var to = Mat.FromArray(scenePoints);
@@ -238,9 +239,11 @@ internal static class FeatureMatchingAlgorithms
 
             // 判定门限：先看内点数量/比例，再看角度与尺度是否落在工艺允许窗口内。
             if (inlierCount < options.MinInliers)
-                return outcome with { Found = false, Reason = "too-few-inliers" };
+                return outcome with { Found = false, Reason = "ransac-unreliable:too-few-inliers" };
             if (inlierRatio < options.MinInlierRatio)
-                return outcome with { Found = false, Reason = "inlier-ratio-low" };
+                return outcome with { Found = false, Reason = "ransac-unreliable:inlier-ratio-low" };
+            if (options.MaxReprojErrorPx > 0 && rms > options.MaxReprojErrorPx + 1e-9)
+                return outcome with { Found = false, Reason = "ransac-unreliable:reproj-error-high" };
             if (options.AngleRangeDeg < 180 && Math.Abs(normalizedAngle) > options.AngleRangeDeg + 1e-9)
                 return outcome with { Found = false, Reason = "angle-out-of-range" };
             var scalePercent = scale * 100.0;

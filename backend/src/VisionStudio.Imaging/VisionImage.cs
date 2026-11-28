@@ -13,6 +13,7 @@ public sealed class VisionImage : IVisionImage, IDisposable
     private IDisposable? _owner;
     private readonly bool _ownsMat;
     private Mat? _mat;
+    private readonly Dictionary<string, string> _metadata = new(StringComparer.OrdinalIgnoreCase);
     internal string CoordinateFrame { get; private set; }
 
     private VisionImage(Mat mat, bool ownsMat, IDisposable? owner, string coordinateFrame = "CurrentImage")
@@ -28,6 +29,16 @@ public sealed class VisionImage : IVisionImage, IDisposable
     public int Height => Mat.Height;
     public object NativeImage => Mat;
 
+    /// <summary>Node-specific provenance that must travel with an owned image without changing pixel storage.</summary>
+    public IReadOnlyDictionary<string, string> Metadata => _metadata;
+
+    internal void SetMetadata(IEnumerable<KeyValuePair<string, string>> values)
+    {
+        _metadata.Clear();
+        foreach (var (key, value) in values)
+            if (!string.IsNullOrWhiteSpace(key)) _metadata[key] = value;
+    }
+
     public static VisionImage Own(Mat mat) => new(mat, ownsMat: true, owner: null);
     public static VisionImage Borrow(Mat mat) => new(mat, ownsMat: false, owner: null);
 
@@ -37,7 +48,12 @@ public sealed class VisionImage : IVisionImage, IDisposable
     /// 这层是算法与相机实现之间的下沉点，不能反向依赖 CameraFrameLease。
     /// </summary>
     public static VisionImage FromLease(Mat image, IDisposable owner) => new(image, ownsMat: false, owner);
-    public VisionImage CloneOwned() => new(Mat.Clone(), ownsMat: true, owner: null, CoordinateFrame);
+    public VisionImage CloneOwned()
+    {
+        var clone = new VisionImage(Mat.Clone(), ownsMat: true, owner: null, CoordinateFrame);
+        foreach (var (key, value) in _metadata) clone._metadata[key] = value;
+        return clone;
+    }
 
     internal void SetCoordinateFrame(string coordinateFrame)
     {

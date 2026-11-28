@@ -74,6 +74,28 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
         var source = context.RequireImage("image");
         var roi = node.GetRoi();
         using var analysis = FeatureDetectorHelpers.Prepare(source, roi, Type);
+        if (Cv2.CountNonZero(analysis) == 0 && roi is not null)
+        {
+            var emptyDiag = CoordinateValidation.Diagnostics(Type, ("found", false), ("errorCode", "emptyRoi"), ("roi", roi.Type.ToString()));
+            return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(source), ["points"] = VisionValue.PointList([]), ["count"] = VisionValue.Integer(0),
+                ["maxResponse"] = VisionValue.Double(0), ["meanResponse"] = VisionValue.Double(0), ["found"] = VisionValue.Boolean(false),
+                ["diagnostics"] = VisionValue.String(emptyDiag)
+            }, new Dictionary<string, object?> { ["found"] = false, ["errorCode"] = "emptyRoi", ["diagnostics"] = emptyDiag }));
+        }
+        Cv2.MeanStdDev(analysis, out var meanGray, out var stdGray);
+        var lowContrast = stdGray.Val0 < 1e-6;
+        if (lowContrast)
+        {
+            var contrastDiag = CoordinateValidation.Diagnostics(Type, ("found", false), ("errorCode", "insufficientContrast"), ("mean", meanGray.Val0), ("std", stdGray.Val0));
+            return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(source), ["points"] = VisionValue.PointList([]), ["count"] = VisionValue.Integer(0),
+                ["maxResponse"] = VisionValue.Double(0), ["meanResponse"] = VisionValue.Double(0), ["found"] = VisionValue.Boolean(false),
+                ["diagnostics"] = VisionValue.String(contrastDiag)
+            }, new Dictionary<string, object?> { ["found"] = false, ["errorCode"] = "insufficientContrast", ["diagnostics"] = contrastDiag }));
+        }
 
         var detected = FeatureDetectionAlgorithms.Corners(analysis, method, fastThreshold, maxCorners, qualityLevel,
             minDistance, blockSize, harrisK, subpixel, cancellationToken);
@@ -92,6 +114,8 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("method", method), ("count", ordered.Length), ("maxCorners", maxCorners),
+            ("requested", detected.Requested), ("refined", detected.Refined), ("discarded", detected.Discarded),
+            ("errorCode", ordered.Length > 0 ? "none" : "noCorners"),
             ("fastThreshold", fastThreshold),
             ("qualityLevel", qualityLevel), ("minDistance", minDistance), ("blockSize", blockSize),
             ("subpixel", subpixel), ("maxResponse", peak), ("meanResponse", meanResponse),
@@ -176,6 +200,7 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
         var source = context.RequireImage("image");
         var roi = node.GetRoi();
         using var analysis = FeatureDetectorHelpers.Prepare(source, roi, Type);
+        var emptyRoi = roi is not null && Cv2.CountNonZero(analysis) == 0;
         var detected = FeatureDetectionAlgorithms.Ellipses(analysis, cannyLow, cannyHigh, minPoints, minArea, maxArea,
             minAspect, maxAspect, minCoverage, maxRms, maxEllipses, cancellationToken);
         var ordered = detected.Ordered;
@@ -198,6 +223,7 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("count", ordered.Length), ("inputCount", inputCount), ("truncated", truncated),
+            ("errorCode", ordered.Length > 0 ? "none" : emptyRoi ? "emptyRoi" : detected.ContourCount == 0 ? "noCandidate" : "allFiltered"),
             ("contours", detected.ContourCount), ("candidates", detected.CandidateCount),
             ("minArea", minArea), ("minCoverageDeg", minCoverage), ("maxRmsError", maxRms),
             ("roi", roi?.Type.ToString() ?? "FullImage"),
@@ -312,13 +338,14 @@ public sealed class FeatureRidgeNode : IVisionNodeExecutor
             try
             {
                 curves = native.LinesGauss(nativeSigma, nativeLow, nativeHigh, side,
-                    extractWidth ? "true" : "false", lineModel, completeJunctions ? "true" : "false");
+                    extractWidth ? "true" : "false", lineModel, "false");
                 raw.AddRange(JlContourCodec.FromNative(curves, cancellationToken));
             }
             finally { curves?.Dispose(); }
         }
         cancellationToken.ThrowIfCancellationRequested();
-
+        var bridgeCount = 0;
+        if (completeJunctions) bridgeCount = CompleteRidgeJunctions(raw, sigma);
         contours = raw.Where(contour => contour.Points.Count >= 2 && ContourLength(contour) >= minLength).ToArray();
         var points = new List<VisionPoint2D>();
         var widths = new List<double>();
@@ -354,6 +381,9 @@ public sealed class FeatureRidgeNode : IVisionNodeExecutor
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("count", contours.Count), ("totalLength", totalLength), ("meanWidth", meanWidth),
             ("sigma", sigma), ("low", low), ("high", high), ("polarity", polarity), ("lineModel", lineModel),
+            ("completeJunctions", completeJunctions), ("junctionBridgeCount", bridgeCount),
+            ("sigmaWarning", sigma > Math.Min(masked.Width, masked.Height) / 20d ? "sigmaMayMergeAdjacentRidges" : "none"),
+            ("recommendedMaxSigma", Math.Min(masked.Width, masked.Height) / 20d),
             ("minLength", minLength), ("pointCount", points.Count),
             ("roi", roi?.Type.ToString() ?? "FullImage"),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
@@ -379,6 +409,90 @@ public sealed class FeatureRidgeNode : IVisionNodeExecutor
                 ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                 ["algorithmBackend"] = "jlvision", ["diagnostics"] = diagnostics
             }, overlays));
+    }
+
+    private static int CompleteRidgeJunctions(List<VisionContour> contours, double sigma)
+    {
+        var bridges = 0;
+        var used = new bool[contours.Count];
+        var maxEndpointDistance = Math.Max(2d, sigma * 2d);
+        for (var i = 0; i < contours.Count; i++)
+        {
+            if (used[i] || contours[i].Points.Count < 2) continue;
+            for (var j = i + 1; j < contours.Count; j++)
+            {
+                if (used[j] || contours[j].Points.Count < 2) continue;
+                if (!TryBridgeRidges(contours[i], contours[j], maxEndpointDistance, out var merged)) continue;
+                contours[i] = merged;
+                used[j] = true;
+                bridges++;
+            }
+        }
+        for (var i = contours.Count - 1; i >= 0; i--) if (used[i]) contours.RemoveAt(i);
+        return bridges;
+    }
+
+    private static bool TryBridgeRidges(VisionContour left, VisionContour right, double maxDistance,
+        out VisionContour merged)
+    {
+        merged = left;
+        var leftStart = Tangent(left.Points, false);
+        var leftEnd = Tangent(left.Points, true);
+        var rightStart = Tangent(right.Points, false);
+        var rightEnd = Tangent(right.Points, true);
+        var candidates = new (VisionPoint2D Left, VisionPoint2D Right, bool ReverseRight, VisionPoint2D LeftTangent, VisionPoint2D RightTangent)[]
+        {
+            (left.Points[^1], right.Points[0], false, leftEnd, rightStart),
+            (left.Points[^1], right.Points[^1], true, leftEnd, rightEnd),
+            (left.Points[0], right.Points[0], true, leftStart, rightStart),
+            (left.Points[0], right.Points[^1], false, leftStart, rightEnd)
+        };
+        var matches = candidates.Where(item => MeasurementMath.Hypot(item.Left.X - item.Right.X, item.Left.Y - item.Right.Y) <= maxDistance)
+            .OrderBy(item => MeasurementMath.Hypot(item.Left.X - item.Right.X, item.Left.Y - item.Right.Y)).ToArray();
+        if (matches.Length == 0) return false;
+        var best = matches[0];
+        var dot = Math.Abs(best.LeftTangent.X * best.RightTangent.X + best.LeftTangent.Y * best.RightTangent.Y);
+        // Parallel or collinear ridges are never bridged; only near-endpoint crossings are joined.
+        if (dot >= Math.Cos(20 * Math.PI / 180)) return false;
+        var rightPoints = best.ReverseRight ? right.Points.Reverse().ToArray() : right.Points.ToArray();
+        var points = new List<VisionPoint2D>(left.Points.Count + rightPoints.Length + 2) { left.Points[0] };
+        points.AddRange(left.Points.Skip(1));
+        points.Add(best.Right);
+        points.AddRange(rightPoints.Skip(1));
+        var leftWidths = Widths(left);
+        var rightWidths = Widths(right);
+        var widths = new List<double>(leftWidths);
+        widths.Add((leftWidths[^1] + rightWidths[0]) / 2d);
+        widths.AddRange(rightWidths.Skip(1));
+        var minX = points.Min(point => point.X); var minY = points.Min(point => point.Y);
+        var maxX = points.Max(point => point.X); var maxY = points.Max(point => point.Y);
+        merged = left with
+        {
+            Points = points,
+            Perimeter = ContourLength(left with { Points = points }),
+            BoundingBox = new VisionRectangle2D(minX, minY, maxX - minX, maxY - minY),
+            Attributes = new Dictionary<string, IReadOnlyList<double>>(StringComparer.OrdinalIgnoreCase) { ["width"] = widths }
+        };
+        return true;
+    }
+
+    private static VisionPoint2D Tangent(IReadOnlyList<VisionPoint2D> points, bool fromEnd)
+    {
+        var last = fromEnd ? points.Count - 1 : 0;
+        var previous = fromEnd ? points.Count - 2 : 1;
+        var dx = points[last].X - points[previous].X;
+        var dy = points[last].Y - points[previous].Y;
+        var length = Math.Max(1e-12, Math.Sqrt(dx * dx + dy * dy));
+        return new VisionPoint2D(dx / length, dy / length);
+    }
+
+    private static IReadOnlyList<double> Widths(VisionContour contour)
+    {
+        if (contour.Attributes is not null)
+            foreach (var pair in contour.Attributes)
+                if (pair.Key.Equals("width", StringComparison.OrdinalIgnoreCase) && pair.Value.Count == contour.Points.Count)
+                    return pair.Value;
+        return Enumerable.Repeat(0d, contour.Points.Count).ToArray();
     }
 
     private static double ContourLength(VisionContour contour)
@@ -431,16 +545,21 @@ public sealed class FeatureGaborBankNode : IVisionNodeExecutor
             throw new InvalidOperationException("feature.gaborBank energyMode must be sum or max.");
 
         var emitDirectionMap = node.GetBool("directionMap", true);
+        var energyNormalization = node.GetString("energyNormalization", "normalized").Trim().ToLowerInvariant();
+        if (energyNormalization is not ("raw" or "normalized"))
+            throw new InvalidOperationException("feature.gaborBank energyNormalization must be raw or normalized.");
 
         var source = context.RequireImage("image");
         var roi = node.GetRoi();
         using var analysis = FeatureDetectorHelpers.Prepare(source, roi, Type);
-        if (wavelength > Math.Min(analysis.Width, analysis.Height) / 2.0)
+        var roiLimit = Math.Min(analysis.Width, analysis.Height) / 2.0;
+        if (wavelength > roiLimit)
             throw new InvalidOperationException(
-                "feature.gaborBank wavelength must not exceed half the image; lower it or crop the ROI.");
+                $"feature.gaborBank errorCode=degenerateKernel: wavelength={wavelength} exceeds ROI limit={roiLimit} (width={analysis.Width}, height={analysis.Height}); lower it or crop the ROI.");
 
         var bank = FeatureDetectionAlgorithms.GaborBank(
-            analysis, wavelength, orientations, sigmaRatio, gamma, energyMode, emitDirectionMap, cancellationToken);
+            analysis, wavelength, orientations, sigmaRatio, gamma, energyMode, emitDirectionMap,
+            energyNormalization == "normalized", cancellationToken);
         var sigma = bank.Sigma;
         var kernelSize = bank.KernelSize;
         var perOrientation = bank.Energies;
@@ -474,6 +593,7 @@ public sealed class FeatureGaborBankNode : IVisionNodeExecutor
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("wavelength", wavelength), ("orientations", orientations), ("sigma", sigma),
             ("kernelSize", kernelSize), ("gamma", gamma), ("energyMode", energyMode),
+            ("energyNormalization", energyNormalization), ("gainNormalized", bank.GainNormalized), ("kernelGain", bank.KernelGain), ("roiLimit", roiLimit),
             ("dominantDirectionDeg", dominantDegrees), ("anisotropy", anisotropy),
             ("meanEnergy", meanEnergy), ("maxEnergy", maxEnergy),
             ("roi", roi?.Type.ToString() ?? "FullImage"),
@@ -485,6 +605,7 @@ public sealed class FeatureGaborBankNode : IVisionNodeExecutor
             {
                 ["wavelength"] = wavelength, ["orientations"] = orientations, ["sigma"] = sigma,
                 ["kernelSize"] = kernelSize, ["gamma"] = gamma, ["energyMode"] = energyMode,
+                ["energyNormalization"] = energyNormalization, ["gainNormalized"] = bank.GainNormalized, ["kernelGain"] = bank.KernelGain,
                 ["dominantDirectionDeg"] = dominantDegrees, ["anisotropy"] = Math.Round(anisotropy, 4),
                 ["meanEnergy"] = meanEnergy, ["maxEnergy"] = maxEnergy,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage",

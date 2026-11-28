@@ -24,8 +24,20 @@ var source = context.RequireImage("image").Mat;
         using var net = OnnxInferenceHelpers.LoadNet(node);
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
         var layout = node.GetString("layout", "scores").Trim().ToLowerInvariant();
+        if (layout is not ("scores" or "yolo26"))
+            throw new InvalidOperationException($"Unsupported classification layout '{layout}'. Supported values are 'scores' and 'yolo26'.");
         // YOLO26-cls ONNX already embeds softmax; applying it again flattens the distribution.
         var applySoftmax = layout == "yolo26" ? false : node.GetBool("applySoftmax", true);
+        var aggregation = node.GetString("aggregation", "probability").Trim().ToLowerInvariant();
+        if (aggregation is not ("probability" or "logits"))
+            throw new InvalidOperationException("Classification aggregation must be probability or logits.");
+        if (aggregation == "logits" && layout == "yolo26")
+            throw new InvalidOperationException("Classification aggregation=logits is invalid for layout=yolo26 because the model already emits probabilities.");
+        if (aggregation == "probability" && layout == "scores" && !applySoftmax)
+            throw new InvalidOperationException("Classification aggregation=probability requires applySoftmax=true for layout=scores.");
+        var maxViewDisagreement = node.GetDouble("maxViewDisagreement", 0);
+        if (!double.IsFinite(maxViewDisagreement) || maxViewDisagreement is < 0 or > 1)
+            throw new InvalidOperationException("Classification maxViewDisagreement must be finite and between 0 and 1.");
         var multiCrop = node.GetString("multiCrop", "none").Trim().ToLowerInvariant();
         if (multiCrop is not ("none" or "five" or "ten"))
             throw new InvalidOperationException("Classification multiCrop must be none, five, or ten.");
@@ -40,6 +52,7 @@ var source = context.RequireImage("image").Mat;
         var topK = node.GetInt("topK", 5);
         if (topK is < 1 or > 100) throw new InvalidOperationException("Classification topK must be between 1 and 100.");
         var labels = OnnxInferenceHelpers.ResolveLabels(node);
+        ValidateClassificationMetadata(net, node.GetString("outputName", string.Empty).Trim(), labels, layout);
         var inputWidth = node.GetInt("inputWidth", 224); var inputHeight = node.GetInt("inputHeight", 224);
         if (inputWidth is < 1 or > 4096 || inputHeight is < 1 or > 4096)
             throw new InvalidOperationException("Classification inputWidth and inputHeight must be between 1 and 4096.");
@@ -52,6 +65,7 @@ var source = context.RequireImage("image").Mat;
             double[]? aggregate = null;
             int[]? outputShape = null;
             var viewPredictions = new List<object>(views.Count);
+            var viewDistributions = new List<double[]>(views.Count);
             var classCount = 0;
             var batchSize = 1;
             // Test-time augmentation is N views of the same image, so a dynamic-batch model can
@@ -76,7 +90,8 @@ var source = context.RequireImage("image").Mat;
                         var scores = batchValues.AsSpan(viewIndex * perView, perView).ToArray();
                         var viewRank = InferenceStats.RankClassification(scores, layout, applySoftmax, 1, labels);
                         viewPredictions.Add(new { view = viewIndex + 1, index = viewRank.Top[0].Index, label = viewRank.Top[0].Label, score = viewRank.Top[0].Score });
-                        var distribution = ClassificationDistribution(scores, layout, applySoftmax);
+                        var distribution = ClassificationDistribution(scores, layout, applySoftmax, aggregation);
+                        viewDistributions.Add(distribution);
                         aggregate ??= new double[distribution.Length];
                         if (distribution.Length != aggregate.Length) throw new InvalidOperationException($"Classification view {viewIndex + 1} produced {distribution.Length} classes; expected {aggregate.Length}.");
                         for (var classIndex = 0; classIndex < aggregate.Length; classIndex++) aggregate[classIndex] += distribution[classIndex];
@@ -105,25 +120,35 @@ var source = context.RequireImage("image").Mat;
                         break;
                     }
 
-                    var distribution = ClassificationDistribution(scores, layout, applySoftmax);
+                    var distribution = ClassificationDistribution(scores, layout, applySoftmax, aggregation);
+                    viewDistributions.Add(distribution);
                     aggregate ??= new double[distribution.Length];
                     for (var classIndex = 0; classIndex < aggregate.Length; classIndex++) aggregate[classIndex] += distribution[classIndex];
                 }
             }
 
-            var aggregateIsProbability = layout == "yolo26" || applySoftmax;
+            var aggregateIsProbability = aggregation == "probability" && (layout == "yolo26" || applySoftmax);
             var averaged = aggregate!.Select(value => (float)(value / views.Count)).ToArray();
             var rank = multiCrop == "none"
                 ? InferenceStats.RankClassification(averaged, layout, applySoftmax, topK, labels)
-                : InferenceStats.RankClassification(averaged, aggregateIsProbability ? "yolo26" : "scores", false, topK, labels);
+                : InferenceStats.RankClassification(averaged, aggregateIsProbability ? "yolo26" : "scores", !aggregateIsProbability && applySoftmax, topK, labels);
             var best = rank.Top[0];
-            var accepted = minimumConfidence <= 0 || best.Score >= minimumConfidence;
-            var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("minimumConfidence", minimumConfidence), ("accepted", accepted), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)), ("multiCrop", multiCrop), ("viewCropFraction", viewCropFraction), ("viewCount", views.Count), ("batchSize", batchSize));
+            var viewVariance = multiCrop == "none" ? 0d : Enumerable.Range(0, averaged.Length)
+                .Max(classIndex => viewDistributions.Average(view => Math.Pow(view[classIndex] - averaged[classIndex], 2)));
+            var observedMaxViewDisagreement = multiCrop == "none" ? 0d : Enumerable.Range(0, averaged.Length)
+                .Max(classIndex => viewDistributions.Max(view => view[classIndex]) - viewDistributions.Min(view => view[classIndex]));
+            if (!aggregateIsProbability && observedMaxViewDisagreement > 1)
+                observedMaxViewDisagreement /= Math.Max(1, viewDistributions.SelectMany(view => view).Select(Math.Abs).DefaultIfEmpty(1).Max());
+            var disagreementRejected = multiCrop != "none" && maxViewDisagreement > 0 && observedMaxViewDisagreement > maxViewDisagreement;
+            var accepted = !disagreementRejected && (minimumConfidence <= 0 || best.Score >= minimumConfidence);
+            var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("aggregation", aggregation), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("minimumConfidence", minimumConfidence), ("accepted", accepted), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)), ("multiCrop", multiCrop), ("viewCropFraction", viewCropFraction), ("viewCount", views.Count), ("batchSize", batchSize), ("viewVariance", viewVariance), ("maxViewDisagreement", observedMaxViewDisagreement), ("maxViewDisagreementThreshold", maxViewDisagreement));
             var jsonFields = new Dictionary<string, object?>
             {
                 ["classes"] = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }),
-                ["outputShape"] = outputShape, ["layout"] = layout, ["margin"] = rank.Margin, ["entropy"] = rank.Entropy,
-                ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted
+                ["outputShape"] = outputShape, ["layout"] = layout, ["aggregation"] = aggregation, ["margin"] = rank.Margin, ["entropy"] = rank.Entropy,
+                ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted,
+                ["viewVariance"] = viewVariance, ["maxViewDisagreement"] = observedMaxViewDisagreement,
+                ["maxViewDisagreementThreshold"] = maxViewDisagreement, ["disagreementRejected"] = disagreementRejected
             };
             if (multiCrop != "none")
             {
@@ -144,9 +169,12 @@ var source = context.RequireImage("image").Mat;
                     ["margin"] = VisionValue.Double(rank.Margin),
                     ["entropy"] = VisionValue.Double(rank.Entropy),
                     ["classCount"] = VisionValue.Integer(rank.ClassCount),
+                    ["viewVariance"] = VisionValue.Double(viewVariance),
+                    ["maxViewDisagreement"] = VisionValue.Double(observedMaxViewDisagreement),
+                    ["aggregation"] = VisionValue.String(aggregation),
                     ["diagnostics"] = VisionValue.String(diag)
                 },
-                new Dictionary<string, object?> { ["outputShape"] = outputShape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted, ["multiCrop"] = multiCrop, ["viewCropFraction"] = viewCropFraction, ["viewCount"] = views.Count, ["batchSize"] = batchSize, ["diagnostics"] = diag }));
+                new Dictionary<string, object?> { ["outputShape"] = outputShape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["aggregation"] = aggregation, ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted, ["multiCrop"] = multiCrop, ["viewCropFraction"] = viewCropFraction, ["viewCount"] = views.Count, ["batchSize"] = batchSize, ["viewVariance"] = viewVariance, ["maxViewDisagreement"] = observedMaxViewDisagreement, ["diagnostics"] = diag }));
         }
         finally
         {
@@ -163,14 +191,29 @@ var source = context.RequireImage("image").Mat;
         return OnnxInferenceHelpers.ReadFloatTensor(output, "classification");
     }
 
-    private static double[] ClassificationDistribution(float[] scores, string layout, bool applySoftmax)
+    private static double[] ClassificationDistribution(float[] scores, string layout, bool applySoftmax, string aggregation)
     {
-        if (layout == "yolo26" || !applySoftmax) return scores.Select(value => (double)value).ToArray();
+        if (aggregation == "logits" || layout == "yolo26" || !applySoftmax) return scores.Select(value => (double)value).ToArray();
         var maximum = scores.Max();
         var exponentials = scores.Select(value => Math.Exp(value - maximum)).ToArray();
         var total = exponentials.Sum();
         if (!double.IsFinite(total) || total <= 0) throw new InvalidOperationException("Classification crop softmax produced an invalid normalizer.");
         return exponentials.Select(value => value / total).ToArray();
+    }
+
+    private static void ValidateClassificationMetadata(OnnxModelSession net, string outputName, string[] labels, string layout)
+    {
+        if (net.Session.OutputMetadata.Count == 0)
+            throw new InvalidOperationException("Classification model exposes no outputs.");
+        if (outputName.Length > 0 && !net.Session.OutputMetadata.ContainsKey(outputName))
+            throw new InvalidOperationException($"Classification output '{outputName}' is not exposed by the model.");
+        var metadata = outputName.Length > 0 ? net.Session.OutputMetadata[outputName] : net.Session.OutputMetadata.First().Value;
+        var shape = metadata.Dimensions;
+        int? classCount = null;
+        if (shape.Length == 2 && shape[0] == 1 && shape[1] > 0) classCount = shape[1];
+        else if (shape.Length == 4 && shape[0] == 1 && shape[1] > 0 && shape[2] == 1 && shape[3] == 1) classCount = shape[1];
+        if (classCount is > 0 && labels.Length > 0 && labels.Length != classCount)
+            throw new InvalidOperationException($"Classification labels count ({labels.Length}) must match the model class count ({classCount}).");
     }
 
     private static List<Mat> CreateClassificationViews(Mat source, int inputWidth, int inputHeight, double cropFraction,
@@ -239,6 +282,19 @@ var source = context.RequireImage("image").Mat;
             throw new InvalidOperationException("Detection with crop=true is unsupported because detection coordinates cannot be mapped through the center crop. Set crop=false.");
         using var net = OnnxInferenceHelpers.LoadNet(node);
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
+        var layout = node.GetString("layout", "xyxy").Trim().ToLowerInvariant();
+        if (layout is not ("xyxy" or "yolo" or "yolov5"))
+            throw new InvalidOperationException($"Unsupported detection layout '{layout}'. Supported values are 'xyxy', 'yolo' and 'yolov5'.");
+        var tensorOrder = node.GetString("tensorOrder", "auto").Trim().ToLowerInvariant();
+        if (tensorOrder is not ("auto" or "channelsfirst" or "channelslast"))
+            throw new InvalidOperationException("Detection tensorOrder must be auto, channelsFirst, or channelsLast.");
+        if (layout == "xyxy" && tensorOrder != "auto")
+            throw new InvalidOperationException("Detection tensorOrder is only valid for raw yolo/yolov5 layouts; use auto for xyxy rows.");
+        var coordinates = node.GetString("coordinates", "normalized").Trim().ToLowerInvariant();
+        if (coordinates is not ("normalized" or "pixels"))
+            throw new InvalidOperationException($"Unsupported detection coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
+        var letterbox = node.GetBool("letterbox", false);
+        var preprocessingContract = $"layout={layout};tensorOrder={tensorOrder};coordinates={coordinates};letterbox={letterbox};crop=false";
         using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
         cancellationToken.ThrowIfCancellationRequested();
         using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
@@ -247,12 +303,6 @@ var source = context.RequireImage("image").Mat;
         var rows = shape.Length == 2 && shape[1] == 6
             ? shape[0]
             : shape.Length == 3 && shape[0] == 1 && shape[2] == 6 ? shape[1] : 0;
-        var layout = node.GetString("layout", "xyxy").Trim().ToLowerInvariant();
-        if (layout is not ("xyxy" or "yolo" or "yolov5"))
-            throw new InvalidOperationException($"Unsupported detection layout '{layout}'. Supported values are 'xyxy', 'yolo' and 'yolov5'.");
-        var tensorOrder = node.GetString("tensorOrder", "auto").Trim().ToLowerInvariant();
-        if (tensorOrder is not ("auto" or "channelsfirst" or "channelslast"))
-            throw new InvalidOperationException("Detection tensorOrder must be auto, channelsFirst, or channelsLast.");
         var isYoloLayout = layout is "yolo" or "yolov5";
         if (rows <= 0 && !isYoloLayout)
             throw new InvalidOperationException($"Detection output must have shape [N,6] or [1,N,6] with rows [x1,y1,x2,y2,score,classId]; received [{string.Join(',', shape)}].");
@@ -263,10 +313,6 @@ var source = context.RequireImage("image").Mat;
         if (maxCount is < 1 or > 1000) throw new InvalidOperationException("maxCount must be between 1 and 1000.");
         if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1)
             throw new InvalidOperationException("Detection confidenceThreshold and nmsThreshold must be finite values from 0 to 1.");
-        var coordinates = node.GetString("coordinates", "normalized").Trim().ToLowerInvariant();
-        if (coordinates is not ("normalized" or "pixels"))
-            throw new InvalidOperationException($"Unsupported detection coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
-        var letterbox = node.GetBool("letterbox", false);
 
         var candidates = new List<DetectionCandidate>();
         var sourceWidth = source.Width;
@@ -320,10 +366,18 @@ var source = context.RequireImage("image").Mat;
                 AddCandidate(values[offset], values[offset + 1], values[offset + 2], values[offset + 3], values[offset + 4], (int)MathF.Round(rawClassId), i);
             }
         }
-        var kept = new List<DetectionCandidate>();
-        var truncated = InferenceNmsCap.Fill(candidates.OrderByDescending(x => x.Score), maxCount, kept,
+        var preNmsCount = candidates.Count;
+        var survivors = new List<DetectionCandidate>();
+        InferenceNmsCap.Fill(candidates
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.ClassId)
+            .ThenBy(x => x.Left).ThenBy(x => x.Top).ThenBy(x => x.Right).ThenBy(x => x.Bottom),
+            int.MaxValue, survivors,
             (existing, candidate) => existing.Any(x => x.ClassId == candidate.ClassId && IoU(x, candidate) > nmsThreshold),
             cancellationToken);
+        var postNmsCount = survivors.Count;
+        var truncated = postNmsCount > maxCount;
+        var kept = survivors.Take(maxCount).ToList();
         var detections = kept.Select((x, index) => ToVisionDetection(x, index)).ToArray();
         var payload = kept.Select(x => new { x1 = x.Left, y1 = x.Top, x2 = x.Right, y2 = x.Bottom, score = x.Score, classId = x.ClassId }).ToArray();
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -332,15 +386,18 @@ var source = context.RequireImage("image").Mat;
                 ["detections"] = VisionValue.Detections(detections),
                 ["count"] = VisionValue.Integer(detections.Length),
                 ["truncated"] = VisionValue.Boolean(truncated),
-                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { detections = payload, outputShape = shape, tensorOrder })),
+                ["preNmsCount"] = VisionValue.Integer(preNmsCount),
+                ["postNmsCount"] = VisionValue.Integer(postNmsCount),
+                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { detections = payload, outputShape = shape, tensorOrder, preNmsCount, postNmsCount })),
                 ["maxScore"] = VisionValue.Double(detections.Length == 0 ? 0 : detections.Max(d => d.Confidence ?? 0)),
                 ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(Type,
-                    ("count", detections.Length), ("truncated", truncated), ("maxScore", detections.Length == 0 ? 0 : detections.Max(d => d.Confidence ?? 0)),
+                    ("count", detections.Length), ("truncated", truncated), ("preNmsCount", preNmsCount), ("postNmsCount", postNmsCount), ("maxScore", detections.Length == 0 ? 0 : detections.Max(d => d.Confidence ?? 0)),
                     ("layout", layout), ("tensorOrder", tensorOrder), ("coordinates", coordinates), ("letterbox", letterbox),
+                    ("preprocessingContract", preprocessingContract),
                     ("confidenceThreshold", threshold), ("nmsThreshold", nmsThreshold), ("maxCount", maxCount),
                     ("outputShape", string.Join(',', shape))))
             },
-            new Dictionary<string, object?> { ["count"] = detections.Length, ["coordinates"] = coordinates, ["layout"] = layout, ["letterbox"] = letterbox, ["outputShape"] = shape,
+            new Dictionary<string, object?> { ["count"] = detections.Length, ["preNmsCount"] = preNmsCount, ["postNmsCount"] = postNmsCount, ["coordinates"] = coordinates, ["layout"] = layout, ["letterbox"] = letterbox, ["outputShape"] = shape,
                 ["maxScore"] = detections.Length == 0 ? 0 : detections.Max(d => d.Confidence ?? 0),
                 ["diagnostics"] = CoordinateValidation.Diagnostics(Type, ("count", detections.Length), ("layout", layout)) }));
     }
@@ -437,9 +494,14 @@ var source = context.RequireImage("image").Mat;
             if (!double.IsFinite(item.Score) || item.Score is < 0 or > 1)
                 throw new InvalidOperationException($"OBB row {i} has a non-finite score or a score outside [0,1].");
             if (item.ClassId < 0) throw new InvalidOperationException($"OBB row {i} has a negative classId.");
+            if (!double.IsFinite(item.AngleRad) || Math.Abs(item.AngleRad) > 1e6)
+                throw new InvalidOperationException($"OBB row {i} has a non-finite or out-of-range angle; expected finite radians.");
+            var normalizedAngle = item.AngleRad % (2 * Math.PI);
+            if (normalizedAngle >= Math.PI) normalizedAngle -= 2 * Math.PI;
+            if (normalizedAngle < -Math.PI) normalizedAngle += 2 * Math.PI;
             if (item.Score == 0 || item.Score < threshold) continue; // zero-score padding rows are normal in end-to-end exports
             if (!double.IsFinite(item.CenterX) || !double.IsFinite(item.CenterY) || !double.IsFinite(item.Width) || !double.IsFinite(item.Height) ||
-                !double.IsFinite(item.AngleRad) || item.Width <= 0 || item.Height <= 0)
+                item.Width <= 0 || item.Height <= 0)
                 throw new InvalidOperationException($"OBB row {i} has non-finite geometry, angle, or a non-positive width/height.");
 
             var cx = item.CenterX; var cy = item.CenterY; var width = item.Width; var height = item.Height;
@@ -449,8 +511,8 @@ var source = context.RequireImage("image").Mat;
             }
             cx = mapping.ToSourceX(cx); cy = mapping.ToSourceY(cy);
             width /= mapping.ScaleX; height /= mapping.ScaleY;
-            var corners = InferenceStats.OrientedBoxCorners(cx, cy, width, height, item.AngleRad);
-            candidates.Add(new ObbCandidate(cx, cy, width, height, item.AngleRad, item.Score, item.ClassId, corners));
+            var corners = InferenceStats.OrientedBoxCorners(cx, cy, width, height, normalizedAngle);
+            candidates.Add(new ObbCandidate(cx, cy, width, height, normalizedAngle, item.Score, item.ClassId, corners));
         }
 
         var kept = new List<ObbCandidate>();
@@ -494,7 +556,9 @@ var source = context.RequireImage("image").Mat;
 
         var overlay = BuildObbOverlay(source, kept, labels);
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("count", detections.Count), ("truncated", truncated), ("nmsMode", nmsMode),
-            ("letterbox", letterbox), ("coordinates", coordinates), ("outputShape", shape));
+            ("letterbox", letterbox), ("coordinates", coordinates), ("outputShape", shape),
+            ("angleUnit", "radian"), ("angleReferenceAxis", "+x-image-axis"), ("angleRange", "[-pi,pi)"),
+            ("scaleX", mapping.ScaleX), ("scaleY", mapping.ScaleY), ("padX", mapping.PadX), ("padY", mapping.PadY));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -502,7 +566,7 @@ var source = context.RequireImage("image").Mat;
                 ["count"] = VisionValue.Integer(detections.Count),
                 ["truncated"] = VisionValue.Boolean(truncated),
                 ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
-                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, outputShape = shape, nmsApplied = applyNms, detections = payload })),
+                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, outputShape = shape, nmsApplied = applyNms, angleUnit = "radian", angleReferenceAxis = "+x-image-axis", angleRange = "[-pi,pi)", mapping = new { scaleX = mapping.ScaleX, scaleY = mapping.ScaleY, padX = mapping.PadX, padY = mapping.PadY }, detections = payload })),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?> { ["count"] = detections.Count, ["layout"] = layout, ["nmsApplied"] = applyNms,

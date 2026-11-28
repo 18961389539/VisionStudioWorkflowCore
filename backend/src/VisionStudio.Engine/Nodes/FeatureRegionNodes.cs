@@ -75,6 +75,9 @@ internal static class GrayMorphology
         var kernelArea = (long)width * height;
         var diag = CoordinateValidation.Diagnostics(nodeType,
             ("operation", operation), ("kernelWidth", width), ("kernelHeight", height), ("kernelArea", kernelArea),
+            ("inputMode", "gray"), ("colorToGray", "BGR(A)->BT.601 gray"), ("kernelAnchor", "center"),
+            ("borderType", "JLVision native default"), ("roiOutsidePreserved", applyRoi),
+            ("statisticsIncludeRoiOutside", !applyRoi),
             ("nonZeroRatio", fgRatio), ("nonZeroCount", nonZeroCount),
             ("meanIntensity", meanIntensity), ("maxIntensity", maxIntensity), ("minIntensity", minIntensity), ("stdIntensity", stdIntensity),
             ("energy", energy), ("peakX", maxLoc.X), ("peakY", maxLoc.Y), ("minX", minLoc.X), ("minY", minLoc.Y),
@@ -176,20 +179,115 @@ public sealed class RegionFromRoiNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
         var width = node.GetInt("canvasWidth", 512); var height = node.GetInt("canvasHeight", 384);
-        if (context.TryGetValue("image", out var image)) { var source = image.Require<VisionImage>("image"); width = source.Width; height = source.Height; }
+        var canvasSource = "canvasParameters";
+        if (context.TryGetValue("image", out var image)) { var source = image.Require<VisionImage>("image"); width = source.Width; height = source.Height; canvasSource = "image"; }
         if (width is < 1 or > 16384 || height is < 1 or > 16384 || (long)width * height > 64_000_000)
             throw new InvalidOperationException("ROI canvas must be 1..16384 per axis and at most 64000000 pixels.");
         var roi = context.TryGetValue("roi", out var input) ? input.Require<VisionRoi>("roi") : node.GetRoi();
         if (roi is null) throw new InvalidOperationException("Connect a ROI or configure a valid roi parameter.");
+        var originalBounds = RoiBounds(roi);
+        var brushWarnings = new List<object>();
+        var brushAudit = roi.Type == VisionRoiType.Brush ? AuditBrush(roi, width, height, cancellationToken, brushWarnings) : [];
         // Native region generation clips to the most recently initialized image
         // extent. Establish this canvas before rasterizing so the first run does
         // not inherit a smaller image from another node on this worker thread.
         using var nativeCanvas = new JlImage("byte", width, height);
         using var native = Rasterize(roi, width, height, cancellationToken);
+        var rasterizedArea = native.AreaCenter(out double _, out double _);
         using var bounds = new JlRegion(0d, 0d, (double)height - 1, (double)width - 1);
         using var clipped = native.Intersection(bounds);
+        var clippedRegion = JLVisionRegions.FromNative(clipped, width, height, cancellationToken);
+        var clippedBounds = RegionBounds(clippedRegion);
         using var inverted = node.GetBool("invert", false) ? bounds.Difference(clipped) : null;
-        return ValueTask.FromResult(RegionShapeProcessing.Result(inverted ?? clipped, width, height, cancellationToken));
+        var result = RegionShapeProcessing.Result(inverted ?? clipped, width, height, cancellationToken);
+        var outputRegion = result.Outputs["region"].Require<VisionRegion>("region");
+        var outputArea = JLVisionRegions.PixelArea(outputRegion);
+        var clippedPixels = Math.Max(0d, rasterizedArea - JLVisionRegions.PixelArea(clippedRegion));
+        var clippedRatio = rasterizedArea > 0 ? clippedPixels / rasterizedArea : 0d;
+        var outputBounds = RegionBounds(outputRegion);
+        var warnings = brushWarnings.ToArray();
+        if (roi.Type == VisionRoiType.Brush && outputArea == 0)
+            warnings = [.. warnings, new { code = "brush-erased-all", message = "All brush pixels were erased; found=false." }];
+        var auditJson = JsonSerializer.Serialize(brushAudit);
+        var warningsJson = JsonSerializer.Serialize(warnings);
+        var diagnostics = CoordinateValidation.Diagnostics(Type, new (string Key, object? Value)[]
+        {
+            ("found", outputArea > 0), ("width", width), ("height", height),
+            ("canvasSource", canvasSource), ("originalBounds", originalBounds), ("clippedBounds", clippedBounds),
+            ("effectiveBounds", outputBounds),
+            ("rasterizedArea", rasterizedArea), ("clippedPixels", clippedPixels), ("clippedRatio", clippedRatio),
+            ("invert", node.GetBool("invert", false)), ("complementArea", node.GetBool("invert", false) ? outputArea : 0),
+            ("brushOperationCount", brushAudit.Count), ("warningCount", warnings.Length)
+        });
+        var outputs = new Dictionary<string, VisionValue>(result.Outputs)
+        {
+            ["diagnostics"] = VisionValue.String(diagnostics), ["brushAudit"] = VisionValue.String(auditJson),
+            ["warningsJson"] = VisionValue.String(warningsJson), ["warningCount"] = VisionValue.Integer(warnings.Length)
+        };
+        var summary = new Dictionary<string, object?>(result.Summary)
+        {
+            ["canvasSource"] = canvasSource, ["originalBounds"] = originalBounds, ["clippedBounds"] = clippedBounds,
+            ["effectiveBounds"] = outputBounds,
+            ["rasterizedArea"] = rasterizedArea, ["clippedPixels"] = clippedPixels, ["clippedRatio"] = clippedRatio,
+            ["complementArea"] = node.GetBool("invert", false) ? outputArea : 0,
+            ["brushOperationCount"] = brushAudit.Count, ["brushAudit"] = brushAudit,
+            ["warningCount"] = warnings.Length, ["warnings"] = warnings, ["diagnostics"] = diagnostics
+        };
+        return ValueTask.FromResult(result with { Outputs = outputs, Summary = summary });
+    }
+
+    private static object RoiBounds(VisionRoi roi)
+    {
+        if (roi.Type == VisionRoiType.Rectangle)
+        {
+            var x = roi.X ?? 0; var y = roi.Y ?? 0; var w = roi.Width ?? 0; var h = roi.Height ?? 0;
+            return new { x, y, width = w, height = h };
+        }
+        if (roi.Type == VisionRoiType.Circle)
+        {
+            var x = roi.X ?? 0; var y = roi.Y ?? 0; var r = roi.Radius ?? 0;
+            return new { x = x - r, y = y - r, width = r * 2, height = r * 2 };
+        }
+        var points = roi.Type == VisionRoiType.Polygon ? roi.Points ?? [] : roi.Strokes?.SelectMany(s => s.Points ?? []).ToArray() ?? [];
+        if (points.Count == 0) return new { x = 0d, y = 0d, width = 0d, height = 0d };
+        var minX = points.Min(p => p.X); var maxX = points.Max(p => p.X); var minY = points.Min(p => p.Y); var maxY = points.Max(p => p.Y);
+        return new { x = minX, y = minY, width = maxX - minX, height = maxY - minY };
+    }
+
+    private static object RegionBounds(VisionRegion region)
+    {
+        if (region.Components.Count == 0) return new { x = 0, y = 0, width = 0, height = 0 };
+        var left = region.Components.Min(c => c.Runs.Min(r => r.StartColumn));
+        var right = region.Components.Max(c => c.Runs.Max(r => r.EndColumn));
+        var top = region.Components.Min(c => c.Runs.Min(r => r.Row));
+        var bottom = region.Components.Max(c => c.Runs.Max(r => r.Row));
+        return new { x = left, y = top, width = right - left + 1, height = bottom - top + 1 };
+    }
+
+    private static List<object> AuditBrush(VisionRoi roi, int width, int height, CancellationToken cancellationToken, List<object> warnings)
+    {
+        var audit = new List<object>();
+        using var mask = new Mat(height, width, MatType.CV_8UC1, Scalar.All(0));
+        var strokes = roi.Strokes ?? [];
+        for (var i = 0; i < strokes.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var stroke = strokes[i];
+            VisionRoiOpenCvExtensions.DrawBrushStrokes(mask, [stroke], cancellationToken: cancellationToken);
+            var area = Cv2.CountNonZero(mask);
+            object? warning = null;
+            if (stroke.Mode == VisionRoiStrokeMode.Erase && area == 0)
+                warning = new { code = "brush-erased-all", operationIndex = i, message = "Erase operation removed all pixels." };
+            else if (stroke.Mode == VisionRoiStrokeMode.Erase && stroke.Points.Any(p => p.X < 0 || p.Y < 0 || p.X >= width || p.Y >= height))
+                warning = new { code = "brush-erase-crosses-canvas", operationIndex = i, message = "Erase operation extends outside the canvas." };
+            if (warning is not null) warnings.Add(warning);
+            audit.Add(new
+            {
+                operationIndex = i, mode = stroke.Mode.ToString().ToLowerInvariant(), shape = "brush",
+                width = stroke.Width, points = stroke.Points, areaAfter = area, warning
+            });
+        }
+        return audit;
     }
     private static JlRegion Rasterize(VisionRoi roi, int canvasWidth, int canvasHeight, CancellationToken cancellationToken)
     {
@@ -270,6 +368,12 @@ public sealed class RegionFromRoiNode : IVisionNodeExecutor
 
 internal static class RegionShapeProcessing
 {
+    public static NodeExecutorResult Result(VisionRegion region, int width, int height, CancellationToken token)
+    {
+        var result = RegionNodeHelpers.Result(region, token);
+        return result with { Summary = new Dictionary<string, object?>(result.Summary) { ["algorithmBackend"] = "jlvision" } };
+    }
+
     public static NodeExecutorResult Result(JlRegion native, int width, int height, CancellationToken token)
     {
         var result = RegionNodeHelpers.Result(JLVisionRegions.FromNative(native, width, height, token), token);
@@ -307,10 +411,24 @@ internal static class RegionShapeProcessing
         var inputPixelArea = JLVisionRegions.PixelArea(source);
         using var native = JLVisionRegions.ToNative(source);
         using var input = unionFirst ? native.Union1() : native.CopyObj(1, -1);
+        using var inputFilled = operation == "hull" ? input.FillUp() : null;
+        var inputFilledArea = inputFilled is null ? 0d : inputFilled.AreaCenter(out double _, out double _);
         using var processed = operation switch { "hull" => input.ShapeTrans("convex"), "boundary" => input.Boundary(mode!), _ => input.Skeleton() };
         using var bounds = new JlRegion(0d, 0d, (double)source.Height - 1, (double)source.Width - 1);
         using var clipped = processed.Intersection(bounds);
-        var result = Result(clipped, source.Width, source.Height, token);
+        var shapeRegion = JLVisionRegions.FromNative(clipped, source.Width, source.Height, token)
+            .WithMetadata(source.CoordinateSystem, source.SchemaVersion, source.SourceRegionId);
+        var beforeMetrics = RegionShapeMetrics.Compute(shapeRegion, operation, token);
+        var pruneLength = operation == "skeleton" ? node.GetInt("pruneLength", 0) : 0;
+        if (pruneLength is < 0 or > 255) throw new InvalidOperationException("region.skeleton pruneLength must be within 0..255 pixels.");
+        var prunedPixels = 0L;
+        if (operation == "skeleton" && pruneLength > 0)
+        {
+            var pruned = RegionSkeletonPruner.Apply(shapeRegion, pruneLength, token);
+            prunedPixels = Math.Max(0, (long)beforeMetrics.Length - (long)RegionShapeMetrics.Compute(pruned, operation, token).Length);
+            shapeRegion = pruned;
+        }
+        var result = Result(shapeRegion, source.Width, source.Height, token);
         return RegionNodeHelpers.Complete(result, token, () =>
         {
             var region = result.Outputs["region"].Require<VisionRegion>("region");
@@ -320,20 +438,50 @@ internal static class RegionShapeProcessing
             var area = result.Outputs.TryGetValue("area", out var areaValue) ? areaValue.Value : null;
             var count = result.Outputs.TryGetValue("count", out var countValue) ? countValue.Value : null;
             var found = result.Outputs.TryGetValue("found", out var foundValue) && foundValue.Value is true;
-            var diag = CoordinateValidation.Diagnostics(nodeType,
+            var mappings = RegionNodeHelpers.SourceMappings(region, source, null, operation, token);
+            var bridgedPairs = RegionNodeHelpers.BridgedPairs(mappings);
+            var warningCount = bridgedPairs.Count > 0 ? 1 : 0;
+            var addedArea = operation == "hull" ? Math.Max(0d, outputPixelArea - inputPixelArea) : 0d;
+            var holeFilledArea = operation == "hull" ? Math.Max(0d, inputFilledArea - inputPixelArea) : 0d;
+            var concavityFilledArea = operation == "hull" ? Math.Max(0d, addedArea - holeFilledArea) : 0d;
+            var geometricLength = operation == "boundary" ? RegionShapeMetrics.Compute(region, "hull", token).Length : 0d;
+            var touchedSides = operation == "boundary" && mode == "outer" ? RegionShapeMetrics.CanvasTouch(source) : Array.Empty<string>();
+            var missingOutsidePixels = operation == "boundary" && mode == "outer" ? RegionShapeMetrics.MissingOutsidePixels(source, touchedSides) : 0;
+            var boundaryWarnings = new List<object>();
+            if (touchedSides.Length > 0) boundaryWarnings.Add(new { code = "outer-boundary-clipped", sides = touchedSides, missingOutsidePixels });
+            if (operation == "boundary" && mode == "outer" && inputPixelArea >= (double)source.Width * source.Height)
+                boundaryWarnings.Add(new { code = "full-canvas-boundary-incomplete", message = "No background pixels exist outside a full-canvas region." });
+            warningCount += boundaryWarnings.Count;
+            var diag = CoordinateValidation.Diagnostics(nodeType, new (string Key, object? Value)[]
+            {
                 ("operation", operation), ("boundaryMode", mode), ("unionFirst", unionFirst),
                 ("width", source.Width), ("height", source.Height),
                 ("inputObjectCount", inputObjectCount), ("inputPixelArea", inputPixelArea),
                 ("outputPixelArea", outputPixelArea), ("areaRatio", areaRatio),
                 ("area", area), ("count", count), ("found", found),
                 ("length", metrics.Length), ("endpoints", metrics.Endpoints), ("junctions", metrics.Junctions),
-                ("vertexCount", metrics.VertexCount), ("emptyInput", inputPixelArea <= 0));
+                ("vertexCount", metrics.VertexCount), ("emptyInput", inputPixelArea <= 0),
+                ("pruneLength", pruneLength), ("prunedPixels", prunedPixels),
+                ("skeletonPixelsBeforePrune", beforeMetrics.Length), ("skeletonPixelsAfterPrune", metrics.Length),
+                ("endpointsBeforePrune", beforeMetrics.Endpoints), ("endpointsAfterPrune", metrics.Endpoints),
+                ("junctionsBeforePrune", beforeMetrics.Junctions), ("junctionsAfterPrune", metrics.Junctions),
+                ("bridgedObjectPairs", bridgedPairs), ("warningCount", warningCount),
+                ("addedArea", addedArea), ("holeFilledArea", holeFilledArea), ("concavityFilledArea", concavityFilledArea),
+                ("geometricLength", geometricLength), ("touchedCanvasSides", touchedSides),
+                ("missingOutsidePixels", missingOutsidePixels), ("boundaryWarnings", boundaryWarnings)
+            });
             var outputs = new Dictionary<string, VisionValue>(result.Outputs)
             {
                 ["length"] = VisionValue.Double(metrics.Length),
                 ["endpoints"] = VisionValue.Integer(metrics.Endpoints),
                 ["junctions"] = VisionValue.Integer(metrics.Junctions),
                 ["vertexCount"] = VisionValue.Integer(metrics.VertexCount),
+                ["sourceMappings"] = VisionValue.String(mappings),
+                ["addedArea"] = VisionValue.Double(addedArea),
+                ["holeFilledArea"] = VisionValue.Double(holeFilledArea),
+                ["concavityFilledArea"] = VisionValue.Double(concavityFilledArea),
+                ["geometricLength"] = VisionValue.Double(geometricLength),
+                ["warningCount"] = VisionValue.Integer(warningCount),
                 ["diagnostics"] = VisionValue.String(diag)
             };
             var summary = new Dictionary<string, object?>(result.Summary)
@@ -343,15 +491,83 @@ internal static class RegionShapeProcessing
                 ["outputPixelArea"] = outputPixelArea, ["areaRatio"] = areaRatio,
                 ["length"] = metrics.Length, ["endpoints"] = metrics.Endpoints,
                 ["junctions"] = metrics.Junctions, ["vertexCount"] = metrics.VertexCount,
-                ["emptyInput"] = inputPixelArea <= 0, ["diagnostics"] = diag
+                ["emptyInput"] = inputPixelArea <= 0, ["pruneLength"] = pruneLength, ["prunedPixels"] = prunedPixels,
+                ["skeletonPixelsBeforePrune"] = beforeMetrics.Length, ["skeletonPixelsAfterPrune"] = metrics.Length,
+                ["endpointsBeforePrune"] = beforeMetrics.Endpoints, ["endpointsAfterPrune"] = metrics.Endpoints,
+                ["junctionsBeforePrune"] = beforeMetrics.Junctions, ["junctionsAfterPrune"] = metrics.Junctions,
+                ["bridgedObjectPairs"] = bridgedPairs, ["sourceMappings"] = mappings,
+                ["addedArea"] = addedArea, ["holeFilledArea"] = holeFilledArea, ["concavityFilledArea"] = concavityFilledArea,
+                ["geometricLength"] = geometricLength, ["touchedCanvasSides"] = touchedSides,
+                ["missingOutsidePixels"] = missingOutsidePixels, ["boundaryWarnings"] = boundaryWarnings,
+                ["warningCount"] = warningCount, ["diagnostics"] = diag
             };
             return result with { Outputs = outputs, Summary = summary };
         });
     }
 }
 
+internal static class RegionSkeletonPruner
+{
+    public static VisionRegion Apply(VisionRegion source, int maxLength, CancellationToken token)
+    {
+        using var mask = JLVisionRegions.Mask(source);
+        var height = mask.Height;
+        var width = mask.Width;
+        for (var iteration = 0; iteration < maxLength; iteration++)
+        {
+            token.ThrowIfCancellationRequested();
+            var endpoints = new List<Point>();
+            for (var y = 0; y < height; y++)
+            {
+                if ((y & 31) == 0) token.ThrowIfCancellationRequested();
+                for (var x = 0; x < width; x++)
+                {
+                    if (mask.At<byte>(y, x) == 0) continue;
+                    var neighbours = 0;
+                    for (var dy = -1; dy <= 1; dy++)
+                    for (var dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        var nx = x + dx; var ny = y + dy;
+                        if ((uint)nx < (uint)width && (uint)ny < (uint)height && mask.At<byte>(ny, nx) != 0) neighbours++;
+                    }
+                    if (neighbours == 1) endpoints.Add(new Point(x, y));
+                }
+            }
+            if (endpoints.Count == 0) break;
+            foreach (var point in endpoints) mask.Set<byte>(point.Y, point.X, 0);
+        }
+        var (components, _) = RegionFromMaskNode.BuildComponents(mask, token);
+        return new VisionRegion(source.Width, source.Height, components, source.CoordinateSystem, source.SchemaVersion, source.SourceRegionId);
+    }
+}
+
 internal static class RegionShapeMetrics
 {
+    internal static string[] CanvasTouch(VisionRegion region)
+    {
+        var sides = new List<string>();
+        if (region.Components.Any(c => c.Runs.Any(r => r.Row == 0))) sides.Add("top");
+        if (region.Components.Any(c => c.Runs.Any(r => r.Row == region.Height - 1))) sides.Add("bottom");
+        if (region.Components.Any(c => c.Runs.Any(r => r.StartColumn == 0))) sides.Add("left");
+        if (region.Components.Any(c => c.Runs.Any(r => r.EndColumn == region.Width - 1))) sides.Add("right");
+        return sides.ToArray();
+    }
+
+    internal static int MissingOutsidePixels(VisionRegion region, string[] sides)
+    {
+        var count = 0;
+        if (sides.Contains("top")) count += region.Width;
+        if (sides.Contains("bottom")) count += region.Width;
+        if (sides.Contains("left")) count += region.Height;
+        if (sides.Contains("right")) count += region.Height;
+        if (sides.Contains("top") && sides.Contains("left")) count--;
+        if (sides.Contains("top") && sides.Contains("right")) count--;
+        if (sides.Contains("bottom") && sides.Contains("left")) count--;
+        if (sides.Contains("bottom") && sides.Contains("right")) count--;
+        return count;
+    }
+
     public readonly record struct Metrics(double Length, long Endpoints, long Junctions, long VertexCount);
 
     public static Metrics Compute(VisionRegion region, string operation, CancellationToken token)

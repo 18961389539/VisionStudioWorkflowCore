@@ -20,6 +20,7 @@ public static class FeatureGapCatalog
             [Exec, new("image", VisionDataType.Image)],
             [new("region", VisionDataType.Region), new("labels", VisionDataType.Image),
              new("boundary", VisionDataType.Image), new("count", VisionDataType.Integer),
+             new("labelCount", VisionDataType.Integer), new("fragmentedLabelCount", VisionDataType.Integer),
              new("meanSize", VisionDataType.Double), Diagnostics, Next],
             [
                 new("regionSize", "Region Size", "number", 10, 2, 200, 1, Unit: "px", Group: "SLIC",
@@ -48,7 +49,13 @@ public static class FeatureGapCatalog
                 new("minScore", "Minimum Score", "number", .7, 0, 1, .01, Group: "Limits",
                     Description: "Score floor for found. The score is 1 minus the RMS difference of the normalised radius signatures, so 0.9 means the shapes agree within about 10% of the mean radius."),
                 new("allowRotation", "Allow Rotation", "boolean", true, Group: "Matching",
-                    Description: "Search all cyclic shifts of the signature. Turn it off when the part orientation is already known, which makes the match stricter and faster."),
+                    Description: "Search cyclic signature shifts inside the configured angle window. Turn it off when the part orientation is already known, which makes the match stricter and faster."),
+                new("angleStartDeg", "Search Angle Start", "number", -180, -180, 180, 1, Group: "Matching",
+                    Description: "Inclusive start of the rotation search window in degrees. The actual discrete search range is reported in diagnostics."),
+                new("angleEndDeg", "Search Angle End", "number", 180, -180, 180, 1, Group: "Matching",
+                    Description: "Inclusive end of the rotation search window in degrees. Keep the window narrow for rotationally symmetric parts."),
+                new("angleStepDeg", "Search Angle Step", "number", 1.40625, 0.001, 360, 0.001, Group: "Matching",
+                    Description: "Maximum angular step in degrees. The implementation snaps it to the signature sample grid and reports the actual step."),
             ],
             "Shape matching on contours: both the scene and the template are resampled by arc length, reduced to a centroid-radius signature normalised by mean radius, then correlated over cyclic shifts. That makes the score invariant to translation, rotation and scale — which is exactly what match.shape (gray-edge template) cannot do on transparent or printed parts with almost no gray contrast. Outputs score, rotationDeg and scale relative to the template. Reflection is not distinguished from rotation. Units: pixels for center, degrees for rotation.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: [])

@@ -63,6 +63,17 @@ public sealed class RobotManager : IAsyncDisposable
     public bool IsCommandInFlight(string id) => CommandGate(id).CurrentCount == 0;
 
     public RobotDescriptor Get(string id) => Require(id).Snapshot();
+
+    public bool TryGet(string id, out RobotDescriptor snapshot)
+    {
+        if (!_robots.TryGetValue(id, out var robot))
+        {
+            snapshot = null!;
+            return false;
+        }
+        snapshot = robot.Snapshot();
+        return true;
+    }
     public Task ConnectAsync(string id, CancellationToken ct = default) => Require(id).ConnectAsync(ct);
     public Task DisconnectAsync(string id, CancellationToken ct = default) => Require(id).DisconnectAsync(ct);
     public async Task StopAsync(string id, CancellationToken ct = default)
@@ -295,6 +306,8 @@ public sealed class RobotManager : IAsyncDisposable
         var traceId = Guid.NewGuid().ToString("N");
         RobotCommandReceipt? lastReceipt = null;
         Exception? lastError = null;
+        var executionEntered = false;
+        var busyObserved = false;
 
         await EnsureConnectedAsync(adapter, policy.AutoConnect, ct);
         await EmitAsync(traceId, id, 0, 0, "Connected", "Robot connection ready.", adapter.Snapshot().Handshake, target, null, ct);
@@ -312,8 +325,12 @@ public sealed class RobotManager : IAsyncDisposable
                     var accepted = adapter.Snapshot();
                     await EmitAsync(traceId, id, lastReceipt.CommandId, attempt, "TargetReady", "Target payload accepted and TargetReady asserted.", accepted.Handshake, target, null, ct);
 
+                    // Entering Move is the commit point: even a failed/unknown dispatch may have
+                    // started physical motion, so this attempt must never be resent automatically.
+                    executionEntered = true;
                     lastReceipt = await StartMotionCall(id, () => adapter.MoveToAsync(target, ct));
                     var executing = adapter.Snapshot();
+                    busyObserved |= executing.Busy || executing.Handshake.Busy || executing.Handshake.Execute;
                     await EmitAsync(traceId, id, lastReceipt.CommandId, attempt, "Execute", "Execute requested.", executing.Handshake, target, null, ct);
 
                     RobotDescriptor final;
@@ -322,15 +339,19 @@ public sealed class RobotManager : IAsyncDisposable
                     else
                         final = adapter.Snapshot();
 
-                    if (final.Handshake.Error)
-                        throw new InvalidOperationException(final.Error ?? final.Handshake.ErrorCode ?? "Robot handshake reported Error.");
-
                     var acknowledged = false;
+                    if (final.Handshake.Error || final.ConnectionState == RobotConnectionState.Faulted)
+                        throw new InvalidOperationException(final.Error ?? final.Handshake.ErrorCode ?? "Robot handshake reported Error; Auto Ack is forbidden until the fault is cleared.");
                     if (policy.AutoAck && final.Handshake.Complete)
                     {
+                        if (final.Busy || final.Handshake.Busy || final.LastCommandId != lastReceipt.CommandId
+                            || final.ConnectionState != RobotConnectionState.Connected)
+                            throw new InvalidOperationException($"Robot '{id}' completion was not safe to acknowledge (Busy={final.Busy}, command={final.LastCommandId}, connection={final.ConnectionState}); downstream success is forbidden.");
                         await adapter.AcknowledgeAsync(lastReceipt.CommandId, ct);
                         final = adapter.Snapshot();
                         acknowledged = true;
+                        if (final.Handshake.Error || final.ConnectionState == RobotConnectionState.Faulted)
+                            throw new InvalidOperationException($"Robot '{id}' reported Error after Ack; downstream success is forbidden: {final.Error ?? final.Handshake.ErrorCode ?? "unknown"}");
                         await EmitAsync(traceId, id, lastReceipt.CommandId, attempt, "Ack", "Completion acknowledged; handshake cycle closed.", final.Handshake, target, null, ct);
                     }
 
@@ -345,6 +366,16 @@ public sealed class RobotManager : IAsyncDisposable
 
                     if (attempt > policy.MaxRetries)
                         break;
+
+                    var failed = adapter.Snapshot();
+                    if (executionEntered || busyObserved || failed.Handshake.Error || failed.Handshake.Busy
+                        || failed.Handshake.Execute || failed.ConnectionState == RobotConnectionState.Faulted)
+                    {
+                        lastError = new InvalidOperationException(
+                            $"Robot '{id}' attempt {attempt} entered Execute/Busy or reported a terminal error; the target was NOT resent automatically. " +
+                            $"FinalState={failed.HandshakeState}, Busy={failed.Busy}, InPosition={failed.InPosition}, Error={failed.Error ?? failed.Handshake.ErrorCode ?? "none"}.", lastError);
+                        break;
+                    }
 
                     // 停止未确认时禁止重发目标：设备可能仍在执行上一个目标，再次下发会叠加真实动作。
                     if (!await TryStopAsync(traceId, id, adapter, attempt, "RetryStop"))
@@ -379,11 +410,14 @@ public sealed class RobotManager : IAsyncDisposable
         }
 
         // 最终失败：统一执行停止清理（独立宽限期，不依赖调用方 token），诊断中明确停止是否确认。
+        var finalState = adapter.Snapshot();
         var finalStopConfirmed = await TryStopAsync(traceId, id, adapter, policy.MaxRetries + 1, "FinalStop");
+        finalState = adapter.Snapshot();
         var message = finalStopConfirmed
             ? $"Robot '{id}' handshake failed after {policy.MaxRetries + 1} attempt(s); stop was issued and confirmed. Trace={traceId}. {lastError?.Message}"
             : $"Robot '{id}' handshake failed after {policy.MaxRetries + 1} attempt(s); STOP COULD NOT BE CONFIRMED - robot state is indeterminate, verify actual device state before resending. Trace={traceId}. {lastError?.Message}";
-        throw new InvalidOperationException(message, lastError);
+        throw new InvalidOperationException(
+            message + $" FinalState={finalState.HandshakeState}, Busy={finalState.Busy}, InPosition={finalState.InPosition}, Connection={finalState.ConnectionState}, Error={finalState.Error ?? finalState.Handshake.ErrorCode ?? "none"}.", lastError);
     }
 
     /// <summary>

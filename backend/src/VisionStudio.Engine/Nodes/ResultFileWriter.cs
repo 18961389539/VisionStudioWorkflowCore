@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace VisionStudio.Engine.Nodes;
 
@@ -23,9 +24,15 @@ internal static class ResultFileWriter
             IVisionFrameSet frames => new { frames.GroupId, frames.TimestampBasis, frames.TriggerSkewUs, frames.WithinTolerance, cameras = frames.Frames.Keys.Order().ToArray() },
             _ => value.Value
         };
+        var jsonOptions = new JsonSerializerOptions
+        {
+            WriteIndented = node.GetBool("pretty", false),
+            NumberHandling = JsonNumberHandling.Strict
+        };
+        var csvValue = value.Value is string textValue ? NeutralizeFormula(textValue) : serializable;
         var text = format == "json"
-            ? JsonSerializer.Serialize(new { type = value.Type.ToString(), value = serializable }, new JsonSerializerOptions { WriteIndented = node.GetBool("pretty", false) })
-            : "type,value" + newline + Csv(value.Type.ToString()) + "," + Csv(JsonSerializer.Serialize(serializable));
+            ? JsonSerializer.Serialize(new { type = value.Type.ToString(), value = serializable }, jsonOptions)
+            : "type,value" + newline + Csv(value.Type.ToString()) + "," + Csv(JsonSerializer.Serialize(csvValue, jsonOptions));
         text = text.Replace("\r\n", "\n").Replace("\n", newline);
         if (node.GetBool("appendNewline", true)) text += newline;
         var payload = encoding.GetPreamble().Concat(encoding.GetBytes(text)).ToArray();
@@ -33,6 +40,8 @@ internal static class ResultFileWriter
         if (budget is < 64 or > 67108864 || payload.Length > budget)
             throw new InvalidOperationException("Export exceeds maxBytes or the budget is outside 64..67108864.");
         var directory = Path.GetDirectoryName(requestedPath)!;
+        if (Directory.Exists(requestedPath))
+            throw ConflictException("directory", requestedPath, "the destination path is occupied by a directory.");
         if (node.GetBool("createDirectories", true)) Directory.CreateDirectory(directory);
         else if (!Directory.Exists(directory)) throw new DirectoryNotFoundException("Export directory does not exist; enable Create Directories.");
         var level = NodeCompletionGuards.DiagnosticsLevel(node);
@@ -54,6 +63,13 @@ internal static class ResultFileWriter
                         Path.GetFileNameWithoutExtension(requestedPath) + $"_{suffix}" + Path.GetExtension(requestedPath));
                     try { File.Move(temp, candidate, policy == "overwrite"); path = candidate; break; }
                     catch (IOException) when (policy == "suffix" && File.Exists(candidate) && suffix < 10000) { }
+                    catch (IOException ex)
+                    {
+                        var kind = Directory.Exists(candidate) ? "directory"
+                            : File.Exists(candidate) ? "file-exists" : "publish-failed";
+                        throw ConflictException(kind, candidate,
+                            $"atomic publish failed with conflictPolicy={policy}; the previous target was preserved.", ex);
+                    }
                 }
             }
             catch (IOException) when (attempt < attempts && (policy != "fail" || !File.Exists(requestedPath)))
@@ -87,4 +103,16 @@ internal static class ResultFileWriter
         return (int)value;
     }
     private static string Csv(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
+
+    private static string NeutralizeFormula(string value)
+        => value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r'
+            ? "'" + value : value;
+
+    private static IOException ConflictException(string kind, string path, string message, Exception? inner = null)
+    {
+        var error = new IOException($"output.exportResult conflict={kind} path='{path}': {message}", inner);
+        error.Data["conflictKind"] = kind;
+        error.Data["path"] = path;
+        return error;
+    }
 }

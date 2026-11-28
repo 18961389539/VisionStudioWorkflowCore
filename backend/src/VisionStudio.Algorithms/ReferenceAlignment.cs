@@ -422,6 +422,56 @@ public static class ReferenceAlignment
         return (gain, offset);
     }
 
+    /// <summary>Robust illumination fit: iteratively trim residual outliers so defects do not become the lighting model.</summary>
+    public static (double Gain, double Offset) FitGainOffsetRobust(float[] image, float[] reference, byte[]? domainMask = null, CancellationToken cancellationToken = default)
+    {
+        if (image.Length != reference.Length) throw new InvalidOperationException("Compensation buffers must have identical size.");
+        if (domainMask is not null && domainMask.Length != image.Length) throw new InvalidOperationException("Compensation mask must match image dimensions.");
+        var valid = new List<int>();
+        for (var i = 0; i < image.Length; i++)
+        {
+            if ((i & 0x3FFF) == 0) cancellationToken.ThrowIfCancellationRequested();
+            if (domainMask is null || domainMask[i] != 0) valid.Add(i);
+        }
+        if (valid.Count == 0) return (1, 0);
+        const int sampleLimit = 65536;
+        var stride = Math.Max(1, (valid.Count + sampleLimit - 1) / sampleLimit);
+        var samples = valid.Where((_, index) => index % stride == 0).ToArray();
+        var active = samples;
+        var result = Fit(active);
+        for (var iteration = 0; iteration < 4; iteration++)
+        {
+            var residuals = active.Select(i => Math.Abs(image[i] - (result.Gain * reference[i] + result.Offset))).OrderBy(value => value).ToArray();
+            var median = residuals[residuals.Length / 2];
+            var deviations = residuals.Select(value => Math.Abs(value - median)).OrderBy(value => value).ToArray();
+            var mad = deviations[deviations.Length / 2];
+            var cutoff = median + Math.Max(1e-6, 3 * 1.4826 * mad);
+            var inliers = active.Where(i => Math.Abs(image[i] - (result.Gain * reference[i] + result.Offset)) <= cutoff).ToArray();
+            if (inliers.Length < Math.Max(2, active.Length / 2) || inliers.Length == active.Length) break;
+            active = inliers;
+            result = Fit(active);
+        }
+        return result;
+
+        (double Gain, double Offset) Fit(int[] indices)
+        {
+            double sx = 0, sy = 0, sxx = 0, sxy = 0;
+            foreach (var i in indices)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                double x = reference[i], y = image[i];
+                sx += x; sy += y; sxx += x * x; sxy += x * y;
+            }
+            var n = indices.Length;
+            var denominator = n * sxx - sx * sx;
+            if (Math.Abs(denominator) < 1e-9) return (1, sy / n - sx / n);
+            var gain = (n * sxy - sx * sy) / denominator;
+            var offset = (sy - gain * sx) / n;
+            if (!double.IsFinite(gain) || gain <= 0.05 || gain > 20) return (1, offset);
+            return (gain, offset);
+        }
+    }
+
     private static float[] ToFloat(byte[] values)
     {
         var result = new float[values.Length];

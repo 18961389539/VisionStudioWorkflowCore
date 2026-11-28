@@ -1,4 +1,6 @@
 using VisionStudio.Engine.Algorithms;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -77,6 +79,7 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
         var rawCount = 0;
         var attempts = 0;
         var tileAttempts = 0;
+        var recoveryTiles = new List<OpenCvSharp.Rect>();
         try
         {
             foreach (var variant in variants)

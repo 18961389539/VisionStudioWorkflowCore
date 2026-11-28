@@ -19,7 +19,8 @@ namespace VisionStudio.Engine.Nodes;
 /// 先复位再计数，是为了让"复位后这一件"算作第 1 件，而不是第 0 件——这一步搞反会让
 /// 连续 NG 门限整体偏移一件，是最容易差一件的地方。
 /// </summary>
-public sealed class ValueCounterNode(IRunCounterStore? store = null, IDurableRunCounterStore? durableStore = null)
+public sealed class ValueCounterNode(IRunCounterStore? store = null, IDurableRunCounterStore? durableStore = null,
+    IRunCounterSnapshotFlusher? snapshotFlusher = null)
     : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
     public string Type => "value.counter";
@@ -68,16 +69,25 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null, IDurableRun
             throw new InvalidOperationException("value.counter step must be finite within +/-1000000.");
         var resetOnPass = node.GetBool("resetOnPass", false);
         var resetOnFail = node.GetBool("resetOnFail", false);
+        // Missing resetScope identifies a legacy P0 definition: reset all statistics before counting.
+        // New definitions can retain the P1 streak-only contract by explicitly setting resetScope=streak.
+        var resetScope = node.GetString("resetScope", "all").Trim().ToLowerInvariant();
+        if (resetScope is not ("streak" or "all"))
+            throw new InvalidOperationException("value.counter resetScope must be streak or all.");
+        var flushOnRunEnd = node.GetBool("flushOnRunEnd", false);
 
         var hasPass = context.TryGetValue("pass", out var passInput);
         var pass = hasPass && passInput.Require<bool>("pass");
         var manualReset = context.TryGetValue("reset", out var resetInput) && resetInput.Require<bool>("reset");
 
         var reset = manualReset || (pass && resetOnPass) || (!pass && hasPass && resetOnFail);
+        var resetReason = manualReset ? "manual" : pass && resetOnPass ? "pass" : !pass && hasPass && resetOnFail ? "fail" : "none";
         var increment = (long)Math.Round(step, MidpointRounding.AwayFromZero);
         bool? passResult = hasPass ? pass : null;
         RunCounterReading reading;
+        RunCounterReading? before = null;
         var reused = false;
+        long lastSnapshotCount = 0;
         if (durability == "durable")
         {
             var eventId = context.Require<string>("eventId").Trim();
@@ -87,7 +97,7 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null, IDurableRun
                 throw new InvalidOperationException("value.counter durable mode requires a stable workflow ID.");
             var target = durableStore ?? throw new InvalidOperationException("value.counter durable mode requires an IDurableRunCounterStore.");
             (reading, reused) = await target.ApplyAsync(
-                new DurableCounterEvent(context.WorkflowId, counterId, eventId, increment, passResult, reset),
+                new DurableCounterEvent(context.WorkflowId, counterId, eventId, increment, passResult, reset, resetOnPass, resetOnFail, step, resetScope),
                 context.IsDebugRun, cancellationToken).ConfigureAwait(false);
         }
         else
@@ -98,9 +108,21 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null, IDurableRun
             var state = Store.GetOrAdd(scopeKey, counterId);
             lock (state)
             {
-                reading = new RunCounterReading(state.Count, state.Total, state.Pass, state.Fail).Apply(increment, passResult, reset);
+                before = new RunCounterReading(state.Count, state.Total, state.Pass, state.Fail);
+                lastSnapshotCount = state.LastSnapshotCount;
+                reading = before.Value.Apply(increment, passResult, reset, resetScope == "all");
                 (state.Count, state.Total, state.Pass, state.Fail) = reading;
             }
+        }
+
+        if (durability == "snapshot" && flushOnRunEnd && !context.IsDebugRun)
+        {
+            if (snapshotFlusher is null)
+                throw new InvalidOperationException("value.counter flushOnRunEnd requires an IRunCounterSnapshotFlusher.");
+            var scopeKey = scopeMode == "run" ? context.RunId ?? context.WorkflowScope ?? "local" : context.WorkflowScope ?? "local";
+            lastSnapshotCount = await snapshotFlusher.FlushAsync(scopeKey, counterId, cancellationToken).ConfigureAwait(false);
+            var state = Store.GetOrAdd(scopeKey, counterId);
+            lock (state) state.LastSnapshotCount = lastSnapshotCount;
         }
 
         var (count, total, passCount, failCount) = reading;
@@ -108,7 +130,9 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null, IDurableRun
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("counterId", counterId), ("scope", scopeMode), ("count", count), ("total", total),
             ("passCount", passCount), ("failCount", failCount), ("rate", rate),
-            ("reset", manualReset), ("step", step), ("durability", durability), ("reused", reused),
+            ("reset", manualReset), ("resetReason", resetReason), ("resetScope", resetScope),
+            ("beforeReset", before), ("step", step), ("durability", durability), ("reused", reused),
+            ("flushOnRunEnd", flushOnRunEnd), ("lastSnapshotCount", lastSnapshotCount),
             ("preview", durability == "durable" && context.IsDebugRun));
 
         return new NodeExecutorResult(
@@ -120,13 +144,16 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null, IDurableRun
                 ["failCount"] = VisionValue.Integer(failCount),
                 ["rate"] = VisionValue.Double(rate),
                 ["reused"] = VisionValue.Boolean(reused),
+                ["lastSnapshotCount"] = VisionValue.Integer(lastSnapshotCount),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["counterId"] = counterId, ["scope"] = scopeMode, ["count"] = count, ["total"] = total,
                 ["passCount"] = passCount, ["failCount"] = failCount, ["rate"] = rate,
-                ["reset"] = manualReset, ["step"] = step, ["durability"] = durability, ["reused"] = reused,
+                ["reset"] = manualReset, ["resetReason"] = resetReason, ["resetScope"] = resetScope, ["beforeReset"] = before,
+                ["step"] = step, ["durability"] = durability, ["reused"] = reused,
+                ["flushOnRunEnd"] = flushOnRunEnd, ["lastSnapshotCount"] = lastSnapshotCount,
                 ["preview"] = durability == "durable" && context.IsDebugRun, ["diagnostics"] = diagnostics
             });
     }

@@ -52,6 +52,9 @@ public sealed class ColorClassifyNode : IVisionNodeExecutor
             throw new InvalidOperationException("color.classify colorSpace must be lab or rgb.");
 
         var roi = ReadRoi(context, node);
+        var maxUnmatchedRatio = node.GetDouble("maxUnmatchedRatio", 0.5);
+        if (!double.IsFinite(maxUnmatchedRatio) || maxUnmatchedRatio is < 0 or > 1)
+            throw new InvalidOperationException("color.classify maxUnmatchedRatio must be finite and within 0..1.");
         using var colors = ToColorSpace(source.Mat, colorSpace, cancellationToken);
         using var mask = roi?.BuildMask(source.Mat.Size(), cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
@@ -63,6 +66,9 @@ public sealed class ColorClassifyNode : IVisionNodeExecutor
                 ? RunCluster(node, colors, mask, colorSpace, cancellationToken)
                 : RunReference(node, colors, mask, colorSpace, cancellationToken);
             labelMap = result.LabelMap;
+            var unmatchedRatio = result.RoiPixels == 0 ? 0 : result.UnmatchedPixels / (double)result.RoiPixels;
+            var unmatchedThresholdExceeded = mode == "reference" && unmatchedRatio > maxUnmatchedRatio + 1e-9;
+            var found = result.Stats.Any(stat => stat.PixelCount > 0) && !unmatchedThresholdExceeded;
             var image = VisionImage.Own(labelMap);
             labelMap = null;
             timer.Stop();
@@ -75,6 +81,10 @@ public sealed class ColorClassifyNode : IVisionNodeExecutor
                     ("classCount", result.Stats.Count(stat => stat.PixelCount > 0)),
                     ("roiPixels", result.RoiPixels),
                     ("unmatchedPixels", result.UnmatchedPixels),
+                    ("unmatchedRatio", unmatchedRatio),
+                    ("maxUnmatchedRatio", maxUnmatchedRatio),
+                    ("unmatchedThresholdExceeded", unmatchedThresholdExceeded),
+                    ("failureReason", unmatchedThresholdExceeded ? "unmatched-reference-colors" : null),
                     ("clusterCount", mode == "cluster" ? result.Stats.Count : null),
                     ("sampleCount", result.SampleCount),
                     ("roiApplied", roi is not null),
@@ -82,11 +92,13 @@ public sealed class ColorClassifyNode : IVisionNodeExecutor
                 var outputs = new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(image),
-                    ["found"] = VisionValue.Boolean(result.Stats.Any(stat => stat.PixelCount > 0)),
+                    ["found"] = VisionValue.Boolean(found),
                     ["count"] = VisionValue.Integer(result.Stats.Count(stat => stat.PixelCount > 0)),
                     ["classCounts"] = VisionValue.String(SerializeStats(result.Stats, colorSpace)),
                     ["dominantClass"] = VisionValue.Integer(result.DominantClass),
                     ["unmatchedPixels"] = VisionValue.Integer(result.UnmatchedPixels),
+                    ["unmatchedRatio"] = VisionValue.Double(unmatchedRatio),
+                    ["unmatchedThresholdExceeded"] = VisionValue.Boolean(unmatchedThresholdExceeded),
                     ["diagnostics"] = VisionValue.String(diagnostics)
                 };
                 return new NodeExecutorResult(outputs, new Dictionary<string, object?>
@@ -96,6 +108,9 @@ public sealed class ColorClassifyNode : IVisionNodeExecutor
                     ["classCount"] = result.Stats.Count(stat => stat.PixelCount > 0),
                     ["roiPixels"] = result.RoiPixels,
                     ["unmatchedPixels"] = result.UnmatchedPixels,
+                    ["unmatchedRatio"] = unmatchedRatio,
+                    ["maxUnmatchedRatio"] = maxUnmatchedRatio,
+                    ["unmatchedThresholdExceeded"] = unmatchedThresholdExceeded,
                     ["clusterCount"] = mode == "cluster" ? result.Stats.Count : null,
                     ["sampleCount"] = result.SampleCount,
                     ["roiApplied"] = roi is not null,

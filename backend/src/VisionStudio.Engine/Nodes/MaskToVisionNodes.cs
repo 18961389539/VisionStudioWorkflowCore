@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Text.Json;
 using System.Runtime.InteropServices;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -6,6 +7,13 @@ using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Engine.Nodes;
+
+/// <summary>Structured resource-budget failure for mask conversion.</summary>
+internal sealed class RegionMaskResourceException : InvalidOperationException
+{
+    public object Diagnostics { get; }
+    public RegionMaskResourceException(object diagnostics, string message) : base(message) => Diagnostics = diagnostics;
+}
 
 /// <summary>
 /// 掩码 → 区域（region.fromMask，2026-10-26 · 缺口分析 P1-17）。
@@ -29,9 +37,18 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
 
         var source = context.RequireImage("image");
         var mask = MaskThreshold.Read(node);
-        using var binary = mask.Apply(source.Mat);
+        using var binary = mask.Apply(source.Mat, strictByte: true);
 
-        var (components, pixelCount) = BuildComponents(binary, cancellationToken);
+        List<VisionRegionComponent> components;
+        long pixelCount;
+        try
+        {
+            (components, pixelCount) = BuildComponents(binary, cancellationToken, threshold: mask.Value);
+        }
+        catch (RegionMaskResourceException ex)
+        {
+            throw new InvalidOperationException("region.fromMask resource budget failure: " + ex.Message + " " + JsonSerializer.Serialize(ex.Diagnostics), ex);
+        }
         var region = new VisionRegion(binary.Width, binary.Height, components);
         var image = VisionImage.Own(binary.Clone());
         return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
@@ -71,12 +88,23 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
     /// 按 8 邻域连通域生成 Region 行程：每个连通域一个 component。
     /// 单遍扫描 + 按标签累积行程，避免把"多块缺陷"合并成一整块。
     /// </summary>
-    internal static (List<VisionRegionComponent> Components, long PixelCount) BuildComponents(Mat binary, CancellationToken cancellationToken)
+    internal static (List<VisionRegionComponent> Components, long PixelCount) BuildComponents(Mat binary, CancellationToken cancellationToken,
+        PixelConnectivity connectivity = PixelConnectivity.Connectivity8, double threshold = 1)
     {
         using var labels = new Mat();
-        var labelCount = Cv2.ConnectedComponents(binary, labels, PixelConnectivity.Connectivity8, MatType.CV_32S);
+        var labelCount = Cv2.ConnectedComponents(binary, labels, connectivity, MatType.CV_32S);
         if (labelCount - 1 > VisionRegion.MaxComponents)
-            throw new InvalidOperationException($"region.fromMask found {labelCount - 1} components; the limit is {VisionRegion.MaxComponents}. Reduce mask noise before conversion.");
+        {
+            var sample = FirstForeground(labels);
+            var diagnostics = new
+            {
+                node = "region.fromMask", reason = "component-budget", componentCount = labelCount - 1,
+                componentLimit = VisionRegion.MaxComponents, runCount = 0, runLimit = VisionRegion.MaxRuns,
+                threshold, sample
+            };
+            throw new RegionMaskResourceException(diagnostics,
+                $"region.fromMask found {labelCount - 1} components; the limit is {VisionRegion.MaxComponents}. Reduce mask noise before conversion. component budget exceeded; Sample={sample}.");
+        }
         var runsByLabel = new Dictionary<int, List<VisionRegionRun>>(labelCount);
         var width = labels.Width;
         var height = labels.Height;
@@ -86,7 +114,16 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
         void AddRun(int label, int row, int start, int end)
         {
             if (++runCount > VisionRegion.MaxRuns)
-                throw new InvalidOperationException($"region.fromMask exceeded the {VisionRegion.MaxRuns} run limit. Simplify the mask before conversion.");
+            {
+                var diagnostics = new
+                {
+                    node = "region.fromMask", reason = "run-budget", componentCount = labelCount - 1,
+                    componentLimit = VisionRegion.MaxComponents, runCount, runLimit = VisionRegion.MaxRuns,
+                    threshold, sample = new { x = start, y = row, label }
+                };
+                throw new RegionMaskResourceException(diagnostics,
+                    $"region.fromMask exceeded the {VisionRegion.MaxRuns} run limit. Simplify the mask before conversion. x={start},y={row},label={label}; componentCount={labelCount - 1}.");
+            }
             if (!runsByLabel.TryGetValue(label, out var runs))
                 runsByLabel[label] = runs = [];
             runs.Add(new VisionRegionRun(row, start, end));
@@ -136,6 +173,16 @@ public sealed class RegionFromMaskNode : IVisionNodeExecutor
             .ToList();
         return (components, pixelCount);
     }
+
+    private static object FirstForeground(Mat labels)
+    {
+        var height = labels.Height;
+        var width = labels.Width;
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+            if (labels.At<int>(y, x) > 0) return new { x, y, label = labels.At<int>(y, x) };
+        return new { x = -1, y = -1, label = 0 };
+    }
 }
 
 /// <summary>
@@ -151,6 +198,28 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
 {
     public string Type => "contour.fromMask";
 
+    private static void ValidateMask(Mat source, MaskThreshold mask, CancellationToken cancellationToken)
+    {
+        if (mask.Mode != "probability") return;
+        if (source.Empty() || (source.Type() != MatType.CV_32FC1 && source.Type() != MatType.CV_64FC1))
+            throw new InvalidOperationException($"contour.fromMask stage=mask-validation: probability mode requires non-empty single-channel float32/float64; actual depth={source.Depth()}, channels={source.Channels()}.");
+        using var invalid = new Mat();
+        Cv2.InRange(source, Scalar.All(0), Scalar.All(1), invalid);
+        if (JLVisionOperators.CountNonZero(invalid) == source.Total()) return;
+        var rows = source.Rows;
+        var cols = source.Cols;
+        for (var y = 0; y < rows; y++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            for (var x = 0; x < cols; x++)
+            {
+                var value = source.Type() == MatType.CV_32FC1 ? source.At<float>(y, x) : source.At<double>(y, x);
+                if (!double.IsFinite(value) || value is < 0 or > 1)
+                    throw new InvalidOperationException($"contour.fromMask stage=mask-validation: first invalid probability pixel at x={x}, y={y}, value={value}; expected finite and within 0..1.");
+            }
+        }
+    }
+
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -159,6 +228,7 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
 
         var source = context.RequireImage("image");
         var mask = MaskThreshold.Read(node);
+        ValidateMask(source.Mat, mask, cancellationToken);
         using var binary = mask.Apply(source.Mat);
 
         var retrieval = node.GetString("retrieval", "external").Trim().ToLowerInvariant() switch
@@ -191,8 +261,11 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
             if (area < minArea) continue;
             kept.Add((index, area));
         }
+        var totalPoints = contours.Sum(points => points.Length);
         if (kept.Count > maxContours)
-            throw new InvalidOperationException($"contour.fromMask found {kept.Count} contours above minArea={minArea}; raise maxContours or tighten minArea instead of silently truncating.");
+            throw new InvalidOperationException($"contour.fromMask stage=contour-count: contourCount={kept.Count}, maxContours={maxContours}; no partial contours were emitted. Raise maxContours or tighten minArea={minArea}.");
+        if (kept.Any(item => contours[item.Original].Length > maxPoints))
+            throw new InvalidOperationException($"contour.fromMask stage=point-count: contourCount={kept.Count}, totalPoints={totalPoints}, maxPoints={maxPoints}; no partial contours were emitted. Increase maxPoints or simplify the mask.");
 
         var outputIndexByOriginal = kept
             .Select((item, position) => (item.Original, position))
@@ -232,6 +305,7 @@ public sealed class ContourFromMaskNode : IVisionNodeExecutor
             ("retrieval", retrieval == RetrievalModes.External ? "external" : "all"),
             ("approximation", approximation == ContourApproximationModes.ApproxSimple ? "simple" : "none"),
             ("contourCount", results.Count),
+            ("totalPoints", totalPoints),("maxContours",maxContours),("maxPoints",maxPoints),("failurePolicy","atomic; no partial contours"),
             ("minArea", minArea));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
@@ -272,7 +346,7 @@ internal sealed record class MaskThreshold(string Mode, double Value, bool Inver
         return new(mode, threshold, node.GetBool("invert", false));
     }
 
-    public Mat Apply(Mat source)
+    public Mat Apply(Mat source, bool strictByte = false)
     {
         var binary = new Mat();
         try
@@ -280,7 +354,10 @@ internal sealed record class MaskThreshold(string Mode, double Value, bool Inver
             if (Mode == "probability")
             {
                 if (source.Empty() || (source.Type() != MatType.CV_32FC1 && source.Type() != MatType.CV_64FC1))
-                    throw new InvalidOperationException("Probability masks require a non-empty, single-channel float32 or float64 image.");
+                {
+                    var actual = source.Empty() ? "empty" : $"depth={source.Depth()},channels={source.Channels()}";
+                    throw new InvalidOperationException($"Probability masks require a non-empty, single-channel float32 or float64 image; actual {actual}.");
+                }
                 Cv2.InRange(source, Scalar.All(0), Scalar.All(1), binary);
                 if (JLVisionOperators.CountNonZero(binary) != source.Total())
                     throw new InvalidOperationException("Probability mask pixels must be finite and within 0..1.");
@@ -288,7 +365,12 @@ internal sealed record class MaskThreshold(string Mode, double Value, bool Inver
             }
             else
             {
-                using var gray = RecognitionImageHelpers.ToGray8(source);
+                if (strictByte && (source.Empty() || source.Type() != MatType.CV_8UC1))
+                {
+                    var actual = source.Empty() ? "empty" : $"depth={source.Depth()},channels={source.Channels()}";
+                    throw new InvalidOperationException($"Byte masks require a non-empty single-channel 8-bit grayscale image; actual {actual}.");
+                }
+                using var gray = strictByte ? source.Clone() : RecognitionImageHelpers.ToGray8(source);
                 Cv2.Threshold(gray, binary, Value - 1, 255, ThresholdTypes.Binary);
             }
             if (Invert) Cv2.BitwiseNot(binary, binary);

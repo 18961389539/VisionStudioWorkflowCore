@@ -1,6 +1,7 @@
 using System.Text.Json;
 using JLVisionLib;
 using VisionStudio.Abstractions;
+using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 
@@ -15,6 +16,7 @@ public sealed class JLVisionDxfNode : IVisionNodeExecutor
         var operation = AdvancedJl.Choice(node, "operator", "read", "read", "write");
         var path = SaveImageNode.RequirePath(node, "");
         if (!string.Equals(Path.GetExtension(path), ".dxf", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("轮廓文件必须使用 .dxf 扩展名。");
+        if (Directory.Exists(path)) throw new InvalidOperationException("DXF path must name a file, not a directory.");
         IReadOnlyList<VisionContour> contours; string status; string unit;
         if (operation == "read")
         {
@@ -41,6 +43,8 @@ public sealed class JLVisionDxfNode : IVisionNodeExecutor
             contours = context.Require<IReadOnlyList<VisionContour>>("contours");
             if (contours.Count == 0) throw new InvalidOperationException("不能导出空轮廓集合。");
             unit = contours[0].Unit;
+            if (string.IsNullOrWhiteSpace(unit) || unit.Equals("unspecified",StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(contours[0].CoordinateFrame))
+                throw new InvalidOperationException("jlvision.dxf export requires a known unit and coordinate frame on every contour; unspecified/unknown contracts are rejected.");
             if (contours.Any(c => c.Unit != unit || c.CoordinateFrame != contours[0].CoordinateFrame))
                 throw new InvalidOperationException("导出轮廓的单位与坐标系必须一致；请先完成坐标转换。");
             var overwrite = node.GetBool("overwrite", false);
@@ -54,8 +58,11 @@ public sealed class JLVisionDxfNode : IVisionNodeExecutor
             finally { SaveImageNode.TryDelete(temporary); }
             status = "written";
         }
+        var diagnostics=CoordinateValidation.Diagnostics(Type,("operator",operation),("path",path),("unit",unit),("count",contours.Count),("writePolicy","temporary file + atomic replace; preserve original on failure"),
+            ("importChain",operation=="read"?$"x'=(x*{node.GetDouble("scale",1)})+{node.GetDouble("offsetX",0)}; y'=(y*{node.GetDouble("scale",1)}*{(node.GetBool("flipY",false)?-1:1)})+{node.GetDouble("offsetY",0)}":null),
+            ("coordinateFrame",operation=="read"?$"cad:{node.Id}:{unit}":contours[0].CoordinateFrame));
         return ValueTask.FromResult(AdvancedJl.Result(node, operation, new() { ["contours"] = VisionValue.Contours(contours), ["count"] = VisionValue.Integer(contours.Count),
-            ["found"] = VisionValue.Boolean(contours.Count > 0), ["path"] = VisionValue.String(path), ["status"] = VisionValue.String(status), ["unit"] = VisionValue.String(unit) }));
+            ["found"] = VisionValue.Boolean(contours.Count > 0), ["path"] = VisionValue.String(path), ["status"] = VisionValue.String(status), ["unit"] = VisionValue.String(unit), ["diagnostics"]=VisionValue.String(diagnostics) }));
     }
 }
 
@@ -71,14 +78,26 @@ public sealed class JLVisionWorldPlaneNode : IVisionNodeExecutor
         {
             var sourceImage = context.RequireImage("image");
             var rowsImage = context.RequireImage("mapRows"); var columnsImage = context.RequireImage("mapColumns");
-            var info = JlPlaneMapContract.Validate(context.Require<string>("mapInfo"), sourceImage.Mat, rowsImage.Mat, columnsImage.Mat);
+            var mapInfoJson = context.Require<string>("mapInfo");
+            var currentCalibration = context.TryGetValue("calibration", out var calibrationValue)
+                ? calibrationValue.Require<string>("calibration")
+                : node.GetString("cameraParameters", "");
+            var currentCalibrationVersion = node.GetString("calibrationVersion", "");
+            var info = JlPlaneMapContract.Validate(mapInfoJson, sourceImage.Mat, rowsImage.Mat, columnsImage.Mat,
+                sourceImage.CoordinateFrame,
+                string.IsNullOrWhiteSpace(currentCalibration) ? null : JlPlaneMapContract.ComputeCalibrationFingerprint(currentCalibration),
+                string.IsNullOrWhiteSpace(currentCalibrationVersion) ? null : currentCalibrationVersion);
             using var source = JLVisionImages.FromMat(sourceImage.Mat);
             using var mapRows = JLVisionImages.FromMat(rowsImage.Mat);
             using var mapColumns = JLVisionImages.FromMat(columnsImage.Mat);
             using var map = mapRows.RealToVectorField(mapColumns, "vector_field_absolute");
             using var mapped = source.MapImage(map); outputs["image"] = AdvancedJl.Image(mapped);
+            var mask = BuildValidMask(rowsImage.Mat, columnsImage.Mat, sourceImage.Width, sourceImage.Height);
+            outputs["validMask"] = VisionValue.Image(mask);
+            outputs["validPixelCount"] = VisionValue.Integer(CountValid(mask.Mat, 255));
+            outputs["invalidPixelCount"] = VisionValue.Integer(mask.Width * mask.Height - CountValid(mask.Mat, 255));
             outputs["unit"] = VisionValue.String(info.Unit);
-            outputs["mapInfo"] = VisionValue.String(context.Require<string>("mapInfo"));
+            outputs["mapInfo"] = VisionValue.String(mapInfoJson);
         }
         else
         {
@@ -107,9 +126,25 @@ public sealed class JLVisionWorldPlaneNode : IVisionNodeExecutor
                 using var w = new JlTuple(width); using var h = new JlTuple(height);
                 if (operation == "image")
                 {
-                    using var native = JLVisionImages.FromMat(source.Mat); using var interpolation = new JlTuple("bilinear");
-                    JlOperatorSet.ImageToWorldPlane(native, out var mapped, camera, pose, w, h, pixelScale, interpolation);
-                    using (mapped) using (var typed = new JlImage(mapped)) outputs["image"] = AdvancedJl.Image(typed);
+                    using var native = JLVisionImages.FromMat(source.Mat);
+                    using var widthIn = new JlTuple(source.Width); using var heightIn = new JlTuple(source.Height);
+                    using var mapType = new JlTuple("coord_map_sub_pix");
+                    JlOperatorSet.GenImageToWorldPlaneMap(out var map, camera, pose, widthIn, heightIn, w, h, pixelScale, mapType);
+                    using (map)
+                    using (var typed = new JlImage(map))
+                    using (var mapRows = typed.VectorFieldToReal(out var mapColumns))
+                    using (mapColumns)
+                    {
+                        using var vectorField = mapRows.RealToVectorField(mapColumns, "vector_field_absolute");
+                        using var mapped = native.MapImage(vectorField);
+                        using (var mappedTyped = new JlImage(mapped)) outputs["image"] = AdvancedJl.Image(mappedTyped);
+                        using var rowsMat = JLVisionImages.ToMat(mapRows);
+                        using var columnsMat = JLVisionImages.ToMat(mapColumns);
+                        var mask = BuildValidMask(rowsMat, columnsMat, source.Width, source.Height);
+                        outputs["validMask"] = VisionValue.Image(mask);
+                        outputs["validPixelCount"] = VisionValue.Integer(CountValid(mask.Mat, 255));
+                        outputs["invalidPixelCount"] = VisionValue.Integer(mask.Width * mask.Height - CountValid(mask.Mat, 255));
+                    }
                 }
                 else
                 {
@@ -121,7 +156,7 @@ public sealed class JLVisionWorldPlaneNode : IVisionNodeExecutor
                         outputs["mapRows"] = AdvancedJl.Image(mapRows); outputs["mapColumns"] = AdvancedJl.Image(mapColumns);
                         var rowsMat = outputs["mapRows"].Require<IVisionImage>("mapRows").NativeImage as OpenCvSharp.Mat ?? throw new InvalidOperationException("映射行图无效。");
                         var columnsMat = outputs["mapColumns"].Require<IVisionImage>("mapColumns").NativeImage as OpenCvSharp.Mat ?? throw new InvalidOperationException("映射列图无效。");
-                        outputs["mapInfo"] = VisionValue.String(JlPlaneMapContract.Create(node.Id, source.Width, source.Height, unit, pixelSize, json, poseJson, rowsMat, columnsMat));
+                        outputs["mapInfo"] = VisionValue.String(JlPlaneMapContract.Create(node.Id, source.Width, source.Height, unit, pixelSize, json, poseJson, rowsMat, columnsMat, node.GetString("calibrationVersion", ""), source.CoordinateFrame));
                     }
                 }
             }
@@ -129,6 +164,33 @@ public sealed class JLVisionWorldPlaneNode : IVisionNodeExecutor
         }
         return ValueTask.FromResult(AdvancedJl.Result(node, operation, outputs));
     }
+    private static VisionImage BuildValidMask(Mat rows, Mat columns, int sourceWidth, int sourceHeight)
+    {
+        var height = rows.Height;
+        var width = rows.Width;
+        var mask = new Mat(height, width, MatType.CV_8UC1, Scalar.All(0));
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var row = rows.At<float>(y, x);
+            var column = columns.At<float>(y, x);
+            if (float.IsFinite(row) && float.IsFinite(column) && row >= 0 && column >= 0 && row <= sourceHeight - 1 && column <= sourceWidth - 1)
+                mask.Set(y, x, (byte)255);
+        }
+        return VisionImage.Own(mask);
+    }
+
+    private static long CountValid(Mat mask, byte value)
+    {
+        long count = 0;
+        var rows = mask.Rows;
+        var cols = mask.Cols;
+        for (var y = 0; y < rows; y++)
+        for (var x = 0; x < cols; x++)
+            if (mask.At<byte>(y, x) == value) count++;
+        return count;
+    }
+
     private static JlTuple CameraParameters(string json)
     {
         if (json.TrimStart().StartsWith('[')) return AdvancedJl.Tuple(json, "相机参数", mixed: true);

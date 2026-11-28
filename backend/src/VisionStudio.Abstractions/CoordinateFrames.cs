@@ -102,7 +102,10 @@ public static class VisionTransform2DMath
     }
 }
 
-public sealed record VisionFrameResolveResult(VisionTransform2D Transform, IReadOnlyList<string> Path);
+public sealed record VisionFrameResolveResult(VisionTransform2D Transform, IReadOnlyList<string> Path)
+{
+    public IReadOnlyList<string> CandidatePaths { get; init; } = [];
+}
 
 public sealed class VisionFrameTree2D
 {
@@ -130,23 +133,42 @@ public sealed class VisionFrameTree2D
             edges.Add(t);
             edges.Add(VisionTransform2DMath.Inverse(t));
         }
+        edges = edges.OrderBy(x => x.SourceFrame, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.TargetFrame, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => string.Join(",", x.Matrix), StringComparer.Ordinal).ToList();
 
         var queue = new Queue<(string Frame, VisionTransform2D? Acc, List<string> Path)>();
         queue.Enqueue((sourceFrame, null, [sourceFrame]));
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { sourceFrame };
+        var candidates = new List<(VisionTransform2D Transform, List<string> Path)>();
 
         while (queue.Count > 0)
         {
-            var current = queue.Dequeue();
-            foreach (var edge in edges.Where(x => x.SourceFrame.Equals(current.Frame, StringComparison.OrdinalIgnoreCase)))
+            var levelSize = queue.Count;
+            for (var level = 0; level < levelSize; level++)
             {
-                if (!visited.Add(edge.TargetFrame)) continue;
-                var acc = current.Acc is null ? edge : VisionTransform2DMath.Compose(current.Acc, edge);
-                var path = new List<string>(current.Path) { edge.TargetFrame };
-                if (edge.TargetFrame.Equals(targetFrame, StringComparison.OrdinalIgnoreCase))
-                    return new VisionFrameResolveResult(acc, path);
-                queue.Enqueue((edge.TargetFrame, acc, path));
+                var current = queue.Dequeue();
+                foreach (var edge in edges.Where(x => x.SourceFrame.Equals(current.Frame, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (!visited.Add(edge.TargetFrame)) continue;
+                    var acc = current.Acc is null ? edge : VisionTransform2DMath.Compose(current.Acc, edge);
+                    var path = new List<string>(current.Path) { edge.TargetFrame };
+                    if (edge.TargetFrame.Equals(targetFrame, StringComparison.OrdinalIgnoreCase))
+                        candidates.Add((acc, path));
+                    else
+                        queue.Enqueue((edge.TargetFrame, acc, path));
+                }
             }
+            if (candidates.Count > 0) break;
+        }
+
+        if (candidates.Count > 0)
+        {
+            var selected = candidates.OrderBy(x => string.Join("->", x.Path), StringComparer.Ordinal).First();
+            return new VisionFrameResolveResult(selected.Transform, selected.Path)
+            {
+                CandidatePaths = candidates.Select(x => string.Join("->", x.Path)).OrderBy(x => x, StringComparer.Ordinal).ToArray()
+            };
         }
 
         throw new InvalidOperationException($"No transform path exists from '{sourceFrame}' to '{targetFrame}'.");

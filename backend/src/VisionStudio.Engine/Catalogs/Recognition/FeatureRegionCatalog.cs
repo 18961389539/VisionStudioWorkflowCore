@@ -9,6 +9,10 @@ public static class FeatureRegionCatalog
     private static readonly PortDescriptor[] RegionOutputs = [Region, Image, new("found", VisionDataType.Boolean), new("count", VisionDataType.Integer), new("area", VisionDataType.Double),
         new("length", VisionDataType.Double, Required: false), new("endpoints", VisionDataType.Integer, Required: false),
         new("junctions", VisionDataType.Integer, Required: false), new("vertexCount", VisionDataType.Integer, Required: false),
+        new("sourceMappings", VisionDataType.String, Required: false), new("warningCount", VisionDataType.Integer, Required: false),
+        new("addedArea", VisionDataType.Double, Required: false), new("holeFilledArea", VisionDataType.Double, Required: false),
+        new("concavityFilledArea", VisionDataType.Double, Required: false), new("geometricLength", VisionDataType.Double, Required: false),
+        new("brushAudit", VisionDataType.String, Required: false), new("warningsJson", VisionDataType.String, Required: false),
         new("diagnostics", VisionDataType.String, Required: false), Next];
     private static readonly ParameterDescriptor Union = new("unionFirst", "Union Objects First", "boolean", false,
         Description: "When true, merge all region objects before the shape transform so hull/boundary/skeleton sees one connected mask; when false, process each object independently.");
@@ -32,7 +36,8 @@ public static class FeatureRegionCatalog
             [Union, new("boundaryMode", "Boundary Side", "select", "inner", Options: [new("Inner", "inner"), new("Outer", "outer")],
                 Description: "inner: pixels belonging to the region that touch background (or holes). outer: background pixels that touch the region, clipped to the canvas.")],
             "Native inner or outer pixel boundary, including hole edges. Operates per object unless unionFirst=true removes internal overlaps first. Outer boundaries are clipped to canvas bounds. Emits length as boundary pixel count. Output objects retain grouping; use connectedComponents to split them.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
-        new("region.skeleton", "Region Skeleton", "Region", [Exec, Region], RegionOutputs, [Union],
+        new("region.skeleton", "Region Skeleton", "Region", [Exec, Region], RegionOutputs, [Union,
+                new("pruneLength", "Prune Endpoint Branches (px)", "number", 0, 0, 255, 1, Description: "Iteratively remove endpoint branches up to this pixel length; 0 keeps the native skeleton. Diagnostics report pixels/endpoints/junctions before and after.")],
             "Native binary skeleton per region object, or after union when unionFirst=true. Output is a pixel region mask. Emits length (skeleton pixel count), endpoints (degree-1) and junctions (degree>=3). count is nonempty region objects. Small spurs remain visible.", "builtin", new VisionToolCapabilities(EmitsOverlay: true))
     ];
 }

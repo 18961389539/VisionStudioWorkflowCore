@@ -4,7 +4,21 @@
 
 namespace VisionStudio.Abstractions;
 
-public sealed record CameraCalibrationView(List<List<double>> ObjectPoints, List<List<double>> ImagePoints);
+public sealed record CameraCalibrationBoardInfo(
+    string Kind,
+    int Columns,
+    int Rows,
+    double SquareLengthMm,
+    double? MarkerLengthMm = null,
+    string? Dictionary = null,
+    bool? LegacyPattern = null);
+
+public sealed record CameraCalibrationView(
+    List<List<double>> ObjectPoints,
+    List<List<double>> ImagePoints,
+    int? ImageWidth = null,
+    int? ImageHeight = null,
+    CameraCalibrationBoardInfo? Board = null);
 
 public sealed record CameraCalibrationRequest(int ImageWidth, int ImageHeight, List<CameraCalibrationView> Views);
 

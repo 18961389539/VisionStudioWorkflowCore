@@ -30,6 +30,12 @@ var json = context.TryGetValue("calibrationDataJson", out var connectedViews)
         if (cameraModel is not ("pinhole" or "fisheye" or "telecentric")) throw new InvalidOperationException("cameraModel must be pinhole, fisheye, or telecentric.");
         var telecentricMagnification = node.GetDouble("telecentricMagnification", 0.2);
         var telecentricPixelSizeUm = node.GetDouble("telecentricPixelSizeUm", 3.45);
+        var telecentricParameterSource = node.GetString("telecentricParameterSource", "datasheet").Trim();
+        var maxTelecentricDriftPercent = node.GetDouble("maxTelecentricDriftPercent", 25);
+        if (telecentricParameterSource.Length is < 1 or > 128)
+            throw new InvalidOperationException("telecentricParameterSource must be 1..128 characters.");
+        if (!double.IsFinite(maxTelecentricDriftPercent) || maxTelecentricDriftPercent is < 0 or > 1000)
+            throw new InvalidOperationException("maxTelecentricDriftPercent must be finite and between 0 and 1000 (0 disables).");
         if (cameraModel == "telecentric" && (!double.IsFinite(telecentricMagnification) || telecentricMagnification is < 0.001 or > 10))
             throw new InvalidOperationException("telecentricMagnification must be finite and between 0.001 and 10.");
         if (cameraModel == "telecentric" && (!double.IsFinite(telecentricPixelSizeUm) || telecentricPixelSizeUm is < 0.1 or > 100))
@@ -44,6 +50,10 @@ var json = context.TryGetValue("calibrationDataJson", out var connectedViews)
             cancellationToken.ThrowIfCancellationRequested();
             if (view is null || view.ObjectPoints is null || view.ImagePoints is null || view.ObjectPoints.Count < 6 || view.ObjectPoints.Count != view.ImagePoints.Count)
                 throw new InvalidOperationException($"View {index} must have matching object/image point arrays with at least six points.");
+            if (view.ImageWidth is { } viewWidth && viewWidth != request.ImageWidth)
+                throw new InvalidOperationException($"View {index} imageWidth {viewWidth} does not match request imageWidth {request.ImageWidth}.");
+            if (view.ImageHeight is { } viewHeight && viewHeight != request.ImageHeight)
+                throw new InvalidOperationException($"View {index} imageHeight {viewHeight} does not match request imageHeight {request.ImageHeight}.");
             if (view.ObjectPoints.Count > 5000) throw new InvalidOperationException($"View {index} exceeds the 5000-point limit.");
             totalPointCount = checked(totalPointCount + view.ObjectPoints.Count);
             if (totalPointCount > 100000) throw new InvalidOperationException("Intrinsic calibration accepts at most 100000 total correspondence points.");
@@ -88,6 +98,29 @@ var json = context.TryGetValue("calibrationDataJson", out var connectedViews)
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { throw new InvalidOperationException($"{(cameraModel == "fisheye" ? "OpenCV fisheye" : "JLVision")} intrinsic calibration failed: {ex.Message}", ex); }
+        string? telecentricReportJson = null;
+        if (cameraModel == "telecentric")
+        {
+            var parameters = model.NativeCameraParameters ?? throw new InvalidOperationException("Telecentric calibration returned no native camera parameters.");
+            var calibratedMagnification = parameters[0];
+            var calibratedPixelSizeUm = parameters[6] * 1e6;
+            var magnificationDriftPercent = Math.Abs(calibratedMagnification - telecentricMagnification) / telecentricMagnification * 100d;
+            var pixelSizeDriftPercent = Math.Abs(calibratedPixelSizeUm - telecentricPixelSizeUm) / telecentricPixelSizeUm * 100d;
+            if (!double.IsFinite(calibratedMagnification) || !double.IsFinite(calibratedPixelSizeUm) ||
+                calibratedMagnification is < 0.001 or > 10 || calibratedPixelSizeUm is < 0.1 or > 100)
+                throw new InvalidOperationException($"Telecentric calibration produced implausible magnification/pixel size ({calibratedMagnification:0.###}, {calibratedPixelSizeUm:0.###} um).");
+            if (maxTelecentricDriftPercent > 0 && (magnificationDriftPercent > maxTelecentricDriftPercent || pixelSizeDriftPercent > maxTelecentricDriftPercent))
+                throw new InvalidOperationException($"Telecentric parameters drifted beyond maxTelecentricDriftPercent={maxTelecentricDriftPercent:0.###}% (magnification {magnificationDriftPercent:0.###}%, pixel size {pixelSizeDriftPercent:0.###}%). Verify the datasheet source and view geometry.");
+            telecentricReportJson = JsonSerializer.Serialize(new
+            {
+                source = telecentricParameterSource,
+                before = new { magnification = telecentricMagnification, pixelSizeUm = telecentricPixelSizeUm },
+                after = new { magnification = calibratedMagnification, pixelSizeUm = calibratedPixelSizeUm },
+                magnificationDriftPercent,
+                pixelSizeDriftPercent,
+                maxTelecentricDriftPercent
+            });
+        }
         var rms = model.Rms;
         var maxRms = node.GetDouble("maxRms", 0);
         if (!double.IsFinite(maxRms) || maxRms is < 0 or > 1000) throw new InvalidOperationException("maxRms must be finite and between 0 and 1000 (0 disables the model gate).");
@@ -160,15 +193,19 @@ var json = context.TryGetValue("calibrationDataJson", out var connectedViews)
         if (worstPoseViewRms > 0) outputs["worstPoseViewRms"] = VisionValue.Double(worstPoseViewRms);
         if (worstPoseViewIndex is not null) outputs["worstPoseViewIndex"] = VisionValue.Integer(worstPoseViewIndex.Value);
         if (outlierViewIndex is not null) outputs["outlierViewIndex"] = VisionValue.Integer(outlierViewIndex.Value);
+        if (telecentricReportJson is not null) outputs["telecentricReportJson"] = VisionValue.String(telecentricReportJson);
         var diag = CoordinateValidation.Diagnostics(Type,
             ("views", request.Views.Count), ("rms", rms), ("cameraModel", cameraModel),
+            ("imageWidth", request.ImageWidth), ("imageHeight", request.ImageHeight),
+            ("telecentricParameterSource", cameraModel == "telecentric" ? telecentricParameterSource : null),
+            ("telecentricReportJson", telecentricReportJson),
             ("worstViewRms", worstViewRms), ("worstPoseViewRms", worstPoseViewRms),
             ("medianPoseRms", medianPoseRms), ("outlierViewIndex", outlierViewIndex),
             ("meanCoverageX", viewStats.Average(v => v.coverageX)), ("meanCoverageY", viewStats.Average(v => v.coverageY)),
             ("nativePolynomialDistortionActive", nativePolynomialDistortionActive),
             ("fisheyeModelActive", fisheyeModelActive), ("telecentricModelActive", telecentricModelActive));
         outputs["diagnostics"] = VisionValue.String(diag);
-        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["diagnostics"] = diag, ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["cameraModel"] = cameraModel, ["telecentricMagnification"] = cameraModel == "telecentric" ? telecentricMagnification : null, ["telecentricPixelSizeUm"] = cameraModel == "telecentric" ? telecentricPixelSizeUm : null, ["maxViewRms"] = maxViewRms, ["maxPoseViewRms"] = maxPoseViewRms, ["maxRms"] = maxRms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["nativePolynomialDistortionActive"] = nativePolynomialDistortionActive, ["fisheyeModelActive"] = fisheyeModelActive, ["telecentricModelActive"] = telecentricModelActive, ["poseRmsModel"] = telecentricModelActive ? "not available for telecentric projection model" : nativePolynomialDistortionActive ? "not available for native polynomial distortion" : fisheyeModelActive ? "OpenCV fisheye fitted model" : "pinhole", ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.LensModel ?? model.NativeCameraType ?? "brown_conrady", ["algorithmBackend"] = fisheyeModelActive ? "opencv" : "jlvision", ["calibrationBackend"] = fisheyeModelActive ? "opencv" : "jlvision" }));
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["diagnostics"] = diag, ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["cameraModel"] = cameraModel, ["telecentricMagnification"] = cameraModel == "telecentric" ? telecentricMagnification : null, ["telecentricPixelSizeUm"] = cameraModel == "telecentric" ? telecentricPixelSizeUm : null, ["telecentricParameterSource"] = cameraModel == "telecentric" ? telecentricParameterSource : null, ["telecentricReportJson"] = telecentricReportJson, ["maxTelecentricDriftPercent"] = cameraModel == "telecentric" ? maxTelecentricDriftPercent : null, ["maxViewRms"] = maxViewRms, ["maxPoseViewRms"] = maxPoseViewRms, ["maxRms"] = maxRms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["nativePolynomialDistortionActive"] = nativePolynomialDistortionActive, ["fisheyeModelActive"] = fisheyeModelActive, ["telecentricModelActive"] = telecentricModelActive, ["poseRmsModel"] = telecentricModelActive ? "not available for telecentric projection model" : nativePolynomialDistortionActive ? "not available for native polynomial distortion" : fisheyeModelActive ? "OpenCV fisheye fitted model" : "pinhole", ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.LensModel ?? model.NativeCameraType ?? "brown_conrady", ["algorithmBackend"] = fisheyeModelActive ? "opencv" : "jlvision", ["calibrationBackend"] = fisheyeModelActive ? "opencv" : "jlvision" }));
     }
 }
 
@@ -203,11 +240,30 @@ var intrinsicAssetId = node.GetString("intrinsicsAssetId", "").Trim();
         try { output = JLVisionCalibration.Undistort(source, model, cancellationToken, fisheyeBalance); }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { throw new InvalidOperationException($"{(model.LensModel == "opencv_fisheye" ? "OpenCV fisheye" : "JLVision")} undistortion failed: {ex.Message}", ex); }
+        using var white = new Mat(source.Size(), source.Type(), Scalar.All(source.Depth() == MatType.CV_16U ? 65535 : 255));
+        Mat validMask;
+        try { validMask = JLVisionCalibration.Undistort(white, model, cancellationToken, fisheyeBalance); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { throw new InvalidOperationException($"Unable to derive image.undistort valid mask: {ex.Message}", ex); }
+        if (validMask.Channels() != 1) Cv2.CvtColor(validMask, validMask, ColorConversionCodes.BGR2GRAY);
+        Cv2.Threshold(validMask, validMask, 0, 255, ThresholdTypes.Binary);
+        var scaleX = (double)source.Width / model.ImageWidth;
+        var scaleY = (double)source.Height / model.ImageHeight;
+        var scaledFx = model.CameraMatrix[0][0] * scaleX;
+        var scaledFy = model.CameraMatrix[1][1] * scaleY;
+        var scaledCx = model.CameraMatrix[0][2] * scaleX;
+        var scaledCy = model.CameraMatrix[1][2] * scaleY;
         JLVisionOperators.MinMax(output, out double undistMin, out double undistMax);
         var undistMean = JLVisionOperators.Mean(output);
+        var validPixelCount = JLVisionOperators.CountNonZero(validMask);
         var undistDiag = CoordinateValidation.Diagnostics(Type, ("lensModel", model.LensModel ?? model.NativeCameraType ?? "brown_conrady"), ("fisheyeBalance", fisheyeBalance),
+            ("modelFamily", model.LensModel ?? model.NativeCameraType ?? "brown_conrady"), ("distCoeffCount", model.DistCoeffs.Length),
+            ("sourceWidth", source.Width), ("sourceHeight", source.Height), ("calibrationWidth", model.ImageWidth), ("calibrationHeight", model.ImageHeight),
+            ("scaledIntrinsics", new { fx = scaledFx, fy = scaledFy, cx = scaledCx, cy = scaledCy }),
+            ("intrinsicsAssetId", intrinsicAssetId.Length == 0 ? null : intrinsicAssetId), ("intrinsicsAssetVersion", intrinsicAssetVersion == 0 ? null : intrinsicAssetVersion),
+            ("validPixelCount", validPixelCount), ("validRatio", validPixelCount / (double)(source.Width * source.Height)),
             ("width", output.Width), ("height", output.Height), ("channels", output.Channels()), ("meanIntensity", undistMean), ("minIntensity", undistMin), ("maxIntensity", undistMax));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["meanIntensity"] = VisionValue.Double(undistMean), ["minIntensity"] = VisionValue.Double(undistMin), ["maxIntensity"] = VisionValue.Double(undistMax), ["diagnostics"] = VisionValue.String(undistDiag) }, new Dictionary<string, object?> { ["lensModel"] = model.LensModel ?? model.NativeCameraType ?? "brown_conrady", ["fisheyeBalance"] = fisheyeBalance, ["sourceSize"] = $"{source.Width}x{source.Height}", ["calibrationSize"] = $"{model.ImageWidth}x{model.ImageHeight}", ["scaledIntrinsics"] = source.Width != model.ImageWidth || source.Height != model.ImageHeight, ["intrinsicsAssetId"] = intrinsicAssetId.Length == 0 ? null : intrinsicAssetId, ["intrinsicsAssetVersion"] = intrinsicAssetVersion == 0 ? null : intrinsicAssetVersion, ["calibrationBackend"] = model.LensModel == "opencv_fisheye" ? "opencv" : "jlvision", ["algorithmBackend"] = model.LensModel == "opencv_fisheye" ? "opencv" : "jlvision" }));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["validMask"] = VisionValue.Image(VisionImage.Own(validMask)), ["meanIntensity"] = VisionValue.Double(undistMean), ["minIntensity"] = VisionValue.Double(undistMin), ["maxIntensity"] = VisionValue.Double(undistMax), ["diagnostics"] = VisionValue.String(undistDiag) }, new Dictionary<string, object?> { ["lensModel"] = model.LensModel ?? model.NativeCameraType ?? "brown_conrady", ["fisheyeBalance"] = fisheyeBalance, ["sourceSize"] = $"{source.Width}x{source.Height}", ["calibrationSize"] = $"{model.ImageWidth}x{model.ImageHeight}", ["scaledIntrinsics"] = new { fx = scaledFx, fy = scaledFy, cx = scaledCx, cy = scaledCy }, ["validPixelCount"] = validPixelCount, ["intrinsicsAssetId"] = intrinsicAssetId.Length == 0 ? null : intrinsicAssetId, ["intrinsicsAssetVersion"] = intrinsicAssetVersion == 0 ? null : intrinsicAssetVersion, ["calibrationBackend"] = model.LensModel == "opencv_fisheye" ? "opencv" : "jlvision", ["algorithmBackend"] = model.LensModel == "opencv_fisheye" ? "opencv" : "jlvision" }));
     }
 
     private static bool HasValidLensModel(CameraCalibrationModel model)
@@ -271,6 +327,11 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         var maxTranslation = node.GetDouble("maxTranslationError", 0);
         var maxAngle = node.GetDouble("maxAngleErrorDeg", 0);
         var maxConditionNumber = node.GetDouble("maxConditionNumber", 0);
+        var minRobustSamples = node.GetInt("minRobustSamples", 6);
+        var maxOutlierRatio = node.GetDouble("maxOutlierRatio", 0.4);
+        var confirmUnitScale = node.GetBool("confirmUnitScale", false);
+        if (minRobustSamples is < 4 or > 1000) throw new InvalidOperationException("minRobustSamples must be between 4 and 1000.");
+        if (!double.IsFinite(maxOutlierRatio) || maxOutlierRatio is < 0 or > 1) throw new InvalidOperationException("maxOutlierRatio must be finite and between 0 and 1.");
         // Ranges come from the shared rule set so the wizard API and this node cannot drift apart.
         if (HandEyeSettings.ValidatePlanar(mode, angularWeight, visionScale, robustLoss, maxTranslation, maxAngle, maxConditionNumber) is { } settingsError)
             throw new InvalidOperationException(settingsError);
@@ -278,6 +339,11 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         var handEyeAssetVersion = node.GetInt("handEyeAssetVersion", 0);
         if (handEyeAssetVersion < 0 || (handEyeAssetId.Length > 0) != (handEyeAssetVersion > 0))
             throw new InvalidOperationException("handEyeAssetId and a positive handEyeAssetVersion must be provided together, or both left unset.");
+        var sourceUnit = CoordinateValidation.RequireUnit(node.GetString("sourceUnit", "mm"), "sourceUnit");
+        var unit = CoordinateValidation.RequireUnit(node.GetString("unit", "mm"), "unit");
+        var unitScaleConfirmed = !unit.Equals(sourceUnit, StringComparison.OrdinalIgnoreCase) && visionScale == 1 && confirmUnitScale;
+        if (!unit.Equals(sourceUnit, StringComparison.OrdinalIgnoreCase) && visionScale == 1 && !confirmUnitScale)
+            throw new InvalidOperationException($"sourceUnit '{sourceUnit}' differs from unit '{unit}' while visionScale=1. Set visionScale to the explicit target-units-per-source-unit conversion or enable confirmUnitScale only after verifying the scale source.");
         var work = visionScale == 1 ? samples : samples.Select(s => new HandEyeSample(s.Robot, new VisionPose2D(s.Vision.X * visionScale, s.Vision.Y * visionScale, s.Vision.ThetaDeg))).ToList();
         var robotRotationCoverage = AngularCoverage(work.Select(s => s.Robot.ThetaDeg));
         var visionRotationCoverage = AngularCoverage(work.Select(s => s.Vision.ThetaDeg));
@@ -344,11 +410,20 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         // Tukey runs reweight the residual vector; using the unweighted vector here would let the very
         // outliers the robust loss rejected inflate sigma^2 (and therefore every reported std dev).
         var sigmaErrors = errors;
+        var robustOutlierIndices = Array.Empty<int>();
+        var robustUsedSampleCount = work.Count;
         if (robustLoss == "tukey")
         {
             var finalWeights = new double[work.Count];
             UpdateRobustWeights(errors, finalWeights);
+            robustOutlierIndices = Enumerable.Range(0, work.Count).Where(i => finalWeights[i] <= 0).ToArray();
+            robustUsedSampleCount = work.Count - robustOutlierIndices.Length;
             sigmaErrors = Weighted(errors, finalWeights);
+            if (robustUsedSampleCount < minRobustSamples)
+                throw new InvalidOperationException($"Tukey robust fit left {robustUsedSampleCount} effective samples, below minRobustSamples={minRobustSamples}; outlierSampleIndex=[{string.Join(",", robustOutlierIndices)}].");
+            var robustOutlierRatio = (double)robustOutlierIndices.Length / work.Count;
+            if (robustOutlierRatio > maxOutlierRatio)
+                throw new InvalidOperationException($"Tukey robust fit rejected {robustOutlierIndices.Length}/{work.Count} samples ({robustOutlierRatio:0.0%}), above maxOutlierRatio={maxOutlierRatio:0.0%}; outlierSampleIndex=[{string.Join(",", robustOutlierIndices)}].");
         }
         var sigma2 = dof > 0 ? sigmaErrors.Sum(v => v * v) / dof : 0;
         var det = observability[0,0]*(observability[1,1]*observability[2,2]-observability[1,2]*observability[2,1])
@@ -392,11 +467,7 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         var defaultTargetFrame=mode.Equals("eyeInHand",StringComparison.OrdinalIgnoreCase)?"RobotTool":"RobotBase";
         var targetFrame=node.GetString("targetFrame",defaultTargetFrame); if(string.IsNullOrWhiteSpace(targetFrame))targetFrame=defaultTargetFrame;
         targetFrame=CoordinateValidation.RequireFrame(targetFrame,"targetFrame");
-        var unit=CoordinateValidation.RequireUnit(node.GetString("unit","mm"),"unit");
-        var sourceUnit=CoordinateValidation.RequireUnit(node.GetString("sourceUnit","mm"),"sourceUnit");
-        var unitWarning = !unit.Equals(sourceUnit, StringComparison.OrdinalIgnoreCase) && visionScale == 1
-            ? $"sourceUnit '{sourceUnit}' differs from unit '{unit}' but visionScale is 1, so vision coordinates are used as-is; set visionScale (target units per vision source unit) or pre-scale the samples."
-            : null;
+        var unitWarning = unitScaleConfirmed ? "sourceUnit/unit mismatch with visionScale=1 was explicitly confirmed; verify the recorded scale source before production use." : null;
         var transform=new VisionTransform2D(sourceFrame,targetFrame,unit,Math.Cos(radians),-Math.Sin(radians),x[0],Math.Sin(radians),Math.Cos(radians),x[1],0,0,1,sourceUnit);
         var canonicalMode = mode.Equals("eyeInHand", StringComparison.OrdinalIgnoreCase) ? "eyeInHand" : "eyeToHand";
         var calibrationModel = new HandEyeCalibrationModel(canonicalMode, sourceFrame, targetFrame, unit, sourceUnit, x[0], x[1], theta, angularWeight, visionScale, robustLoss);
@@ -414,6 +485,9 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
             ["robotTranslationSpan"] = VisionValue.Double(robotTranslationSpan),
             ["visionTranslationSpan"] = VisionValue.Double(visionTranslationSpan),
             ["sampleResidualsJson"] = VisionValue.String(JsonSerializer.Serialize(sampleResiduals)),
+            ["usedSampleCount"] = VisionValue.Integer(robustUsedSampleCount),
+            ["outlierSampleIndicesJson"] = VisionValue.String(JsonSerializer.Serialize(robustOutlierIndices)),
+            ["outlierRatio"] = VisionValue.Double(robustOutlierIndices.Length == 0 ? 0 : (double)robustOutlierIndices.Length / work.Count),
             ["converged"] = VisionValue.Boolean(converged),
             ["iterations"] = VisionValue.Integer(iterationsUsed),
             ["stdDevX"] = VisionValue.Double(stdDevX),
@@ -426,6 +500,10 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
                 ("outlierSampleIndex", outlierSampleIndex),
                 ("robotRotationCoverageDeg", robotRotationCoverage), ("visionRotationCoverageDeg", visionRotationCoverage),
                 ("robustLoss", robustLoss), ("visionScale", visionScale),
+                ("usedSampleCount", robustUsedSampleCount), ("outlierSampleIndices", robustOutlierIndices),
+                ("outlierRatio", robustOutlierIndices.Length == 0 ? 0 : (double)robustOutlierIndices.Length / work.Count),
+                ("minRobustSamples", minRobustSamples), ("maxOutlierRatio", maxOutlierRatio),
+                ("unitScaleConfirmed", unitScaleConfirmed),
                 ("converged", converged), ("iterations", iterationsUsed),
                 ("conditionNumber", double.IsFinite(conditionNumber) ? conditionNumber : null),
                 ("stdDevX", stdDevX), ("stdDevY", stdDevY), ("angleStdDevDeg", angleStdDevDeg),
@@ -454,6 +532,10 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
             ["robotTranslationSpan"] = robotTranslationSpan, ["visionTranslationSpan"] = visionTranslationSpan, ["angularWeight"] = angularWeight,
             ["maxConditionNumber"] = maxConditionNumber,
             ["robustLoss"] = robustLoss, ["visionScale"] = visionScale,
+            ["usedSampleCount"] = robustUsedSampleCount, ["outlierSampleIndices"] = robustOutlierIndices,
+            ["outlierRatio"] = robustOutlierIndices.Length == 0 ? 0 : (double)robustOutlierIndices.Length / work.Count,
+            ["minRobustSamples"] = minRobustSamples, ["maxOutlierRatio"] = maxOutlierRatio,
+            ["unitScaleConfirmed"] = unitScaleConfirmed,
             ["converged"] = converged, ["iterations"] = iterationsUsed,
             ["conditionNumber"] = double.IsFinite(conditionNumber) ? conditionNumber : null,
             ["stdDevX"] = stdDevX, ["stdDevY"] = stdDevY, ["angleStdDevDeg"] = angleStdDevDeg,

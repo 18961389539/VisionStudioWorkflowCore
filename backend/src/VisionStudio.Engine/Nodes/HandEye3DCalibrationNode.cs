@@ -53,12 +53,18 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
         // successive accepted removals would run ~500k solves and blow the node timeout.
         var maxRejections = node.GetInt("maxRejections", 20);
         var minRmsImprovement = node.GetDouble("minRmsImprovement", 0.5);
+        var crossCheckTranslationLimit = node.GetDouble("crossCheckTranslationLimit", 0);
+        var crossCheckRotationLimitDeg = node.GetDouble("crossCheckRotationLimitDeg", 0);
         var maxTranslationGate = node.GetDouble("maxTranslationError", 0);
         var maxRotationGate = node.GetDouble("maxRotationErrorDeg", 0);
         // Ranges come from the shared rule set so the wizard API and this node cannot drift apart.
         if (HandEyeSettings.ValidateSpatial(mode, methodName, rotationWeight, outlierRejection, crossCheckMethodName,
                 maxTranslationGate, maxRotationGate, minTranslationSpan, maxRejections, minRmsImprovement) is { } settingsError)
             throw new InvalidOperationException(settingsError);
+        if (!double.IsFinite(crossCheckTranslationLimit) || crossCheckTranslationLimit is < 0 or > 1e6)
+            throw new InvalidOperationException("crossCheckTranslationLimit must be finite and between 0 and 1000000 (0 disables).");
+        if (!double.IsFinite(crossCheckRotationLimitDeg) || crossCheckRotationLimitDeg is < 0 or > 180)
+            throw new InvalidOperationException("crossCheckRotationLimitDeg must be finite and between 0 and 180 (0 disables).");
         var method = ParseMethod(methodName);
         ValidateMotion(samples);
         var robotTranslationSpan = TranslationSpan(samples);
@@ -76,6 +82,8 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
         // accepting only a halving-or-better improvement; stops at the six-sample minimum or a clean fit.
         var kept = Enumerable.Range(0, samples.Count).ToList();
         var rejected = new List<int>();
+        var rejectionHistory = new List<object>();
+        var rejectionStopReason = outlierRejection != "iterative" ? "not-requested" : maxRejections == 0 ? "disabled" : "max-rejections";
         var cameraToRobot = SolveSubset(samples, kept, eyeInHand, method);
         var outlierFloor = 1e-6 * Math.Max(1, robotTranslationSpan);
         if (outlierRejection == "iterative" && maxRejections > 0)
@@ -84,7 +92,7 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var currentRms = KeptTranslationRms(samples, kept, cameraToRobot, eyeInHand);
-                if (currentRms <= outlierFloor) break;
+                if (currentRms <= outlierFloor) { rejectionStopReason = "clean-fit"; break; }
                 var bestPosition = -1;
                 var bestRms = double.PositiveInfinity;
                 double[]? bestFit = null;
@@ -97,11 +105,28 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
                     var trialRms = KeptTranslationRms(samples, trial, trialFit, eyeInHand);
                     if (trialRms < bestRms) { bestRms = trialRms; bestPosition = k; bestFit = trialFit; }
                 }
-                if (bestPosition < 0 || bestFit is null || !(bestRms < minRmsImprovement * currentRms)) break;
-                rejected.Add(kept[bestPosition]);
+                if (bestPosition < 0 || bestFit is null || !(bestRms < minRmsImprovement * currentRms))
+                {
+                    rejectionStopReason = rejected.Count >= maxRejections ? "max-rejections" : "insufficient-rms-improvement";
+                    break;
+                }
+                var removedIndex = kept[bestPosition];
+                rejected.Add(removedIndex);
                 kept.RemoveAt(bestPosition);
                 cameraToRobot = bestFit;
+                rejectionHistory.Add(new
+                {
+                    round = rejected.Count,
+                    removedIndex,
+                    previousRms = currentRms,
+                    newRms = bestRms,
+                    improvementRatio = currentRms <= 0 ? 0 : bestRms / currentRms,
+                    remainingSampleCount = kept.Count
+                });
             }
+            if (kept.Count <= 6) rejectionStopReason = "minimum-samples";
+            if (kept.Count < 6) throw new InvalidOperationException("3D hand-eye outlier rejection left fewer than six samples.");
+            ValidateMotion(kept.Select(index => samples[index]).ToArray());
         }
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -161,8 +186,19 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
             }
             catch (Exception ex) when (ex is OpenCVException or InvalidOperationException)
             {
-                // cross-check is best-effort; never fail the primary solve because of it
+                if (crossCheckTranslationLimit > 0 || crossCheckRotationLimitDeg > 0)
+                    throw new InvalidOperationException($"Cross-check method {crossCheckMethodName} failed while a publication gate was enabled: {ex.Message}", ex);
+                // cross-check is best-effort when no publication gate is enabled.
             }
+        }
+        if (crossCheckTranslationLimit > 0 || crossCheckRotationLimitDeg > 0)
+        {
+            if (crossCheckTranslationDelta is not { } translationDelta || crossCheckAngleDeltaDeg is not { } angleDelta)
+                throw new InvalidOperationException("Cross-check publication gate requires a successful second method different from the primary method.");
+            if (crossCheckTranslationLimit > 0 && translationDelta > crossCheckTranslationLimit)
+                throw new InvalidOperationException($"Cross-check translation delta {translationDelta:0.####} exceeds crossCheckTranslationLimit {crossCheckTranslationLimit:0.####}; production asset was not published.");
+            if (crossCheckRotationLimitDeg > 0 && angleDelta > crossCheckRotationLimitDeg)
+                throw new InvalidOperationException($"Cross-check rotation delta {angleDelta:0.####} deg exceeds crossCheckRotationLimitDeg {crossCheckRotationLimitDeg:0.####}; production asset was not published.");
         }
 
         var sourceFrame = CoordinateValidation.RequireFrame(node.GetString("sourceFrame", "Camera"), "sourceFrame");
@@ -182,6 +218,8 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
             ["maxRotationErrorDeg"] = maxRotationErrorDeg, ["worstSampleIndex"] = worstSampleIndex,
             ["worstTranslationSampleIndex"] = worstTranslationIndex, ["worstRotationSampleIndex"] = worstRotationIndex,
             ["outlierSampleIndex"] = outlierSampleIndex, ["rejectedSampleIndices"] = rejected,
+            ["rejectionHistory"] = rejectionHistory, ["rejectionStopReason"] = rejectionStopReason,
+            ["crossCheckTranslationLimit"] = crossCheckTranslationLimit, ["crossCheckRotationLimitDeg"] = crossCheckRotationLimitDeg,
             ["robotTranslationSpan"] = robotTranslationSpan, ["rotationWeight"] = rotationWeight,
             ["outlierRejection"] = outlierRejection, ["crossCheckMethod"] = crossCheckMethodName,
             ["minTranslationSpan"] = minTranslationSpan,
@@ -210,6 +248,8 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
             ["worstRotationSampleIndex"] = VisionValue.Integer(worstRotationIndex),
             ["usedSampleCount"] = VisionValue.Integer(kept.Count),
             ["rejectedSampleIndicesJson"] = VisionValue.String(JsonSerializer.Serialize(rejected)),
+            ["rejectionHistoryJson"] = VisionValue.String(JsonSerializer.Serialize(rejectionHistory)),
+            ["rejectionStopReason"] = VisionValue.String(rejectionStopReason),
             ["sampleResidualsJson"] = VisionValue.String(JsonSerializer.Serialize(sampleResiduals))
         };
         if (outlierSampleIndex is not null) outputs["outlierSampleIndex"] = VisionValue.Integer(outlierSampleIndex.Value);
@@ -220,6 +260,8 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
             ("maxTranslationError", maxTranslationError), ("maxRotationErrorDeg", maxRotationErrorDeg), ("robotTranslationSpan", robotTranslationSpan),
             ("outlierRejection", outlierRejection), ("outlierSampleIndex", outlierSampleIndex), ("rejectedSampleIndices", rejected),
             ("maxRejections", maxRejections), ("minRmsImprovement", minRmsImprovement),
+            ("rejectionHistory", rejectionHistory), ("rejectionStopReason", rejectionStopReason),
+            ("crossCheckTranslationLimit", crossCheckTranslationLimit), ("crossCheckRotationLimitDeg", crossCheckRotationLimitDeg),
             ("residualToSpanRatio", residualToSpanRatio), ("unitWarning", unitWarning),
             ("crossCheckMethod", crossCheckMethodName), ("crossCheckTranslationDelta", crossCheckTranslationDelta), ("crossCheckAngleDeltaDeg", crossCheckAngleDeltaDeg),
             ("sourceFrame", sourceFrame), ("targetFrame", targetFrame), ("unit", unit));

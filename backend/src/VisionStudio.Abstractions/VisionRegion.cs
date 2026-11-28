@@ -2,7 +2,6 @@ namespace VisionStudio.Abstractions;
 
 /// <summary>Inclusive pixel runs in image coordinates. No native handle crosses graph boundaries.</summary>
 public readonly record struct VisionRegionRun(int Row, int StartColumn, int EndColumn);
-
 public sealed class VisionRegionComponent
 {
     public IReadOnlyList<VisionRegionRun> Runs { get; }
@@ -27,14 +26,23 @@ public sealed class VisionRegion
 {
     public const int MaxComponents = 10_000;
     public const int MaxRuns = 1_000_000;
+    public const string ImagePixelCenterContract = "image-pixel-center-v1";
     public int Width { get; }
     public int Height { get; }
     public IReadOnlyList<VisionRegionComponent> Components { get; }
-    public VisionRegion(int width, int height, IReadOnlyList<VisionRegionComponent> components)
+    /// <summary>Coordinate convention carried with the region across graph/worker boundaries.</summary>
+    public string CoordinateSystem { get; } = ImagePixelCenterContract;
+    public int SchemaVersion { get; } = 1;
+    /// <summary>Optional stable producer identity used by source-object mapping diagnostics.</summary>
+    public string? SourceRegionId { get; }
+    public VisionRegion(int width, int height, IReadOnlyList<VisionRegionComponent> components,
+        string coordinateSystem = ImagePixelCenterContract, int schemaVersion = 1, string? sourceRegionId = null)
     {
         if (width is < 1 or > 32768 || height is < 1 or > 32768) throw new ArgumentException("Invalid region image dimensions.");
         ArgumentNullException.ThrowIfNull(components);
         if (components.Count > MaxComponents) throw new ArgumentException("Region component budget exceeded.");
+        if (string.IsNullOrWhiteSpace(coordinateSystem)) throw new ArgumentException("Region coordinate system is required.");
+        if (schemaVersion != 1) throw new ArgumentException("Unsupported region schema version.");
         long runCount = 0;
         foreach (var component in components)
         {
@@ -45,7 +53,12 @@ public sealed class VisionRegion
         }
         Width = width; Height = height;
         Components = Array.AsReadOnly(components.Where(c => c.Runs.Count > 0).ToArray());
+        CoordinateSystem = coordinateSystem;
+        SchemaVersion = schemaVersion;
+        SourceRegionId = sourceRegionId;
     }
+    public VisionRegion WithMetadata(string? coordinateSystem = null, int? schemaVersion = null, string? sourceRegionId = null)
+        => new(Width, Height, Components, coordinateSystem ?? CoordinateSystem, schemaVersion ?? SchemaVersion, sourceRegionId ?? SourceRegionId);
     public override string ToString() => $"Region {Width}x{Height}, {Components.Count} objects";
 }
 

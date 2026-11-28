@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using VisionStudio.Abstractions;
 
 namespace VisionStudio.Engine.Nodes;
@@ -52,6 +54,9 @@ public sealed class DatabaseWriteNode(IResultRecordStore? store = null) : IVisio
         };
         var payload = System.Text.Json.JsonSerializer.Serialize(new { type = value.Type.ToString(), value = serializable });
         var payloadBytes = System.Text.Encoding.UTF8.GetByteCount(payload);
+        var payloadSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
+        var recordKeyNormalizationVersion = "v1-trim";
+        var imageSummaryOnly = value.Value is IVisionImage or IVisionFrameSet;
         if (payloadBytes > maxBytes)
             throw new InvalidOperationException($"output.database payload is {payloadBytes} bytes which exceeds maxPayloadBytes={maxBytes}; store a summary instead of the full object.");
 
@@ -68,7 +73,9 @@ public sealed class DatabaseWriteNode(IResultRecordStore? store = null) : IVisio
             RunId: context.RunId ?? string.Empty,
             WorkflowScope: context.WorkflowScope,
             NodeId: node.Id,
-            CreatedAt: DateTimeOffset.UtcNow);
+            CreatedAt: DateTimeOffset.UtcNow,
+            PayloadSha256: payloadSha256,
+            RecordKeyNormalizationVersion: recordKeyNormalizationVersion);
 
         var recordId = record.Id;
         var reused = false;
@@ -105,6 +112,9 @@ public sealed class DatabaseWriteNode(IResultRecordStore? store = null) : IVisio
             ("reused", reused),
             (reused ? "requestedRecordKey" : "recordKey", recordKey),
             ("payloadBytes", payloadBytes),
+            ("payloadSha256", payloadSha256),
+            ("recordKeyNormalizationVersion", recordKeyNormalizationVersion),
+            ("imageSummaryOnly", imageSummaryOnly),
             (reused ? "requestedValueType" : "valueType", value.Type.ToString()),
             ("idempotencyConflictPolicy", conflictPolicy),
             ("idempotencyConflict", conflict));
@@ -114,6 +124,9 @@ public sealed class DatabaseWriteNode(IResultRecordStore? store = null) : IVisio
             ["reused"] = VisionValue.Boolean(reused),
             ["dataset"] = VisionValue.String(dataset),
             ["payloadBytes"] = VisionValue.Integer(payloadBytes),
+            ["payloadSha256"] = VisionValue.String(payloadSha256),
+            ["recordKeyNormalizationVersion"] = VisionValue.String(recordKeyNormalizationVersion),
+            ["imageSummaryOnly"] = VisionValue.Boolean(imageSummaryOnly),
             ["idempotencyConflict"] = VisionValue.Boolean(conflict),
             ["diagnostics"] = VisionValue.String(diagnostics)
         };
@@ -124,6 +137,9 @@ public sealed class DatabaseWriteNode(IResultRecordStore? store = null) : IVisio
             ["reused"] = reused,
             [reused ? "requestedRecordKey" : "recordKey"] = recordKey,
             ["payloadBytes"] = payloadBytes,
+            ["payloadSha256"] = payloadSha256,
+            ["recordKeyNormalizationVersion"] = recordKeyNormalizationVersion,
+            ["imageSummaryOnly"] = imageSummaryOnly,
             ["diagnostics"] = diagnostics
         };
         if (conflictMessage is not null)

@@ -7,7 +7,7 @@ namespace VisionStudio.Engine.Algorithms;
 /// <see cref="Label"/> 直接进目录下拉，<see cref="Note"/> 说明用到哪些参数。
 /// </summary>
 public sealed record JlImageOperator(string Key, string Label, string Note, Func<JlImageOperatorArgs, JlImage> Run,
-    JlPixelKind Pixels = JlPixelKind.Any, bool NeedsStructuringElement = false);
+    JlPixelKind Pixels = JlPixelKind.Any, bool NeedsStructuringElement = false, bool NeedsSecondImage = false);
 
 /// <summary>算子对输入像素类型的最低要求。节点在执行前校验并给出可操作的错误，而不是让原生错误码冒出来。</summary>
 public enum JlPixelKind
@@ -74,7 +74,7 @@ public static class JlImageOperations
         ["asin"] = new("asin", "Arc sine", "无参数", a => a.Image.AsinImage(), JlPixelKind.UnitReal),
         ["acos"] = new("acos", "Arc cosine", "无参数", a => a.Image.AcosImage(), JlPixelKind.UnitReal),
         ["atan"] = new("atan", "Arc tangent", "无参数", a => a.Image.AtanImage(), JlPixelKind.Real),
-        ["atan2"] = new("atan2", "Arc tangent (y/x)", "第二输入图", a => a.Image.Atan2Image(a.Secondary), JlPixelKind.Real),
+        ["atan2"] = new("atan2", "Arc tangent (y/x)", "第二输入图", a => a.Image.Atan2Image(a.Secondary), JlPixelKind.Real, NeedsSecondImage: true),
 
         // ── 双图算术 ─────────────────────────────────────────────────
         ["add"] = new("add", "Add images", "第二输入图, mult, offset", a => a.Image.AddImage(a.Secondary, a.Mult, a.Offset)),

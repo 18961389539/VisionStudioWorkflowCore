@@ -32,6 +32,7 @@ internal static class P0CompletionCatalog
                 ], Description: "Object is what MES/HTTP endpoints expect. Array keeps the order and drops the keys, which is handy for positional protocols."),
                 new("pretty", "Pretty Print", "boolean", false, Group: "Fields",
                     Description: "Indent the JSON for logs and reports. Leave off for transport: every space costs bytes on a line running 60 parts per minute."),
+                new("emptyPolicy", "Array Empty Policy", "select", "compact", Group: "Fields", VisibleWhen: new("mode", ["array"]), Options: [new("Compact", "compact"), new("Preserve null slots", "preserveNull")], Description: "compact omits unconnected ports; preserveNull emits null placeholders so fieldCount equals the six-slot array length."),
                 new("maxBytes", "Maximum Payload", "number", 65536, 64, 4194304, 1024, Group: "Limits",
                     Description: "Hard cap on the produced UTF-8 payload. Exceeding it fails instead of sending a truncated packet that the receiver will reject later."),
             ],
@@ -42,7 +43,7 @@ internal static class P0CompletionCatalog
         new("value.jsonParse", "Parse JSON", "Value",
             [Exec, new("document", VisionDataType.Json, Required: false), new("json", VisionDataType.String, Required: false)],
             [
-                new("found", VisionDataType.Boolean),
+                new("found", VisionDataType.Boolean), new("valid", VisionDataType.Boolean),
                 new("value", VisionDataType.Any, Required: false),
                 new("document", VisionDataType.Json, Required: false),
                 new("texts", VisionDataType.StringList, Required: false),
@@ -50,12 +51,13 @@ internal static class P0CompletionCatalog
                 new("text", VisionDataType.String, Required: false),
                 new("boolean", VisionDataType.Boolean, Required: false),
                 new("kind", VisionDataType.String), new("count", VisionDataType.Integer, Required: false),
-                new("diagnostics", VisionDataType.String), Next
+                new("errorCode", VisionDataType.String), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("json", "JSON Text", "textarea", "{}", Group: "Source",
-                    Description: "Fallback payload when the json port is disconnected. A connected json port wins.")
+                    Description: "Fallback payload when no source port is selected. A connected json port wins over this parameter.")
                     { OverriddenByPorts = ["json"] },
+                new("source", "Data Source", "select", "auto", Group: "Source", Options: [new("Auto", "auto"), new("Typed document port", "document"), new("JSON text port", "json"), new("JSON parameter", "parameter")], Description: "auto fails when document and json are both connected; otherwise it prefers document, then json, then the parameter. Diagnostics record the actual source."),
                 new("path", "Path", "text", "$", Group: "Source",
                     Description: "Dot path with optional [n] indexes, for example data.items[0].code. $ or empty reads the whole document. Wildcards and filters are not supported on purpose: an industrial response is read, not queried."),
                 new("type", "Value Type", "select", "auto", Group: "Result", Options:
@@ -64,13 +66,18 @@ internal static class P0CompletionCatalog
                     new("Number", "number"),
                     new("Text", "text"),
                     new("Boolean", "boolean")
-                ], Description: "Auto returns text/number/boolean as-is and gives objects/arrays back as raw JSON text (parse them again). Forcing number or boolean converts numeric/boolean-looking text and fails when it cannot."),
+                ], Description: "Auto returns text/number/boolean as-is and gives objects/arrays back as raw JSON text. Forced number/boolean conversion is invariant and full-string; type mismatch returns found=true, valid=false, errorCode=typeMismatch and no converted value. Null is never converted to zero or false."),
                 new("required", "Require The Path", "boolean", true, Group: "Result",
                     Description: "When the path is missing: true fails the run (default, a silent null always explodes three nodes later); false returns found=false for flow.if to branch on."),
                 new("maxBytes", "Maximum Payload", "number", 1048576, 64, 16777216, 1024, Group: "Result",
                     Description: "Reject oversized payloads before parsing. A 100 MB HTML error page should not become a JSON parse attempt."),
+                new("maxDepth", "Maximum Nesting Depth", "number", 64, 1, 256, 1, Group: "Limits",
+                    Description: "Maximum object/array nesting depth. Exceeding it terminates parsing with errorCode=maxDepthExceeded."),
+                new("duplicatePropertyPolicy", "Duplicate Property Policy", "select", "fail", Group: "Result",
+                    Options: [new("Fail", "fail"), new("Keep First", "first"), new("Keep Last", "last")],
+                    Description: "How repeated object property names are handled. fail terminates parsing with errorCode=duplicateKey; first/last select that occurrence."),
             ],
-            "Read one field out of a JSON response. Wire: document (typed) or json (text) -> found/value/document/texts/number/text/boolean/kind/count. Path syntax is $.a.b[0].c; objects and arrays come back as raw JSON text plus a typed Json document, arrays of strings also produce a StringList on texts, so a second node can drill further without re-parsing text. Missing paths fail by default, and forcing a type that the value cannot represent also fails instead of returning null. Failures: empty input, invalid JSON, payload above maxBytes.",
+            "Read one field out of a JSON response. Wire: document (typed) or json (text) -> found/value/document/texts/number/text/boolean/kind/count. Path syntax is $.a.b[0].c; objects and arrays come back as raw JSON text plus a typed Json document, arrays of strings also produce a StringList on texts, so a second node can drill further without re-parsing text. Missing paths fail by default, and forcing a type that the value cannot represent also fails instead of returning null. Failures: empty input, invalid JSON, payload above maxBytes, nesting above maxDepth, or duplicate keys under the fail policy.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
             Actions: []),
 
@@ -79,7 +86,7 @@ internal static class P0CompletionCatalog
              new("sequence", VisionDataType.Integer, Required: false)],
             [
                 new("found", VisionDataType.Boolean), new("index", VisionDataType.Integer),
-                new("total", VisionDataType.Integer), new("cellCount", VisionDataType.Integer),
+                new("total", VisionDataType.Integer), new("generation", VisionDataType.Integer), new("exhausted", VisionDataType.Boolean), new("cellCount", VisionDataType.Integer),
                 new("header", VisionDataType.String), new("columnsJson", VisionDataType.String),
                 new("row", VisionDataType.String), new("rowJson", VisionDataType.String),
                 new("rowValues", VisionDataType.StringList, Required: false),
@@ -139,7 +146,7 @@ internal static class P0CompletionCatalog
                 ], Description: "Webhook for MES or your own alarm platform, WeCom for the on-call group chat, SMTP when quality or maintenance needs a written record."),
                 new("url", "Webhook URL", "text", string.Empty, Group: "Channel",
                     VisibleWhen: new("channel", ["webhook", "wecom"]),
-                    Description: "Absolute http/https endpoint. A connected url port overrides it, so the address can come from a recipe or a device tag."),
+                    Description: "Absolute http/https endpoint; other protocols are rejected. A connected url port overrides it. URL tokens and user-info are redacted from diagnostics, response bodies and failures."),
                 new("subject", "Subject", "text", "VisionStudio alarm", Group: "Message",
                     Description: "First line of the notification and the mail subject. Keep it short: the on-call engineer reads the subject on a lock screen."),
                 // 2026-10-29：执行器一直在读这个键（BuildBody 里写进 webhook JSON 的 source 字段），
@@ -175,7 +182,7 @@ internal static class P0CompletionCatalog
                 new("smtpSsl", "SMTP TLS", "boolean", true, Group: "SMTP",
                     VisibleWhen: new("channel", ["smtp"]), Description: "Enable TLS. Turn off only for a local relay that does not offer it."),
             ],
-            "Send an alarm out of the flow: Webhook (structured JSON POST), WeCom group robot (text message) or SMTP mail. Wire: optional message/value/url -> delivered/attempts/statusCode. A connected value is serialized into the webhook payload (images degrade to width/height). Only recoverable failures are retried; 4xx fails immediately. Undelivered notifications fail the run unless failOnError is off. This node declares an external side effect, so debug runs require approval. Failures: bad URL, missing SMTP fields, payload above maxPayloadBytes, or an undelivered message.",
+            "Send an alarm out of the flow: Webhook (structured JSON POST), WeCom group robot (text message) or SMTP mail. Wire: optional message/value/url -> delivered/attempts/statusCode. A connected value is serialized into the webhook payload (images degrade to width/height). Only recoverable failures are retried; 4xx fails immediately. Undelivered notifications fail the run unless failOnError is off. SMTP passwords, URL credentials/tokens and credential-shaped values are redacted from diagnostics, response bodies and exceptions. This node declares an external side effect, so debug runs require approval. Failures: bad URL, missing SMTP fields, payload above maxPayloadBytes, or an undelivered message.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: false, SupportsRunNode: false),
             Actions: [new(NodeActionKind.ExternalCall, NodeActionCompletion.Synchronous)]),
 
@@ -186,7 +193,7 @@ internal static class P0CompletionCatalog
             [
                 new("count", VisionDataType.Integer), new("total", VisionDataType.Integer),
                 new("passCount", VisionDataType.Integer), new("failCount", VisionDataType.Integer),
-                new("rate", VisionDataType.Double), new("reused", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next
+                new("rate", VisionDataType.Double), new("reused", VisionDataType.Boolean), new("lastSnapshotCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("counterId", "Counter Id", "text", "counter", Group: "Counter",
@@ -195,7 +202,7 @@ internal static class P0CompletionCatalog
                     Description: "Added to count on every execution; use -1 for a remaining-parts countdown."),
                 new("durability", "Persistence", "select", "snapshot", Group: "Counter",
                     Options: [new("Periodic Snapshot", "snapshot"), new("Durable per Event", "durable")],
-                    Description: "Durable mode uses workflow scope and a non-empty eventId. Reuse it for retries of the same operation. Debug runs preview the change."),
+                    Description: "Durable mode uses workflow scope and a non-empty eventId. Same-ID retries return the original result; a different step/pass/reset/reset-policy operation fails with eventConflict. Debug runs preview the change."),
                 new("scope", "Scope", "select", "workflow", Group: "Counter", Options:
                 [
                     new("Workflow (survives across runs)", "workflow"),
@@ -205,8 +212,10 @@ internal static class P0CompletionCatalog
                     Description: "Clear the counter when the pass input is true, then count this execution as the first one. This is the reset point of a consecutive-NG counter."),
                 new("resetOnFail", "Reset On Fail", "boolean", false, Group: "Reset",
                     Description: "Clear the counter when the pass input is false, then count this execution. Use it for a consecutive-OK or no-fault streak."),
+                new("resetScope", "Reset Scope", "select", "streak", Group: "Reset", Options: [new("Streak only", "streak"), new("All statistics", "all")], Description: "streak clears only count and preserves total/passCount/failCount; all clears every statistic before counting the current event."),
+                new("flushOnRunEnd", "Flush Snapshot", "boolean", false, Group: "Persistence", Description: "Snapshot mode flushes before reporting success and emits lastSnapshotCount. A flush failure fails the node and does not advance lastSnapshotCount; durable debug previews never flush or commit."),
             ],
-            "Cross-run counter with yield statistics. Reset runs before incrementing. Snapshot mode uses the host's periodic snapshots. Durable mode commits each new event ID within a workflow and counter ID before reporting success. A retry returns the original result with reused=true.",
+            "Cross-run counter with yield statistics. Reset runs before incrementing. Snapshot mode uses the host's periodic snapshots. Durable mode commits each new event ID within a workflow and counter ID before reporting success. A retry returns the original result with reused=true. Event identity, counter values and yield statistics are committed atomically; reusing an event ID with a different operation fingerprint fails with eventConflict without changing any counts.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: false),
             Actions: [])
     ];

@@ -19,6 +19,7 @@ internal static class FlatFieldCorrection
         var minimum = Number(node, "minGain", 1, 0.000001, 65535);
         var maximum = Number(node, "maxGain", 0, 0, 1e6);
         var maxStd = Number(node, "maxCorrectedStd", 0, 0, 65535);
+        var maxSaturatedRatio = Number(node, "maxSaturatedRatio", 0, 0, 1);
         var positive = node.GetBool("requirePositiveGain", true);
         VisionImage? dark = null, bright = null;
         if (mode != "gain")
@@ -39,22 +40,65 @@ internal static class FlatFieldCorrection
         using var gain = mode == "offset" ? image.ScaleImage(0d, 1d) : brightImage.SubImage(darkImage, 1d, 0d);
         using var domain = gain.GetDomain();
         var gainStats = DefectNodeHelpers.Statistics(gain, domain);
+        var invalidGainCount = 0;
+        var invalidGainX = -1;
+        var invalidGainY = -1;
+        var invalidGainReason = string.Empty;
         if (mode != "offset")
         {
             if (maximum > 0 && maximum <= minimum) throw new InvalidOperationException("maxGain must be 0 or greater than minGain.");
             using var gainMat = JLVisionImages.ToMat(gain); gainMat.GetArray(out float[] pixels);
-            foreach (var value in pixels)
+            for (var index = 0; index < pixels.Length; index++)
             {
                 token.ThrowIfCancellationRequested();
-                if (!float.IsFinite(value) || (positive ? value <= minimum : Math.Abs(value) <= minimum))
-                    throw new InvalidOperationException("Flat-field gain violates finite/positive/minimum-magnitude protection.");
-                if (maximum > 0 && Math.Abs(value) > maximum) throw new InvalidOperationException("Flat-field gain exceeds maxGain.");
+                var value = pixels[index];
+                var reason = !float.IsFinite(value) ? "non-finite"
+                    : positive ? value <= minimum ? "non-positive-or-below-minGain" : string.Empty
+                    : Math.Abs(value) <= minimum ? "below-minimum-magnitude" : string.Empty;
+                if (reason.Length == 0 && maximum > 0 && Math.Abs(value) > maximum) reason = "above-maxGain";
+                if (reason.Length == 0) continue;
+                invalidGainCount++;
+                if (invalidGainX < 0)
+                {
+                    invalidGainX = index % source.Width;
+                    invalidGainY = index / source.Width;
+                    invalidGainReason = reason;
+                }
             }
+            if (invalidGainCount > 0)
+                throw new InvalidOperationException($"Flat-field gain protection rejected {invalidGainCount} pixels; first=({invalidGainX},{invalidGainY}) reason={invalidGainReason}.");
         }
         var autoTarget = target == 0;
         if (autoTarget) target = mode == "offset" ? DefectNodeHelpers.Statistics(darkImage, domain).Mean : gainStats.Mean;
         using var signal = image.SubImage(darkImage, 1d, 0d);
         using var corrected = mode == "offset" ? signal.ScaleImage(1, target) : signal.DivImage(gain, target, 0);
+        long saturatedPixels = 0;
+        double maxClipAmount = 0;
+        var pixelCount = (long)source.Width * source.Height;
+        if (outputType == "byte")
+        {
+            using var correctedMat = JLVisionImages.ToMat(corrected);
+            correctedMat.GetArray(out float[] correctedPixels);
+            var channels = Math.Max(1, correctedMat.Channels());
+            for (var index = 0; index < correctedPixels.Length; index += channels)
+            {
+                token.ThrowIfCancellationRequested();
+                var clipped = false;
+                for (var channel = 0; channel < channels && index + channel < correctedPixels.Length; channel++)
+                {
+                    var value = correctedPixels[index + channel];
+                    var clip = Math.Max(0d, Math.Max(-value, value - 255d));
+                    if (clip <= 0) continue;
+                    clipped = true;
+                    maxClipAmount = Math.Max(maxClipAmount, clip);
+                }
+                if (clipped) saturatedPixels++;
+            }
+        }
+        var saturatedRatio = pixelCount == 0 ? 0 : (double)saturatedPixels / pixelCount;
+        if (outputType == "byte" && maxSaturatedRatio > 0 && saturatedRatio > maxSaturatedRatio)
+            throw new InvalidOperationException(
+                $"Flat-field byte output saturates {saturatedPixels} pixels (ratio {saturatedRatio:P2}, max clip {maxClipAmount:0.####}), above maxSaturatedRatio={maxSaturatedRatio}.");
         using var output = corrected.ConvertImageType(outputType);
         var stats = DefectNodeHelpers.Statistics(output, domain);
         if (maxStd > 0 && stats.Deviation > maxStd) throw new InvalidOperationException("Corrected output exceeds maxCorrectedStd.");
@@ -62,14 +106,26 @@ internal static class FlatFieldCorrection
         var diagnostics = NodeCompletionGuards.BuildDiagnostics(node.Type, NodeCompletionGuards.DiagnosticsLevel(node), 0, 1,
             ("referenceMode", mode), ("darkSkipped", dark is null), ("clipLow", low), ("clipHigh", high),
             ("gainMean", gainStats.Mean), ("targetMean", target), ("autoTarget", autoTarget), ("outputType", outputType),
-            ("correctedMean", stats.Mean), ("correctedStd", stats.Deviation));
+            ("invalidGainCount", invalidGainCount), ("invalidGainX", invalidGainX), ("invalidGainY", invalidGainY),
+            ("correctedMean", stats.Mean), ("correctedStd", stats.Deviation),
+            ("saturatedPixelCount", saturatedPixels), ("saturatedRatio", saturatedRatio),
+            ("maxClipAmount", maxClipAmount), ("maxSaturatedRatio", maxSaturatedRatio));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
             ["image"] = VisionValue.Image(VisionImage.Own(JLVisionImages.ToMat(output))), ["gainMean"] = VisionValue.Double(gainStats.Mean),
             ["correctedMean"] = VisionValue.Double(stats.Mean), ["correctedMin"] = VisionValue.Double(stats.Min),
-            ["correctedMax"] = VisionValue.Double(stats.Max), ["correctedStd"] = VisionValue.Double(stats.Deviation), ["diagnostics"] = VisionValue.String(diagnostics)
+            ["correctedMax"] = VisionValue.Double(stats.Max), ["correctedStd"] = VisionValue.Double(stats.Deviation),
+            ["invalidGainCount"] = VisionValue.Integer(invalidGainCount),
+            ["invalidGainX"] = VisionValue.Integer(invalidGainX), ["invalidGainY"] = VisionValue.Integer(invalidGainY),
+            ["saturatedPixelCount"] = VisionValue.Integer(saturatedPixels),
+            ["saturatedRatio"] = VisionValue.Double(saturatedRatio),
+            ["maxClipAmount"] = VisionValue.Double(maxClipAmount),
+            ["diagnostics"] = VisionValue.String(diagnostics)
         }, new Dictionary<string, object?> { ["referenceMode"] = mode, ["targetMean"] = target, ["outputType"] = outputType,
-            ["gainMean"] = gainStats.Mean, ["correctedMean"] = stats.Mean, ["diagnostics"] = diagnostics }));
+            ["gainMean"] = gainStats.Mean, ["correctedMean"] = stats.Mean, ["saturatedPixelCount"] = saturatedPixels,
+            ["invalidGainCount"] = invalidGainCount, ["invalidGainX"] = invalidGainX, ["invalidGainY"] = invalidGainY,
+            ["saturatedRatio"] = saturatedRatio, ["maxClipAmount"] = maxClipAmount,
+            ["maxSaturatedRatio"] = maxSaturatedRatio, ["diagnostics"] = diagnostics }));
     }
 
     private static JlImage Prepare(VisionImage source, double low, double high, CancellationToken token)

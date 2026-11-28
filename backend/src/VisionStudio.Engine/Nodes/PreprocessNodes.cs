@@ -103,7 +103,14 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-var mat = new Mat();
+        var availableChannels = source.Channels() == 1
+            ? new[] { "gray", "average", "max" }
+            : source.Channels() == 4
+                ? new[] { "gray", "average", "max", "blue", "green", "red", "hue", "saturation", "value" }
+                : new[] { "gray", "average", "max", "blue", "green", "red", "hue", "saturation", "value" };
+        if ((channel is "blue" or "green" or "red" or "hue" or "saturation" or "value") && source.Channels() == 1)
+            throw new InvalidOperationException($"image.channel channel '{channel}' requires a color image; it is unavailable for a single-channel input before pixel reads; available channels: {string.Join(", ", availableChannels)}.");
+        var mat = new Mat();
 
         if (channel is "hue" or "saturation" or "value")
         {
@@ -186,6 +193,10 @@ var mat = new Mat();
         JLVisionOperators.MinMax(mat, out double minIntensity, out double maxIntensity);
         var meanIntensity = JLVisionOperators.Mean(mat, out _);
         var diag = CoordinateValidation.Diagnostics(Type, ("channel", channel), ("weights", weights), ("inputChannels", source.Channels()), ("outputChannels", mat.Channels()),
+            ("inputChannelOrder", source.Channels() is 3 or 4 ? "BGR(A)" : "gray"), ("alphaIgnored", source.Channels() == 4),
+            ("hueRangeDeg", channel == "hue" ? "0..180 (OpenCV 8-bit HSV folded range)" : null),
+            ("hueWrapSemantics", channel == "hue" ? "linear in folded 0..180 range; 359deg and 1deg both map near the wrap and require circular handling downstream" : null),
+            ("availableChannels", availableChannels),
             ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity),
             ("width", mat.Width), ("height", mat.Height));
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -234,6 +245,8 @@ internal static class GaussianBlurFilter
             "wrap" => BorderTypes.Wrap,
             _ => throw new InvalidOperationException($"{nodeType} borderType must be default, constant, replicate, reflect or wrap.")
         };
+        var resolvedSigmaX = sigmaX > 0 ? sigmaX : 0.3 * ((kernel - 1) * 0.5 - 1) + 0.8;
+        var resolvedSigmaY = sigmaY > 0 ? sigmaY : resolvedSigmaX;
         cancellationToken.ThrowIfCancellationRequested();
         var roi = node.GetRoi();
         var blurred = PreprocessImageHelpers.GaussianWithBorder(source, kernel, sigmaX, sigmaY, border, borderName == "default");
@@ -241,7 +254,9 @@ internal static class GaussianBlurFilter
         JLVisionOperators.MinMax(output, out double minIntensity, out double maxIntensity);
         var meanIntensity = JLVisionOperators.Mean(output);
         var diag = CoordinateValidation.Diagnostics(nodeType, ("kernelSize", kernel), ("requestedKernelSize", requested),
-            ("sigmaX", sigmaX), ("sigmaY", sigmaY), ("borderType", borderName),
+            ("sigmaX", sigmaX), ("sigmaY", sigmaY), ("resolvedSigmaX", resolvedSigmaX), ("resolvedSigmaY", resolvedSigmaY),
+            ("sigmaYRule", sigmaY > 0 ? "explicit" : "copy resolved sigmaX"), ("sigmaXRule", sigmaX > 0 ? "explicit" : "derived from kernelSize"),
+            ("borderType", borderName), ("roiOutsideUnchanged", roi is not null),
             ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity),
             ("width", output.Width), ("height", output.Height), ("channels", channels));
         return new NodeExecutorResult(
@@ -285,13 +300,14 @@ internal static class MedianBlurFilter
         if (kernel > Math.Max(image.Width, image.Height) * 2 + 1)
             throw new InvalidOperationException($"{nodeType} kernelSize is unreasonably large for the image dimensions.");
         var borderName = node.GetString("borderType", "replicate").Trim().ToLowerInvariant();
+        if (borderName is "default" or "wrap")
+            throw new InvalidOperationException($"{nodeType} median supports constant, replicate or reflect borderType; '{borderName}' is Gaussian-only.");
         var border = borderName switch
         {
             "constant" => BorderTypes.Constant,
             "replicate" => BorderTypes.Replicate,
             "reflect" => BorderTypes.Reflect,
-            "wrap" => BorderTypes.Wrap,
-            _ => throw new InvalidOperationException($"{nodeType} borderType must be constant, replicate, reflect or wrap.")
+            _ => throw new InvalidOperationException($"{nodeType} borderType must be constant, replicate or reflect.")
         };
         var roi = node.GetRoi();
         cancellationToken.ThrowIfCancellationRequested();
@@ -322,6 +338,8 @@ public sealed class ImageFilterNode : IVisionNodeExecutor
         if (image.Width < 1 || image.Height < 1) throw new InvalidOperationException(Type + " requires a non-empty image.");
         var method = node.GetString("method", "gaussian").Trim().ToLowerInvariant();
         if (method is not ("gaussian" or "median")) throw new InvalidOperationException("image.filter method must be gaussian or median.");
+        if (method == "median" && (node.GetDouble("sigmaX", 0) != 0 || node.GetDouble("sigmaY", 0) != 0))
+            throw new InvalidOperationException("image.filter method=median does not use sigmaX/sigmaY; set both to 0 or switch to gaussian.");
         var requested = node.GetInt("kernelSize", 5);
         if (requested is < 1 or > 31) throw new InvalidOperationException("image.filter kernelSize must be between 1 and 31.");
         var inner = method == "gaussian"
@@ -352,6 +370,15 @@ public sealed class MorphologyNode : IVisionNodeExecutor
 
         var operation = node.GetString("operation", "open").Trim();
         var normalizedOperation = operation.ToLowerInvariant();
+        var inputMode = node.GetString("inputMode", "auto").Trim().ToLowerInvariant();
+        if (inputMode is not ("auto" or "binary" or "gray"))
+            throw new InvalidOperationException("image.morphology inputMode must be auto, binary or gray.");
+        var maskSemantics = node.GetString("maskSemantics", "nonzero").Trim().ToLowerInvariant();
+        if (maskSemantics is not ("nonzero" or "binaryonly"))
+            throw new InvalidOperationException("image.morphology maskSemantics must be nonzero or binaryOnly.");
+        var sourceForContract = context.RequireImage("image").Mat;
+        if (maskSemantics == "binaryonly" && !PreprocessP1Diagnostics.IsBinary(sourceForContract))
+            throw new InvalidOperationException("image.morphology maskSemantics=binaryOnly requires pixels to contain at most one nonzero value; threshold first or select nonzero semantics.");
         if (normalizedOperation is "whitetophat" or "blackbottomhat" or "gradient")
         {
             var grayOperation = normalizedOperation switch
@@ -409,6 +436,10 @@ public sealed class MorphologyNode : IVisionNodeExecutor
             nonZeroCount = JLVisionOperators.CountNonZero(nzGray);
         }
         var diag = CoordinateValidation.Diagnostics(Type, ("operation", operation), ("kernelSize", kernel), ("iterations", iterations), ("shape", shape),
+            ("inputMode", inputMode), ("maskSemantics", maskSemantics), ("nonzeroValues", PreprocessP1Diagnostics.NonZeroValues(source)),
+            ("kernelAnchor", "center"), ("borderType", "OpenCV default (reflect101)"),
+            ("openCloseEquivalentToSequential", true), ("roiOutsidePreserved", roi is not null),
+            ("statisticsIncludeRoiOutside", false), ("colorToGray", "BGR(A)->BT.601 gray for gray operations"),
             ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity), ("stdIntensity", stdIntensity), ("nonZeroCount", nonZeroCount),
             ("width", output.Width), ("height", output.Height));
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -464,7 +495,12 @@ internal static class AdaptiveThresholdCore
                 domain.Mask, cancellationToken);
 
             var fg = domain.PixelCount > 0 ? (double)JLVisionOperators.CountNonZero(output) / domain.PixelCount : 0;
-            var diag = CoordinateValidation.Diagnostics(nodeType, ("blockSize", blockSize), ("c", c), ("method", method), ("invert", invert), ("foregroundRatio", fg), ("domainPixels", domain.PixelCount), ("autoGray", converted));
+            var diag = CoordinateValidation.Diagnostics(nodeType, ("blockSize", blockSize), ("c", c), ("method", method), ("invert", invert), ("foregroundRatio", fg), ("domainPixels", domain.PixelCount), ("autoGray", converted),
+                ("inputBitDepthUsed", inputBitDepth?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? (source.Depth() == MatType.CV_16U ? "16" : "8")),
+                ("byteScale", source.Depth() == MatType.CV_16U ? PreprocessImageHelpers.ByteScale(inputBitDepth) : 1d),
+                ("roiBounds", $"{domain.Rect.X},{domain.Rect.Y},{domain.Rect.Width},{domain.Rect.Height}"),
+                ("neighborhoodPadding", blockSize / 2), ("adaptiveNeighborhood", "uses full-image neighbours outside ROI; result is masked back to ROI"),
+                ("borderType", "OpenCV adaptive-threshold default"), ("foregroundDenominator", "ROI pixels"));
             cancellationToken.ThrowIfCancellationRequested();
             return (new NodeExecutorResult(
                 new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["foregroundRatio"] = VisionValue.Double(fg), ["diagnostics"] = VisionValue.String(diag) },
@@ -537,7 +573,11 @@ internal static class OtsuThresholdCore
             output = PreprocessImageHelpers.ApplyMask(binary, domain.Mask, cancellationToken);
 
             var fg2 = domain.PixelCount > 0 ? (double)JLVisionOperators.CountNonZero(output) / domain.PixelCount : 0;
-            var diag2 = CoordinateValidation.Diagnostics(nodeType, ("threshold", computed), ("invert", invert), ("foregroundRatio", fg2), ("domainPixels", domain.PixelCount), ("autoGray", converted));
+            var diag2 = CoordinateValidation.Diagnostics(nodeType, ("threshold", computed), ("invert", invert), ("foregroundRatio", fg2), ("domainPixels", domain.PixelCount), ("autoGray", converted),
+                ("inputBitDepthUsed", inputBitDepth?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? (source.Depth() == MatType.CV_16U ? "16" : "8")),
+                ("byteScale", source.Depth() == MatType.CV_16U ? PreprocessImageHelpers.ByteScale(inputBitDepth) : 1d),
+                ("roiBounds", $"{domain.Rect.X},{domain.Rect.Y},{domain.Rect.Width},{domain.Rect.Height}"),
+                ("otsuStatistics", "ROI pixels only; empty ROI fails before estimation"), ("foregroundDenominator", "ROI pixels"));
             cancellationToken.ThrowIfCancellationRequested();
             return (new NodeExecutorResult(
                 new Dictionary<string, VisionValue>

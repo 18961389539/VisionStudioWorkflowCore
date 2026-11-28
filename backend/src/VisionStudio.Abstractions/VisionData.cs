@@ -190,7 +190,12 @@ public readonly record struct VisionDeviceTagValue(
     object? Value,
     string Quality,
     DateTimeOffset Timestamp);
-public readonly record struct VisionMeasurement(double Value, string Unit, string Kind);
+public readonly record struct VisionMeasurement(double Value, string Unit, string Kind)
+{
+    public string? Start { get; init; }
+    public string? End { get; init; }
+    public string? Metric { get; init; }
+}
 
 public readonly record struct VisionRectangle2D(double X, double Y, double Width, double Height, double AngleDeg = 0);
 public readonly record struct VisionCircle(double X, double Y, double Radius);
@@ -216,7 +221,9 @@ public readonly record struct VisionDetection(
     VisionCircle Circle,
     VisionRectangle2D BoundingBox,
     double? Confidence = null,
-    int? ClassId = null);
+    int? ClassId = null,
+    string? CoordinateFrame = null,
+    int? SourceIndex = null);
 
 /// <summary>表格值：列名 + 行（单元格保持 CSV 的文本表示）。</summary>
 public sealed record VisionTable(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows);

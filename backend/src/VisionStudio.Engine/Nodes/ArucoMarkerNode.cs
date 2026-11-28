@@ -23,6 +23,7 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
     public string Type => "recognition.aruco";
 
     private readonly record struct MarkerPose(int Id, double[] Rvec, double[] Tvec, double[] Matrix, double Distance);
+    private sealed record RejectedMarkerReason(int index, string reason);
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
@@ -39,7 +40,7 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
         if (maxMarkers is < 1 or > 1000)
             throw new InvalidOperationException("recognition.aruco maxMarkers must be within 1..1000.");
         var parameters = BuildDetectorParameters(node);
-        var calibration = ReadCalibration(context, node);
+        var calibration = ReadCalibration(context, node, source.Width, source.Height);
 
         Point2f[][] corners;
         int[] ids;
@@ -61,6 +62,13 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
 
         var detections = BuildDetections(corners, ids, confidences);
         var cornersJson = JsonSerializer.Serialize(corners.Select(quad => quad.Select(point => new { x = point.X, y = point.Y })));
+        var duplicateMarkerIds = ids.GroupBy(id => id).Where(group => group.Count() > 1)
+            .Select(group => group.Key).OrderBy(id => id).ToArray();
+        var rejectedReasons = ClassifyRejected(rejected, source.Width, source.Height,
+            node.GetDouble("minMarkerPerimeterRate", 0.03), node.GetInt("minDistanceToBorder", 3),
+            node.GetString("cornerRefinement", "none"));
+        var rejectedByReason = rejectedReasons.GroupBy(item => item.reason)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
 
         var poses = new List<MarkerPose>();
         var poseFailures = 0;
@@ -70,16 +78,19 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
             var markerSize = node.GetDouble("markerSize", 50);
             if (!double.IsFinite(markerSize) || markerSize is < 0.001 or > 1_000_000)
                 throw new InvalidOperationException("recognition.aruco markerSize must be finite and within 0.001..1000000.");
-            poseUnit = node.GetString("markerSizeUnit", "mm").Trim();
-            if (poseUnit.Length is < 1 or > 16)
-                throw new InvalidOperationException("recognition.aruco markerSizeUnit must be 1..16 characters.");
-            for (var index = 0; index < ids.Length; index++)
+            poseUnit = node.GetString("markerSizeUnit", "mm").Trim().ToLowerInvariant();
+            if (poseUnit is not ("mm" or "cm" or "m" or "um" or "in"))
+                throw new InvalidOperationException("recognition.aruco markerSizeUnit must be mm, cm, m, um or in.");
+            if (duplicateMarkerIds.Length == 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (TrySolvePose(calibration, corners[index], markerSize, ids[index], out var pose))
-                    poses.Add(pose);
-                else
-                    poseFailures++;
+                for (var index = 0; index < ids.Length; index++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (TrySolvePose(calibration, corners[index], markerSize, ids[index], out var pose))
+                        poses.Add(pose);
+                    else
+                        poseFailures++;
+                }
             }
         }
 
@@ -97,9 +108,13 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
                     ("dictionary", dictionaryType.ToString()),
                     ("count", ids.Length),
                     ("rejectedCount", rejected?.Length ?? 0),
+                    ("rejectedByReason", rejectedByReason),
                     ("poseAvailable", poseAvailable),
                     ("poseCount", poses.Count),
                     ("poseFailures", poseFailures),
+                    ("duplicateMarkerIds", duplicateMarkerIds),
+                    ("calibrationImageWidth", calibration?.ImageWidth ?? 0),
+                    ("calibrationImageHeight", calibration?.ImageHeight ?? 0),
                     ("elapsedMs", timer.Elapsed.TotalMilliseconds));
                 var outputs = new Dictionary<string, VisionValue>
                 {
@@ -109,7 +124,9 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
                     ["detections"] = VisionValue.Detections(detections),
                     ["corners"] = VisionValue.String(cornersJson),
                     ["poseAvailable"] = VisionValue.Boolean(poseAvailable),
+                    ["duplicateMarkerIds"] = VisionValue.String(JsonSerializer.Serialize(duplicateMarkerIds)),
                     ["rejectedCount"] = VisionValue.Integer(rejected?.Length ?? 0),
+                    ["rejectedReasonsJson"] = VisionValue.String(JsonSerializer.Serialize(rejectedReasons)),
                     ["overlay"] = VisionValue.Image(image),
                     ["diagnostics"] = VisionValue.String(diagnostics)
                 };
@@ -132,9 +149,13 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
                     ["dictionary"] = dictionaryType.ToString(),
                     ["count"] = ids.Length,
                     ["rejectedCount"] = rejected?.Length ?? 0,
+                    ["rejectedByReason"] = rejectedByReason,
                     ["poseAvailable"] = poseAvailable,
                     ["poseCount"] = poses.Count,
                     ["poseFailures"] = poseFailures,
+                    ["duplicateMarkerIds"] = duplicateMarkerIds,
+                    ["calibrationImageWidth"] = calibration?.ImageWidth ?? 0,
+                    ["calibrationImageHeight"] = calibration?.ImageHeight ?? 0,
                     ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                     ["algorithmBackend"] = "opencv",
                     ["recognitionBackend"] = "opencv",
@@ -216,7 +237,7 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
                 "recognition.aruco dictionary must be Dict4X4_50, Dict5X5_100, Dict6X6_250, Dict7X7_50, DictArucoOriginal, DictAprilTag_36h10 or DictAprilTag_36h11.")
         };
 
-    private static CameraCalibrationModel? ReadCalibration(NodeExecutionContext context, NodeDefinition node)
+    private static CameraCalibrationModel? ReadCalibration(NodeExecutionContext context, NodeDefinition node, int imageWidth, int imageHeight)
     {
         var json = context.TryGetValue("calibrationJson", out var connected)
             ? connected.Require<string>("calibrationJson")
@@ -240,6 +261,9 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
             model.DistCoeffs is null || model.DistCoeffs.Length is not (4 or 5 or 8 or 12 or 14) ||
             model.DistCoeffs.Any(value => !double.IsFinite(value)))
             throw new InvalidOperationException("recognition.aruco calibrationJson must contain a finite 3x3 cameraMatrix with positive focal lengths and 4/5/8/12/14 distCoeffs.");
+        if (model.ImageWidth <= 0 || model.ImageHeight <= 0 || model.ImageWidth != imageWidth || model.ImageHeight != imageHeight)
+            throw new InvalidOperationException(
+                $"recognition.aruco calibration image size {model.ImageWidth}x{model.ImageHeight} does not match input {imageWidth}x{imageHeight}; recalibrate or use the matching image resolution.");
         if (model.LensModel == "opencv_fisheye" || model.NativeCameraType == "area_scan_telecentric_polynomial")
             throw new InvalidOperationException("recognition.aruco pose supports pinhole perspective calibration only; undistort/rectify fisheye or telecentric images first.");
         return model;
@@ -290,6 +314,43 @@ public sealed class ArucoMarkerNode : IVisionNodeExecutor
         var distance = Math.Sqrt(tvec[0] * tvec[0] + tvec[1] * tvec[1] + tvec[2] * tvec[2]);
         pose = new MarkerPose(id, rvec, tvec, matrix, distance);
         return true;
+    }
+
+    private static List<RejectedMarkerReason> ClassifyRejected(Point2f[][]? rejected, int width, int height,
+        double minPerimeterRate, int minBorderDistance, string cornerRefinement)
+    {
+        var result = new List<RejectedMarkerReason>();
+        if (rejected is null) return result;
+        var refinementEnabled = !string.Equals(cornerRefinement, "none", StringComparison.OrdinalIgnoreCase);
+        for (var index = 0; index < rejected.Length; index++)
+        {
+            var quad = rejected[index];
+            if (quad is null || quad.Length != 4)
+            {
+                result.Add(new(index, "corner-refinement-failed"));
+                continue;
+            }
+            var perimeter = PolygonPerimeter(quad);
+            var area = PolygonArea(quad);
+            if (!double.IsFinite(perimeter) || !double.IsFinite(area) || area < 1e-6)
+            {
+                result.Add(new(index, refinementEnabled ? "corner-refinement-failed" : "geometry-invalid"));
+                continue;
+            }
+            var borderDistance = quad.Min(point => Math.Min(Math.Min(point.X, point.Y), Math.Min(width - 1 - point.X, height - 1 - point.Y)));
+            if (borderDistance < minBorderDistance)
+            {
+                result.Add(new(index, "border-distance"));
+                continue;
+            }
+            if (perimeter < minPerimeterRate * Math.Max(width, height))
+            {
+                result.Add(new(index, "size"));
+                continue;
+            }
+            result.Add(new(index, "dictionary-decode"));
+        }
+        return result;
     }
 
     private static List<VisionDetection> BuildDetections(Point2f[][] corners, int[] ids, float[] confidences)

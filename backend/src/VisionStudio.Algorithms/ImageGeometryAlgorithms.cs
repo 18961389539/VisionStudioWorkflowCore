@@ -5,9 +5,11 @@ namespace VisionStudio.Engine.Algorithms;
 internal static class ImageGeometryAlgorithms
 {
     internal sealed record GradientResult(
-        Mat Magnitude, Mat? Direction, double Mean, double Maximum, double Percentile99);
+        Mat Magnitude, Mat? Direction, double Mean, double Maximum, double Percentile99,
+        int ZeroGradientPixels, double OutputScale);
 
-    internal sealed record DistanceResult(Mat Image, int ForegroundCount, double Maximum, double Mean);
+    internal sealed record DistanceResult(Mat Image, int ForegroundCount, double Maximum, double Mean,
+        int BorderTouchingCount, double BorderAffectedRatio);
 
     internal static Mat Flip(Mat source, FlipMode mode)
     {
@@ -75,8 +77,18 @@ internal static class ImageGeometryAlgorithms
                 using var shifted = new Mat();
                 Cv2.Add(directionOut, Scalar.All(360), shifted);
                 shifted.CopyTo(directionOut, negativeMask);
+                using var zeroGradient = new Mat();
+                Cv2.Compare(magnitude, Scalar.All(0), zeroGradient, CmpTypes.LE);
+                directionOut.SetTo(0, zeroGradient);
             }
-            return new GradientResult(magnitudeOut, directionOut, mean, maximum, percentile);
+            var zeroGradientPixels = 0;
+            using (var zero = new Mat())
+            {
+                Cv2.Compare(magnitude, Scalar.All(0), zero, CmpTypes.LE);
+                zeroGradientPixels = Cv2.CountNonZero(zero);
+            }
+            var outputScale = scaleMode == "stretch" ? (percentile > 1e-9 ? 255d / percentile : 255d) : 1d;
+            return new GradientResult(magnitudeOut, directionOut, mean, maximum, percentile, zeroGradientPixels, outputScale);
         }
         catch
         {
@@ -87,18 +99,36 @@ internal static class ImageGeometryAlgorithms
     }
 
     internal static DistanceResult DistanceTransform(
-        Mat source, string mode, DistanceTypes metric, int maskSize, CancellationToken cancellationToken)
+        Mat source, string mode, DistanceTypes metric, int maskSize, BorderTypes padding, CancellationToken cancellationToken)
     {
         using var mask = new Mat();
         if (mode == "background") Cv2.BitwiseNot(source, mask);
         else source.CopyTo(mask);
-        using var distance = new Mat();
-        Cv2.DistanceTransform(mask, distance, metric, (DistanceTransformMasks)maskSize);
-        cancellationToken.ThrowIfCancellationRequested();
-        Cv2.MinMaxLoc(distance, out _, out var maximum, out _, out _);
         var foregroundCount = Cv2.CountNonZero(mask);
-        var mean = foregroundCount > 0 ? Cv2.Mean(distance, mask).Val0 : 0d;
-        return new DistanceResult(distance.Clone(), foregroundCount, maximum, mean);
+        var borderTouchingCount = 0;
+        if (foregroundCount > 0)
+        {
+            borderTouchingCount += Cv2.CountNonZero(mask.Row(0)) + Cv2.CountNonZero(mask.Row(mask.Rows - 1))
+                + Cv2.CountNonZero(mask.Col(0)) + Cv2.CountNonZero(mask.Col(mask.Cols - 1));
+            // SubMat uses exclusive rowEnd/colEnd, not a height/width pair.
+            // Dispose each corner view so the diagnostic scan does not retain image buffers.
+            using var topLeft = mask.SubMat(0, 1, 0, 1);
+            using var topRight = mask.SubMat(0, 1, mask.Cols - 1, mask.Cols);
+            using var bottomLeft = mask.SubMat(mask.Rows - 1, mask.Rows, 0, 1);
+            using var bottomRight = mask.SubMat(mask.Rows - 1, mask.Rows, mask.Cols - 1, mask.Cols);
+            borderTouchingCount -= Cv2.CountNonZero(topLeft) + Cv2.CountNonZero(topRight)
+                + Cv2.CountNonZero(bottomLeft) + Cv2.CountNonZero(bottomRight);
+        }
+        using var padded = new Mat();
+        Cv2.CopyMakeBorder(mask, padded, 1, 1, 1, 1, padding, Scalar.All(0));
+        using var distance = new Mat();
+        Cv2.DistanceTransform(padded, distance, metric, (DistanceTransformMasks)maskSize);
+        using var cropped = new Mat(distance, new Rect(1, 1, source.Width, source.Height));
+        cancellationToken.ThrowIfCancellationRequested();
+        Cv2.MinMaxLoc(cropped, out _, out var maximum, out _, out _);
+        var mean = foregroundCount > 0 ? Cv2.Mean(cropped, mask).Val0 : 0d;
+        var borderAffectedRatio = foregroundCount == 0 ? 0 : (double)borderTouchingCount / foregroundCount;
+        return new DistanceResult(cropped.Clone(), foregroundCount, maximum, mean, borderTouchingCount, borderAffectedRatio);
     }
 
     private static Mat ToGrayCopy(Mat source)

@@ -8,11 +8,12 @@ public static partial class BuiltInNodeCatalog
             "coordinate.transformPoint",
             "Transform Point",
             "Coordinate",
-            [ExecIn, new("point", VisionDataType.Point2D), new("transform", VisionDataType.Transform2D)],
-            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [ExecIn, new("point", VisionDataType.Point2D), new("transform", VisionDataType.Transform2D), new("sourceImageId", VisionDataType.String, Required: false)],
+            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("sourceImageId", VisionDataType.String), new("sourcePixelX", VisionDataType.Double), new("sourcePixelY", VisionDataType.Double), new("transformId", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
-                ],
-            "Map an image-space Point2D through a validated Transform2D into a frame/unit-aware point. Wire: point + transform → point + frame/unit/diagnostics. Rejects non-finite points and singular transforms. Typical after match/register.",
+                new("sourceImageId", "Source Image ID", "text", "unattributed", Description: "Provenance identifier for the source image; a connected sourceImageId port takes precedence. Required to distinguish equal pixels from different cameras/ROIs.")
+            ],
+            "Map an image-space Point2D through a validated Transform2D into a frame/unit-aware point. Outputs retain sourceImageId, source pixel coordinates and transformId; rejects non-finite/out-of-range results and singular transforms.",
             "builtin"),
         new(
             "coordinate.transformPoint3D",
@@ -32,7 +33,7 @@ public static partial class BuiltInNodeCatalog
             [
                 new("minLength", "Min Length (0=off)", "number", 0, 0, 1e9, 0.001, Description: "Optional minimum transformed length gate; 0 disables."),
                 ],
-            "Transform both endpoints of a pixel Line2D into a coordinate-aware line. Validates line degeneracy and transform singularity; emits length, direction angle, frame, unit and JSON diagnostics.",
+            "Transform both endpoints of a pixel Line2D into a coordinate-aware line. minLength is evaluated after transformation in target units; diagnostics record both lengths, Start->End order and the (-180,180] angle interval. Degenerate input or output fails.",
             "builtin"),
         new(
             "coordinate.transformPose",
@@ -42,7 +43,7 @@ public static partial class BuiltInNodeCatalog
             [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 ],
-            "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Rejects non-finite pose values and singular transforms; emits scalars, frame, unit and JSON diagnostics.",
+            "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Orientation is the normalized Jacobian local-X-axis mapping (correct for shear/nonuniform scale); diagnostics identify rigid vs non-rigid distortion and retain source pixels/transform ID.",
             "builtin"),
         new(
             "coordinate.point",
@@ -57,7 +58,7 @@ public static partial class BuiltInNodeCatalog
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point", Description: "Coordinate unit carried on the point, e.g. px or mm.")
             ,
                 ],
-            "Create a coordinate-aware reference point. Optional X/Y inputs override the constants so a match or detection can drive the point. Values must be finite. The frame must be non-empty; a connected frame tree checks it against known frames.",
+            "Create a coordinate-aware reference point. Optional X/Y inputs override the constants so a match or detection can drive the point. Values must be finite. Without a tree the frame is marked unverified in diagnostics; a connected tree marks it verified and rejects unknown frames.",
             "builtin"),
         new(
             "coordinate.point3D",
@@ -66,7 +67,7 @@ public static partial class BuiltInNodeCatalog
             [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("z", VisionDataType.Double, Required: false)],
             [new("point", VisionDataType.CoordinatePoint3D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("z", VisionDataType.Double),
              new("magnitude", VisionDataType.Double), new("xyMagnitude", VisionDataType.Double),
-             new("azimuthDeg", VisionDataType.Double), new("elevationDeg", VisionDataType.Double),
+             new("azimuthDeg", VisionDataType.Double), new("azimuthDefined", VisionDataType.Boolean), new("elevationDeg", VisionDataType.Double),
              new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("x", "X", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "X in the named frame. Optional X input overrides this constant; must be finite within +/-1e9.") { OverriddenByPorts = ["x"] },
@@ -88,7 +89,7 @@ public static partial class BuiltInNodeCatalog
 
                 new("metric", "Distance Metric", "select", "euclidean", Options: [new("Euclidean", "euclidean"), new("Manhattan", "manhattan")], Description: "Distance metric between the two coordinate points; both keep signed dx/dy."),
                 ],
-            "Distance between two frame-aware points, only when frame and unit match exactly. Emits a Measurement, scalar distance, signed dx/dy and JSON diagnostics; mismatched or non-finite points fail deterministically.",
+            "Distance between two frame-aware points, only when frame and unit match exactly. dx=B.x-A.x and dy=B.y-A.y; Measurement retains start/end/metric. Mismatch diagnostics list both frames/units and the mismatch type; no automatic conversion.",
             "builtin"),
         new(
             "coordinate.transformConstant",
@@ -108,7 +109,7 @@ public static partial class BuiltInNodeCatalog
                 new("angleDeg", "Rotation", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Rigid Transform", Description: "Finite counter-clockwise rotation in degrees.")
             ,
                 ],
-            "Create a rigid 2D transform between named engineering or pixel coordinate frames with strict finite-value, frame and unit validation. Emits translation/rotation scalars, frame names, unit and JSON diagnostics (including determinant).",
+            "Create a rigid 2D transform between named engineering or pixel frames. The single unit is shared by source and target (same-unit only). Angles are normalized to (-180,180] while diagnostics retain the raw input.",
             "builtin"),
         new(
             "coordinate.transformInverse",
@@ -119,7 +120,7 @@ public static partial class BuiltInNodeCatalog
             [
 
                 ],
-            "Invert a Transform2D and swap source/target frame and units. Validates every matrix element and rejects singular transforms deterministically; emits frame names, determinant and JSON diagnostics.",
+            "Invert a Transform2D (including non-rigid affine) and swap source/target frame and units. Scale-aware determinant and condition-number gates reject singular/ill-conditioned inputs; diagnostics include matrices, determinants, threshold, type and active column-vector convention.",
             "builtin", TransformFrames: new(NodeTransformFramePolicy.Invert, PrimaryPort: "transform")),
         new(
             "coordinate.transformCompose",
@@ -142,11 +143,11 @@ public static partial class BuiltInNodeCatalog
             [
                 new("transformsJson", "Transforms JSON", "textarea", "[]",
                     Group: "Frame Tree",
-                    Description: "Static rigid transforms. Runtime dynamic transforms can still be composed as normal workflow data.")
+                    Description: "Versioned schema {schemaVersion:1,transforms:[{sourceFrame,targetFrame,unit,x,y,angleDeg}]}; legacy bare arrays are accepted. Identical duplicate edges are deduplicated; conflicting edges fail.")
             ,
 
                 ],
-            "Build a bidirectional frame graph from validated rigid transforms and resolve transforms by named frame path. Rejects empty, duplicate or non-finite edges deterministically; emits transform/frame counts, the frame list and JSON diagnostics.",
+            "Build a bidirectional frame graph from validated rigid transforms. Identical duplicate edges are idempotently removed; conflicting edges fail. The frames output is a JSON array. Equal-length resolve paths choose the lexicographically smallest path and diagnostics list candidates.",
             "builtin"),
         new(
             "coordinate.frameResolve",
@@ -160,7 +161,7 @@ public static partial class BuiltInNodeCatalog
             ,
 
                 ],
-            "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
+            "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges. Equal-length paths choose the lexicographically smallest and diagnostics list candidates. sourceFrame=targetFrame returns a zero-hop identity; unknown frames and no-path failures list available frames.",
             "builtin"),
         new(
             "coordinate.pose",
@@ -176,14 +177,14 @@ public static partial class BuiltInNodeCatalog
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Pose", Description: "Length unit stamped on the pose; it does not convert the numeric X/Y values.")
             ,
                 ],
-            "Create a frame-aware 2D pose. Optional X/Y/theta inputs override the constants so a match result can drive the pose. Values must be finite and theta is normalized to (-180, 180]. The frame must be non-empty; a connected frame tree checks it against known frames.",
+            "Create a frame-aware 2D pose. Optional X/Y/theta inputs override the constants so a match result can drive the pose. Values must be finite and theta is normalized to (-180, 180]. Without a tree the frame is marked unverified in diagnostics; a connected tree marks it verified and rejects unknown frames.",
             "builtin"),
         new(
             "coordinate.poseToTransform",
             "Pose to Transform",
             "Coordinate",
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D)],
-            [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [new("sourceFrame", "Source Frame", "text", "Tool", Group: "Frames", Description: "Child/tool frame named by the new transform; must differ from the pose frame."),
 
                 ],
@@ -197,7 +198,7 @@ public static partial class BuiltInNodeCatalog
             [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("sourceFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 ],
-            "Transform a frame-aware point through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the point plus scalar x/y, target frame, unit and JSON diagnostics.",
+            "Transform a frame-aware point through another engineering-frame Transform2D. Mismatch diagnostics list both frame/unit values; transformed coordinates are finite and bounded, with input/output and determinant recorded.",
             "builtin"),
         new(
             "coordinate.transformCoordinatePose",
@@ -206,7 +207,7 @@ public static partial class BuiltInNodeCatalog
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D), new("transform", VisionDataType.Transform2D)],
             [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Transform a frame-aware pose through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the pose plus scalar x/y/theta, target frame, unit and JSON diagnostics.",
+            "Transform a frame-aware pose through another engineering-frame Transform2D. Orientation uses normalized Jacobian local-X-axis mapping; diagnostics flag shear/nonuniform-scale distortion and list both frame/unit values on mismatch.",
             "builtin"),
     ];
 }

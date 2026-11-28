@@ -43,8 +43,20 @@ public sealed class CaliperArrayNode : IVisionNodeExecutor, IVisionNodeDefinitio
         var direction = SubpixelEdgeCore.ChoiceParameter(node, "direction", "strongest", "strongest", "firstfromstart", "firstfromend", "closestwidth");
         var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 9, 1, 101);
         var minValidCalipers = SubpixelEdgeCore.ClampedIntParameter(node, "minValidCalipers", 1, 1, 101);
+        var minValidRatio = SubpixelEdgeCore.RequireFiniteParameter(node, "minValidRatio", .5);
+        var minCoverageRatio = SubpixelEdgeCore.RequireFiniteParameter(node, "minCoverageRatio", .5);
+        var minContinuousRatio = SubpixelEdgeCore.RequireFiniteParameter(node, "minContinuousRatio", .5);
+        if (minValidRatio is < 0 or > 1 || minCoverageRatio is < 0 or > 1 || minContinuousRatio is < 0 or > 1)
+            throw new InvalidOperationException("Caliper array coverage ratios must be within 0..1.");
         var edgeLength = SubpixelEdgeCore.RequireFiniteParameter(node, "edgeLength", 0);
         var maxWidthStd = SubpixelEdgeCore.RequireFiniteParameter(node, "maxWidthStd", 0);
+        // 名义值公差与候选筛选/一致性门限分离：min/maxWidth 只筛候选边缘对，maxWidthStd 只看离散度，
+        // 尺寸合格与否必须由 nominalWidth ± 公差 单独判定。
+        var lowerTolerance = SubpixelEdgeCore.RequireFiniteParameter(node, "lowerTolerance", 0);
+        var upperTolerance = SubpixelEdgeCore.RequireFiniteParameter(node, "upperTolerance", 0);
+        if (lowerTolerance < 0 || upperTolerance < 0)
+            throw new InvalidOperationException("Width tolerances must be non-negative; 0/0 disables the tolerance gate.");
+        var toleranceEnabled = lowerTolerance > 0 || upperTolerance > 0;
         if (edgeLength is < 0 or > 10000) throw new InvalidOperationException("edgeLength must be between 0 and 10000.");
         if (maxWidthStd < 0) throw new InvalidOperationException("maxWidthStd must be >= 0 (0 disables the gate).");
         var includeProfiles = node.GetBool("includeProfiles", false);
@@ -157,8 +169,24 @@ public sealed class CaliperArrayNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 : widths.Length == 1 ? 0 : null;
             double? widthCv = widthMean is > 1e-9 && widthStd is not null ? widthStd.Value / widthMean.Value : widthMean is 0 ? 0 : null;
             var stdGateFailed = maxWidthStd > 0 && widthStd is not null && widthStd.Value > maxWidthStd;
-            var found = valid.Length >= minValidCalipers && !stdGateFailed;
+            var validIndices = valid.Select(s => s.Index).ToArray();
+            var validRatio = (double)valid.Length / caliperCount;
+            var coverageRatio = validIndices.Length == 0 ? 0 : caliperCount == 1 ? 1 : (double)(validIndices[^1] - validIndices[0]) / (caliperCount - 1);
+            var longestBlock = 0; var block = 0;
+            for (var i = 0; i < caliperCount; i++)
+            {
+                block = validIndices.Contains(i) ? block + 1 : 0;
+                longestBlock = Math.Max(longestBlock, block);
+            }
+            var continuousRatio = (double)longestBlock / caliperCount;
+            var coverageFailed = validRatio < minValidRatio || coverageRatio < minCoverageRatio || continuousRatio < minContinuousRatio;
+            var found = valid.Length >= minValidCalipers && !stdGateFailed && !coverageFailed;
+            var widthDeviation = widthMean is null ? (double?)null : widthMean.Value - nominal;
+            var withinTolerance = toleranceEnabled && widthDeviation is not null
+                && widthDeviation.Value >= -lowerTolerance - 1e-9 && widthDeviation.Value <= upperTolerance + 1e-9;
+            var evaluationState = widthMean is null ? "not-measured" : !toleranceEnabled ? "not-evaluated" : withinTolerance ? "pass" : "fail";
             var reason = found ? "ok"
+                : coverageFailed ? "insufficient-spatial-coverage"
                 : stdGateFailed ? "width-std-exceeds-tolerance"
                 : valid.Length > 0 ? "insufficient-valid-calipers"
                 : outsideImage == caliperCount ? "search-region-outside-image"
@@ -183,6 +211,10 @@ public sealed class CaliperArrayNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 ["searchLine"] = VisionValue.Line(reportedSearch),
                 ["caliperCount"] = VisionValue.Integer(caliperCount),
                 ["validCount"] = VisionValue.Integer(valid.Length),
+                ["validRatio"] = VisionValue.Double(validRatio),
+                ["coverageRatio"] = VisionValue.Double(coverageRatio),
+                ["continuousRatio"] = VisionValue.Double(continuousRatio),
+                ["invalidStations"] = VisionValue.String(JsonSerializer.Serialize(stations.Where(s => !s.Found).Select(s => new { s.Index, s.Reason }))),
                 ["calipersJson"] = VisionValue.String(JsonSerializer.Serialize(stations.Select(s => s.ToJsonObject())))
             };
             if (widthMean is not null) outputs["widthMean"] = VisionValue.Double(widthMean.Value);
@@ -190,6 +222,10 @@ public sealed class CaliperArrayNode : IVisionNodeExecutor, IVisionNodeDefinitio
             if (widthMax is not null) outputs["widthMax"] = VisionValue.Double(widthMax.Value);
             if (widthStd is not null) outputs["widthStd"] = VisionValue.Double(widthStd.Value);
             if (widthCv is not null) outputs["widthCv"] = VisionValue.Double(widthCv.Value);
+            outputs["widthDeviation"] = VisionValue.Double(widthDeviation ?? 0);
+            outputs["toleranceEnabled"] = VisionValue.Boolean(toleranceEnabled);
+            outputs["withinTolerance"] = VisionValue.Boolean(withinTolerance);
+            outputs["evaluationState"] = VisionValue.String(evaluationState);
             if (valid.Length > 0)
             {
                 outputs["center"] = VisionValue.Point(new VisionPoint2D(valid.Average(s => s.Center!.Value.X), valid.Average(s => s.Center!.Value.Y)));
@@ -198,7 +234,11 @@ public sealed class CaliperArrayNode : IVisionNodeExecutor, IVisionNodeDefinitio
 
             var diag = CoordinateValidation.Diagnostics(Type,
                 ("found", found), ("reason", reason), ("caliperCount", caliperCount),
-                ("validCount", valid.Length), ("widthMean", widthMean), ("widthStd", widthStd),
+                ("validCount", valid.Length), ("validRatio", validRatio), ("coverageRatio", coverageRatio),
+                ("continuousRatio", continuousRatio), ("coverageFailed", coverageFailed), ("widthMean", widthMean), ("widthStd", widthStd),
+                ("nominalWidth", nominal), ("lowerTolerance", lowerTolerance), ("upperTolerance", upperTolerance),
+                ("widthDeviation", widthDeviation), ("toleranceEnabled", toleranceEnabled),
+                ("withinTolerance", withinTolerance), ("evaluationState", evaluationState),
                 ("maxWidthStd", maxWidthStd), ("polarity", polarity), ("direction", direction));
             outputs["diagnostics"] = VisionValue.String(diag);
             return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?>
@@ -208,6 +248,9 @@ public sealed class CaliperArrayNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 ["reason"] = reason,
                 ["caliperCount"] = caliperCount,
                 ["validCount"] = valid.Length,
+                ["validRatio"] = validRatio, ["coverageRatio"] = coverageRatio, ["continuousRatio"] = continuousRatio,
+                ["coverageFailed"] = coverageFailed,
+                ["minValidRatio"] = minValidRatio, ["minCoverageRatio"] = minCoverageRatio, ["minContinuousRatio"] = minContinuousRatio,
                 ["failedCount"] = caliperCount - valid.Length,
                 ["outsideImage"] = outsideImage,
                 ["shortAfterClip"] = shortAfterClip,
@@ -227,6 +270,12 @@ public sealed class CaliperArrayNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 ["minWidth"] = minimum,
                 ["maxWidth"] = maximum,
                 ["nominalWidth"] = nominal,
+                ["lowerTolerance"] = lowerTolerance,
+                ["upperTolerance"] = upperTolerance,
+                ["widthDeviation"] = widthDeviation,
+                ["toleranceEnabled"] = toleranceEnabled,
+                ["withinTolerance"] = withinTolerance,
+                ["evaluationState"] = evaluationState,
                 ["edgeLength"] = span,
                 ["minValidCalipers"] = minValidCalipers,
                 ["includeProfiles"] = includeProfiles,

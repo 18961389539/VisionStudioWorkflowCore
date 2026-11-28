@@ -45,6 +45,16 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
         if (mode is not ("auto" or "file" or "directory" or "manifest"))
             throw new InvalidOperationException("image.load pathMode must be auto, file, directory or manifest.");
         var pageIndex = ProtocolFraming.RequireRange(node.GetInt("pageIndex", 0), 0, 1000000, "image.load pageIndex");
+        var colorModeText = node.GetString("colorMode", "preserve").Trim().ToLowerInvariant();
+        var colorMode = colorModeText switch
+        {
+            "preserve" => ImreadModes.Unchanged,
+            "gray" => ImreadModes.Grayscale,
+            "color" => ImreadModes.Color,
+            _ => throw new InvalidOperationException("image.load colorMode must be preserve, gray or color.")
+        };
+        var indexPolicy = node.GetString("indexPolicy", "fail").Trim().ToLowerInvariant();
+        if (indexPolicy is not ("fail" or "wrap")) throw new InvalidOperationException("image.load indexPolicy must be fail or wrap.");
         var captureManifest = node.GetBool("captureManifest", false);
         if (captureManifest && mode == "manifest")
             throw new InvalidOperationException("image.load captureManifest requires live directory mode.");
@@ -89,7 +99,11 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
             if (!Directory.Exists(resolvedRoot))
                 throw new DirectoryNotFoundException($"image.load pathMode=directory but the path is not a directory: '{requested}'.");
             List<string>? files = null;
-            if (mode == "manifest") manifest = ReplayImageManifest.Parse(node.GetString("manifestJson", ""));
+            if (mode == "manifest")
+            {
+                manifest = ReplayImageManifest.Parse(node.GetString("manifestJson", ""));
+                await ReplayImageManifest.ValidateAsync(resolvedRoot, manifest, authorization, maxMegabytes, cancellationToken);
+            }
             else
             {
                 files = EnumerateFrames(resolvedRoot, recursive, skipLinks: captureManifest);
@@ -99,8 +113,7 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
                     manifest = await ReplayImageManifest.CaptureAsync(resolvedRoot, files, authorization, maxMegabytes, cancellationToken);
             }
             frameCount = manifest?.Files.Length ?? files!.Count;
-            var policy = node.GetString("indexPolicy", "fail").Trim().ToLowerInvariant();
-            effectiveIndex = policy switch
+            effectiveIndex = indexPolicy switch
             {
                 "fail" => requestedIndex < frameCount
                     ? requestedIndex
@@ -130,13 +143,6 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
         var extension = Path.GetExtension(fullPath).ToLowerInvariant();
         if (pageIndex > 0 && extension is not (".tiff" or ".tif"))
             throw new InvalidOperationException($"image.load pageIndex > 0 requires a TIFF file. Got '{Path.GetFileName(fullPath)}'.");
-        var colorMode = node.GetString("colorMode", "preserve").Trim().ToLowerInvariant() switch
-        {
-            "preserve" => ImreadModes.Unchanged,
-            "gray" => ImreadModes.Grayscale,
-            "color" => ImreadModes.Color,
-            _ => throw new InvalidOperationException("image.load colorMode must be preserve, gray or color.")
-        };
 
         Mat mat;
         if (manifestEntry is not null || pageIndex > 0)
@@ -174,7 +180,12 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
                 ("source", Path.GetFileName(fullPath)),
                 ("mode", sourceMode),
                 ("sequence", effectiveIndex),
+                ("requestedIndex", requestedIndex),
+                ("indexPolicy", indexPolicy),
                 ("frameCount", frameCount),
+                ("manifestVersion", manifest?.Version),
+                ("manifestEntryCount", manifest?.Files.Length),
+                ("colorMode", colorModeText),
                 ("pageIndex", pageIndex),
                 ("width", image.Width),
                 ("height", image.Height),
@@ -201,7 +212,11 @@ public sealed class ImageLoadNode(IReplayInputResolver? replayInput = null) : IV
                     ["source"] = Path.GetFileName(fullPath),
                     ["mode"] = sourceMode,
                     ["sequence"] = effectiveIndex,
+                    ["requestedIndex"] = requestedIndex,
+                    ["indexPolicy"] = indexPolicy,
                     ["frameCount"] = frameCount,
+                    ["manifestVersion"] = manifest?.Version,
+                    ["colorMode"] = colorModeText,
                     ["pageIndex"] = pageIndex,
                     ["size"] = $"{image.Width}x{image.Height}",
                     ["channels"] = image.Mat.Channels(),

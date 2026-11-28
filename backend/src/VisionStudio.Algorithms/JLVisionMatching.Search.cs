@@ -121,8 +121,9 @@ internal static partial class JLVisionMatching
                     ? Math.Clamp((int)Math.Floor(Math.Log2(Math.Max(1d, Math.Min(modelWidth, modelHeight) / 6d))) + 1, 1, 8)
                     : resolvedPyramidLevels;
                 var fingerprint = unscaled && !masked ? "" : RoiFingerprint(templateRoi) + ":" + scale.ToString("R");
+                var templateIdentity = summary.TryGetValue("templateCacheIdentity", out var identityValue) ? identityValue?.ToString() ?? "" : "";
                 using var lease = JLVisionModelCache.Acquire(
-                    Key(keyImage, false, trainRange, step, modelOriginX, modelOriginY, levels, ignorePolarity: ignorePolarity, clutterConfig: fingerprint),
+                    Key(keyImage, false, trainRange, step, modelOriginX, modelOriginY, levels, ignorePolarity: ignorePolarity, clutterConfig: fingerprint + "|" + templateIdentity),
                     () =>
                     {
                         var created = new JlNCCModel();

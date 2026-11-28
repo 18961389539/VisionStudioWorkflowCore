@@ -49,6 +49,29 @@ internal sealed record ReplayImageManifest(int Version, ReplayImageEntry[] Files
         return new ReplayImageManifest(1, entries);
     }
 
+    public static async Task ValidateAsync(
+        string root, ReplayImageManifest manifest, IReplayInputResolver authorization, int maxMegabytes, CancellationToken ct)
+    {
+        // Resolve the complete set before hashing. Missing/unsafe entries retain their
+        // actionable exception and take precedence over an earlier file's content change.
+        var paths = new string[manifest.Files.Length];
+        for (var i = 0; i < manifest.Files.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            paths[i] = ResolveFile(root, manifest.Files[i].Path, authorization);
+        }
+
+        for (var i = 0; i < manifest.Files.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var entry = manifest.Files[i];
+            await using var input = ImageLoadNode.OpenBounded(paths[i], maxMegabytes);
+            var actual = Convert.ToHexString(await SHA256.HashDataAsync(input, ct));
+            if (!actual.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"image.load manifest image content changed: '{entry.Path}' (preflight entry {i}; SHA-256 mismatch: expected {entry.Sha256}, actual {actual}).");
+        }
+    }
+
     public static string ResolveFile(string root, string relative, IReplayInputResolver authorization)
     {
         var segments = relative.Split(['/', '\\']);

@@ -88,17 +88,47 @@ public sealed class AcquireImageNode(CameraManager cameraManager, IReplayInputRe
         {
             var device = cameraManager.Require(cameraId);
             if (exposureUs > 0 && !device.Capabilities.Exposure)
-                throw new InvalidOperationException($"Camera '{cameraId}' does not support exposure control.");
+                throw new InvalidOperationException($"Camera '{cameraId}' does not support exposure control; exposureUs was not applied.");
             if (gainDb >= 0 && !device.Capabilities.Gain)
-                throw new InvalidOperationException($"Camera '{cameraId}' does not support gain control.");
+                throw new InvalidOperationException($"Camera '{cameraId}' does not support gain control; gainDb was not applied.");
             var current = device.Settings;
-            await cameraManager.ApplySettingsAsync(cameraId, current with
+            var applyExposure = exposureUs > 0;
+            var applyGain = gainDb >= 0;
+            try
             {
-                ExposureUs = exposureUs > 0 ? exposureUs : current.ExposureUs,
-                GainDb = gainDb >= 0 ? gainDb : current.GainDb
-            }, cancellationToken);
+                if (applyExposure && applyGain)
+                {
+                    await cameraManager.ApplySettingsAsync(cameraId, current with { ExposureUs = exposureUs }, cancellationToken);
+                    try
+                    {
+                        await cameraManager.ApplySettingsAsync(cameraId, current with { ExposureUs = exposureUs, GainDb = gainDb }, cancellationToken);
+                    }
+                    catch
+                    {
+                        try { await cameraManager.ApplySettingsAsync(cameraId, current, cancellationToken); }
+                        catch (Exception rollback) { throw new InvalidOperationException($"Camera '{cameraId}' rejected gainDb={gainDb:0.###}; exposure rollback also failed: {rollback.Message}. No frame was acquired.", rollback); }
+                        throw new InvalidOperationException($"Camera '{cameraId}' rejected gainDb={gainDb:0.###}; exposureUs={exposureUs:0.###} was rolled back. No frame was acquired.");
+                    }
+                }
+                else
+                {
+                    await cameraManager.ApplySettingsAsync(cameraId, current with
+                    {
+                        ExposureUs = applyExposure ? exposureUs : current.ExposureUs,
+                        GainDb = applyGain ? gainDb : current.GainDb
+                    }, cancellationToken);
+                }
+            }
+            catch (InvalidOperationException) { throw; }
+            catch (Exception ex)
+            {
+                var failed = applyExposure && applyGain ? "exposureUs/gainDb" : applyExposure ? "exposureUs" : "gainDb";
+                throw new InvalidOperationException($"Camera '{cameraId}' rejected {failed}; no frame was acquired.", ex);
+            }
         }
 
+        var triggerSequence = triggerBeforeGrab ? cameraManager.GetLatestSequence(cameraId) : (long?)null;
+        var triggeredAt = triggerBeforeGrab ? DateTimeOffset.UtcNow : (DateTimeOffset?)null;
         var lease = await cameraManager.AcquireAsync(
             cameraId,
             frameMode,
@@ -112,31 +142,44 @@ public sealed class AcquireImageNode(CameraManager cameraManager, IReplayInputRe
             var image = VisionImage.FromLease(lease.Image, lease);
             if (node.GetBool("requireNonEmpty", true) && (image.Width < 1 || image.Height < 1 || image.Mat.Empty()))
                 throw new InvalidOperationException($"Acquire Image camera '{lease.CameraId}' returned an empty frame.");
+            var outputs = new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(image),
+                ["sequence"] = VisionValue.Integer(lease.Sequence),
+                ["timestamp"] = VisionValue.String(lease.Timestamp.ToString("O")),
+                ["cameraId"] = VisionValue.String(lease.CameraId),
+                ["width"] = VisionValue.Integer(image.Width),
+                ["height"] = VisionValue.Integer(image.Height)
+            };
+            if (triggerSequence is { } triggerSequenceValue)
+                outputs["triggerSequence"] = VisionValue.Integer(triggerSequenceValue);
+            var grabCompletedAt = DateTimeOffset.UtcNow;
+            var effectiveFrameMode = triggerBeforeGrab ? "Next" : frameMode.ToString();
+            var frameReuseRisk = triggerBeforeGrab && frameMode == CameraFrameMode.Latest;
+            var triggerToFrameMs = triggeredAt is { } triggerTime ? (grabCompletedAt - triggerTime).TotalMilliseconds : (double?)null;
             var diag = CoordinateValidation.Diagnostics(Type,
                 ("cameraId", lease.CameraId), ("sequence", lease.Sequence), ("frameMode", frameMode.ToString()),
-                ("triggerBeforeGrab", triggerBeforeGrab), ("timeoutMs", timeoutMs),
+                ("effectiveFrameMode", effectiveFrameMode), ("triggerBeforeGrab", triggerBeforeGrab),
+                ("triggerSequence", triggerSequence), ("triggerToFrameMs", triggerToFrameMs),
+                ("frameReuseRisk", frameReuseRisk), ("timeoutMs", timeoutMs),
                 ("width", image.Width), ("height", image.Height), ("pixelFormat", lease.PixelFormat),
                 ("exposureUs", exposureUs), ("gainDb", gainDb));
+            outputs["diagnostics"] = VisionValue.String(diag);
             return new NodeExecutorResult(
-                new Dictionary<string, VisionValue>
-                {
-                    ["image"] = VisionValue.Image(image),
-                    ["sequence"] = VisionValue.Integer(lease.Sequence),
-                    ["timestamp"] = VisionValue.String(lease.Timestamp.ToString("O")),
-                    ["cameraId"] = VisionValue.String(lease.CameraId),
-                    ["width"] = VisionValue.Integer(image.Width),
-                    ["height"] = VisionValue.Integer(image.Height),
-                    ["diagnostics"] = VisionValue.String(diag)
-                },
+                outputs,
                 new Dictionary<string, object?>
                 {
                     ["camera"] = lease.CameraId,
                     ["sequence"] = lease.Sequence,
+                    ["triggerSequence"] = triggerSequence,
                     ["timestamp"] = lease.Timestamp.ToString("O"),
                     ["pixelFormat"] = lease.PixelFormat,
                     ["size"] = $"{image.Width}x{image.Height}",
                     ["frameMode"] = frameMode.ToString(),
+                    ["effectiveFrameMode"] = effectiveFrameMode,
                     ["triggerBeforeGrab"] = triggerBeforeGrab,
+                    ["triggerToFrameMs"] = triggerToFrameMs,
+                    ["frameReuseRisk"] = frameReuseRisk,
                     ["diagnostics"] = diag
                 });
         }, cancellationToken);
@@ -171,17 +214,33 @@ if (context is null) throw new ArgumentNullException(nameof(context));
         var maxSkewUs = node.GetDouble("maxSkewUs", 0);
         if (!double.IsFinite(maxSkewUs) || maxSkewUs < 0) throw new InvalidOperationException("camera.syncCapture maxSkewUs must be finite and >= 0 (0 disables).");
 
-        VisionFrameSet frameSet;
-        try
+        var captureAttempts = node.GetInt("captureAttempts", 3);
+        if (captureAttempts is < 1 or > 10) throw new InvalidOperationException("camera.syncCapture captureAttempts must be between 1 and 10.");
+        var requireGroupedTrigger = node.GetBool("requireGroupedTrigger", true);
+        VisionFrameSet? frameSet = null;
+        string? consistencyFailure = null;
+        var attemptsUsed = 0;
+        for (var attempt = 1; attempt <= captureAttempts; attempt++)
         {
-            frameSet = await synchronization.CaptureAsync(new SynchronizedFrameSetCaptureRequest(
-                groupId, scheduled, leadTimeMs, timeoutMs), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            attemptsUsed = attempt;
+            VisionFrameSet candidate;
+            try
+            {
+                candidate = await synchronization.CaptureAsync(new SynchronizedFrameSetCaptureRequest(
+                    groupId, scheduled, leadTimeMs, timeoutMs), cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"camera.syncCapture failed for group '{groupId}' (scheduled={scheduled}, leadTimeMs={leadTimeMs}, frameTimeoutMs={timeoutMs}): {ex.Message}", ex);
+            }
+            consistencyFailure = ValidateGroupConsistency(candidate, requireGroupedTrigger);
+            if (consistencyFailure is null) { frameSet = candidate; break; }
+            candidate.Dispose();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new InvalidOperationException(
-                $"camera.syncCapture failed for group '{groupId}' (scheduled={scheduled}, leadTimeMs={leadTimeMs}, frameTimeoutMs={timeoutMs}): {ex.Message}", ex);
-        }
+        if (frameSet is null)
+            throw new InvalidOperationException($"camera.syncCapture group '{groupId}' failed grouped-frame consistency after {captureAttempts} attempt(s): {consistencyFailure}.");
 
         var cameraCount = frameSet.Images.Count;
         if (cameraCount == 0)
@@ -191,18 +250,29 @@ if (context is null) throw new ArgumentNullException(nameof(context));
                 $"camera.syncCapture group '{frameSet.GroupId}' returned {cameraCount} camera(s); minCameraCount={minCameraCount}. Partial capture is treated as failure.");
         if (!double.IsFinite(frameSet.TriggerSkewUs) || frameSet.TriggerSkewUs < 0)
             throw new InvalidOperationException($"camera.syncCapture group '{frameSet.GroupId}' returned invalid skew '{frameSet.TriggerSkewUs}'.");
+        var cameraTiming = BuildCameraTiming(frameSet);
+        var overTolerance = maxSkewUs > 0
+            ? cameraTiming.Where(x => x.DeviationFromMeanUs is { } deviation && Math.Abs(deviation) > maxSkewUs).ToArray()
+            : [];
+        var overToleranceText = overTolerance.Length == 0
+            ? cameraTiming.All(x => x.DeviationFromMeanUs is null) ? "unavailable (device timestamps missing)" : "none"
+            : string.Join(",", overTolerance.Select(x => $"{x.CameraId}:{x.DeviationFromMeanUs:0.###}us"));
         if (maxSkewUs > 0 && frameSet.TriggerSkewUs > maxSkewUs)
             throw new InvalidOperationException(
-                $"camera.syncCapture group '{frameSet.GroupId}' skew {frameSet.TriggerSkewUs:0.###} us exceeds maxSkewUs {maxSkewUs:0.###} us.");
+                $"camera.syncCapture group '{frameSet.GroupId}' skew {frameSet.TriggerSkewUs:0.###} us exceeds maxSkewUs {maxSkewUs:0.###} us; overToleranceCameras={overToleranceText}.");
         if (requireWithinTolerance && !frameSet.WithinTolerance)
             throw new InvalidOperationException(
-                $"camera.syncCapture group '{frameSet.GroupId}' skew {frameSet.TriggerSkewUs:0.###} us exceeds the configured sync tolerance (requireWithinTolerance=true).");
+                $"camera.syncCapture group '{frameSet.GroupId}' skew {frameSet.TriggerSkewUs:0.###} us exceeds the configured sync tolerance (requireWithinTolerance=true); overToleranceCameras={overToleranceText}.");
 
+        var warningCount = frameSet.WithinTolerance ? 0 : 1;
         var diag = CoordinateValidation.Diagnostics(Type,
             ("groupId", frameSet.GroupId), ("cameraCount", cameraCount), ("triggerSkewUs", frameSet.TriggerSkewUs),
             ("timestampBasis", frameSet.TimestampBasis), ("withinTolerance", frameSet.WithinTolerance),
             ("scheduled", scheduled), ("leadTimeMs", leadTimeMs), ("frameTimeoutMs", timeoutMs),
             ("requireWithinTolerance", requireWithinTolerance), ("minCameraCount", minCameraCount),
+            ("maxSkewUs", maxSkewUs), ("overToleranceCameras", overToleranceText),
+            ("cameraTiming", cameraTiming), ("captureAttempts", attemptsUsed),
+            ("requireGroupedTrigger", requireGroupedTrigger),
             ("cameras", string.Join(",", frameSet.Frames.Keys.Order())));
 
         return new NodeExecutorResult(
@@ -216,6 +286,8 @@ if (context is null) throw new ArgumentNullException(nameof(context));
                 ["cameras"] = VisionValue.String(string.Join(",", frameSet.Frames.Keys.Order())),
                 ["skewMs"] = VisionValue.Double(frameSet.TriggerSkewUs / 1000d),
                 ["groupId"] = VisionValue.String(groupId),
+                ["warningCount"] = VisionValue.Integer(warningCount),
+                ["attemptCount"] = VisionValue.Integer(attemptsUsed),
                 ["diagnostics"] = VisionValue.String(diag)
             },
             new Dictionary<string, object?>
@@ -225,11 +297,47 @@ if (context is null) throw new ArgumentNullException(nameof(context));
                 ["triggerSkewUs"] = frameSet.TriggerSkewUs,
                 ["timestampBasis"] = frameSet.TimestampBasis,
                 ["withinTolerance"] = frameSet.WithinTolerance,
-                ["cameras"] = frameSet.Frames.Values.Select(x => new { x.CameraId, x.Sequence, x.DeviceTimestampNs, x.TriggerId }).ToArray(),
+                ["warningCount"] = warningCount,
+                ["attemptCount"] = attemptsUsed,
+                ["overToleranceCameras"] = overToleranceText,
+                ["cameras"] = cameraTiming,
                 ["diagnostics"] = diag
             });
     }
-}
+
+    private static string? ValidateGroupConsistency(IVisionFrameSet frameSet, bool requireGroupedTrigger)
+    {
+        if (frameSet.Images.Count != frameSet.Frames.Count)
+            return $"image/metadata member count mismatch ({frameSet.Images.Count}/{frameSet.Frames.Count})";
+        if (frameSet.Images.Values.GroupBy(image => image, ReferenceEqualityComparer.Instance).Any(group => group.Count() > 1))
+            return "duplicate frame storage detected across camera members";
+        var frames = frameSet.Frames.Values.ToArray();
+        if (frames.Any(frame => string.IsNullOrWhiteSpace(frame.CameraId) || frame.Sequence <= 0))
+            return "every member must have a camera id and positive sequence";
+        var triggerIds = frames.Where(frame => frame.TriggerId.HasValue).Select(frame => frame.TriggerId!.Value).Distinct().ToArray();
+        if (requireGroupedTrigger && triggerIds.Length > 0 && (triggerIds.Length != 1 || frames.Any(frame => frame.TriggerId is null)))
+            return $"triggerId grouping mismatch ({string.Join(",", frames.Select(frame => $"{frame.CameraId}:{frame.TriggerId}"))})";
+        return null;
+    }
+
+    private static CameraTiming[] BuildCameraTiming(IVisionFrameSet frameSet)
+    {
+        var frames = frameSet.Frames.Values.OrderBy(frame => frame.CameraId, StringComparer.Ordinal).ToArray();
+        double? meanNs = frames.All(frame => frame.DeviceTimestampNs.HasValue) && frames.Length > 0
+            ? frames.Average(frame => (double)frame.DeviceTimestampNs!.Value)
+            : null;
+        return frames.Select(frame => new CameraTiming(
+            frame.CameraId,
+            frame.Sequence,
+            frame.TriggerId,
+            frame.DeviceTimestampNs,
+            frame.HostTimestamp.ToString("O"),
+            meanNs is { } mean && frame.DeviceTimestampNs is { } device ? (device - mean) / 1000d : null)).ToArray();
+    }
+
+    private sealed record CameraTiming(string CameraId, long Sequence, long? TriggerId, long? DeviceTimestampNs,
+        string HostTimestamp, double? DeviationFromMeanUs);
+    }
 
 public sealed class FrameSetImageNode : IVisionNodeExecutor
 {
@@ -256,10 +364,18 @@ var frameSet = context.Require<IVisionFrameSet>("frameSet");
             throw new InvalidOperationException($"FrameSet '{frameSet.GroupId}' is missing frame metadata for camera '{cameraId}'.");
         if (image.Width < 1 || image.Height < 1)
             throw new InvalidOperationException($"frameset.image camera '{cameraId}' has an empty image.");
+        var deviceTimestampExpected = frameSet.TimestampBasis.Contains("device", StringComparison.OrdinalIgnoreCase)
+            || frameSet.Frames.Values.Any(item => item.DeviceTimestampNs.HasValue);
+        var deviceTimestampStatus = frame.DeviceTimestampNs is { } ? "available" : deviceTimestampExpected ? "corrupt" : "unsupported";
+        if (deviceTimestampStatus == "corrupt")
+            throw new InvalidOperationException($"FrameSet '{frameSet.GroupId}' camera '{cameraId}' is missing deviceTimestampNs although the set uses device timestamps; the acquisition data is corrupted.");
+        var warningCount = deviceTimestampStatus == "unsupported" ? 1 : 0;
         var diag = CoordinateValidation.Diagnostics(Type,
-            ("groupId", frameSet.GroupId), ("cameraId", cameraId), ("sequence", frame.Sequence),
-            ("width", image.Width), ("height", image.Height), ("triggerSkewUs", frameSet.TriggerSkewUs),
-            ("withinTolerance", frameSet.WithinTolerance), ("cameraCount", frameSet.Images.Count));
+            ("groupId", frameSet.GroupId), ("memberCount", frameSet.Images.Count), ("cameraId", cameraId),
+            ("sequence", frame.Sequence), ("width", image.Width), ("height", image.Height),
+            ("skewUs", frameSet.TriggerSkewUs), ("triggerSkewUs", frameSet.TriggerSkewUs),
+            ("withinTolerance", frameSet.WithinTolerance), ("deviceTimestampStatus", deviceTimestampStatus),
+            ("warningCount", warningCount));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -269,18 +385,22 @@ var frameSet = context.Require<IVisionFrameSet>("frameSet");
                 ["deviceTimestampNs"] = frame.DeviceTimestampNs is { } ns ? VisionValue.Integer(ns) : new VisionValue(VisionDataType.Integer, null),
                 ["triggerId"] = frame.TriggerId is { } triggerId ? VisionValue.Integer(triggerId) : new VisionValue(VisionDataType.Integer, null),
                 ["cameraId"] = VisionValue.String(cameraId),
+                ["warningCount"] = VisionValue.Integer(warningCount),
                 ["diagnostics"] = VisionValue.String(diag)
             },
             new Dictionary<string, object?>
             {
                 ["groupId"] = frameSet.GroupId,
+                ["memberCount"] = frameSet.Images.Count,
                 ["cameraId"] = cameraId,
                 ["sequence"] = frame.Sequence,
                 ["deviceTimestampNs"] = frame.DeviceTimestampNs,
+                ["deviceTimestampStatus"] = deviceTimestampStatus,
                 ["triggerId"] = frame.TriggerId,
-                ["triggerSkewUs"] = frameSet.TriggerSkewUs,
+                ["skewUs"] = frameSet.TriggerSkewUs,
                 ["width"] = image.Width,
                 ["height"] = image.Height,
+                ["warningCount"] = warningCount,
                 ["diagnostics"] = diag
             }));
     }

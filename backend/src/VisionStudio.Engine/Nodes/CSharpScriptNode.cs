@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using OpenCvSharp;
 using VisionStudio.Engine.Scripting;
 using VisionStudio.Scripting;
@@ -36,6 +38,16 @@ public sealed class CSharpScriptNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
 
         var source = node.GetString("source", CSharpScriptCatalog.DefaultSource);
+        var scriptApproved = node.GetBool("scriptApproved", false);
+        var approvedSourceSha256 = node.GetString("approvedSourceSha256", string.Empty).Trim();
+        var sourceHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
+        if (!scriptApproved)
+            throw new InvalidOperationException(
+                "script.csharp execution requires explicit approval of the exact script source (scriptApproved=true).");
+        if (approvedSourceSha256.Length != 64 || !approvedSourceSha256.All(Uri.IsHexDigit) ||
+            !string.Equals(approvedSourceSha256, sourceHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "script.csharp approvedSourceSha256 does not match the current source; approve the exact script bytes before execution.");
         var timeoutMs = node.GetInt("timeoutMs", 250);
         var maxTicks = node.GetInt("maxTicks", 1_000_000);
         var maxOutputBytes = node.GetInt("maxOutputBytes", 65_536);
@@ -110,6 +122,8 @@ public sealed class CSharpScriptNode : IVisionNodeExecutor
             var diagnostics = CoordinateValidation.Diagnostics(
                 Type,
                 ("sourceHash", scriptResult.SourceHash),
+                ("scriptApproved", scriptApproved),
+                ("approvedSourceSha256", approvedSourceSha256),
                 ("compileMs", Math.Round(scriptResult.CompileMs, 3)),
                 ("executeMs", Math.Round(scriptResult.ExecuteMs, 3)),
                 ("ticks", scriptResult.Ticks),
@@ -121,6 +135,8 @@ public sealed class CSharpScriptNode : IVisionNodeExecutor
             var summary = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
                 ["sourceHash"] = scriptResult.SourceHash,
+                ["scriptApproved"] = scriptApproved,
+                ["approvedSourceSha256"] = approvedSourceSha256,
                 ["compileMs"] = Math.Round(scriptResult.CompileMs, 3),
                 ["executeMs"] = Math.Round(scriptResult.ExecuteMs, 3),
                 ["ticks"] = scriptResult.Ticks,

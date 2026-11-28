@@ -70,6 +70,7 @@ internal static class JlVisionOperatorCatalog
             [new("exec", VisionDataType.Control), new("region", VisionDataType.Region), new("region2", VisionDataType.Region, Required: false), new("image", VisionDataType.Image, Required: false)],
             [new("region", VisionDataType.Region), new("overlay", VisionDataType.Image), new("operator", VisionDataType.String),
                 new("components", VisionDataType.Integer), new("area", VisionDataType.Integer),
+                new("parametersJson", VisionDataType.String), new("warningCount", VisionDataType.Integer),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
                 new("operator", "Operator", "select", "complement", Group: "Operation", Options:
@@ -103,12 +104,13 @@ internal static class JlVisionOperatorCatalog
                 new("overlay", VisionDataType.Image), new("points", VisionDataType.Contour),
                 new("point", VisionDataType.Point2D, Required: false), new("inputPoints", VisionDataType.Contour),
                 new("count", VisionDataType.Integer), new("found", VisionDataType.Boolean), new("componentCount", VisionDataType.Integer),
+                new("componentUnits", VisionDataType.String),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
                 new("operator", "Operator", "select", "distancePp", Group: "Operation", Options:
                     [.. JlGeometryOperations.All.Values.OrderBy(op => op.Key, StringComparer.Ordinal)
                         .Select(op => new ParameterOption($"{op.Label} ({op.Key})", op.Key))],
-                    Description: "JLVision JlMisc geometry operator. Angle results are radians; Values carries every named component."),
+                    Description: "JLVision JlMisc geometry operator. Required parameters are validated per operator; angle results are radians. values carries numeric components and componentUnits records each component unit."),
                 new("row1", "Row 1", "number", 0, -1e9, 1e9, 0.5, Group: "Geometry", Description: "First point row / line A start row."),
                 new("column1", "Column 1", "number", 0, -1e9, 1e9, 0.5, Group: "Geometry", Description: "First point column / line A start column."),
                 new("row2", "Row 2", "number", 10, -1e9, 1e9, 0.5, Group: "Geometry", Description: "Second point row / line A end row."),
@@ -122,7 +124,8 @@ internal static class JlVisionOperatorCatalog
                 new("phi", "Phi", "number", 0, -6.2832, 6.2832, 0.01, Unit: "rad", Group: "Geometry", Description: "Ellipse orientation in radians."),
                 new("angle", "Angle", "number", 1.5708, -6.2832, 6.2832, 0.01, Unit: "rad", Group: "Geometry", Description: "Ellipse parameter angle in radians."),
                 new("size", "Size", "number", 1, 0, 1000, 0.1, Group: "Geometry", Description: "Scalar argument: sigma for the Gaussian kernel, alpha for filter info."),
-                new("mode", "Mode", "text", "", Group: "Geometry", Description: "Filter name for infoEdges/infoSmooth.")
+                new("mode", "Mode", "text", "", Group: "Geometry", Description: "Filter name for infoEdges/infoSmooth; relative path for fileExists/listFiles."),
+                new("allowedRoot", "Allowed Read Root", "text", ".", Group: "Security", Description: "Read-only root for fileExists/listFiles/getCurrentDir, relative to the working directory. Absolute paths, drive paths, '..' segments and links escaping this root are rejected.")
             ],
             "JLVision JlMisc geometry and filter-info operators, evaluated from scalar parameters (no image needed): " +
             "point/point, point/line, point/segment, segment/line and segment/segment distances (min and max), " +
@@ -157,7 +160,7 @@ internal static class JlVisionOperatorCatalog
             "abs/sqrt, scale, matrix and element-wise power, norm, sum/max/min/mean, size, single element, sub matrix, diagonal, repeat, " +
             "linear solve, symmetric/generalized symmetric eigenvalues, orthogonal decomposition and type decomposition, plus constant matrix creation. " +
             "Value is the element count (or the scalar result for determinant/norm/getValue); Matrix is the result as JSON; Values carries rows/columns. " +
-            "Connect a previous matrix output to matrixA/matrixB to compose calculations; connected values override the editable parameters. Matrices are limited to one million elements; expansion operations check the output size before allocation. Heatmaps show the top-left 128x128 cells; plot shows up to 64 normalized debug samples. Full matrix output is retained.",
+            "Connect a previous matrix output to matrixA/matrixB to compose calculations; connected values override the editable parameters. Matrices are limited to one million elements; parsing and expansion operations check the output size before allocation. Ragged, non-finite, dimension-mismatched, out-of-range and divide-by-zero inputs fail before native computation. Invert/solve reject singular matrices; conditioning operators report conditionNumber/illConditioned and scalarRole in diagnostics. Heatmaps show the top-left 128x128 cells; plot shows up to 64 normalized debug samples. Full matrix output is retained.",
             "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.homMat", "Homogeneous Transform", "Geometry",
@@ -187,7 +190,8 @@ internal static class JlVisionOperatorCatalog
             "identity, translate/translateLocal, rotate/rotateLocal, scale/scaleLocal, slant/slantLocal, reflect/reflectLocal, transpose, invert, compose, " +
             "determinant, toAffinePar (sx/sy/phi/theta/tx/ty) and point/pixel transformation. " +
             "Because the affine parameters come straight from hom_mat2d_to_affine_par, the reported 3x3 matches exactly what the native operator applies; " +
-            "no matrix JSON parsing is required. Use this node to build the offset that roi.transform or a robot guidance step consumes.",
+            "no matrix JSON parsing is required. Use this node to build the offset that roi.transform or a robot guidance step consumes. " +
+            "invert/compose reject singular matrices; diagnostics record determinant/conditionNumber, compose order, local fixed-point semantics and angleUnit=rad.",
             "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.contourOp", "Contour Operator", "Contour",
@@ -210,13 +214,15 @@ internal static class JlVisionOperatorCatalog
                 new("length2", "Length 2", "number", 10, 0, 1e9, 0.5, Group: "Parameters", Description: "Second length for rectangle2 and crop."),
                 new("min", "Min", "number", 0, -1e9, 1e9, 0.5, Group: "Parameters", Description: "Lower bound for the selection operators."),
                 new("max", "Max", "number", 1e9, -1e9, 1e9, 0.5, Group: "Parameters", Description: "Upper bound for the selection operators."),
-                new("mode", "Mode", "text", "", Group: "Parameters", Description: "Operator-specific string: parallel mode, crop close flag, merge mode, selection feature name.")
+                new("mode", "Mode", "text", "", Group: "Parameters", Description: "Operator-specific string: parallel mode, crop close flag, merge mode, selection feature name."),
+                new("coordinateFrame", "Generated Frame", "text", "ImagePixel", Group: "Contract", VisibleWhen: new("operator", JlContourOperations.All.Where(p=>p.Value.IgnoresInput).Select(p=>p.Key).ToArray()), Description: "Coordinate frame stamped on generated contours; must be explicit and non-empty."),
+                new("unit", "Generated Unit", "text", "px", Group: "Contract", VisibleWhen: new("operator", JlContourOperations.All.Where(p=>p.Value.IgnoresInput).Select(p=>p.Key).ToArray()), Description: "Unit stamped on generated contours; downstream transforms must match it.")
             ],
             "Runs a JLVision XLD contour operator on every input contour and returns the resulting contour list: " +
             "generators (circle/ellipse/rectangle2/cross), close/smooth/segment/parallel, rectangle clipping and cropping, " +
             "shape-based and point-based selection, adjacent/collinear/cocircular union, closed-contour union/difference/intersection, and region intersection. " +
             "Each output XLD object becomes one platform contour with area/perimeter/circularity/bounding box recomputed, so downstream contour.properties and geometry fitting keep working. " +
-            "Set operators read contour2 and region intersection reads region; a missing input fails before the native call with a readable message.",
+            "Set operators read contour2 and region intersection reads region; a missing input fails before the native call with a readable message. Non-default parameters not used by the selected operator are rejected. Set inputs must share coordinate frame/unit; generators stamp the configured Generated Frame/Unit.",
             "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.threshold", "Threshold and Region Segmentation", "Preprocess",
@@ -276,6 +282,7 @@ internal static class JlVisionOperatorCatalog
             [new("exec", VisionDataType.Control), new("image", VisionDataType.Image)],
             [new("edges", VisionDataType.String), new("overlay", VisionDataType.Image), new("contours", VisionDataType.Contour),
                 new("count", VisionDataType.Integer), new("found", VisionDataType.Boolean),
+                new("measurementValid", VisionDataType.Boolean), new("invalidCount", VisionDataType.Integer),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
                 new("shape", "Measure Shape", "select", "rectangle", Options:
@@ -310,9 +317,11 @@ internal static class JlVisionOperatorCatalog
                 ], Group: "Measure", VisibleWhen: new("method", ["measurePos", "measurePairs", "measureThresh"]), Description: "Which edges inside the profile participate.")
             ],
             "JLVision native 1D measure object: builds a rectangle2 or arc measure, then runs MeasurePos, MeasurePairs, MeasureThresh or MeasureProjection. " +
-            "Edges are returned as a JSON array (row/column/amplitude/distance per edge, or pair columns for MeasurePairs). " +
+            "Edges use schemaVersion=1 with method-specific payloads: {schemaVersion,method,shape,unit,coordinateOrder,edges,invalidCount,invalidReasons,measurementValid}. " +
+            "Position/threshold edges contain position:{x,y}, amplitude and distance; pair edges contain first/second points, amplitudes, width and widthValid; projection edges contain a native-order gray projection sample. " +
+            "Coordinates are x=column,y=row in pixels. Missing pair endpoints or invalid width invalidate the measurement instead of silently dropping columns. " +
             "Unlike measure.caliper this node goes through the native measure object, which is what enables arc profiles and gray projection. " +
-            "Native quirks of JLVisionLib 1.0.0 honored here: output tuples have inconsistent lengths (the pair width tuple is empty, so width is dropped instead of faked), " +
+            "Native quirks of JLVisionLib 1.0.0 honored here: output tuples have inconsistent lengths; pair width falls back to endpoint distance and is always emitted with widthValid, " +
             "and TranslateMeasure / GetMeasureParam / ResetFuzzyMeasure corrupt or fail the measure handle, so translateRow/translateColumn are intentionally ignored.",
             "builtin", new VisionToolCapabilities(EmitsOverlay: true))
     ];

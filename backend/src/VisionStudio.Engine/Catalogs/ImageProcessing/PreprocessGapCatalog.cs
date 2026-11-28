@@ -47,7 +47,7 @@ public static class PreprocessGapCatalog
             [Exec, ImageIn, new("circle", VisionDataType.Circle, Required: false)],
             [ImageOut, Width, Height, new("centerX", VisionDataType.Double), new("centerY", VisionDataType.Double),
              new("innerRadius", VisionDataType.Double), new("outerRadius", VisionDataType.Double),
-             new("angleStartDeg", VisionDataType.Double), new("angleSweepDeg", VisionDataType.Double), Diagnostics, Next],
+             new("angleStartDeg", VisionDataType.Double), new("angleSweepDeg", VisionDataType.Double), new("sourceAnglesJson", VisionDataType.String), Diagnostics, Next],
             [
                 new("centerX", "Center X", "number", 0, -1000000, 1000000, .5, Group: "Center",
                     Description: "Unwrap center X when the circle input is disconnected. A connected circle overrides both center coordinates."),
@@ -126,7 +126,7 @@ public static class PreprocessGapCatalog
             [new("found", VisionDataType.Boolean), new("brightness", VisionDataType.Double), new("contrast", VisionDataType.Double),
              new("sharpness", VisionDataType.Double), new("noiseSigma", VisionDataType.Double),
              new("saturationRatio", VisionDataType.Double), new("darkRatio", VisionDataType.Double),
-             new("entropy", VisionDataType.Double), new("pixelCount", VisionDataType.Integer), Diagnostics, Next],
+             new("entropy", VisionDataType.Double), new("pixelCount", VisionDataType.Integer), new("invalidPixelCount", VisionDataType.Integer), Diagnostics, Next],
             [
                 new("saturationThreshold", "Saturation Threshold", "number", 254, 1, 255, 1, Group: "Thresholds",
                     Description: "Gray level at or above which a pixel counts as clipped. 254 catches pixels that are already quantisation-dead even if they are not exactly 255."),
@@ -139,7 +139,9 @@ public static class PreprocessGapCatalog
         new("image.depthScale", "Depth Scale", "Preprocess",
             [Exec, ImageIn],
             [ImageOut, new("inputBits", VisionDataType.Integer), new("outputBits", VisionDataType.Integer),
-             new("scaleUsed", VisionDataType.Double), new("offsetUsed", VisionDataType.Double), Diagnostics, Next],
+             new("scaleUsed", VisionDataType.Double), new("offsetUsed", VisionDataType.Double),
+             new("overflowPolicy", VisionDataType.String), new("overflowPixelCount", VisionDataType.Integer),
+             new("overflowRatio", VisionDataType.Double), new("maxClipAmount", VisionDataType.Double), Diagnostics, Next],
             [
                 new("inputBits", "Input Bits (0=auto)", "number", 0, 0, 16, 1, Group: "Mapping",
                     Description: "Bit depth of the current sample values. 0 reads it from the Mat type (8 or 16). Set it to 10/12/14 when a 16-bit container carries a narrower camera range, so the auto scale does not darken the image."),
@@ -152,6 +154,10 @@ public static class PreprocessGapCatalog
                     Description: "Explicit multiplier. 0 derives (2^out-1)/(2^in-1), which maps the full input range onto the full output range without clipping."),
                 new("offset", "Offset", "number", 0, -1000000, 1000000, 1, Group: "Mapping",
                     Description: "Added after scaling. Negative offsets are useful to lift a black level that sits above zero."),
+                new("overflowPolicy", "Downscale Overflow Policy", "select", "fail", Group: "Safety", Options:
+                [
+                    new("Fail before writing", "fail"), new("Saturate explicitly", "saturate")
+                ], Description: "When outputBits < inputBits, fail reports the predicted clipped-pixel count and maximum clipping amount before producing an image. saturate acknowledges the loss and emits the same statistics."),
             ],
             "Explicit, auditable bit-depth conversion between 8 and 16 bits. Today the only conversions are implicit: threshold nodes scale UInt16 by 1/257, and jlvision.imageOp convertType/scale can do it in two steps with the parameters spread out. This node makes the mapping (inputBits, scale, offset) visible in the trace, which matters for 10/12/16-bit cameras. Rejects float input instead of guessing.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: false), Actions: []),

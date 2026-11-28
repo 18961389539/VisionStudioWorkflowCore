@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using VisionStudio.Abstractions;
 
 namespace VisionStudio.Engine.Nodes;
@@ -307,6 +308,7 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
             measured, reference, closed, start, maxIterations, trim, tolerance, allowScale, cancellationToken);
 
         // 最终残差用全部采样点（含被剪掉的），才能如实反映毛刺。
+        var residualSquares = 0d;
         var residualSum = 0d;
         var residualMax = 0d;
         var inliers = 0;
@@ -314,12 +316,16 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
         {
             var point = current.Apply(measured[index]);
             var (distance, _) = BestFitMath.NearestOnPolyline(reference, closed, point);
+            residualSquares += distance * distance;
             residualSum += distance;
             if (distance > residualMax) residualMax = distance;
             if (distance <= tolerance * 1000) inliers++;
         }
-        var rms = measured.Length > 0 ? Math.Sqrt(residualSum / measured.Length) : 0;
+        var rms = measured.Length > 0 ? Math.Sqrt(residualSquares / measured.Length) : 0;
         var mean = measured.Length > 0 ? residualSum / measured.Length : 0;
+        var found = converged && double.IsFinite(rms) && double.IsFinite(residualMax)
+            && double.IsFinite(current.A) && double.IsFinite(current.B) && double.IsFinite(current.C)
+            && double.IsFinite(current.D) && double.IsFinite(current.Tx) && double.IsFinite(current.Ty);
 
         var alignedPoints = new VisionPoint2D[measuredRaw.Count];
         for (var index = 0; index < measuredRaw.Count; index++)
@@ -341,6 +347,8 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
             ["scale"] = current.Scale, ["rmsError"] = rms, ["maxError"] = residualMax, ["meanError"] = mean,
             ["inlierCount"] = inliers, ["pointCount"] = measuredRaw.Count, ["iterations"] = iterations,
             ["converged"] = converged,
+            ["found"] = found,
+            ["reason"] = found ? "ok" : "not-converged-or-non-finite",
             ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
             ["algorithmBackend"] = "managed"
         };
@@ -368,7 +376,8 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
                 ["inlierCount"] = VisionValue.Integer(inliers),
                 ["pointCount"] = VisionValue.Integer(measuredRaw.Count),
                 ["iterations"] = VisionValue.Integer(iterations),
-                ["found"] = VisionValue.Boolean(true),
+                ["found"] = VisionValue.Boolean(found),
+                ["converged"] = VisionValue.Boolean(converged),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             summary));
@@ -387,6 +396,7 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
                 ["pointCount"] = VisionValue.Integer(measuredCount),
                 ["inlierCount"] = VisionValue.Integer(0),
                 ["iterations"] = VisionValue.Integer(0),
+                ["converged"] = VisionValue.Boolean(false),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -428,6 +438,10 @@ public sealed class FixedRadiusCircleFitNode : IVisionNodeExecutor
         var maxIterations = node.GetInt("maxIterations", 100);
         if (maxIterations is < 1 or > 1000)
             throw new InvalidOperationException("measure.fitCircleFixedRadius maxIterations must be within 1..1000.");
+
+        var maxRadial = node.GetDouble("maxRadialError", 0);
+        if (!double.IsFinite(maxRadial) || maxRadial is < 0 or > 1_000_000)
+            throw new InvalidOperationException("measure.fitCircleFixedRadius maxRadialError must be within 0..1000000 (0 disables).");
 
         var tolerance = node.GetDouble("tolerancePx", 1e-6);
         if (!double.IsFinite(tolerance) || tolerance is <= 0 or > 1)
@@ -483,15 +497,40 @@ public sealed class FixedRadiusCircleFitNode : IVisionNodeExecutor
 
         // 迭代可能振荡：始终交出历史最优圆心，而不是最后一次。
         cx = bestX; cy = bestY;
+        var residuals = new double[points.Count];
+        var angles = new double[points.Count];
         var maxError = 0d;
+        var minSigned = 0d;
+        var maxSigned = 0d;
+        var tooCloseCount = 0;
+        var tooFarCount = 0;
         for (var index = 0; index < points.Count; index++)
         {
             var dx = points[index].X - cx;
             var dy = points[index].Y - cy;
-            var error = Math.Abs(Math.Sqrt(dx * dx + dy * dy) - radius);
+            var signed = Math.Sqrt(dx * dx + dy * dy) - radius;
+            residuals[index] = signed;
+            var error = Math.Abs(signed);
             if (error > maxError) maxError = error;
+            if (signed < minSigned) minSigned = signed;
+            if (signed > maxSigned) maxSigned = signed;
+            // 正负分开计数：局部碰伤（偏近）与毛刺（偏远）修法不同，不能只报一个超差总数。
+            if (maxRadial > 0)
+            {
+                if (signed < -maxRadial) tooCloseCount++;
+                else if (signed > maxRadial) tooFarCount++;
+            }
+            angles[index] = Math.Atan2(dy, dx) * 180 / Math.PI;
         }
-        var withinTolerance = maxRms <= 0 || bestRms <= maxRms;
+        var arcCoverageDeg = ArcCoverageDeg(angles);
+        var rmsPassed = maxRms <= 0 || bestRms <= maxRms;
+        var radialPassed = maxRadial <= 0 || tooCloseCount == 0 && tooFarCount == 0;
+        var gatesEnabled = maxRms > 0 || maxRadial > 0;
+        var withinTolerance = rmsPassed && radialPassed;
+        // 未收敛的圆心只是迭代历史最优，不能参与判定；收敛后才看公差。
+        var found = converged && withinTolerance;
+        var reason = !converged ? "not-converged" : !rmsPassed ? "rms-exceeded" : !radialPassed ? "radial-error-exceeded" : "ok";
+        var evaluationState = !converged ? "fail" : !gatesEnabled ? "not-evaluated" : withinTolerance ? "pass" : "fail";
         timer.Stop();
 
         var diagnostics = CoordinateValidation.Diagnostics(
@@ -499,6 +538,10 @@ public sealed class FixedRadiusCircleFitNode : IVisionNodeExecutor
             ("radius", radius), ("centerX", cx), ("centerY", cy),
             ("rmsError", bestRms), ("maxError", maxError), ("pointCount", points.Count),
             ("iterations", iterations), ("converged", converged), ("withinTolerance", withinTolerance),
+            ("maxRmsError", maxRms), ("maxRadialError", maxRadial),
+            ("tooCloseCount", tooCloseCount), ("tooFarCount", tooFarCount),
+            ("minSignedError", minSigned), ("maxSignedError", maxSigned), ("arcCoverageDeg", arcCoverageDeg),
+            ("found", found), ("reason", reason), ("evaluationState", evaluationState),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
 
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -510,9 +553,20 @@ public sealed class FixedRadiusCircleFitNode : IVisionNodeExecutor
                 ["radius"] = VisionValue.Double(radius),
                 ["rmsError"] = VisionValue.Double(bestRms),
                 ["maxError"] = VisionValue.Double(maxError),
+                ["maxRadialError"] = VisionValue.Double(maxError),
                 ["pointCount"] = VisionValue.Integer(points.Count),
                 ["iterations"] = VisionValue.Integer(iterations),
-                ["found"] = VisionValue.Boolean(true),
+                ["converged"] = VisionValue.Boolean(converged),
+                ["withinTolerance"] = VisionValue.Boolean(withinTolerance),
+                ["tooCloseCount"] = VisionValue.Integer(tooCloseCount),
+                ["tooFarCount"] = VisionValue.Integer(tooFarCount),
+                ["minSignedError"] = VisionValue.Double(minSigned),
+                ["maxSignedError"] = VisionValue.Double(maxSigned),
+                ["arcCoverageDeg"] = VisionValue.Double(arcCoverageDeg),
+                ["residualsJson"] = VisionValue.String(JsonSerializer.Serialize(residuals.Select(value => Math.Round(value, 6)).ToArray())),
+                ["found"] = VisionValue.Boolean(found),
+                ["reason"] = VisionValue.String(reason),
+                ["evaluationState"] = VisionValue.String(evaluationState),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -520,10 +574,27 @@ public sealed class FixedRadiusCircleFitNode : IVisionNodeExecutor
                 ["radius"] = radius, ["centerX"] = cx, ["centerY"] = cy,
                 ["rmsError"] = bestRms, ["maxError"] = maxError, ["pointCount"] = points.Count,
                 ["iterations"] = iterations, ["converged"] = converged,
-                ["withinTolerance"] = withinTolerance,
+                ["withinTolerance"] = withinTolerance, ["maxRmsError"] = maxRms, ["maxRadialError"] = maxRadial,
+                ["tooCloseCount"] = tooCloseCount, ["tooFarCount"] = tooFarCount,
+                ["minSignedError"] = minSigned, ["maxSignedError"] = maxSigned, ["arcCoverageDeg"] = arcCoverageDeg,
+                ["found"] = found, ["reason"] = reason, ["evaluationState"] = evaluationState,
                 ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                 ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             }));
+    }
+
+    /// <summary>圆弧覆盖角：360° 减去相邻采样角之间的最大空隙。</summary>
+    private static double ArcCoverageDeg(double[] angles)
+    {
+        if (angles.Length < 2) return 0;
+        var sorted = angles.OrderBy(value => value).ToArray();
+        var largestGap = sorted[0] + 360 - sorted[^1];
+        for (var index = 1; index < sorted.Length; index++)
+        {
+            var gap = sorted[index] - sorted[index - 1];
+            if (gap > largestGap) largestGap = gap;
+        }
+        return Math.Max(0, 360 - largestGap);
     }
 
     private static double ResidualRms(IReadOnlyList<VisionPoint2D> points, double cx, double cy, double radius)

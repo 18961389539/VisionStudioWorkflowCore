@@ -82,14 +82,61 @@ public sealed class JLVisionMeasure1dNode : IVisionNodeExecutor
             // reset_fuzzy_measure 在未设置模糊函数时会抛 JlTuple 越界，未接入。
             measure.CloseMeasure();
 
-            var finiteRows = rows
-                .Select(row => row.Where(pair => double.IsFinite(pair.Value)).ToDictionary(pair => pair.Key, pair => pair.Value))
-                .Where(row => row.Count > 0).ToList();
-            rows = finiteRows;
+            var invalidReasons = new List<string>();
+            var validRows = new List<Dictionary<string, double>>();
+            foreach (var raw in rows)
+            {
+                var reason = ValidateRow(raw, method);
+                if (reason is null) validRows.Add(raw);
+                else invalidReasons.Add(reason);
+            }
+            var edges = new List<object?>();
+            foreach (var row in validRows)
+            {
+                if (method == JlMeasureMethod.MeasurePairs)
+                {
+                    var width = PairWidth(row);
+                    edges.Add(new
+                    {
+                        index = edges.Count, unit = "px", coordinateOrder = "x=column,y=row",
+                        first = PointPayload(row["columnFirst"], row["rowFirst"]),
+                        second = PointPayload(row["columnSecond"], row["rowSecond"]),
+                        firstAmplitude = FiniteOrNull(row, "amplitudeFirst"),
+                        secondAmplitude = FiniteOrNull(row, "amplitudeSecond"),
+                        width = width,
+                        widthValid = width is not null
+                    });
+                }
+                else if (method == JlMeasureMethod.MeasureProjection)
+                {
+                    edges.Add(new
+                    {
+                        index = edges.Count, unit = "gray", coordinateOrder = "native-profile-order",
+                        position = (object?)null, projection = row["projection"]
+                    });
+                }
+                else
+                {
+                    edges.Add(new
+                    {
+                        index = edges.Count, unit = "px", coordinateOrder = "x=column,y=row",
+                        position = PointPayload(row["column"], row["row"]),
+                        amplitude = FiniteOrNull(row, "amplitude"),
+                        distance = FiniteOrNull(row, "distance")
+                    });
+                }
+            }
+            var payload = new
+            {
+                schemaVersion = 1, method = method.ToString(), shape, unit = "px",
+                coordinateOrder = "x=column,y=row", edges,
+                invalidCount = invalidReasons.Count, invalidReasons = invalidReasons.Distinct().ToArray(),
+                measurementValid = validRows.Count > 0 && invalidReasons.Count == 0
+            };
 
             // 把找到的边缘点抽成平台轮廓，供下游拟合/可视化；同时画到 overlay 上便于调试。
             var edgePoints = new List<VisionPoint2D>();
-            foreach (var row in rows)
+            foreach (var row in validRows)
             {
                 AppendPoint(edgePoints, row, "row", "column");
                 AppendPoint(edgePoints, row, "rowFirst", "columnFirst");
@@ -106,20 +153,27 @@ public sealed class JLVisionMeasure1dNode : IVisionNodeExecutor
                     new OpenCvSharp.Scalar(0, 255, 255), -1);
             var outputs = new Dictionary<string, VisionValue>
             {
-                ["edges"] = VisionValue.String(JsonSerializer.Serialize(rows, JsonOptions)),
+                ["edges"] = VisionValue.String(JsonSerializer.Serialize(payload, JsonOptions)),
                 ["overlay"] = VisionValue.Image(VisionImage.Own(overlaySurface.Clone())),
                 ["contours"] = VisionValue.Contours(contours),
-                ["count"] = VisionValue.Integer(rows.Count),
-                ["found"] = VisionValue.Boolean(rows.Count > 0),
+                ["count"] = VisionValue.Integer(validRows.Count),
+                ["found"] = VisionValue.Boolean(validRows.Count > 0 && invalidReasons.Count == 0),
+                ["measurementValid"] = VisionValue.Boolean(validRows.Count > 0 && invalidReasons.Count == 0),
+                ["invalidCount"] = VisionValue.Integer(invalidReasons.Count),
                 ["diagnostics"] = VisionValue.String(JLVisionNodeSupport.Diagnostics(
-                    node.Type, "standard", 0, ("shape", shape), ("method", method.ToString()), ("count", rows.Count)))
+                    node.Type, payload.measurementValid ? "standard" : "invalid-measurement-row", invalidReasons.Count,
+                    ("shape", shape), ("method", method.ToString()), ("count", validRows.Count),
+                    ("invalidReasons", invalidReasons.Distinct().ToArray()), ("schemaVersion", 1)))
             };
             var summary = new Dictionary<string, object?>
             {
                 ["algorithmBackend"] = "jlvision",
                 ["shape"] = shape,
                 ["method"] = method.ToString(),
-                ["count"] = rows.Count,
+                ["count"] = validRows.Count,
+                ["schemaVersion"] = 1,
+                ["measurementValid"] = payload.measurementValid,
+                ["invalidReasons"] = payload.invalidReasons,
                 ["sigma"] = sigma,
                 ["threshold"] = threshold,
                 ["transition"] = transition,
@@ -128,6 +182,38 @@ public sealed class JLVisionMeasure1dNode : IVisionNodeExecutor
             return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
         }
     }
+
+    private static string? ValidateRow(IReadOnlyDictionary<string, double> row, JlMeasureMethod method)
+    {
+        string[] required = method == JlMeasureMethod.MeasurePairs
+            ? ["rowFirst", "columnFirst", "rowSecond", "columnSecond"]
+            : method == JlMeasureMethod.MeasureProjection ? ["projection"] : ["row", "column"];
+        foreach (var key in required)
+            if (!row.TryGetValue(key, out var value) || !double.IsFinite(value)) return "missing-or-non-finite-" + key;
+        if (method == JlMeasureMethod.MeasurePairs && PairWidth(row) is null) return "invalid-pair-width";
+        return null;
+    }
+
+    /// <summary>
+    /// 原生封装的 width/distance 元组可能缺失、长度不同步或为 0；依次回退到原生宽度、
+    /// 原生距离和端点间距，并把无法得到正宽度的边缘对判为无效，避免静默输出零宽。
+    /// </summary>
+    private static double? PairWidth(IReadOnlyDictionary<string, double> row)
+    {
+        if (Positive(row, "width") is { } width) return width;
+        if (Positive(row, "distance") is { } distance) return distance;
+        var endpointDistance = MeasurementMath.Hypot(
+            row["columnSecond"] - row["columnFirst"], row["rowSecond"] - row["rowFirst"]);
+        return double.IsFinite(endpointDistance) && endpointDistance > 0 ? endpointDistance : null;
+    }
+
+    private static double? Positive(IReadOnlyDictionary<string, double> row, string key)
+        => row.TryGetValue(key, out var value) && double.IsFinite(value) && value > 0 ? value : null;
+
+    private static double? FiniteOrNull(IReadOnlyDictionary<string, double> row, string key)
+        => row.TryGetValue(key, out var value) && double.IsFinite(value) ? value : null;
+
+    private static object PointPayload(double x, double y) => new { x, y };
 
     /// <summary>从测量结果行里取一组 (row, column) 变成平台点；缺键或非有限值则跳过。</summary>
     private static void AppendPoint(List<VisionPoint2D> points, Dictionary<string, double> row, string rowKey, string columnKey)

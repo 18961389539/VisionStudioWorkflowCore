@@ -162,9 +162,12 @@ public static class ChamferShapeMatching
         return edgeCount == 0 ? 0 : (double)unexplained / edgeCount;
     }
 
+    public sealed record SuppressedHit(Hit Hit, string Reason);
+
     public static IReadOnlyList<Hit> Search(
         float[,] dist, IReadOnlyList<ModelPoint> model, Options o,
-        bool[,]? sceneEdges = null, float[,]? gradX = null, float[,]? gradY = null)
+        bool[,]? sceneEdges = null, float[,]? gradX = null, float[,]? gradY = null,
+        List<SuppressedHit>? suppressed = null)
     {
         if (model.Count < 8) throw new InvalidOperationException("Chamfer shape model needs at least 8 contour points.");
         var h = dist.GetLength(0); var w = dist.GetLength(1);
@@ -218,13 +221,27 @@ public static class ChamferShapeMatching
                 refined.Add(best with { PyramidLevelUsed = levels });
         }
         var hits = new List<Hit>();
-        foreach (var hit in refined.OrderByDescending(r => r.Score))
+        var ordered = refined
+            .OrderByDescending(r => r.Score)
+            .ThenBy(r => Math.Abs(r.AngleDeg))
+            .ThenBy(r => Math.Abs(r.Scale - 1d))
+            .ThenBy(r => r.X).ThenBy(r => r.Y).ToArray();
+        for (var index = 0; index < ordered.Length; index++)
         {
-            if (hits.Any(k => Math.Sqrt((k.X - hit.X) * (k.X - hit.X) + (k.Y - hit.Y) * (k.Y - hit.Y)) < o.MinCenterDistance)) continue;
+            var hit = ordered[index];
+            if (hits.Any(k => Math.Sqrt((k.X - hit.X) * (k.X - hit.X) + (k.Y - hit.Y) * (k.Y - hit.Y)) < o.MinCenterDistance))
+            {
+                suppressed?.Add(new SuppressedHit(hit, "min-center-distance"));
+                continue;
+            }
+            if (hits.Count >= Math.Max(1, o.MaxTargets))
+            {
+                suppressed?.Add(new SuppressedHit(hit, "max-targets"));
+                continue;
+            }
             var sx = Subpixel(dist, model, hit, 1, o, gradX, gradY);
             var sy = Subpixel(dist, model, hit, 2, o, gradX, gradY);
             hits.Add(hit with { X = sx, Y = sy });
-            if (hits.Count >= Math.Max(1, o.MaxTargets)) break;
         }
         return hits;
     }

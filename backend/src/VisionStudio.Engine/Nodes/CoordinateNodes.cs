@@ -172,6 +172,17 @@ List<CalibrationPair> pairs;
         var unit=CoordinateValidation.RequireUnit(node.GetString("targetUnit","mm"),"targetUnit","mm","cm","m","px");
         var assetVersion=node.GetInt("assetVersion",0);
         if (assetVersion < 0) throw new InvalidOperationException("calibration.planar assetVersion must be >= 0.");
+        for (var i = 0; i < pairs.Count; i++)
+        {
+            var pair = pairs[i];
+            if (!double.IsFinite(pair.ImageX) || !double.IsFinite(pair.ImageY) || !double.IsFinite(pair.WorldX) || !double.IsFinite(pair.WorldY))
+                throw new InvalidOperationException($"calibration.planar pair {i} contains NaN/Infinity; point indices are zero-based and invalid data cannot pass quality gates.");
+        }
+        var minHullAreaRatio = node.GetDouble("minHullAreaRatio", 0.0001);
+        if (!double.IsFinite(minHullAreaRatio) || minHullAreaRatio is < 0 or > 1)
+            throw new InvalidOperationException("calibration.planar minHullAreaRatio must be finite and between 0 and 1.");
+        var imageDistribution = AnalyzeDistribution(pairs.Select(p => (p.ImageX, p.ImageY)).ToArray(), minHullAreaRatio, "image");
+        var worldDistribution = AnalyzeDistribution(pairs.Select(p => (p.WorldX, p.WorldY)).ToArray(), minHullAreaRatio, "world");
         var transform=CalibrationMath.SolveHomography(pairs,source,target,unit,cancellationToken);
         var det=CoordinateValidation.ValidateTransform(transform,"calibration.planar result");
         var residuals=pairs.Select((p,index)=>
@@ -191,11 +202,60 @@ List<CalibrationPair> pairs;
         if (maxRmse > 0 && rmse > maxRmse) throw new InvalidOperationException($"calibration.planar RMSE {rmse:F6} {unit} exceeds maxRmse {maxRmse:F6} {unit}.");
         if (maxPointError > 0 && max > maxPointError) throw new InvalidOperationException($"calibration.planar pair {worst} error {max:F6} {unit} exceeds maxPointError {maxPointError:F6} {unit}.");
         var residualsJson=JsonSerializer.Serialize(residuals);
-        var diag=CoordinateValidation.Diagnostics(Type,("pointCount",pairs.Count),("rmse",rmse),("maxError",max),("worstPairIndex",worst),("maxRmse",maxRmse),("maxPointError",maxPointError),("determinant",det),("sourceFrame",source),("targetFrame",target),("unit",unit));
+        var diag=CoordinateValidation.Diagnostics(Type,("pointCount",pairs.Count),("rmse",rmse),("maxError",max),("worstPairIndex",worst),("maxRmse",maxRmse),("maxPointError",maxPointError),("determinant",det),("sourceFrame",source),("targetFrame",target),("unit",unit),("gateUnit",unit),("minHullAreaRatio",minHullAreaRatio),("imageDistribution",imageDistribution),("worldDistribution",worldDistribution));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string,VisionValue>{{"transform",VisionValue.Transform(transform)},{"rmse",VisionValue.Double(rmse)},{"maxError",VisionValue.Double(max)},{"pointCount",VisionValue.Integer(pairs.Count)},{"worstPairIndex",VisionValue.Integer(worst)},{"residualsJson",VisionValue.String(residualsJson)},{"diagnostics",VisionValue.String(diag)}},
-            new Dictionary<string,object?>{{"points",pairs.Count},{"sourceFrame",source},{"targetFrame",target},{"unit",unit},{"assetId",string.IsNullOrWhiteSpace(node.GetString("assetId",""))?null:node.GetString("assetId","")},{"assetVersion",assetVersion>0?assetVersion:null},{"rmse",Math.Round(rmse,6)},{"maxError",Math.Round(max,6)},{"worstPairIndex",worst},{"residualsJson",residualsJson},{"diagnostics",diag}}));
+            new Dictionary<string,object?>{{"points",pairs.Count},{"sourceFrame",source},{"targetFrame",target},{"unit",unit},{"gateUnit",unit},{"minHullAreaRatio",minHullAreaRatio},{"imageDistribution",imageDistribution},{"worldDistribution",worldDistribution},{"assetId",string.IsNullOrWhiteSpace(node.GetString("assetId",""))?null:node.GetString("assetId","")},{"assetVersion",assetVersion>0?assetVersion:null},{"rmse",Math.Round(rmse,6)},{"maxError",Math.Round(max,6)},{"worstPairIndex",worst},{"residualsJson",residualsJson},{"diagnostics",diag}}));
     }
+    private static object AnalyzeDistribution((double X, double Y)[] points, double minHullAreaRatio, string space)
+    {
+        var minX = points.Min(point => point.X); var maxX = points.Max(point => point.X);
+        var minY = points.Min(point => point.Y); var maxY = points.Max(point => point.Y);
+        var boundingBoxArea = Math.Abs((maxX - minX) * (maxY - minY));
+        var hullArea = ConvexHullArea(points);
+        var hullAreaRatio = boundingBoxArea <= 1e-30 ? 0 : hullArea / boundingBoxArea;
+        if (minHullAreaRatio > 0 && hullAreaRatio < minHullAreaRatio)
+            throw new InvalidOperationException($"calibration.planar {space} points are nearly collinear or degenerate (hull/bbox area ratio {hullAreaRatio:0.#####} < minHullAreaRatio {minHullAreaRatio:0.#####}); use points covering the image/workpiece corners.");
+        var centerX = points.Average(point => point.X); var centerY = points.Average(point => point.Y);
+        var radii = points.Select(point => Math.Sqrt(Math.Pow(point.X - centerX, 2) + Math.Pow(point.Y - centerY, 2))).OrderBy(value => value).ToArray();
+        var medianRadius = radii.Length % 2 == 1 ? radii[radii.Length / 2] : (radii[radii.Length / 2 - 1] + radii[radii.Length / 2]) / 2;
+        var outlierSensitivity = medianRadius <= 1e-15 ? 0 : radii[^1] / medianRadius;
+        return new
+        {
+            minX, maxX, minY, maxY, boundingBoxArea, hullArea, hullAreaRatio, outlierSensitivity
+        };
+    }
+
+    private static double ConvexHullArea((double X, double Y)[] points)
+    {
+        var ordered = points.Distinct().OrderBy(point => point.X).ThenBy(point => point.Y).ToArray();
+        if (ordered.Length < 3) return 0;
+        var lower = new List<(double X, double Y)>();
+        foreach (var point in ordered)
+        {
+            while (lower.Count >= 2 && Cross(lower[^2], lower[^1], point) <= 0) lower.RemoveAt(lower.Count - 1);
+            lower.Add(point);
+        }
+        var upper = new List<(double X, double Y)>();
+        for (var i = ordered.Length - 1; i >= 0; i--)
+        {
+            var point = ordered[i];
+            while (upper.Count >= 2 && Cross(upper[^2], upper[^1], point) <= 0) upper.RemoveAt(upper.Count - 1);
+            upper.Add(point);
+        }
+        lower.RemoveAt(lower.Count - 1); upper.RemoveAt(upper.Count - 1);
+        var hull = lower.Concat(upper).ToArray();
+        double area = 0;
+        for (var i = 0; i < hull.Length; i++)
+        {
+            var next = hull[(i + 1) % hull.Length];
+            area += hull[i].X * next.Y - next.X * hull[i].Y;
+        }
+        return Math.Abs(area) / 2;
+    }
+
+    private static double Cross((double X, double Y) a, (double X, double Y) b, (double X, double Y) c)
+        => (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
 }
 public sealed class TransformPointNode : IVisionNodeExecutor
 {
@@ -210,9 +270,12 @@ var p=CoordinateValidation.RequireFinitePoint(context.Require<VisionPoint2D>("po
         var t=context.Require<VisionTransform2D>("transform");
         var det=CoordinateValidation.ValidateTransform(t,"transform");
         var q=CoordinateValidation.RequireFinitePoint(t.Apply(p),"transformed point");
+        CoordinateValidation.RequireMagnitude(q.X,"transformed point.x",1e12); CoordinateValidation.RequireMagnitude(q.Y,"transformed point.y",1e12);
         var world=new VisionCoordinatePoint2D(q.X,q.Y,t.TargetFrame,t.TargetUnit);
-        var diag=CoordinateValidation.Diagnostics(Type,("inputX",p.X),("inputY",p.Y),("outputX",q.X),("outputY",q.Y),("determinant",det),("targetFrame",t.TargetFrame),("unit",t.TargetUnit));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"point",VisionValue.CoordinatePoint(world)},{"x",VisionValue.Double(q.X)},{"y",VisionValue.Double(q.Y)},{"frame",VisionValue.String(t.TargetFrame)},{"unit",VisionValue.String(t.TargetUnit)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"point",$"({q.X:0.###},{q.Y:0.###}) {t.TargetUnit}"},{"frame",t.TargetFrame},{"diagnostics",diag}}));
+        var sourceImageId=CoordinateValidation.RequireNonEmpty(context.TryGetValue("sourceImageId",out var sourceValue)?sourceValue.Require<string>("sourceImageId"):node.GetString("sourceImageId","unattributed"),"sourceImageId");
+        var transformId=CoordinateValidation.RequireNonEmpty(node.Id,"transformId");
+        var diag=CoordinateValidation.Diagnostics(Type,("inputX",p.X),("inputY",p.Y),("outputX",q.X),("outputY",q.Y),("determinant",det),("targetFrame",t.TargetFrame),("unit",t.TargetUnit),("sourceImageId",sourceImageId),("transformId",transformId),("conditionNumber",CoordinateValidation.ConditionNumber(t)),("transformType",CoordinateValidation.MatrixType(t)));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"point",VisionValue.CoordinatePoint(world)},{"x",VisionValue.Double(q.X)},{"y",VisionValue.Double(q.Y)},{"frame",VisionValue.String(t.TargetFrame)},{"unit",VisionValue.String(t.TargetUnit)},{"sourceImageId",VisionValue.String(sourceImageId)},{"sourcePixelX",VisionValue.Double(p.X)},{"sourcePixelY",VisionValue.Double(p.Y)},{"transformId",VisionValue.String(transformId)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"point",$"({q.X:0.###},{q.Y:0.###}) {t.TargetUnit}"},{"frame",t.TargetFrame},{"sourceImageId",sourceImageId},{"transformId",transformId},{"diagnostics",diag}}));
     }
 }
 public sealed class TransformLineNode : IVisionNodeExecutor
@@ -231,14 +294,14 @@ var line=context.Require<VisionLine2D>("line");
         var a=CoordinateValidation.RequireFinitePoint(t.Apply(line.Start),"transformed line.start");
         var b=CoordinateValidation.RequireFinitePoint(t.Apply(line.End),"transformed line.end");
         var wl=new VisionCoordinateLine2D(new(a.X,a.Y,t.TargetFrame,t.TargetUnit),new(b.X,b.Y,t.TargetFrame,t.TargetUnit));
-        if (!double.IsFinite(wl.Length)) throw new InvalidOperationException("coordinate.transformLine produced a non-finite length.");
+        if (!double.IsFinite(wl.Length) || wl.Length < 1e-9) throw new InvalidOperationException("coordinate.transformLine produced a degenerate transformed line.");
         var minLength=node.GetDouble("minLength",0);
         if (!double.IsFinite(minLength) || minLength < 0) throw new InvalidOperationException("coordinate.transformLine minLength must be finite and >= 0.");
         if (minLength > 0 && wl.Length < minLength)
             throw new InvalidOperationException($"coordinate.transformLine produced length {wl.Length:0.###} {t.TargetUnit}, below minLength {minLength:0.###}.");
-        var angle=Math.Atan2(b.Y-a.Y,b.X-a.X)*180/Math.PI;
+        var angle=VisionTransform2D.NormalizeAngleDeg(Math.Atan2(b.Y-a.Y,b.X-a.X)*180/Math.PI);
         CoordinateValidation.RequireFinite(angle,"transformed line.angleDeg");
-        var diag=CoordinateValidation.Diagnostics(Type,("inputLength",inputLength),("outputLength",wl.Length),("minLength",minLength),("angleDeg",angle),("determinant",det),("targetFrame",t.TargetFrame),("unit",t.TargetUnit));
+        var diag=CoordinateValidation.Diagnostics(Type,("inputLength",inputLength),("outputLength",wl.Length),("minLength",minLength),("minLengthStage","target"),("angleDeg",angle),("angleInterval","(-180,180]"),("endpointOrder","Start->End"),("determinant",det),("targetFrame",t.TargetFrame),("unit",t.TargetUnit));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"line",VisionValue.CoordinateLine(wl)},{"length",VisionValue.Measurement(new(wl.Length,t.TargetUnit,"Distance"))},{"lengthValue",VisionValue.Double(wl.Length)},{"angleDeg",VisionValue.Double(angle)},{"frame",VisionValue.String(t.TargetFrame)},{"unit",VisionValue.String(t.TargetUnit)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"length",Math.Round(wl.Length,4)},{"unit",t.TargetUnit},{"frame",t.TargetFrame},{"diagnostics",diag}}));
     }
 }
@@ -258,7 +321,7 @@ var pose=context.Require<VisionPose2D>("pose");
         var q=CoordinateValidation.RequireFinitePoint(t.Apply(new VisionPoint2D(pose.X,pose.Y)),"transformed pose");
         var angle=CoordinateValidation.RequireFinite(t.ApplyAngleDeg(new VisionPoint2D(pose.X,pose.Y),pose.ThetaDeg),"transformed pose.thetaDeg");
         var world=new VisionCoordinatePose2D(q.X,q.Y,angle,t.TargetFrame,t.TargetUnit);
-        var diag=CoordinateValidation.Diagnostics(Type,("outputX",q.X),("outputY",q.Y),("outputThetaDeg",angle),("determinant",det),("targetFrame",t.TargetFrame),("unit",t.TargetUnit));
+        var diag=CoordinateValidation.Diagnostics(Type,("sourcePixelX",pose.X),("sourcePixelY",pose.Y),("inputThetaDeg",pose.ThetaDeg),("outputX",q.X),("outputY",q.Y),("outputThetaDeg",angle),("determinant",det),("targetFrame",t.TargetFrame),("unit",t.TargetUnit),("transformId",node.Id),("transformType",CoordinateValidation.MatrixType(t)),("conditionNumber",CoordinateValidation.ConditionNumber(t)),("orientationRule","Jacobian local-X-axis mapping"),("angleInterval","(-180,180]"));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"pose",VisionValue.CoordinatePose(world)},{"x",VisionValue.Double(q.X)},{"y",VisionValue.Double(q.Y)},{"thetaDeg",VisionValue.Double(angle)},{"frame",VisionValue.String(t.TargetFrame)},{"unit",VisionValue.String(t.TargetUnit)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"x",Math.Round(q.X,4)},{"y",Math.Round(q.Y,4)},{"thetaDeg",Math.Round(angle,4)},{"frame",t.TargetFrame},{"unit",t.TargetUnit},{"diagnostics",diag}}));
     }
 }
@@ -278,7 +341,8 @@ public sealed class CoordinatePointNode : IVisionNodeExecutor
         if (Math.Abs(p.X) > 1e9 || Math.Abs(p.Y) > 1e9)
             throw new InvalidOperationException("coordinate.point coordinates must be within +/-1e9.");
         var diag = CoordinateValidation.Diagnostics(Type, ("x", p.X), ("y", p.Y), ("frame", p.Frame), ("unit", p.Unit),
-            ("magnitude", double.Hypot(p.X, p.Y)));
+            ("magnitude", double.Hypot(p.X, p.Y)), ("frameValidation", CoordinateLiteral.FrameValidationState(context, p.Frame)),
+            ("sources", CoordinateLiteral.Sources(context, "x", "y")));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -306,13 +370,20 @@ public sealed class CoordinateDistanceNode : IVisionNodeExecutor
 
 var a=CoordinateValidation.RequireFinitePoint(context.Require<VisionCoordinatePoint2D>("pointA"),"pointA");
         var b=CoordinateValidation.RequireFinitePoint(context.Require<VisionCoordinatePoint2D>("pointB"),"pointB");
-        if(!string.Equals(a.Frame,b.Frame,StringComparison.OrdinalIgnoreCase)||!string.Equals(a.Unit,b.Unit,StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException($"Coordinate frame/unit mismatch: {a.Frame}/{a.Unit} vs {b.Frame}/{b.Unit}.");
+        if(!string.Equals(a.Frame,b.Frame,StringComparison.OrdinalIgnoreCase)||!string.Equals(a.Unit,b.Unit,StringComparison.OrdinalIgnoreCase))
+        {
+            var mismatches = new List<string>();
+            if (!string.Equals(a.Frame,b.Frame,StringComparison.OrdinalIgnoreCase)) mismatches.Add("frame");
+            if (!string.Equals(a.Unit,b.Unit,StringComparison.OrdinalIgnoreCase)) mismatches.Add("unit");
+            throw new InvalidOperationException($"coordinate.distance mismatch ({string.Join(",",mismatches)}): A frame='{a.Frame}' unit='{a.Unit}'; B frame='{b.Frame}' unit='{b.Unit}'. Automatic conversion is not allowed.");
+        }
         var dx=CoordinateValidation.RequireFinite(b.X-a.X,"distance.dx"); var dy=CoordinateValidation.RequireFinite(b.Y-a.Y,"distance.dy");
         var metric=node.GetString("metric","euclidean").Trim().ToLowerInvariant();
         var d=metric switch { "euclidean" => double.Hypot(dx, dy), "manhattan" => Math.Abs(dx)+Math.Abs(dy), _ => throw new InvalidOperationException("coordinate.distance metric must be euclidean or manhattan.") };
         if (!double.IsFinite(d)) throw new InvalidOperationException("coordinate.distance produced a non-finite distance.");
-        var diag=CoordinateValidation.Diagnostics(Type,("dx",dx),("dy",dy),("distance",d),("metric",metric),("frame",a.Frame),("unit",a.Unit),("coincident",d<1e-12));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"measurement",VisionValue.Measurement(new(d,a.Unit,"Distance"))},{"distance",VisionValue.Double(d)},{"dx",VisionValue.Double(dx)},{"dy",VisionValue.Double(dy)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"distance",Math.Round(d,4)},{"unit",a.Unit},{"frame",a.Frame},{"diagnostics",diag}}));
+        var diag=CoordinateValidation.Diagnostics(Type,("dx",dx),("dy",dy),("distance",d),("metric",metric),("frame",a.Frame),("unit",a.Unit),("coincident",d<1e-12),
+            ("dxContract","B.x-A.x"),("dyContract","B.y-A.y"),("start",$"{a.X},{a.Y}"),("end",$"{b.X},{b.Y}"));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"measurement",VisionValue.Measurement(new(d,a.Unit,"Distance") { Start=$"{a.Frame}:{a.X},{a.Y}", End=$"{b.Frame}:{b.X},{b.Y}", Metric=metric })},{"distance",VisionValue.Double(d)},{"dx",VisionValue.Double(dx)},{"dy",VisionValue.Double(dy)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"distance",Math.Round(d,4)},{"unit",a.Unit},{"frame",a.Frame},{"diagnostics",diag}}));
     }
 }
 
@@ -355,6 +426,12 @@ internal static class CoordinateLiteral
         }
         return (x, y, frame, unit);
     }
+
+    public static string FrameValidationState(NodeExecutionContext context, string frame)
+        => context.TryGetValue("tree", out _) ? "verified" : "unverified";
+
+    public static object Sources(NodeExecutionContext context, params string[] names)
+        => names.ToDictionary(name => name, name => context.TryGetValue(name, out _) ? "port" : "parameter");
 
     private static double Number(NodeExecutionContext context, NodeDefinition node, string name, double fallback, string nodeType)
     {

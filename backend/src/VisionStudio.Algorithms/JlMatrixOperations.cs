@@ -147,6 +147,113 @@ public static class JlMatrixOperations
             throw new InvalidOperationException($"矩阵结果最多支持 {MaxElements} 个元素，当前请求 {rows}×{columns}；请降低尺寸或重复次数。");
     }
 
+    internal static void ValidateOperation(string operation, JlMatrixArgs args)
+    {
+        args.A.GetSizeMatrix(out var rows, out var columns);
+        if ((operation is "invert" or "invertMod" or "determinant" or "eigenvaluesSymmetric" or "solve" or "pow" or "powMod") && rows != columns)
+            throw new InvalidOperationException($"Matrix operator '{operation}' requires a square matrix; received {rows}x{columns}.");
+        if (operation == "generalizedEigenvaluesSymmetric")
+        {
+            args.B!.GetSizeMatrix(out var otherRows, out var otherColumns);
+            if (rows != columns || otherRows != rows || otherColumns != columns)
+                throw new InvalidOperationException("Generalized symmetric eigenvalues require equally sized square matrices.");
+        }
+        if (operation is "add" or "sub" or "multElement" or "divElement" or "addMod" or "subMod" or "multElementMod" or "divElementMod" or "powElementMod")
+        {
+            args.B!.GetSizeMatrix(out var otherRows, out var otherColumns);
+            if (rows != otherRows || columns != otherColumns)
+                throw new InvalidOperationException($"Matrix operator '{operation}' requires matching dimensions; received {rows}x{columns} and {otherRows}x{otherColumns}.");
+        }
+        if (operation is "mult" or "multMod")
+        {
+            args.B!.GetSizeMatrix(out var otherRows, out var otherColumns);
+            var mode = MultType(args.Mode);
+            var innerA = mode is "ATB" or "ATBT" ? rows : columns;
+            var innerB = mode is "ABT" or "ATBT" ? otherRows : otherColumns;
+            if (innerA != innerB)
+                throw new InvalidOperationException($"Matrix multiplication dimensions do not conform for {mode}: {rows}x{columns} and {otherRows}x{otherColumns}.");
+        }
+        if (operation == "solve")
+        {
+            args.B!.GetSizeMatrix(out var rightRows, out _);
+            if (rightRows != rows)
+                throw new InvalidOperationException($"Matrix solve requires matrixB row count {rows}; received {rightRows}.");
+            if (TryConditionNumber(args.A) is null)
+                throw new InvalidOperationException("jlvision.matrixOp.singularMatrix:solve: coefficient matrix is singular.");
+        }
+        if (operation is "getValue" or "getSubMatrix" or "setValue")
+        {
+            if (args.Row < 0 || args.Column < 0 || args.Row >= rows || args.Column >= columns)
+                throw new InvalidOperationException($"Matrix operator '{operation}' index ({args.Row},{args.Column}) is outside {rows}x{columns}.");
+        }
+        if (operation == "getSubMatrix" && (args.Rows < 1 || args.Columns < 1 || args.Row + args.Rows > rows || args.Column + args.Columns > columns))
+            throw new InvalidOperationException($"Matrix sub-matrix range exceeds {rows}x{columns} bounds.");
+        if (operation is "divElement" or "divElementMod")
+        {
+            args.B!.GetSizeMatrix(out var otherRows, out var otherColumns);
+            for (var row = 0; row < otherRows; row++)
+            for (var column = 0; column < otherColumns; column++)
+                if (args.B.GetValueMatrix(row, column) == 0)
+                    throw new InvalidOperationException($"jlvision.matrixOp.divideByZero:{operation}: matrixB[{row},{column}] is zero.");
+        }
+        if (operation is "invert" or "invertMod" && TryConditionNumber(args.A) is null)
+            throw new InvalidOperationException($"jlvision.matrixOp.singularMatrix:{operation}: coefficient matrix is singular.");
+    }
+
+    /// <summary>Infinity-norm condition number for a square matrix; null means singular.</summary>
+    internal static double? TryConditionNumber(JlMatrix matrix)
+    {
+        matrix.GetSizeMatrix(out var n, out var columns);
+        if (n != columns || n < 1) return null;
+        var augmented = new double[n, n * 2];
+        for (var row = 0; row < n; row++)
+        {
+            for (var column = 0; column < n; column++)
+                augmented[row, column] = matrix.GetValueMatrix(row, column);
+            augmented[row, n + row] = 1;
+        }
+        var scale = 0d;
+        for (var row = 0; row < n; row++)
+        {
+            var rowSum = 0d;
+            for (var column = 0; column < n; column++) rowSum += Math.Abs(augmented[row, column]);
+            scale = Math.Max(scale, rowSum);
+        }
+        if (scale == 0 || !double.IsFinite(scale)) return null;
+        for (var pivot = 0; pivot < n; pivot++)
+        {
+            var bestRow = pivot;
+            var bestValue = Math.Abs(augmented[pivot, pivot]);
+            for (var row = pivot + 1; row < n; row++)
+            {
+                var value = Math.Abs(augmented[row, pivot]);
+                if (value > bestValue) { bestValue = value; bestRow = row; }
+            }
+            if (bestValue <= double.Epsilon * scale * n) return null;
+            if (bestRow != pivot)
+                for (var column = 0; column < n * 2; column++)
+                    (augmented[pivot, column], augmented[bestRow, column]) = (augmented[bestRow, column], augmented[pivot, column]);
+            var divisor = augmented[pivot, pivot];
+            for (var column = 0; column < n * 2; column++) augmented[pivot, column] /= divisor;
+            for (var row = 0; row < n; row++)
+            {
+                if (row == pivot) continue;
+                var factor = augmented[row, pivot];
+                if (factor == 0) continue;
+                for (var column = 0; column < n * 2; column++) augmented[row, column] -= factor * augmented[pivot, column];
+            }
+        }
+        var inverseNorm = 0d;
+        for (var row = 0; row < n; row++)
+        {
+            var rowSum = 0d;
+            for (var column = n; column < n * 2; column++) rowSum += Math.Abs(augmented[row, column]);
+            inverseNorm = Math.Max(inverseNorm, rowSum);
+        }
+        var condition = scale * inverseNorm;
+        return double.IsFinite(condition) ? condition : double.PositiveInfinity;
+    }
+
     internal static void ValidateOutputBudget(string operation, JlMatrixArgs args)
     {
         args.A.GetSizeMatrix(out int rows, out int columns);
@@ -224,30 +331,58 @@ public static class JlMatrixOperations
     {
         if (string.IsNullOrWhiteSpace(json))
             throw new InvalidOperationException($"Matrix parameter '{parameterName}' is empty; provide a JSON array of rows.");
-        double[][] rows;
-        try { rows = JsonSerializer.Deserialize<double[][]>(json) ?? []; }
-        catch (JsonException ex) { throw new InvalidOperationException($"Matrix parameter '{parameterName}' is not a JSON array of numbers: {ex.Message}", ex); }
-        if (rows.Length == 0 || rows[0] is null || rows[0].Length == 0)
-            throw new InvalidOperationException($"Matrix parameter '{parameterName}' must contain at least one row and one column.");
-        var columns = rows[0].Length;
-        if (rows.Any(r => r is null || r.Length != columns))
-            throw new InvalidOperationException($"Matrix parameter '{parameterName}' has ragged rows.");
-        if ((long)rows.Length * columns > 1000000 || rows.SelectMany(r => r).Any(v => !double.IsFinite(v)))
-            throw new InvalidOperationException($"Matrix parameter '{parameterName}' must contain at most one million finite numbers.");
-
-        var matrix = new JlMatrix();
         try
         {
-            matrix.CreateMatrix(rows.Length, columns, 0d);
-            var flat = new double[rows.Length * columns];
-            for (var r = 0; r < rows.Length; r++)
-                for (var c = 0; c < columns; c++)
-                    flat[r * columns + c] = rows[r][c];
-            using var tuple = new JlTuple(flat);
-            matrix.SetFullMatrix(tuple);
-            return matrix;
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0)
+                throw new InvalidOperationException($"Matrix parameter '{parameterName}' must contain at least one row and one column.");
+            var rowCount = root.GetArrayLength();
+            var columns = 0;
+            foreach (var row in root.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Array || row.GetArrayLength() == 0)
+                    throw new InvalidOperationException($"Matrix parameter '{parameterName}' must be a rectangular JSON array of numbers.");
+                if (columns == 0) columns = row.GetArrayLength();
+                else if (row.GetArrayLength() != columns)
+                    throw new InvalidOperationException($"Matrix parameter '{parameterName}' has ragged rows.");
+            }
+            // Check the element budget before allocating the managed double[][] or native matrix.
+            if ((long)rowCount * columns > MaxElements)
+                throw new InvalidOperationException($"Matrix parameter '{parameterName}' must contain at most {MaxElements} finite numbers; received {rowCount}x{columns}.");
+            var rows = new double[rowCount][];
+            var rowIndex = 0;
+            foreach (var row in root.EnumerateArray())
+            {
+                var values = new double[columns];
+                var columnIndex = 0;
+                foreach (var value in row.EnumerateArray())
+                {
+                    if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number) || !double.IsFinite(number))
+                        throw new InvalidOperationException($"Matrix parameter '{parameterName}' contains a non-numeric or non-finite element at [{rowIndex},{columnIndex}].");
+                    values[columnIndex++] = number;
+                }
+                rows[rowIndex++] = values;
+            }
+
+            var matrix = new JlMatrix();
+            try
+            {
+                matrix.CreateMatrix(rows.Length, columns, 0d);
+                var flat = new double[rows.Length * columns];
+                for (var r = 0; r < rows.Length; r++)
+                    for (var c = 0; c < columns; c++)
+                        flat[r * columns + c] = rows[r][c];
+                using var tuple = new JlTuple(flat);
+                matrix.SetFullMatrix(tuple);
+                return matrix;
+            }
+            catch { matrix.Dispose(); throw; }
         }
-        catch { matrix.Dispose(); throw; }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Matrix parameter '{parameterName}' is not a JSON array of numbers: {ex.Message}", ex);
+        }
     }
 
     public static string ToJson(double[,] values)

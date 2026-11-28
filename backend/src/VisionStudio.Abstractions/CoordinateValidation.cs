@@ -68,6 +68,46 @@ public static class CoordinateValidation
         if (!double.IsFinite(length) || length < 1e-9) throw new InvalidOperationException($"{name} must be a non-degenerate line (length >= 1e-9).");
         return length;
     }
+    public static double RequireMagnitude(double value, string name, double limit)
+    {
+        RequireFinite(value, name);
+        if (Math.Abs(value) > limit) throw new InvalidOperationException($"{name} magnitude {value} exceeds the allowed limit {limit}.");
+        return value;
+    }
+
+    public static void RequireFrameUnitMatch(string frameA, string unitA, string frameB, string unitB, string operation)
+    {
+        if (!string.Equals(frameA, frameB, StringComparison.OrdinalIgnoreCase) || !string.Equals(unitA, unitB, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"{operation} mismatch: A frame='{frameA}' unit='{unitA}'; B frame='{frameB}' unit='{unitB}' (frameMatch={string.Equals(frameA, frameB, StringComparison.OrdinalIgnoreCase)}, unitMatch={string.Equals(unitA, unitB, StringComparison.OrdinalIgnoreCase)}).");
+    }
+
+    public static double SingularityThreshold(VisionTransform2D transform)
+    {
+        var scale = Math.Max(1, Math.Max(Math.Abs(transform.H00), Math.Max(Math.Abs(transform.H01), Math.Max(Math.Abs(transform.H10), Math.Abs(transform.H11)))));
+        return 1e-12 * scale * scale;
+    }
+
+    /// <summary>2-norm condition number of the affine linear block (translation-independent).</summary>
+    public static double ConditionNumber(VisionTransform2D transform)
+    {
+        var a = Math.Max(Math.Abs(transform.H00), Math.Abs(transform.H01));
+        var c = Math.Max(Math.Abs(transform.H10), Math.Abs(transform.H11));
+        var norm = Math.Max(a + c, 1e-300);
+        var determinant = Determinant(transform);
+        if (Math.Abs(determinant) < 1e-300) return double.PositiveInfinity;
+        // ||A^-1||_1 for a 2x2 matrix; infinity and 1-norm condition numbers are equivalent for 2x2.
+        var inverseNorm = Math.Max(Math.Abs(transform.H11) + Math.Abs(transform.H10), Math.Abs(transform.H01) + Math.Abs(transform.H00)) / Math.Abs(determinant);
+        return norm * inverseNorm;
+    }
+
+    public static string MatrixType(VisionTransform2D transform)
+    {
+        var rigid = Math.Abs(transform.H00 * transform.H00 + transform.H10 * transform.H10 - 1) < 1e-9
+            && Math.Abs(transform.H01 * transform.H01 + transform.H11 * transform.H11 - 1) < 1e-9
+            && Math.Abs(transform.H00 * transform.H01 + transform.H10 * transform.H11) < 1e-9;
+        return rigid ? "rigid" : "affine-nonrigid";
+    }
+
     public static string Diagnostics(string nodeType, params (string Key, object? Value)[] fields)
     {
         var payload = new Dictionary<string, object?> { ["node"] = nodeType, ["valid"] = true };

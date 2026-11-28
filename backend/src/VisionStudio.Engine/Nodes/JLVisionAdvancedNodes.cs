@@ -1,5 +1,6 @@
 using System.Text.Json;
 using JLVisionLib;
+using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
@@ -59,7 +60,7 @@ internal static class AdvancedJl
     internal static string Json(object value) => JsonSerializer.Serialize(value);
     internal static NodeExecutorResult Result(NodeDefinition node, string operation, Dictionary<string, VisionValue> outputs)
     {
-        outputs["diagnostics"] = VisionValue.String(Json(new { operation, backend = "jlvision" }));
+        if (!outputs.ContainsKey("diagnostics")) outputs["diagnostics"] = VisionValue.String(Json(new { operation, backend = "jlvision" }));
         var result = new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["algorithmBackend"] = "jlvision", ["operator"] = operation });
         if (outputs is OwnedOutputs owned) owned.Transferred = true;
         return result;
@@ -87,11 +88,39 @@ internal static class AdvancedJl
 public sealed class JLVisionFeatureExtractNode : IVisionNodeExecutor
 {
     public string Type => "jlvision.featureExtract";
+
+    private static readonly Dictionary<string,string[]> FeatureParameters = new(StringComparer.Ordinal)
+    {
+        ["linesGauss"]=["sigma","low","high","polarity","extractWidth","lineModel","completeJunctions"],
+        ["linesFacet"]=["low","high","maskSize","polarity"], ["linesColor"]=["sigma","low","high","extractWidth","completeJunctions"],
+        ["edgesSubPix"]=["sigma","low","high","filter"], ["edgesColorSubPix"]=["sigma","low","high","filter"],
+        ["pointsHarris"]=["sigma","sigmaSmooth","threshold","alpha","selectedIndex"],
+        ["pointsFoerstner"]=["sigma","sigmaSmooth","sigmaPoints","threshold","shapeThreshold","selectedIndex"],
+        ["detectEdgeSegments"]=["low","sobelSize","maxDistance","minLength"]
+    };
+
+    private static void ValidateFeatureContract(NodeDefinition node,string operation)
+    {
+        var allowed=FeatureParameters[operation];
+        var defaults=new Dictionary<string,double>{{"sigma",1},{"low",5},{"high",10},{"maskSize",5},{"sobelSize",3},{"sigmaSmooth",2},{"sigmaPoints",2},{"threshold",100},{"alpha",.04},{"shapeThreshold",.3},{"maxDistance",2},{"minLength",10}};
+        var irrelevant=defaults.Where(p=>!allowed.Contains(p.Key)&&node.GetDouble(p.Key,p.Value)!=p.Value).Select(p=>p.Key).ToArray();
+        if(!allowed.Contains("filter")&&node.GetString("filter","canny")!="canny") irrelevant=[..irrelevant,"filter"];
+        if(!allowed.Contains("extractWidth")&&!node.GetBool("extractWidth",true)) irrelevant=[..irrelevant,"extractWidth"];
+        if(!allowed.Contains("completeJunctions")&&!node.GetBool("completeJunctions",true)) irrelevant=[..irrelevant,"completeJunctions"];
+        if(!allowed.Contains("polarity")&&node.GetString("polarity","light")!="light") irrelevant=[..irrelevant,"polarity"];
+        if(!allowed.Contains("lineModel")&&node.GetString("lineModel","bar-shaped")!="bar-shaped") irrelevant=[..irrelevant,"lineModel"];
+        if(irrelevant.Length>0) throw new InvalidOperationException($"jlvision.featureExtract operator='{operation}' rejects irrelevant non-default parameters: {string.Join(",",irrelevant)}; effective: {string.Join(",",allowed)}.");
+    }
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var operation = AdvancedJl.Choice(node, "operator", "linesGauss", "linesGauss", "linesFacet", "linesColor", "edgesSubPix", "edgesColorSubPix", "pointsHarris", "pointsFoerstner", "detectEdgeSegments");
-        using var image = AdvancedJl.Source(context, operation is "linesColor" or "edgesColorSubPix");
+        ValidateFeatureContract(node,operation);
+        var sourceImage=context.RequireImage("image");
+        var color=operation is "linesColor" or "edgesColorSubPix";
+        if(color && sourceImage.Mat.Channels()!=3) throw new InvalidOperationException($"jlvision.featureExtract operator='{operation}' requires exactly 3 channels; actual={sourceImage.Mat.Channels()}.");
+        if(!color && sourceImage.Mat.Channels()!=1) throw new InvalidOperationException($"jlvision.featureExtract operator='{operation}' requires a single-channel image; actual={sourceImage.Mat.Channels()}.");
+        using var image = AdvancedJl.Source(context, color);
         var sigma = operation is "linesFacet" or "detectEdgeSegments" ? 1 : AdvancedJl.Number(node, "sigma", 1, .1, 100);
         var usesThresholds = operation is not ("pointsHarris" or "pointsFoerstner");
         var low = operation == "detectEdgeSegments" ? AdvancedJl.Integer(node, "low", 5, 0, 1000000000)
@@ -141,14 +170,20 @@ public sealed class JLVisionFeatureExtractNode : IVisionNodeExecutor
             }
             var contours = curves is null ? [] : JlContourCodec.FromNative(curves, cancellationToken);
             var count = curves is null ? points.Count : contours.Count;
-            var outputs = new Dictionary<string, VisionValue> { ["contours"] = VisionValue.Contours(contours), ["points"] = VisionValue.String(AdvancedJl.Json(points)),
+            var outputs = new Dictionary<string, VisionValue> { ["contours"] = VisionValue.Contours(contours),
+                ["points"] = VisionValue.String(AdvancedJl.Json(new { schemaVersion=1, coordinateSystem="image-pixels", unit="px", precision="subpixel", points })),
                 ["details"] = VisionValue.String(AdvancedJl.Json(details ?? new { })), ["count"] = VisionValue.Integer(count), ["found"] = VisionValue.Boolean(count > 0) };
             var selected = curves is null ? AdvancedJl.Integer(node, "selectedIndex", 0) : 0;
-            if (selected < points.Count) outputs["point"] = VisionValue.Point(points[selected]);
+            if (curves is null && selected >= points.Count)
+                throw new InvalidOperationException($"jlvision.featureExtract operator='{operation}' selectedIndex={selected} is out of range; candidateCount={points.Count}. No point was emitted.");
+            if (curves is null && points.Count > 0) outputs["point"] = VisionValue.Point(points[selected]);
             var detections = curves is null
                 ? points.Select((p, i) => new VisionDetection(i, p.X, p.Y, 0, 0, 0, 0, 0, new(p.X, p.Y, 0), new(p.X, p.Y, 0, 0))).ToArray()
                 : contours.Select((c, i) => new VisionDetection(i, c.BoundingBox.X, c.BoundingBox.Y, c.BoundingBox.Width, c.BoundingBox.Height, c.Area, c.Perimeter, c.Circularity, c.MinEnclosingCircle, c.BoundingBox)).ToArray();
             outputs["detections"] = VisionValue.Detections(detections);
+            var parameterNames=new[]{"sigma","low","high","maskSize","sobelSize","polarity","extractWidth","completeJunctions","lineModel","filter","sigmaSmooth","sigmaPoints","threshold","alpha","shapeThreshold","maxDistance","minLength","selectedIndex"};
+            var effective=parameterNames.Where(name => FeatureParameters[operation]?.Contains(name) == true).ToDictionary(name=>name,name=>node.Parameters is not null && node.Parameters.TryGetValue(name,out var value)?(object?)value:null);
+            outputs["diagnostics"]=VisionValue.String(CoordinateValidation.Diagnostics(Type,("operator",operation),("effectiveParameters",effective),("channels",sourceImage.Mat.Channels()),("count",count),("pointsSchema","schemaVersion=1; image-pixels; px; subpixel")));
             return ValueTask.FromResult(AdvancedJl.Result(node, operation, outputs));
         }
         finally { curves?.Dispose(); }
@@ -163,16 +198,23 @@ public sealed class JLVisionSegmentationNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         var operation = AdvancedJl.Choice(node, "operator", "watersheds", "watersheds", "watershedsMarker", "watershedsThreshold", "mser");
         var source = context.RequireImage("image"); using var image = AdvancedJl.Source(context);
+        var thresholdInput = operation == "watershedsThreshold" ? AdvancedJl.Integer(node, "threshold", 10, 0, 65535) : 0;
+        var thresholdDepth = source.Mat.Depth();
+        if (operation == "watershedsThreshold" && thresholdDepth is not (MatType.CV_8U or MatType.CV_16U))
+            throw new InvalidOperationException($"jlvision.segmentation watershedsThreshold supports byte or uint2 images; actual depth={thresholdDepth}.");
+        var thresholdScale = thresholdDepth == MatType.CV_16U ? 65535d / 255d : 1d;
+        var effectiveThreshold = (int)Math.Round(thresholdInput * thresholdScale);
         JlRegion? region = null; JlRegion? secondary = null;
         try
         {
             switch (operation)
             {
                 case "watersheds": region = image.Watersheds(out secondary); break;
-                case "watershedsThreshold": region = image.WatershedsThreshold(AdvancedJl.Integer(node, "threshold", 10, 0, 65535)); break;
+                case "watershedsThreshold": region = image.WatershedsThreshold(effectiveThreshold); break;
                 case "watershedsMarker":
                     var markers = context.Require<VisionRegion>("markers");
-                    if (markers.Width != source.Width || markers.Height != source.Height || markers.Components.Count == 0) throw new InvalidOperationException("标记区域必须非空并与输入图像尺寸一致。");
+                    if (markers.Width != source.Width || markers.Height != source.Height || markers.Components.Count == 0)
+                        throw new InvalidOperationException($"标记区域必须非空并与输入图像尺寸一致：image={source.Width}x{source.Height}, markers={markers.Width}x{markers.Height}, markerObjects={markers.Components.Count}。");
                     using (var native = JLVisionRegions.ToNative(markers)) region = image.WatershedsMarker(native);
                     break;
                 case "mser":
@@ -183,18 +225,51 @@ public sealed class JLVisionSegmentationNode : IVisionNodeExecutor
             }
             var output = JLVisionRegions.FromNative(region!, source.Width, source.Height, cancellationToken);
             var auxiliary = secondary is null ? null : JLVisionRegions.FromNative(secondary, source.Width, source.Height, cancellationToken);
-            var count = output.Components.Count + (operation == "mser" ? auxiliary?.Components.Count ?? 0 : 0);
-            var outputs = new Dictionary<string, VisionValue> { ["region"] = VisionValue.Region(output), ["count"] = VisionValue.Integer(count), ["found"] = VisionValue.Boolean(count > 0),
-                ["primaryCount"] = VisionValue.Integer(output.Components.Count), ["secondaryCount"] = VisionValue.Integer(auxiliary?.Components.Count ?? 0) };
-            if (auxiliary is not null) outputs["secondaryRegion"] = VisionValue.Region(auxiliary);
+            var outputs = new Dictionary<string, VisionValue>
+            {
+                ["region"] = VisionValue.Region(output),
+                ["primaryCount"] = VisionValue.Integer(output.Components.Count)
+            };
+            object effectiveParameters;
+            string outputContract;
             if (operation == "mser")
             {
+                outputs["secondaryRegion"] = VisionValue.Region(auxiliary ?? new VisionRegion(source.Width, source.Height, []));
                 outputs["darkRegion"] = VisionValue.Region(output);
                 outputs["lightRegion"] = VisionValue.Region(auxiliary ?? new VisionRegion(source.Width, source.Height, []));
+                outputs["secondaryCount"] = VisionValue.Integer(auxiliary?.Components.Count ?? 0);
                 outputs["darkCount"] = VisionValue.Integer(output.Components.Count);
                 outputs["lightCount"] = VisionValue.Integer(auxiliary?.Components.Count ?? 0);
+                var total = output.Components.Count + (auxiliary?.Components.Count ?? 0);
+                outputs["count"] = VisionValue.Integer(total); outputs["found"] = VisionValue.Boolean(total > 0);
+                effectiveParameters = new { minArea = node.GetInt("minArea", 10), maxArea = node.GetInt("maxArea", 10000), delta = node.GetInt("delta", 5), polarity = node.GetString("polarity", "both") };
+                outputContract = "region=darkRegion; secondaryRegion=lightRegion; count=darkCount+lightCount";
             }
-            return ValueTask.FromResult(AdvancedJl.Result(node, operation, outputs));
+            else if (operation == "watersheds")
+            {
+                outputs["secondaryRegion"] = VisionValue.Region(auxiliary ?? new VisionRegion(source.Width, source.Height, []));
+                outputs["secondaryCount"] = VisionValue.Integer(auxiliary?.Components.Count ?? 0);
+                outputs["count"] = VisionValue.Integer(output.Components.Count); outputs["found"] = VisionValue.Boolean(output.Components.Count > 0);
+                effectiveParameters = new { threshold = (int?)null };
+                outputContract = "region=basins; secondaryRegion=watershed-boundary; count=primaryCount";
+            }
+            else
+            {
+                outputs["count"] = VisionValue.Integer(output.Components.Count); outputs["found"] = VisionValue.Boolean(output.Components.Count > 0);
+                effectiveParameters = new { inputThreshold = thresholdInput, effectiveThreshold, scale = thresholdScale, pixelType = thresholdDepth == MatType.CV_8U ? "byte" : "uint2" };
+                outputContract = "region=basins; secondaryRegion/darkRegion/lightRegion and their counts are not emitted";
+            }
+            var diagnostics = JsonSerializer.Serialize(new
+            {
+                node = Type, operation, backend = "jlvision", effectiveParameters, outputContract,
+                width = source.Width, height = source.Height
+            });
+            outputs["diagnostics"] = VisionValue.String(diagnostics);
+            return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?>
+            {
+                ["algorithmBackend"] = "jlvision", ["operator"] = operation, ["effectiveParameters"] = effectiveParameters,
+                ["outputContract"] = outputContract, ["diagnostics"] = diagnostics
+            }));
         }
         finally { region?.Dispose(); secondary?.Dispose(); }
     }
@@ -210,9 +285,12 @@ public sealed class JLVisionRegionAnalysisNode : IVisionNodeExecutor
         var source = context.Require<VisionRegion>("region"); using var region = JLVisionRegions.ToNative(source);
         using var outputs = new AdvancedJl.OwnedOutputs(); object details = new { };
         var contours = (IReadOnlyList<VisionContour>)Array.Empty<VisionContour>(); var count = 0;
+        var metric = node.GetString("metric", "euclidean"); var foreground = node.GetString("foreground", "true");
+        var maxDistance = AdvancedJl.Integer(node, "maxDistance", 2, 0);
+        var percent = AdvancedJl.Integer(node, "percent", 50, 0, 100);
+        var imagePixelType = "not-applicable";
         if (operation is "distanceTransform" or "closestPointTransform")
         {
-            var metric = node.GetString("metric", "euclidean"); var foreground = node.GetString("foreground", "true");
             if (operation == "distanceTransform")
             {
                 using var distance = region.DistanceTransform(metric, foreground, source.Width, source.Height); outputs["image"] = AdvancedJl.Image(distance);
@@ -225,11 +303,15 @@ public sealed class JLVisionRegionAnalysisNode : IVisionNodeExecutor
                     outputs["image"] = AdvancedJl.Image(distance); outputs["closestRows"] = AdvancedJl.Image(rows); outputs["closestColumns"] = AdvancedJl.Image(columns);
                 }
             }
+            imagePixelType = outputs["image"].Require<VisionImage>("image").Mat.Depth() switch
+            {
+                MatType.CV_32F => "float32", MatType.CV_64F => "float64", MatType.CV_32S => "int32", MatType.CV_8U => "byte", _ => "native-real"
+            };
             count = source.Components.Count;
         }
         else if (operation == "splitSkeletonLines")
         {
-            region.SplitSkeletonLines(AdvancedJl.Integer(node, "maxDistance", 2, 0), out var br, out var bc, out var er, out var ec);
+            region.SplitSkeletonLines(maxDistance, out var br, out var bc, out var er, out var ec);
             using (br) using (bc) using (er) using (ec)
             {
                 var begin = AdvancedJl.Points(br, bc); var end = AdvancedJl.Points(er, ec);
@@ -237,31 +319,61 @@ public sealed class JLVisionRegionAnalysisNode : IVisionNodeExecutor
                 contours = begin.Select((p, i) => JlContourCodec.Segment(i, p, end[i])).ToArray();
                 count = contours.Count;
             }
+            outputs["contours"] = VisionValue.Contours(contours);
         }
         else
         {
             var other = context.Require<VisionRegion>("region2");
-            if (other.Width != source.Width || other.Height != source.Height) throw new InvalidOperationException("两个区域必须处于相同尺寸的坐标空间。");
+            RegionNodeHelpers.ValidateCompatible(source, other, "jlvision.regionAnalysis");
             using var second = JLVisionRegions.ToNative(other);
             JlTuple? indices = null; JlTuple? indices2 = null; JlTuple? relation1 = null; JlTuple? relation2 = null;
             try
             {
                 switch (operation)
                 {
-                    case "findNeighbors": indices = region.FindNeighbors(second, AdvancedJl.Integer(node, "maxDistance", 2, 0), out indices2); break;
+                    case "findNeighbors": indices = region.FindNeighbors(second, maxDistance, out indices2); break;
                     case "selectRegionSpatial": indices = region.SelectRegionSpatial(second, node.GetString("direction", "left"), out indices2); break;
-                    case "spatialRelation": indices = region.SpatialRelation(second, AdvancedJl.Integer(node, "percent", 50, 0, 100), out indices2, out relation1, out relation2); break;
+                    case "spatialRelation": indices = region.SpatialRelation(second, percent, out indices2, out relation1, out relation2); break;
                 }
                 count = indices!.Length;
-                details = new { indexA = AdvancedJl.TupleNumbers(indices).Select(v => v - 1), indexB = AdvancedJl.TupleNumbers(indices2!).Select(v => v - 1),
+                details = new
+                {
+                    schemaVersion = 1, indexBase = 0,
+                    indexA = AdvancedJl.TupleNumbers(indices).Select(v => (int)v - 1).ToArray(),
+                    indexB = AdvancedJl.TupleNumbers(indices2!).Select(v => (int)v - 1).ToArray(),
                     relationA = relation1 is null ? [] : Enumerable.Range(0, relation1.Length).Select(i => relation1[i].ToString()).ToArray(),
-                    relationB = relation2 is null ? [] : Enumerable.Range(0, relation2.Length).Select(i => relation2[i].ToString()).ToArray() };
+                    relationB = relation2 is null ? [] : Enumerable.Range(0, relation2.Length).Select(i => relation2[i].ToString()).ToArray()
+                };
             }
             finally { indices?.Dispose(); indices2?.Dispose(); relation1?.Dispose(); relation2?.Dispose(); }
+            outputs["relations"] = VisionValue.String(AdvancedJl.Json(details));
         }
-        outputs["contours"] = VisionValue.Contours(contours); outputs["relations"] = VisionValue.String(AdvancedJl.Json(details));
         outputs["count"] = VisionValue.Integer(count); outputs["found"] = VisionValue.Boolean(count > 0);
-        return ValueTask.FromResult(AdvancedJl.Result(node, operation, outputs));
+        var outputContract = operation is "distanceTransform" or "closestPointTransform"
+            ? "image" + (operation == "closestPointTransform" ? "+closestRows+closestColumns" : "") + "; relations/contours omitted"
+            : operation == "splitSkeletonLines" ? "contours in native segment order; image/relations omitted" : "relations with zero-based indices; image/contours omitted";
+        var diagnostics = JsonSerializer.Serialize(new
+        {
+            node = Type, operation, backend = "jlvision", outputContract,
+            coordinateSystem = source.CoordinateSystem, width = source.Width, height = source.Height,
+            metric = operation is "distanceTransform" or "closestPointTransform" ? metric : null,
+            distanceUnit = operation is "distanceTransform" or "closestPointTransform" ? "px" : null,
+            imagePixelType = operation is "distanceTransform" or "closestPointTransform" ? imagePixelType : null,
+            invalidValue = operation is "distanceTransform" or "closestPointTransform" ? 0 : (int?)null,
+            zeroDistance = operation is "distanceTransform" or "closestPointTransform" ? "selected-domain boundary" : null,
+            percent = operation == "spatialRelation" ? percent : (int?)null,
+            percentDenominator = operation == "spatialRelation" ? "area of the region A object" : null,
+            maxDistance = operation is "findNeighbors" or "splitSkeletonLines" ? maxDistance : (int?)null,
+            maxDistanceUnit = operation is "findNeighbors" or "splitSkeletonLines" ? "px" : null,
+            indexRange = count > 0 ? new[] { 0, count - 1 } : Array.Empty<int>()
+        });
+        outputs["diagnostics"] = VisionValue.String(diagnostics);
+        var result = new NodeExecutorResult(outputs, new Dictionary<string, object?>
+        {
+            ["algorithmBackend"] = "jlvision", ["operator"] = operation, ["outputContract"] = outputContract, ["diagnostics"] = diagnostics
+        });
+        if (outputs is AdvancedJl.OwnedOutputs owned) owned.Transferred = true;
+        return ValueTask.FromResult(result);
     }
 }
 
@@ -329,15 +441,52 @@ public sealed class JLVisionIntersectionsNode : IVisionNodeExecutor
                     JlOperatorSet.IntersectionSegments(r1, c1, r2, c2, r3, c3, r4, c4, out rows, out columns, out overlapping);
                 }
             }
-            var points = AdvancedJl.Points(rows!, columns!);
-            var outputs = new Dictionary<string, VisionValue> { ["points"] = VisionValue.String(AdvancedJl.Json(points)), ["count"] = VisionValue.Integer(points.Length),
-                ["found"] = VisionValue.Boolean(points.Length > 0), ["overlapping"] = VisionValue.Boolean(overlapping is { Length: > 0 } && overlapping[0].D != 0) };
+            var points = AdvancedJl.Points(rows!, columns!).OrderBy(p => p.X).ThenBy(p => p.Y).ToArray();
             var selected = AdvancedJl.Integer(node, "index", 0);
+            if (selected >= points.Length)
+                throw new InvalidOperationException($"geometry.intersections.indexOutOfRange: index {selected} is outside intersection count {points.Length}.");
+            var isOverlapping = overlapping is { Length: > 0 } && overlapping[0].D != 0;
+            var parallelSegments = false;
+            if (operation == "segments")
+            {
+                var first = context.Require<VisionLine2D>("line"); var second = context.Require<VisionLine2D>("line2");
+                var a1 = first.End.X - first.Start.X; var a2 = first.End.Y - first.Start.Y;
+                var b1 = second.End.X - second.Start.X; var b2 = second.End.Y - second.Start.Y;
+                parallelSegments = Math.Abs(a1 * b2 - a2 * b1) <= 1e-12 * Math.Max(1, Math.Sqrt((a1 * a1 + a2 * a2) * (b1 * b1 + b2 * b2)));
+            }
+            var intersectionType = ClassifyIntersection(operation, points, isOverlapping, parallelSegments);
+            var outputs = new Dictionary<string, VisionValue> { ["points"] = VisionValue.String(AdvancedJl.Json(points)), ["count"] = VisionValue.Integer(points.Length),
+                ["found"] = VisionValue.Boolean(points.Length > 0), ["overlapping"] = VisionValue.Boolean(isOverlapping),
+                ["intersectionType"] = VisionValue.String(intersectionType) };
             if (selected < points.Length) outputs["point"] = VisionValue.Point(points[selected]);
-            return ValueTask.FromResult(AdvancedJl.Result(node, operation, outputs));
+            var result = AdvancedJl.Result(node, operation, outputs);
+            var diagnostics = CoordinateValidation.Diagnostics(Type, ("operator", operation), ("intersectionType", intersectionType),
+                ("count", points.Length), ("found", points.Length > 0), ("overlapping", isOverlapping), ("selectedIndex", selected),
+                ("pointOrder", "x-ascending-then-y-ascending"));
+            outputs["diagnostics"] = VisionValue.String(diagnostics);
+            var summary = new Dictionary<string, object?>(result.Summary)
+            {
+                ["intersectionType"] = intersectionType,
+                ["diagnostics"] = diagnostics
+            };
+            return ValueTask.FromResult(new NodeExecutorResult(outputs, summary, result.Overlays));
         }
         finally { rows?.Dispose(); columns?.Dispose(); overlapping?.Dispose(); }
     }
+    private static string ClassifyIntersection(string operation, IReadOnlyList<VisionPoint2D> points, bool overlapping, bool parallelSegments)
+    {
+        if (overlapping) return operation == "circles" ? "coincident" : "collinearOverlap";
+        return operation switch
+        {
+            "lineCircle" => points.Count switch { 0 => "separated", 1 => "tangent", _ => "intersecting" },
+            "circles" => points.Count switch { 0 => "separated", 1 => "tangent", _ => "intersecting" },
+            "segments" when points.Count == 0 => parallelSegments ? "parallel" : "disjoint",
+            "segments" when points.Count == 1 => "endpointTouch",
+            "segments" => "crossing",
+            _ => "unknown"
+        };
+    }
+
     private static void Validate(VisionCircle circle)
     {
         if (!double.IsFinite(circle.X) || !double.IsFinite(circle.Y) || !double.IsFinite(circle.Radius) || circle.Radius <= 0) throw new InvalidOperationException("圆心必须有限，半径必须为正。");

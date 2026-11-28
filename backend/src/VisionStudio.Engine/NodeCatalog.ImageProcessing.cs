@@ -97,7 +97,13 @@ public static partial class BuiltInNodeCatalog
                 new("image", VisionDataType.Image),
                 new("count", VisionDataType.Integer),
                 new("inputCount", VisionDataType.Integer),
+                new("filteredOutCount", VisionDataType.Integer),
                 new("truncated", VisionDataType.Boolean),
+                new("resultComplete", VisionDataType.Boolean),
+                new("emittedArea", VisionDataType.Double),
+                new("candidateArea", VisionDataType.Double),
+                new("selectedIndex", VisionDataType.Integer, Required: false),
+                new("selectionRule", VisionDataType.String, Required: false),
                 new("detections", VisionDataType.DetectionList),
                 new("x", VisionDataType.Double, Required: false),
                 new("y", VisionDataType.Double, Required: false),
@@ -115,6 +121,7 @@ public static partial class BuiltInNodeCatalog
             [
                 new("mode", "Blob Mode", "select", "all", Options:
                 [new("All Blobs", "all"), new("Largest Blob", "largest")], Group: "Mode", Description: "all returns every filtered blob up to Max Count; largest returns the qualifying blob with the largest area. The filters and Min Area apply in both modes; Max Count, Sort By and Descending are used only by all."),
+                new("threshold", "Binary Threshold (0=require binary)", "number", 0, 0, 255, 1, Group: "Input", Description: "0 requires input pixels to contain only background and one foreground value; non-binary input returns inputNotBinary. Positive values explicitly threshold 8-bit gray to 0/255 and record the conversion."),
                 new("minArea", "Min Area", "number", 100, 0, 99999999, 10, Group: "Filter", Description: "Minimum accepted area in pixels."),
                 new("maxArea", "Max Area", "number", 0, 0, 99999999, 10, Group: "Filter", Description: "0 disables the upper bound."),
                 new("minCircularity", "Min Circularity", "number", 0, 0, 1, 0.05, Group: "Filter", Description: "4*pi*A/P^2, 1 = perfect circle."),
@@ -134,7 +141,7 @@ public static partial class BuiltInNodeCatalog
                 new("descending", "Descending", "boolean", true, Group: "Sorting", VisibleWhen: new("mode", ["all"]), Description: "Rank largest or highest first; turn off for ascending order.")
             ,
                 ],
-            "Analyze either all filtered/sorted blobs or only the largest one. The input must be binary — every non-zero pixel counts as foreground, so feed a threshold/range/mask output rather than raw grayscale. Connect exactly one of image or domainImage; an optional region or ROI restricts the analysis area without copying the image. detections.index is a post-sort ordinal, not a tracking id across frames. area counts real foreground pixels and excludes holes; circularity, rectangularity and the bounding box come from the filled outer contour, so a ring reads as round while its hole is not counted in area. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show. totalArea sums the emitted blobs only — compare count with inputCount before treating it as the whole-scene area.",
+            "Analyze either all filtered/sorted blobs or only the largest one. The input must be binary — every non-zero pixel counts as foreground — unless threshold is explicitly enabled; non-binary input with threshold=0 returns found=false and reason=inputNotBinary. Connect exactly one of image or domainImage; an optional region or ROI restricts the analysis area without copying the image. detections.index is a post-sort ordinal, not a tracking id across frames. area counts real foreground pixels and excludes holes; circularity, rectangularity and the bounding box come from the filled outer contour, so a ring reads as round while its hole is not counted in area. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show. totalArea sums the emitted blobs only — compare count with inputCount before treating it as the whole-scene area.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), OutputFrames: [new(NodeOutputFrameSource.ImageInput, InputPort: "image")]),
         new(
@@ -163,6 +170,13 @@ public static partial class BuiltInNodeCatalog
                 new("scaleSearch", VisionDataType.String, Required: false),
                 new("scoreMapEmitted", VisionDataType.Boolean, Required: false),
                 new("modelCacheHit", VisionDataType.Boolean, Required: false),
+                new("templateSource", VisionDataType.String, Required: false),
+                new("templatePriority", VisionDataType.String, Required: false),
+                new("suppressedCount", VisionDataType.Integer, Required: false),
+                new("suppressionReasonsJson", VisionDataType.String, Required: false),
+                new("hardIgnoredCount", VisionDataType.Integer, Required: false),
+                new("softIgnoredCount", VisionDataType.Integer, Required: false),
+                new("softIgnoreMeanWeight", VisionDataType.Double, Required: false),
                 new("polarityMode", VisionDataType.String, Required: false),
                 new("angleSpanDeg", VisionDataType.Double, Required: false),
                 new("subpixelMethod", VisionDataType.String, Required: false),
@@ -170,8 +184,8 @@ public static partial class BuiltInNodeCatalog
                 Next
             ],
             [
-                new("templatePath", "Template File", "text", string.Empty, Group: "Model", Description: "Used when the template input port is not connected (absolute path, or relative to the host working directory)."),
-                new("templateAssetId", "Template Asset", "text", string.Empty, Group: "Model", Description: "Optional template-image asset id (kind=template). Used when the template port is not connected and takes precedence over Template File; a missing asset fails instead of falling back."),
+                new("templatePath", "Template File", "text", string.Empty, Group: "Model", Description: "Lowest-priority source, used only when the template port is disconnected and templateAssetId is empty. Priority is input port > asset id/version > file path."),
+                new("templateAssetId", "Template Asset", "text", string.Empty, Group: "Model", Description: "Optional template-image asset id (kind=template). Used when the template port is disconnected and takes precedence over Template File; a missing asset fails instead of falling back. Asset id/version are part of the NCC cache key."),
                 new("templateAssetVersion", "Template Asset Version", "number", 0, 0, 1000000, 1, Group: "Model", Description: "0 loads the asset's latest version; a positive number pins an immutable version."),
                 new("angleRangeDeg", "Angle Range (deg)", "number", 0, 0, 180, 1, Unit: "deg", Group: "Rotation", Description: "Legacy symmetric half-width. When Search Start and End are both 0, a positive Angle Range still opens +/- that window. Set Angle Range to 0 when using an explicit Start/End window (including a true zero-only search)."),
                 new("searchAngleStartDeg", "Search Start Angle", "number", 0, -180, 180, 1, Unit: "deg", Group: "Rotation", Description: "Lower angle bound (HALCON find_ncc_model style). Default 0; with End also 0, Angle Range still applies as +/- half-width. Set both Start/End for asymmetric windows."),
@@ -273,6 +287,7 @@ public static partial class BuiltInNodeCatalog
                 new("rmsError", VisionDataType.Double, Required: false),
                 new("confidence", VisionDataType.Double, Required: false),
                 new("count", VisionDataType.Integer),
+                new("candidateCount", VisionDataType.Integer),
                 new("lines", VisionDataType.String), new("diagnostics", VisionDataType.String), Next
             ],
             [
@@ -306,6 +321,7 @@ public static partial class BuiltInNodeCatalog
                 new("coverageDeg", VisionDataType.Double, Required: false),
                 new("confidence", VisionDataType.Double, Required: false),
                 new("count", VisionDataType.Integer),
+                new("candidateCount", VisionDataType.Integer),
                 new("circles", VisionDataType.String), new("diagnostics", VisionDataType.String), Next
             ],
             [
@@ -336,7 +352,16 @@ public static partial class BuiltInNodeCatalog
                 new("strength", VisionDataType.Double, Required: false),
                 new("fitError", VisionDataType.Double, Required: false),
                 new("sampleCount", VisionDataType.Integer, Required: false),
-                new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), Next
+                new("searchLine", VisionDataType.Line2D),
+                new("requestedSearchLine", VisionDataType.Line2D),
+                new("effectiveSearchLine", VisionDataType.Line2D),
+                new("clippedLengthRatio", VisionDataType.Double),
+                new("candidateCount", VisionDataType.Integer),
+                new("ambiguous", VisionDataType.Boolean),
+                new("strengthMargin", VisionDataType.Double, Required: false),
+                new("runnerUpPoint", VisionDataType.Point2D, Required: false),
+                new("reason", VisionDataType.String),
+                new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
@@ -364,6 +389,8 @@ public static partial class BuiltInNodeCatalog
                     new("No parabolic refinement", "none")
                 ], Group: "Sampling", Description: "Enable subpixel refinement of the edge location."),
                 new("sigma", "Sigma", "number", 1, 0.4, 100, 0.1, Group: "Sampling", Description: "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior."),
+                new("ambiguityMargin", "Ambiguity Margin (0=off)", "number", 0, 0, 255, 0.5, Group: "Sampling",
+                    Description: "When the runner-up edge with the same polarity is within this strength margin, found=false with reason=ambiguous-edge and no point is emitted, so noise cannot silently switch the measured edge."),
                 new("diagnosticsLevel", "Diagnostics Level", "select", "standard", Options: [new("Minimal", "minimal"), new("Standard", "standard"), new("Verbose", "verbose")], Description: "Diagnostic detail level.")
             ],
             "Single-caliper grayscale edge location along a configurable search line. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",
@@ -395,10 +422,10 @@ public static partial class BuiltInNodeCatalog
             "Line Intersection",
             "Geometry",
             [ExecIn, new("lineA", VisionDataType.Line2D), new("lineB", VisionDataType.Line2D)],
-            [new("point", VisionDataType.Point2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("withinSegments", VisionDataType.Boolean), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
-            [new("parallelTolerance", "Parallel Tolerance", "number", 0.000000001, 0, 0.1, 0.000000001, Group: "Validation", Description: "Minimum |determinant| below which lines are rejected as parallel/coincident instead of returning an unstable point."), new("requireWithinSegments", "Require Within Segments", "boolean", false, Group: "Validation", Description: "When true, reject intersections that lie outside either finite segment; when false, intersect the infinite lines."),
+            [new("point", VisionDataType.Point2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("withinSegments", VisionDataType.Boolean), new("intersectionType", VisionDataType.String), new("endpointDistance", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
+            [new("parallelTolerance", "Parallel Angle Tolerance (deg)", "number", 0.000001, 0, 0.1, 0.000001, Group: "Validation", Description: "Maximum angular separation in degrees treated as parallel. The decision is scale-invariant because it compares normalized direction vectors."), new("endpointTolerance", "Endpoint Tolerance", "number", 0.000001, 0, 1000000, 0.000001, Group: "Validation", Description: "Distance tolerance in input coordinate units used for finite-segment acceptance and endpoint classification."), new("requireWithinSegments", "Require Within Segments", "boolean", false, Group: "Validation", Description: "When true, reject intersections outside either finite segment beyond endpointTolerance; when false, intersect the infinite lines."),
                 ],
-            "Intersect two Line2D values with strict parallel/degenerate validation. Reports point, segment membership (withinSegments), inter-line angle and diagnostics; optionally require the crossing inside both finite segments. Parallel or near-parallel lines fail execution.",
+            "Intersect two Line2D values with scale-invariant angular parallel detection. Distinguishes parallel and coincident failures with stable error codes, reports intersectionType and endpointDistance, and applies endpointTolerance when finite-segment membership is required.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
         new(
@@ -406,10 +433,12 @@ public static partial class BuiltInNodeCatalog
             "Point Distance",
             "Geometry",
             [ExecIn, new("pointA", VisionDataType.Point2D), new("pointB", VisionDataType.Point2D)],
-            [new("distance", VisionDataType.Double), new("dx", VisionDataType.Double), new("dy", VisionDataType.Double), new("midX", VisionDataType.Double), new("midY", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
+            [new("distance", VisionDataType.Double), new("dx", VisionDataType.Double), new("dy", VisionDataType.Double), new("midX", VisionDataType.Double), new("midY", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("coincident", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
             [new("metric", "Distance Metric", "select", "euclidean", Options: [new("Euclidean", "euclidean"), new("Manhattan", "manhattan")], Description: "Distance metric between the two points."),
+                new("sourceFrame", "Coordinate Frame", "text", "Image", Group: "Contract", Description: "Frame recorded in diagnostics. A non-Image frame with pixel units is rejected to prevent silent pixel-to-millimeter interpretation."),
+                new("sourceUnit", "Coordinate Unit", "text", "px", Group: "Contract", Description: "Unit of the input coordinates and emitted distance. Physical units must be produced by an explicit upstream conversion."),
                 ],
-            "Euclidean or Manhattan distance between two finite Point2D values, with signed dx/dy, midpoint, direction angle and JSON diagnostics. Non-finite inputs are rejected deterministically (no NaN propagation).",
+            "Euclidean or Manhattan distance between two finite Point2D values, with signed dx/dy, midpoint, direction angle and JSON diagnostics. Coincident points return distance=0, angleDeg=0 and coincident=true. Diagnostics record coordinateFrame/unit; calibrated frames using pixel units fail instead of masquerading as physical distances.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
         new(
@@ -420,7 +449,7 @@ public static partial class BuiltInNodeCatalog
             [new("angle", VisionDataType.Double), new("signedAngleDeg", VisionDataType.Double), new("lineALength", VisionDataType.Double), new("lineBLength", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 ],
-            "Acute (0-90 deg) and signed (-180..180 deg) angle between two non-degenerate Line2D values, with both line lengths, parallel/perpendicular flags in JSON diagnostics, and overlay lines for visual debugging.",
+            "Acute angle in [0,90] deg and signed angle in [-180,180) deg between two non-degenerate Line2D values. +180 maps to -180 for deterministic opposite-direction results. Zero-length or non-finite lines fail with stable lineA/lineB error codes; diagnostics record both conventions, line lengths and parallel/perpendicular flags.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
         new(

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -44,9 +45,11 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
-    private sealed record CachedTable(string Key, string[] Header, List<string[]> Rows, string RawHeader);
+    private sealed record CachedTable(string Key, string ContentHash, string[] Header, List<string[]> Rows, string RawHeader);
+    private sealed record TableCursor(string ContentHash, int NextIndex, int Generation, bool Exhausted);
+    private static readonly ConcurrentDictionary<string, TableCursor> Cursors = new(StringComparer.Ordinal);
 
-    public ValueTask<NodeExecutorResult> ExecuteAsync(
+    public async ValueTask<NodeExecutorResult> ExecuteAsync(
         NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -90,27 +93,53 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
             throw new InvalidOperationException(
                 $"device.readTable file is {info.Length} bytes which exceeds maxMegabytes={maxMegabytes}; split the table or raise the limit.");
 
+        var fileBytes = await File.ReadAllBytesAsync(resolved, cancellationToken).ConfigureAwait(false);
+        var contentHash = Convert.ToHexString(SHA256.HashData(fileBytes));
         var cacheKey = FormattableString.Invariant(
-            $"{resolved}|{info.LastWriteTimeUtc.Ticks}|{info.Length}|{encodingName}|{delimiterName}|{hasHeader}|{maxRows}");
-        var table = Cache.TryGetValue(cacheKey, out var hit) ? hit : Load(resolved, cacheKey, encoding, delimiterName,
+            $"{resolved}|{info.LastWriteTimeUtc.Ticks}|{info.Length}|{contentHash}|{encodingName}|{delimiterName}|{hasHeader}|{maxRows}");
+        var table = Cache.TryGetValue(cacheKey, out var hit) ? hit : Load(resolved, cacheKey, contentHash, fileBytes, encoding, delimiterName,
             hasHeader, maxRows, cancellationToken);
         if (table is null)
         {
             Cache.TryRemove(cacheKey, out _);
-            table = Load(resolved, cacheKey, encoding, delimiterName, hasHeader, maxRows, cancellationToken)!;
+            table = Load(resolved, cacheKey, contentHash, fileBytes, encoding, delimiterName, hasHeader, maxRows, cancellationToken)!;
         }
 
         var total = table.Rows.Count;
+        var reset = context.TryGetValue("reset", out var resetInput) && resetInput.Require<bool>("reset");
+        var cursorKey = $"{node.Id}|{resolved}";
+        if (reset) Cursors.TryRemove(cursorKey, out _);
+        var cursor = Cursors.TryGetValue(cursorKey, out var cursorHit) && cursorHit.ContentHash == table.ContentHash
+            ? cursorHit : new TableCursor(table.ContentHash, 0, 1, false);
+        var generation = wrap ? cursor.Generation : 1;
+        var exhausted = false;
         if (total == 0)
-            return ValueTask.FromResult(Missing("table-has-no-data-rows", node, hasHeader, 0));
+            return Missing("table-has-no-data-rows", node, hasHeader, 0, generation, exhausted);
 
-        var indexParam = context.TryGetValue("sequence", out var sequenceInput)
-            ? (int)sequenceInput.Require<long>("sequence")
-            : node.GetInt("index", 0);
-        var index = wrap ? ((indexParam % total) + total) % total : indexParam;
-        if (index < 0 || index >= total)
-            return ValueTask.FromResult(Missing(
-                $"index {indexParam} is outside 0..{total - 1} (wrap is off)", node, hasHeader, total));
+        int index;
+        if (wrap && !context.TryGetValue("sequence", out _))
+        {
+            if (cursor.Exhausted)
+                return Missing("table-exhausted-reset-required", node, hasHeader, total, cursor.Generation, true);
+            index = cursor.NextIndex;
+            var nextIndex = index + 1;
+            Cursors[cursorKey] = nextIndex >= total
+                ? cursor with { NextIndex = 0, Exhausted = true }
+                : cursor with { NextIndex = nextIndex };
+        }
+        else
+        {
+            var indexParam = context.TryGetValue("sequence", out var sequenceInput)
+                ? (int)sequenceInput.Require<long>("sequence")
+                : node.GetInt("index", 0);
+            index = wrap ? ((indexParam % total) + total) % total : indexParam;
+            if (wrap) generation = (int)Math.Floor((double)indexParam / total) + 1;
+            if (index < 0 || index >= total)
+                return Missing(
+                    $"index {indexParam} is outside 0..{total - 1} (wrap is off)", node, hasHeader, total, generation, exhausted);
+        }
+        if (wrap && !context.TryGetValue("sequence", out _) && Cursors.TryGetValue(cursorKey, out var advanced))
+            exhausted = advanced.Exhausted;
 
         var cells = table.Rows[index];
         var rowJson = JsonSerializer.Serialize(cells, JsonText);
@@ -118,13 +147,16 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
         var diagnostics = CoordinateValidation.Diagnostics(
             Type,
             ("file", Path.GetFileName(resolved)), ("hasHeader", hasHeader), ("index", index), ("total", total),
-            ("cellCount", cells.Length), ("encoding", encodingName), ("delimiter", delimiterName));
+            ("cellCount", cells.Length), ("encoding", encodingName), ("delimiter", delimiterName),
+            ("contentSha256", table.ContentHash), ("generation", generation), ("exhausted", exhausted));
 
         var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
         {
             ["found"] = VisionValue.Boolean(true),
             ["index"] = VisionValue.Integer(index),
             ["total"] = VisionValue.Integer(total),
+            ["generation"] = VisionValue.Integer(generation),
+            ["exhausted"] = VisionValue.Boolean(exhausted),
             ["cellCount"] = VisionValue.Integer(cells.Length),
             ["header"] = VisionValue.String(table.RawHeader),
             ["columnsJson"] = VisionValue.String(columnsJson),
@@ -143,33 +175,39 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
             outputs["rowObjectJson"] = VisionValue.String(JsonSerializer.Serialize(mapped, JsonText));
         }
 
-        return ValueTask.FromResult(new NodeExecutorResult(outputs,
+        return new NodeExecutorResult(outputs,
             new Dictionary<string, object?>
             {
                 ["file"] = Path.GetFileName(resolved), ["index"] = index, ["total"] = total,
+                ["generation"] = generation, ["exhausted"] = exhausted, ["contentSha256"] = table.ContentHash,
                 ["cellCount"] = cells.Length, ["hasHeader"] = hasHeader, ["encoding"] = encodingName,
                 ["delimiter"] = delimiterName, ["diagnostics"] = diagnostics
-            }));
+            });
     }
 
-    private static NodeExecutorResult Missing(string reason, NodeDefinition node, bool hasHeader, int total)
+    private static NodeExecutorResult Missing(string reason, NodeDefinition node, bool hasHeader, int total,
+        int generation = 1, bool exhausted = false)
     {
-        var diagnostics = CoordinateValidation.Diagnostics(NodeType, ("found", false), ("reason", reason), ("total", total));
+        var diagnostics = CoordinateValidation.Diagnostics(NodeType, ("found", false), ("reason", reason),
+            ("total", total), ("generation", generation), ("exhausted", exhausted));
         var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
         {
             ["found"] = VisionValue.Boolean(false),
             ["total"] = VisionValue.Integer(total),
+            ["generation"] = VisionValue.Integer(generation),
+            ["exhausted"] = VisionValue.Boolean(exhausted),
             ["diagnostics"] = VisionValue.String(diagnostics)
         };
         return new NodeExecutorResult(outputs,
-            new Dictionary<string, object?> { ["found"] = false, ["reason"] = reason, ["total"] = total, ["diagnostics"] = diagnostics });
+            new Dictionary<string, object?> { ["found"] = false, ["reason"] = reason, ["total"] = total, ["generation"] = generation, ["exhausted"] = exhausted, ["diagnostics"] = diagnostics });
     }
 
-    private static CachedTable? Load(string path, string cacheKey, Encoding encoding, string delimiterName,
-        bool hasHeader, int maxRows, CancellationToken cancellationToken)
+    private static CachedTable? Load(string path, string cacheKey, string contentHash, byte[] fileBytes,
+        Encoding encoding, string delimiterName, bool hasHeader, int maxRows, CancellationToken cancellationToken)
     {
         string text;
-        using (var reader = new StreamReader(path, encoding, detectEncodingFromByteOrderMarks: true))
+        using (var stream = new MemoryStream(fileBytes, writable: false))
+        using (var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true))
             text = reader.ReadToEnd();
         cancellationToken.ThrowIfCancellationRequested();
         var lines = SplitRecords(text, cancellationToken);
@@ -177,19 +215,24 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
             throw new InvalidOperationException(
                 $"device.readTable file has more than maxRows={maxRows} rows; raise maxRows or split the table.");
 
-        if (lines.Count == 0) return new CachedTable(cacheKey, [], [], string.Empty);
+        if (lines.Count == 0) return new CachedTable(cacheKey, contentHash, [], [], string.Empty);
 
-        var delimiter = ResolveDelimiter(delimiterName, lines[0]);
-        var header = hasHeader ? SplitLine(lines[0], delimiter) : [];
+        var delimiter = ResolveDelimiter(delimiterName, lines[0].Text);
+        var header = hasHeader ? SplitLine(lines[0].Text, delimiter) : [];
+        var expectedColumns = hasHeader ? header.Length : SplitLine(lines[0].Text, delimiter).Length;
         var firstData = hasHeader ? 1 : 0;
         var rows = new List<string[]>(Math.Max(0, lines.Count - firstData));
         for (var index = firstData; index < lines.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            rows.Add(SplitLine(lines[index], delimiter));
+            var cells = SplitLine(lines[index].Text, delimiter);
+            if (cells.Length != expectedColumns)
+                throw new InvalidOperationException(
+                    $"device.readTable column count mismatch at physical line {lines[index].StartLine}: expected {expectedColumns}, got {cells.Length}.");
+            rows.Add(cells);
         }
 
-        var table = new CachedTable(cacheKey, header, rows, hasHeader ? lines[0] : string.Empty);
+        var table = new CachedTable(cacheKey, contentHash, header, rows, hasHeader ? lines[0].Text : string.Empty);
         if (Cache.Count >= MaxCachedTables) Cache.Clear(); // 简单粗暴但可预测：容量满了整体丢弃，不做 LRU 记账
         Cache[cacheKey] = table;
         return table;
@@ -220,11 +263,13 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
     }
 
     /// <summary>按 RFC4180 切记录：引号内的 CR/LF 属于字段内容，空行不占序号。</summary>
-    private static List<string> SplitRecords(string text, CancellationToken cancellationToken)
+    private static List<TableRecord> SplitRecords(string text, CancellationToken cancellationToken)
     {
-        var records = new List<string>();
+        var records = new List<TableRecord>();
         var builder = new StringBuilder();
         var inQuotes = false;
+        var physicalLine = 1;
+        var recordStartLine = 1;
         for (var index = 0; index < text.Length; index++)
         {
             if ((index & 8191) == 0) cancellationToken.ThrowIfCancellationRequested();
@@ -241,14 +286,25 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
                 if (ch == '\r' && index + 1 < text.Length && text[index + 1] == '\n') index++;
                 var record = builder.ToString();
                 builder.Clear();
-                if (record.Length > 0) records.Add(record);
+                if (record.Length > 0) records.Add(new TableRecord(record, recordStartLine));
+                physicalLine++;
+                recordStartLine = physicalLine;
+                continue;
+            }
+            if (inQuotes && (ch == '\r' || ch == '\n'))
+            {
+                if (ch == '\r' && index + 1 < text.Length && text[index + 1] == '\n') index++;
+                builder.Append('\n');
+                physicalLine++;
                 continue;
             }
             builder.Append(ch);
         }
-        if (builder.Length > 0) records.Add(builder.ToString());
+        if (builder.Length > 0) records.Add(new TableRecord(builder.ToString(), recordStartLine));
         return records;
     }
+
+    private sealed record TableRecord(string Text, int StartLine);
 
     /// <summary>RFC4180 风格拆分：支持双引号包裹、字段内分隔符与换行、"" 转义。</summary>
     private static string[] SplitLine(string line, char delimiter)

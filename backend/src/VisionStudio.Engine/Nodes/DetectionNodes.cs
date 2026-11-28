@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -46,7 +47,14 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
         var descending = largestOnly || node.GetBool("descending", true);
         var roi = node.GetRoi();
 
+        var threshold = node.GetDouble("threshold", 0);
+        if (!double.IsFinite(threshold) || threshold is < 0 or > 255)
+            throw new InvalidOperationException("Blob threshold must be within 0..255 (0 requires binary input).");
+        if (threshold == 0 && !IsBinary(source))
+            return ValueTask.FromResult(BinaryInputFailure(sourceImage, node.Type));
         var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray);
+        if (threshold > 0)
+            OpenCvSharp.Cv2.Threshold(gray, gray, threshold, 255, OpenCvSharp.ThresholdTypes.Binary);
         try
         {
             // ROI / region 输入 / domainImage 收敛成一个域，直接交给 JLVision 的 ReduceDomain：
@@ -115,12 +123,21 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
             var inputCount = candidates.Count;
             var truncated = inputCount > detections.Length;
 
+            // 统计范围必须可对账：candidateArea 是截断前候选面积，emittedArea 只覆盖真正输出的斑点，
+            // filteredOutCount 是连通域被面积/圆度/尺寸/矩形度筛掉的个数。
+            var emittedArea = detections.Sum(x => x.Area);
+            var candidateArea = candidates.Sum(x => x.Detection.Area);
+            var filteredOutCount = Math.Max(0, contours.Length - candidates.Count);
             var outputs = new Dictionary<string, VisionValue>
             {
                 ["image"] = VisionValue.Image(sourceImage),
                 ["count"] = VisionValue.Integer(detections.Length),
                 ["inputCount"] = VisionValue.Integer(inputCount),
+                ["filteredOutCount"] = VisionValue.Integer(filteredOutCount),
                 ["truncated"] = VisionValue.Boolean(truncated),
+                ["resultComplete"] = VisionValue.Boolean(!truncated),
+                ["emittedArea"] = VisionValue.Double(emittedArea),
+                ["candidateArea"] = VisionValue.Double(candidateArea),
                 ["detections"] = VisionValue.Detections(detections)
             };
             // 单斑点便利口永远描述"最大斑点"，与 sortBy 的展示顺序无关。
@@ -144,11 +161,20 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 ["count"] = detections.Length,
                 ["inputCount"] = inputCount,
                 ["truncated"] = truncated,
-                ["totalArea"] = detections.Sum(x => x.Area),
+                ["resultComplete"] = !truncated,
+                ["filteredOutCount"] = filteredOutCount,
+                ["componentCount"] = contours.Length,
+                ["emittedArea"] = emittedArea,
+                ["candidateArea"] = candidateArea,
+                ["totalArea"] = emittedArea,
+                ["selectionRule"] = "largestArea",
+                ["selectedIndex"] = 0,
                 ["minArea"] = minArea,
                 ["maxArea"] = maxArea <= 0 ? "unlimited" : maxArea,
                 ["sortBy"] = sortBy,
-                ["autoGray"] = converted,
+                ["autoGray"] = converted && threshold > 0,
+                ["threshold"] = threshold,
+                ["foregroundValue"] = 255,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage"
             };
             if (best is not null)
@@ -162,6 +188,8 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 outputs["circle"] = VisionValue.Circle(top.Circle);
                 // 单斑点便利口（原 measure.blob）：最大斑点的布尔、外接尺寸、圆度与完整列表。
                 outputs["found"] = VisionValue.Boolean(true);
+                outputs["selectionRule"] = VisionValue.String("largestArea");
+                outputs["selectedIndex"] = VisionValue.Integer(summary["selectedIndex"] is int index ? index : 0);
                 outputs["circularity"] = VisionValue.Double(top.Circularity);
                 outputs["width"] = VisionValue.Double(top.Width);
                 outputs["height"] = VisionValue.Double(top.Height);
@@ -176,6 +204,7 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                     height = x.Height
                 })));
                 summary["bestArea"] = top.Area;
+                summary["selectedIndex"] = System.Array.FindIndex(detections, x => x.Index == top.Index);
             }
             else
             {
@@ -183,8 +212,11 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 outputs["blobs"] = VisionValue.String("[]");
             }
             var diag = CoordinateValidation.Diagnostics(Type,
-                ("mode", mode), ("count", detections.Length), ("inputCount", inputCount), ("truncated", truncated),
-                ("minArea", minArea), ("maxArea", maxArea),
+                ("mode", mode), ("count", detections.Length), ("inputCount", inputCount), ("filteredOutCount", filteredOutCount),
+                ("truncated", truncated), ("resultComplete", !truncated), ("emittedArea", emittedArea), ("candidateArea", candidateArea),
+                ("selectionRule", "largestArea"), ("selectedIndex", outputs.TryGetValue("x", out _) ? summary.GetValueOrDefault("selectedIndex") : null),
+                ("minArea", minArea), ("maxArea", maxArea), ("threshold", threshold),
+                ("inputEncoding", threshold > 0 ? "threshold" : "binary"),
                 ("sortBy", sortBy), ("roi", roi?.Type.ToString() ?? "FullImage"));
             outputs["diagnostics"] = VisionValue.String(diag);
             summary["diagnostics"] = diag;
@@ -194,6 +226,39 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
         {
             ownedGray?.Dispose();
         }
+    }
+
+    private static bool IsBinary(Mat source)
+    {
+        if (source.Empty()) return false;
+        using var value = new Mat();
+        using var equal = new Mat();
+        for (var channel = 0; channel < source.Channels(); channel++)
+        {
+            Cv2.ExtractChannel(source, value, channel);
+            Cv2.MinMaxLoc(value, out double min, out double max);
+            if (double.IsNaN(min) || double.IsNaN(max) || double.IsInfinity(min) || double.IsInfinity(max) || min < 0) return false;
+            if (min == max) continue;
+            Cv2.Compare(value, min, equal, CmpTypes.EQ);
+            var atMinimum = Cv2.CountNonZero(equal);
+            Cv2.Compare(value, max, equal, CmpTypes.EQ);
+            if (atMinimum + Cv2.CountNonZero(equal) != value.Rows * value.Cols) return false;
+        }
+        return true;
+    }
+
+    private static NodeExecutorResult BinaryInputFailure(VisionImage source, string type)
+    {
+        const string reason = "inputNotBinary";
+        var diag = CoordinateValidation.Diagnostics(type, ("found", false), ("reason", reason),
+            ("threshold", 0), ("requiredAction", "select-threshold-or-binarize-input"));
+        return new NodeExecutorResult(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(source), ["found"] = VisionValue.Boolean(false),
+            ["count"] = VisionValue.Integer(0), ["inputCount"] = VisionValue.Integer(0),
+            ["truncated"] = VisionValue.Boolean(false), ["detections"] = VisionValue.Detections([]),
+            ["diagnostics"] = VisionValue.String(diag)
+        }, new Dictionary<string, object?> { ["found"] = false, ["reason"] = reason, ["inputNotBinary"] = true, ["diagnostics"] = diag });
     }
 
     /// <summary>

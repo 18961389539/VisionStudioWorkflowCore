@@ -37,6 +37,7 @@ public static class DefectAnalysisCatalog
                 new("inputCount", VisionDataType.Integer),
                 new("removedCount", VisionDataType.Integer),
                 new("removedByJson", VisionDataType.String),
+                new("discardedByJson", VisionDataType.String),
                 Failure,
                 Diagnostics,
                 Next
@@ -59,7 +60,9 @@ public static class DefectAnalysisCatalog
                 new("canvasHeight", "Canvas Height", "number", 0, 0, 32768, 1,
                     Group: "Edge", Description: "Canvas height used for the edge margin. 0 takes it from the image port."),
                 new("maxCount", "Max Defects Kept", "number", 0, 0, 10000, 1,
-                    Group: "Limit", Description: "Keep at most this many defects, largest first. 0 keeps all. Useful to bound downstream cost when a lighting fault floods the image.")
+                    Group: "Limit", Description: "Keep at most this many defects, largest first. 0 keeps all. Useful to bound downstream cost when a lighting fault floods the image."),
+                new("allowMissingRequiredGates", "Allow Missing Required Gates", "boolean", false, Group: "Safety", Description: "false fails when contrast or edge margin is enabled without its required image/canvas. true skips the unavailable gate and reports it."),
+                new("maxCountStrategy", "Max Count Retention", "select", "area", Options: [new("Largest area", "area"), new("Class priority then area", "class-priority"), new("Highest confidence then area", "confidence")], Group: "Limit", Description: "Selects which survivors reach maxCount. discardedByJson records discarded class ids and original indices."),
             ],
             "Suppress false positives with an explicit, attributable rule set instead of one global threshold. Each rejected defect is counted per reason (area / aspect / circularity / contrast / edge margin / count), so a sudden jump in one bucket tells you which knob to move - the usual alternative is lowering the threshold and silently accepting missed defects. Contrast and edge margin need the image or canvas ports; without them those two gates are skipped and reported as such rather than silently passing everything. All gates are AND-combined: a defect is kept only when it survives every enabled rule.",
             "builtin", new VisionToolCapabilities(Deterministic: true)),
@@ -80,7 +83,8 @@ public static class DefectAnalysisCatalog
             ],
             [
                 new("maxDefects", "Max Defects", "number", 200, 1, 10000, 1,
-                    Description: "Geometry is reported for the first maxDefects entries; the summary scalars still cover all of them."),
+                    Description: "Geometry is reported for the selected maxDefects entries; the summary scalars still cover all of them."),
+                new("selectionStrategy", "Geometry Selection", "select", "first", Options: [new("First N detections", "first"), new("Largest area N", "largest-area")], Description: "Selects detailed geometry records; diagnostics always report measured indices and truncation."),
                 new("elongationThreshold", "Elongated Above", "number", 3, 1, 1000, 0.1,
                     Description: "Defects whose length/width ratio exceeds this are counted as elongated (scratches, cracks, burrs). 3 separates a scratch from a smear in most cells."),
                 new("angleMode", "Dominant Angle", "select", "length-weighted",
@@ -105,6 +109,7 @@ public static class DefectAnalysisCatalog
                 new("maxDepth", VisionDataType.Double),
                 new("totalLength", VisionDataType.Double),
                 new("segmentsJson", VisionDataType.String),
+                new("sampleDiagnosticsJson", VisionDataType.String),
                 Failure,
                 Diagnostics,
                 Next
@@ -122,7 +127,10 @@ public static class DefectAnalysisCatalog
                 new("canvasWidth", "Canvas Width", "number", 0, 0, 32768, 1,
                     Description: "Canvas width for the produced detection bounding boxes. 0 takes it from the sample extents."),
                 new("canvasHeight", "Canvas Height", "number", 0, 0, 32768, 1,
-                    Description: "Canvas height for the produced detection bounding boxes.")
+                    Description: "Canvas height for the produced detection bounding boxes."),
+                new("exitDeviation", "Exit Deviation (0=entry)", "number", 0, 0, 10000, 0.01, Description: "Hysteresis exit threshold; 0 uses maxDeviation. A started segment ends only after deviation returns inside this threshold."),
+                new("closedContour", "Closed Contour", "boolean", false, Description: "Merge a defect spanning the last and first samples across the closed seam."),
+                new("maxSampleJumpPx", "Max Sample Jump (0=off)", "number", 0, 0, 32768, 0.1, Description: "Report sample indices whose segment length exceeds this jump threshold; 0 disables jump reporting."),
             ],
             "Turn an edge deviation profile into discrete edge defects. Wire samples (contour.toPoints / feature.ridge output) plus exactly one nominal - a line or a circle - and the node measures the signed normal deviation, marks the over-tolerance samples, merges them along the contour (including the two lobes of one chip separated by a burr), and emits one DetectionList entry per defect with its depth, arc length and bounding box. This is the missing counterpart of tolerance.profile: that node answers 'is the edge within tolerance', this one answers 'where are the chips and how big are they'. Requires samples ordered along the contour; unordered point clouds produce meaningless segments, which is why the deviation is measured along the polyline rather than by nearest-point search.",
             "builtin", new VisionToolCapabilities(Deterministic: true)),
@@ -165,6 +173,10 @@ public static class DefectAnalysisCatalog
             [
                 new("mean", VisionDataType.Double),
                 new("sigma", VisionDataType.Double),
+                new("baselineMean", VisionDataType.Double),
+                new("baselineSigma", VisionDataType.Double),
+                new("baselineSampleCount", VisionDataType.Integer),
+                new("sigmaZero", VisionDataType.Boolean),
                 new("ucl", VisionDataType.Double),
                 new("lcl", VisionDataType.Double),
                 new("last", VisionDataType.Double),
@@ -196,6 +208,7 @@ public static class DefectAnalysisCatalog
                 new("directory", VisionDataType.String),
                 new("savedCount", VisionDataType.Integer),
                 new("skippedCount", VisionDataType.Integer),
+                new("unexportedCount", VisionDataType.Integer),
                 new("samplesJson", VisionDataType.String),
                 Failure,
                 Diagnostics,
@@ -208,6 +221,7 @@ public static class DefectAnalysisCatalog
                     Description: "Relative to the working directory, which is what makes this node safe: absolute paths and '..' are rejected, so a workflow cannot be used to write outside the project."),
                 new("maxSamples", "Max Samples", "number", 50, 1, 10000, 1,
                     Description: "Upper bound on exported crops per run. 50 keeps a full shift's worth of NG parts reviewable without filling the disk."),
+                new("samplingStrategy", "Sampling Strategy", "select", "detection-order", Options: [new("Detection order", "detection-order"), new("Round-robin class strata", "class-stratified"), new("Largest area first", "severity")], Description: "Explicitly selects samples before maxSamples is applied. unexportedCount and selectedDetectionIndices make truncation observable."),
                 new("cropMarginPx", "Crop Margin (px)", "number", 4, 0, 512, 1,
                     Description: "Padding around the defect box. Some context is what makes a crop useful to a human labeller or a classifier; a tight crop of a 6 px speck is useless."),
                 new("format", "Format", "select", "png",
@@ -216,8 +230,8 @@ public static class DefectAnalysisCatalog
                 new("jpegQuality", "JPEG Quality", "number", 92, 1, 100, 1,
                     Description: "Only used when format=jpg."),
                 new("conflictPolicy", "On Existing File", "select", "suffix",
-                    Options: [new("Append a counter (never overwrite)", "suffix"), new("Overwrite", "overwrite"), new("Skip", "skip")],
-                    Description: "suffix is the default: a re-run must not destroy the samples collected earlier in the shift.")
+                    Options: [new("Append a counter (never overwrite)", "suffix"), new("Overwrite atomically", "overwrite"), new("Skip", "skip")],
+                    Description: "suffix is the default: a re-run must not destroy samples collected earlier. overwrite requires an exclusive directory lock and a valid hash-checked index.json, stages a complete generation, then atomically switches the index.")
             ],
             "Export defect crops as image files plus a machine-readable index, which is the missing return path between production and training. inference.* can only consume models; without this node every field sample has to be dragged out by hand, and that is where deep-learning projects stall in practice. Writes one file per defect into a work-directory-relative folder and emits samplesJson with the path, class, area and position of each crop, ready to be fed to output.database or reviewed in the artefacts folder. Absolute paths and '..' are rejected by design. A missing image port, an empty detection list or an unusable directory returns found=false with the reason, and files already on disk are never silently destroyed under the default conflict policy.",
             "builtin", new VisionToolCapabilities(Deterministic: false))

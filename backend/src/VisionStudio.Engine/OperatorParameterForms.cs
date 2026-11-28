@@ -120,6 +120,15 @@ internal static class OperatorParameterForms
             if (name == "count") return form with { Min = operation is "bitLshift" or "bitRshift" or "bitMask" or "bitSlice" ? 0 : 1,
                 Max = operation == "bitSlice" ? 7 : operation is "bitLshift" or "bitRshift" ? 31 : operation == "bitMask" ? int.MaxValue : 100000, Step = 1 };
         }
+        if (type == "jlvision.regionOp")
+        {
+            if (operation == "zoomRegion" && name is "size" or "length1")
+                return form with { Min = 0.001, Max = 100, Step = 0.05, DefaultValue = 1d, Unit = "×" };
+            if (operation == "pruning" && name == "count")
+                return form with { Min = 1, Max = 100000, Step = 1, DefaultValue = 1d, Unit = "px" };
+            if (operation == "rankRegion" && name == "count")
+                return form with { Min = 1, Max = 100000, Step = 1, DefaultValue = 1d, Unit = "rank" };
+        }
         // Radius, scale and integer count aliases must not inherit an odd-kernel step.
         if (name == "size" && (form.Label?.Contains("比例") == true || form.Label?.Contains("scale", StringComparison.OrdinalIgnoreCase) == true))
             return form with { Min = 0.001, Max = 100, Step = 0.05, DefaultValue = 1d, Unit = "×" };

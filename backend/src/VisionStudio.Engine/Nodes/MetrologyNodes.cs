@@ -34,6 +34,7 @@ public sealed class MetrologyNode : IVisionNodeExecutor
             return ValueTask.FromResult(new NodeExecutorResult(
                 new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(source.CloneOwned()),
                     ["found"] = VisionValue.Boolean(false), ["count"] = VisionValue.Integer(0), ["foundCount"] = VisionValue.Integer(0),
+                    ["qualityUnknownCount"] = VisionValue.Integer(0),
                     ["measurements"] = VisionValue.String("[]"), ["results"] = VisionValue.MetrologyResults(Array.Empty<VisionMetrologyResult>()),
                     ["diagnostics"] = VisionValue.String("{\"previewOnly\":true}") },
                 new Dictionary<string, object?> { ["previewOnly"] = true }, []));
@@ -55,6 +56,7 @@ public sealed class MetrologyNode : IVisionNodeExecutor
         var minScore = node.GetDouble("minScore", 0.3);
         if (!double.IsFinite(minScore) || minScore is < 0 or > 1) throw new InvalidOperationException("measure.metrology minScore must be finite in [0,1].");
         var requireAllFound = node.GetBool("requireAllFound", true);
+        var confirmUnknownQuality = node.GetBool("confirmUnknownQuality", false);
         var alignment = ResolveAlignment(context, node);
 
         using var gray = ToGray(source.Mat);
@@ -87,6 +89,7 @@ public sealed class MetrologyNode : IVisionNodeExecutor
                     ["found"] = VisionValue.Boolean(false),
                     ["count"] = VisionValue.Integer(0),
                     ["foundCount"] = VisionValue.Integer(0),
+                    ["qualityUnknownCount"] = VisionValue.Integer(0),
                     ["measurements"] = VisionValue.String("[]"),
                     ["results"] = VisionValue.MetrologyResults(specs.Select((spec, i) => new VisionMetrologyResult(i, spec.Name, spec.Type, false)).ToArray()),
                     ["diagnostics"] = VisionValue.String(failed)
@@ -146,6 +149,10 @@ public sealed class MetrologyNode : IVisionNodeExecutor
             if (found)
             {
                 var residual = TryResidual(model, index, spec.Type, entry);
+                entry["qualityUnknown"] = spec.Type is "ellipse" or "rectangle2";
+                entry["qualityStatus"] = spec.Type is "ellipse" or "rectangle2"
+                    ? confirmUnknownQuality || spec.QualityConfirmed ? "manually-confirmed" : "unknown"
+                    : residual is not null ? "known" : "unknown";
                 if (residual is not null)
                 {
                     entry["residualPx"] = Math.Round(residual.Value, 4);
@@ -159,7 +166,10 @@ public sealed class MetrologyNode : IVisionNodeExecutor
         }
 
         var foundCount = measurements.Count(m => m.TryGetValue("found", out var f) && f is true);
-        var foundOverall = requireAllFound ? foundCount == specs.Count : foundCount > 0;
+        var unknownQualityCount = measurements.Count(m => m.TryGetValue("found", out var f) && f is true
+            && m.TryGetValue("qualityStatus", out var q) && q is "unknown");
+        var geometryComplete = requireAllFound ? foundCount == specs.Count : foundCount > 0;
+        var foundOverall = geometryComplete && unknownQualityCount == 0;
         var residualRms = residuals.Count > 0 ? Math.Sqrt(residuals.Sum(r => r * r) / residuals.Count) : (double?)null;
         var residualMax = residuals.Count > 0 ? residuals.Max() : (double?)null;
 
@@ -175,6 +185,7 @@ public sealed class MetrologyNode : IVisionNodeExecutor
             ["found"] = VisionValue.Boolean(foundOverall),
             ["count"] = VisionValue.Integer(measurements.Count),
             ["foundCount"] = VisionValue.Integer(foundCount),
+            ["qualityUnknownCount"] = VisionValue.Integer(unknownQualityCount),
             ["measurements"] = VisionValue.String(json),
             ["results"] = VisionValue.MetrologyResults(specs.Select((spec, i) => TypedResult(spec, i, measurements.FirstOrDefault(entry => Convert.ToInt32(entry["objectIndex"]) == i), alignment)).ToArray()),
             ["diagnostics"] = VisionValue.String(diag)
@@ -186,7 +197,9 @@ public sealed class MetrologyNode : IVisionNodeExecutor
         {
             ["diagnostics"] = diag,
             ["found"] = foundOverall,
-            ["reason"] = foundOverall ? "measured" : "measurement-incomplete",
+            ["reason"] = foundOverall ? "measured" : unknownQualityCount > 0 ? "quality-unknown-not-confirmed" : "measurement-incomplete",
+            ["qualityUnknownCount"] = unknownQualityCount,
+            ["confirmUnknownQuality"] = confirmUnknownQuality,
             ["objectCount"] = specs.Count,
             ["foundCount"] = foundCount,
             ["missingCount"] = missing,
@@ -509,7 +522,8 @@ public sealed class MetrologyNode : IVisionNodeExecutor
                     Number("phiDeg"), Number("radius1"), Number("radius2"), Number("length1"), Number("length2"),
                     Number("rowBegin"), Number("columnBegin"), Number("rowEnd"), Number("columnEnd"),
                     Number("measureLength1"), Number("measureLength2"), Number("sigma"), Number("threshold"),
-                    Text("transition"), Text("select"), Number("minScore"));
+                    Text("transition"), Text("select"), Number("minScore"),
+                    element.TryGetProperty("qualityConfirmed", out var confirmed) && confirmed.ValueKind == JsonValueKind.True);
 
                 spec.Validate(index);
                 specs.Add(spec);
@@ -546,7 +560,7 @@ public sealed class MetrologyNode : IVisionNodeExecutor
         double? PhiDeg, double? Radius1, double? Radius2, double? Length1, double? Length2,
         double? RowBegin, double? ColumnBegin, double? RowEnd, double? ColumnEnd,
         double? MeasureLength1, double? MeasureLength2, double? Sigma, double? Threshold,
-        string? Transition, string? Select, double? MinScore)
+        string? Transition, string? Select, double? MinScore, bool QualityConfirmed)
     {
         public void Validate(int index)
         {

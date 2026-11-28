@@ -72,10 +72,18 @@ public sealed class ValueStringNode : IVisionNodeExecutor
 
             case "join":
                 {
-                    // 分隔拼接：跳过空段，避免 "SN_|_|_OK" 这类由未接线输入造成的空洞。
                     var separator = node.GetString("separator", "_");
-                    text = string.Join(separator, new[] { a, b, c, d }.Where(part => part.Length > 0));
+                    var emptyPolicy = node.GetString("emptyPolicy", "skip").Trim().ToLowerInvariant();
+                    if (emptyPolicy is not ("skip" or "preserve"))
+                        throw new InvalidOperationException("value.string emptyPolicy must be skip or preserve.");
+                    var parts = new[] { ("a", a), ("b", b), ("c", c), ("d", d) };
+                    var included = parts.Where(part => emptyPolicy == "preserve"
+                        ? context.TryGetValue(part.Item1, out _)
+                        : part.Item2.Length > 0).ToArray();
+                    text = string.Join(separator, included.Select(part => part.Item2));
                     detail.Add(("separator", separator));
+                    detail.Add(("emptyPolicy", emptyPolicy));
+                    detail.Add(("joinedPorts", string.Join(",", included.Select(part => part.Item1))));
                     break;
                 }
 
@@ -104,9 +112,9 @@ public sealed class ValueStringNode : IVisionNodeExecutor
                     if (raw.Length == 0)
                         throw new InvalidOperationException("value.string toNumber requires a non-empty text input on port 'a'.");
                     if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
-                        throw new InvalidOperationException($"value.string toNumber cannot parse '{Clip(raw)}' using invariant culture and NumberStyles.Float.");
+                        throw new InvalidOperationException($"value.string toNumber cannot parse '{Clip(raw)}' using invariant decimal syntax (optional sign, digits, decimal point and exponent); failureIndex={FindNumberFailure(raw)}, reason=invalid-or-trailing-character.");
                     if (!double.IsFinite(parsed))
-                        throw new InvalidOperationException($"value.string toNumber parsed a non-finite value from '{Clip(raw)}'.");
+                        throw new InvalidOperationException($"value.string toNumber parsed a non-finite value from '{Clip(raw)}'; failureIndex=0, reason=non-finite.");
                     number = parsed;
                     text = a; // 文本端口保持透传，便于同一条链路上继续做字符串判定
                     detail.Add(("parsed", parsed));
@@ -119,16 +127,18 @@ public sealed class ValueStringNode : IVisionNodeExecutor
                     var takeLength = node.GetInt("takeLength", 0);
                     if (startIndex < 0) throw new InvalidOperationException("value.string startIndex must be >= 0.");
                     if (takeLength < 0) throw new InvalidOperationException("value.string takeLength must be >= 0 (0 = to end).");
-                    var start = Math.Min(startIndex, a.Length);
+                    var codePoints = a.EnumerateRunes().ToArray();
+                    var start = Math.Min(startIndex, codePoints.Length);
                     truncated = start != startIndex;
-                    // takeLength=0 表示"取到结尾"；超出剩余长度时同样裁剪并记录。
-                    var available = a.Length - start;
+                    // takeLength=0 表示"取到结尾"；所有边界均按 Unicode 码点，不拆分代理对。
+                    var available = codePoints.Length - start;
                     var take = takeLength == 0 ? available : Math.Min(takeLength, available);
                     truncated |= take != takeLength && takeLength != 0;
-                    text = a.Substring(start, take);
+                    text = string.Concat(codePoints.Skip(start).Take(take).Select(rune => rune.ToString()));
                     detail.Add(("startIndex", startIndex));
                     detail.Add(("takeLength", takeLength));
                     detail.Add(("textLength", a.Length));
+                    detail.Add(("codePointCount", codePoints.Length));
                     break;
                 }
 
@@ -197,14 +207,18 @@ public sealed class ValueStringNode : IVisionNodeExecutor
                     var side = node.GetString("padSide", "left").Trim().ToLowerInvariant();
                     if (width is < 0 or > 1_048_576)
                         throw new InvalidOperationException("value.string padWidth must be within 0..1048576.");
-                    if (padCharText.Length != 1)
-                        throw new InvalidOperationException("value.string padChar must be exactly one character.");
+                    if (padCharText.EnumerateRunes().Count() != 1)
+                        throw new InvalidOperationException("value.string padChar must be exactly one Unicode code point.");
                     if (side is not ("left" or "right"))
                         throw new InvalidOperationException("value.string padSide must be left or right.");
-                    // 够宽则原样返回（不截断），与常见 printf 语义保持一致并在描述里写明。
-                    text = a.Length >= width
+                    var paddingRune = padCharText.EnumerateRunes().First();
+                    var inputCodePointCount = a.EnumerateRunes().Count();
+                    // 够宽则原样返回（不截断）；补位宽度与字符均按码点，绝不会产生孤立代理项。
+                    text = inputCodePointCount >= width
                         ? a
-                        : side == "left" ? a.PadLeft(width, padCharText[0]) : a.PadRight(width, padCharText[0]);
+                        : side == "left"
+                            ? string.Concat(Enumerable.Repeat(paddingRune.ToString(), width - inputCodePointCount)) + a
+                            : a + string.Concat(Enumerable.Repeat(paddingRune.ToString(), width - inputCodePointCount));
                     detail.Add(("padWidth", width));
                     detail.Add(("padSide", side));
                     break;
@@ -230,14 +244,16 @@ public sealed class ValueStringNode : IVisionNodeExecutor
         if (text.Length > maxLength)
             throw new InvalidOperationException($"value.string produced {text.Length} characters which exceeds maxLength {maxLength}.");
 
+        var codePointCount = text.EnumerateRunes().Count();
         var diagnostics = CoordinateValidation.Diagnostics(
             Type,
-            [("op", (object?)op), ("charCount", text.Length), ("truncated", truncated), ("result", Preview(text)), .. detail]);
+            [("op", (object?)op), ("charCount", text.Length), ("codePointCount", codePointCount), ("truncated", truncated), ("result", Preview(text)), .. detail]);
 
         var outputs = new Dictionary<string, VisionValue>
         {
             ["textValue"] = VisionValue.String(text),
             ["charCount"] = VisionValue.Integer(text.Length),
+            ["codePointCount"] = VisionValue.Integer(codePointCount),
             ["truncated"] = VisionValue.Boolean(truncated),
             ["diagnostics"] = VisionValue.String(diagnostics)
         };
@@ -251,6 +267,7 @@ public sealed class ValueStringNode : IVisionNodeExecutor
                 ["op"] = op,
                 ["text"] = Preview(text),
                 ["charCount"] = text.Length,
+                ["codePointCount"] = codePointCount,
                 ["truncated"] = truncated,
                 ["number"] = number,
                 ["diagnostics"] = diagnostics
@@ -327,6 +344,29 @@ public sealed class ValueStringNode : IVisionNodeExecutor
         }
     }
 
+    private static int FindNumberFailure(string text)
+    {
+        var index = 0;
+        if (index < text.Length && text[index] is '+' or '-') index++;
+        var digits = 0;
+        while (index < text.Length && char.IsAsciiDigit(text[index])) { index++; digits++; }
+        if (index < text.Length && text[index] == '.')
+        {
+            index++;
+            while (index < text.Length && char.IsAsciiDigit(text[index])) { index++; digits++; }
+        }
+        if (digits == 0) return Math.Min(index, text.Length);
+        if (index < text.Length && text[index] is 'e' or 'E')
+        {
+            index++;
+            if (index < text.Length && text[index] is '+' or '-') index++;
+            var exponentStart = index;
+            while (index < text.Length && char.IsAsciiDigit(text[index])) index++;
+            if (index == exponentStart) return Math.Min(index, text.Length);
+        }
+        return index < text.Length ? index : -1;
+    }
+
     /// <summary>仅替换第一处（区分/不区分大小写），用于 replaceAll=false 的字面量分支。</summary>
     private static string ReplaceFirst(string text, string find, string replaceWith, bool ignoreCase)
     {
@@ -336,7 +376,16 @@ public sealed class ValueStringNode : IVisionNodeExecutor
     }
 
     /// <summary>诊断与摘要里回显的文本片段，防止把整段 OCR 文本塞进报告。</summary>
-    private static string Preview(string text) => text.Length <= 200 ? text : text[..200] + "…";
+    private static string Preview(string text)
+    {
+        if (text.Length <= 200) return text;
+        var runeCount = 0;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (++runeCount > 100) return string.Concat(text.EnumerateRunes().Take(100).Select(rune => rune.ToString())) + "…";
+        }
+        return text;
+    }
 
     /// <summary>错误信息中引用的输入片段，避免把超长上游文本整段写进异常。</summary>
     private static string Clip(string text) => text.Length <= 64 ? text : text[..64] + "…";

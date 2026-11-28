@@ -53,6 +53,7 @@ public sealed class JLVisionMatrixNode : IVisionNodeExecutor
         JlMatrixResult result;
         try
         {
+            JlMatrixOperations.ValidateOperation(key, args);
             JlMatrixOperations.ValidateOutputBudget(key, args);
             result = op.Run(args);
         }
@@ -68,6 +69,14 @@ public sealed class JLVisionMatrixNode : IVisionNodeExecutor
         var values = new Dictionary<string, double>(StringComparer.Ordinal) { ["value"] = result.Value };
         if (result.Extra is not null)
             foreach (var (name, value) in result.Extra) values[name] = value;
+        var conditioningOperator = key is "invert" or "invertMod" or "solve" or "eigenvaluesSymmetric" or "generalizedEigenvaluesSymmetric" or "decompose" or "orthogonalDecompose";
+        var conditionNumber = conditioningOperator ? JlMatrixOperations.TryConditionNumber(a) : null;
+        if (conditionNumber is not null)
+        {
+            if (double.IsFinite(conditionNumber.Value)) values["conditionNumber"] = conditionNumber.Value;
+            values["illConditioned"] = conditionNumber.Value >= 1e12 ? 1 : 0;
+        }
+        var scalarRole = key is "invert" or "invertMod" or "solve" ? "epsilon" : key is "scale" or "scaleMod" or "create" or "setValue" ? "value" : "unused";
 
         using var overlaySurface = BuildHeatmap(result.Matrix, result.Value);
         var outputs = new Dictionary<string, VisionValue>
@@ -82,6 +91,8 @@ public sealed class JLVisionMatrixNode : IVisionNodeExecutor
             ["diagnostics"] = VisionValue.String(JLVisionNodeSupport.Diagnostics(
                 node.Type, "standard", 0, ("operator", key), ("value", result.Value),
                 ("resultRows", result.Matrix?.GetLength(0) ?? 0), ("resultColumns", result.Matrix?.GetLength(1) ?? 0),
+                ("conditionNumber", conditionNumber), ("illConditioned", conditionNumber is >= 1e12),
+                ("conditioningAvailable", conditionNumber is not null), ("scalarRole", scalarRole),
                 ("previewRows", Math.Min(128, result.Matrix?.GetLength(0) ?? 1)), ("previewColumns", Math.Min(128, result.Matrix?.GetLength(1) ?? 1)),
                 ("previewTruncated", result.Matrix is { } preview && (preview.GetLength(0) > 128 || preview.GetLength(1) > 128)),
                 ("plotSampleLimit", 64), ("plotCoordinates", "调试曲线按幅值归一化，非原始几何坐标")))
@@ -95,7 +106,10 @@ public sealed class JLVisionMatrixNode : IVisionNodeExecutor
             ["value"] = result.Value,
             ["resultRows"] = result.Matrix?.GetLength(0),
             ["resultColumns"] = result.Matrix?.GetLength(1),
-            ["values"] = values
+            ["values"] = values,
+            ["conditionNumber"] = conditionNumber,
+            ["illConditioned"] = conditionNumber is >= 1e12,
+            ["scalarRole"] = scalarRole
         };
         return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
     }

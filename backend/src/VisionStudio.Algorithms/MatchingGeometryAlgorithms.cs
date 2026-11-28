@@ -9,7 +9,8 @@ internal static class MatchingGeometryAlgorithms
         double ScaleX, double ScaleY, double RotationDeg, double SkewDeg, VisionPoint2D[] Corners);
 
     internal sealed record PoseResult(
-        double[] Matrix, double[] Rvec, double Rx, double Ry, double Rz, double Rms, double MaxError);
+        double[] Matrix, double[] Rvec, double Rx, double Ry, double Rz, double Rms, double MaxError,
+        IReadOnlyList<double> PointErrors);
 
     internal static HomographyResult? Homography(
         IReadOnlyList<VisionPoint2D> sourcePoints, IReadOnlyList<VisionPoint2D> targetPoints,
@@ -136,16 +137,18 @@ internal static class MatchingGeometryAlgorithms
         Cv2.ProjectPoints(objects, rvecValues, tvecValues, cameraArray, distortion, out Point2f[] reprojected, out _, 0);
         double sumSquares = 0;
         var maxError = 0d;
+        var pointErrors = new double[objects.Length];
         for (var index = 0; index < objects.Length; index++)
         {
             var dx = reprojected[index].X - imagePoints[index].X;
             var dy = reprojected[index].Y - imagePoints[index].Y;
             var error = Math.Sqrt(dx * dx + dy * dy);
+            pointErrors[index] = error;
             sumSquares += error * error;
             if (error > maxError) maxError = error;
         }
         var (rx, ry, rz) = EulerZyx(rotationMatrix);
-        return new PoseResult(matrix, rvecValues, rx, ry, rz, Math.Sqrt(sumSquares / objects.Length), maxError);
+        return new PoseResult(matrix, rvecValues, rx, ry, rz, Math.Sqrt(sumSquares / objects.Length), maxError, pointErrors);
     }
 
     private static VisionPoint2D Project(double[] h, VisionPoint2D point)

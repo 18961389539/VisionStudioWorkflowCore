@@ -17,13 +17,16 @@ internal static class P1CompletionCatalog
             [
                 new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer),
                 new("mergedCount", VisionDataType.Integer), new("inputCount", VisionDataType.Integer),
-                new("largestArea", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next
+                new("largestArea", VisionDataType.Double), new("clustersJson", VisionDataType.String), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("linkDistancePx", "Link Distance", "number", 5, 0, 10000, 0.5, Unit: "px", Group: "Clustering",
                     Description: "Bounding-box gap at or below this distance joins two detections into one defect. 0 only merges overlapping boxes. Gap (not centroid distance) is what keeps one long scratch from being split into two."),
                 new("maxDetections", "Maximum Input Detections", "number", 5000, 1, 50000, 100, Group: "Limits",
                     Description: "Refuse oversized input lists instead of spending minutes in the pairwise pass. Cluster or filter upstream when a noisy threshold produces thousands of specks."),
+                new("maxMembers", "Max Members per Cluster (0=off)", "number", 0, 0, 50000, 1, Group: "Limits", Description: "Bound transitive chain growth; oversized clusters fail or split according to limitPolicy."),
+                new("maxSpanPx", "Max Cluster Span (0=off)", "number", 0, 0, 1e9, 1, Unit: "px", Group: "Limits", Description: "Maximum bounding-box width or height of a cluster; 0 disables."),
+                new("limitPolicy", "Cluster Limit Policy", "select", "fail", Options: [new("Fail", "fail"), new("Split oversized clusters", "split")], Group: "Limits", Description: "fail refuses unbounded clusters; split emits bounded chunks and reports splitClusterCount."),
             ],
             "Merge nearby detections into one defect each: two boxes join when the gap between them is at most linkDistancePx. Wire: detections -> detections/count/mergedCount. The merged area is the sum of member areas and the merged perimeter is the sum of member perimeters, so circularity of a cluster is a coarse filter only - rebuild the true outline with region/contour nodes when the shape matters. A cluster keeps its class id only when every member shares it. Deterministic and order-independent (union-find over a spatial bucket grid).",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
@@ -35,13 +38,13 @@ internal static class P1CompletionCatalog
                 new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer),
                 new("ngCount", VisionDataType.Integer), new("ok", VisionDataType.Boolean),
                 new("unclassifiedCount", VisionDataType.Integer), new("classCountsJson", VisionDataType.String),
-                new("diagnostics", VisionDataType.String), Next
+                new("detectionDiagnosticsJson", VisionDataType.String), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("rulesJson", "Rules JSON", "textarea",
                     """[{"name":"scratch","classId":1,"minAspect":3,"minArea":50},{"name":"pit","classId":2,"maxArea":500,"minCircularity":0.6},{"name":"stain","classId":3,"minArea":500}]""",
                     Group: "Rules",
-                    Description: "Ordered rule list; the first matching rule wins. Fields: name, classId, minArea, maxArea, minAspect, maxAspect, minCircularity, maxCircularity. 0 or an omitted field disables that bound. Aspect is long side over short side."),
+                    Description: "Ordered rule list; the first matching rule wins. Fields: name, classId, minArea, maxArea, minAspect, maxAspect, minCircularity, maxCircularity. 0 or an omitted field disables that bound. Aspect is long side over short side. Business classId must be 1..10000; 0 is reserved for unclassified."),
                 new("rejectUnclassified", "Reject Unclassified", "boolean", true, Group: "Rules",
                     Description: "Count detections that match no rule as NG (default). Turn it off while tuning a new rule set so unmatched blobs do not fail the part."),
             ],
@@ -89,11 +92,12 @@ internal static class P1CompletionCatalog
             Actions: []),
 
         new("calibration.conveyor", "Conveyor Tracking", "Calibration",
-            [Exec, new("encoder", VisionDataType.Double, Required: false)],
+            [Exec, new("encoder", VisionDataType.Double, Required: false),
+             new("speedDirection", VisionDataType.String, Required: false), new("motionState", VisionDataType.String, Required: false)],
             [
                 new("position", VisionDataType.Double), new("triggerOffset", VisionDataType.Double),
-                new("compensatedPosition", VisionDataType.Double), new("unit", VisionDataType.String),
-                new("diagnostics", VisionDataType.String), Next
+                new("compensatedPosition", VisionDataType.Double, Required: false), new("targetAllowed", VisionDataType.Boolean),
+                new("unit", VisionDataType.String), new("encoderSampleId", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("encoder", "Encoder Count", "number", 0, -1e15, 1e15, 1, Group: "Encoder",
@@ -110,9 +114,22 @@ internal static class P1CompletionCatalog
                 [
                     new("Add (part advanced)", "add"),
                     new("Subtract (reverse running line)", "subtract")
-                ], Description: "The part keeps moving during the delay, so its later position is ahead of the trigger position. Flip it for a line running the other way."),
+                ], Description: "Must agree with Line Direction: forward=add, reverse=subtract. A mismatch blocks the robot target."),
+                new("lineDirection", "Configured Line Direction", "select", "unconfirmed", Group: "Safety", Options:
+                [
+                    new("Unconfirmed", "unconfirmed"), new("Forward", "forward"), new("Reverse", "reverse")
+                ], Description: "Commissioned physical line direction. Unconfirmed direction never emits compensatedPosition."),
+                new("speedDirection", "Observed Speed Direction", "select", "unknown", Group: "Safety", Options:
+                [
+                    new("Unknown", "unknown"), new("Forward", "forward"), new("Reverse", "reverse")
+                ], Description: "Direction reported by the encoder/drive at trigger time. A connected speedDirection port overrides this value."),
+                new("motionState", "Motion State", "select", "unknown", Group: "Safety", Options:
+                [
+                    new("Unknown", "unknown"), new("Steady", "steady"), new("Decelerating", "decelerating"),
+                    new("Reversing", "reversing"), new("Stopped", "stopped")
+                ], Description: "Robot targets are blocked unless the line is steady, or stopped with zero speed. A connected motionState port overrides this value."),
             ],
-            "Conveyor tracking math: encoder counts to engineering position, plus the travel distance accumulated during the trigger delay. Wire: encoder -> position/triggerOffset/compensatedPosition/unit. compensatedPosition = counts/countsPerUnit +/- lineSpeed*triggerDelayMs/1000 and is the value a robot target or a camera-to-robot transform should use. This node reads no hardware: the host latches the encoder count, which keeps the calibration in the recipe and out of the camera driver. Failures: countsPerUnit <= 0, negative delay or speed.",
+            "Conveyor tracking math: encoder counts to engineering position, plus the travel distance accumulated during the trigger delay. Wire: encoder -> position/triggerOffset/compensatedPosition/unit. compensatedPosition is emitted only when the configured line direction is confirmed, the observed direction matches, motion is steady (or stopped at zero speed), and compensationSign agrees with the line direction; otherwise targetAllowed=false and no robot target is published. This node reads no hardware: the host latches the encoder count and direction state, which keeps the calibration in the recipe and out of the camera driver. Failures: countsPerUnit <= 0, negative delay or speed.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
             Actions: []),
 

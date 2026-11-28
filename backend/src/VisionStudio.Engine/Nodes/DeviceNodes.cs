@@ -43,6 +43,9 @@ public sealed class DeviceReadTagNode(DeviceManager devices) : IVisionNodeExecut
         if (requireGood && !string.Equals(sample.Quality.ToString(), "Good", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"device.readTag requireGoodQuality rejected quality '{sample.Quality}' for '{deviceId}/{tagId}'.");
         var ageMs = Math.Max(0d, (DateTimeOffset.UtcNow - sample.Timestamp).TotalMilliseconds);
+        var timestampValid = IsTimestampValid(sample.Timestamp);
+        if (maxAgeMs > 0 && !timestampValid)
+            throw new InvalidOperationException($"device.readTag timestamp is missing, invalid or in the future for '{deviceId}/{tagId}'; maxAgeMs cannot be evaluated.");
         if (maxAgeMs > 0 && ageMs > maxAgeMs)
             throw new InvalidOperationException($"device.readTag sample age {ageMs:0} ms exceeds maxAgeMs {maxAgeMs:0} ms for '{deviceId}/{tagId}'.");
         if (rejectNullValue && sample.Value is null)
@@ -61,13 +64,20 @@ public sealed class DeviceReadTagNode(DeviceManager devices) : IVisionNodeExecut
         var numberValue = 0d;
         var numberValueValid = false;
         try { numberValue = sample.AsDouble(); numberValueValid = true; } catch (InvalidOperationException) { /* 值不是数值类型：跳过该输出 */ }
+        var integerValue = 0L;
+        var integerValueValid = false;
+        try { integerValue = sample.AsInteger(); integerValueValid = true; } catch (InvalidOperationException) { /* 值不是整数类型：跳过该输出 */ }
+        var numberValueLossless = numberValueValid && (!integerValueValid || (decimal)numberValue == (decimal)integerValue);
         var ageMs = Math.Max(0d, (DateTimeOffset.UtcNow - sample.Timestamp).TotalMilliseconds);
+        var timestampValid = IsTimestampValid(sample.Timestamp);
+        var observableAgeMs = timestampValid ? ageMs : -1d;
         var diag = CoordinateValidation.Diagnostics("device.readTag",
             ("deviceId", deviceId), ("tagId", sample.TagId), ("dataType", sample.DataType.ToString()),
             ("quality", sample.Quality.ToString()), ("fresh", fresh), ("autoConnect", autoConnect),
-            ("requireGoodQuality", requireGoodQuality), ("maxAgeMs", maxAgeMs), ("ageMs", ageMs),
-            ("hasValue", sample.Value is not null), ("boolValue", boolValue), ("numberValue", numberValue),
-            ("boolValueValid", boolValueValid), ("numberValueValid", numberValueValid));
+            ("requireGoodQuality", requireGoodQuality), ("maxAgeMs", maxAgeMs), ("ageMs", observableAgeMs),
+            ("timestampValid", timestampValid), ("hasValue", sample.Value is not null), ("boolValue", boolValue), ("numberValue", numberValue),
+            ("boolValueValid", boolValueValid), ("numberValueValid", numberValueValid),
+            ("integerValue", integerValue), ("integerValueValid", integerValueValid), ("numberValueLossless", numberValueLossless));
         return new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -76,10 +86,14 @@ public sealed class DeviceReadTagNode(DeviceManager devices) : IVisionNodeExecut
                 ["boolValueValid"] = VisionValue.Boolean(boolValueValid),
                 ["numberValue"] = VisionValue.Double(numberValue),
                 ["numberValueValid"] = VisionValue.Boolean(numberValueValid),
+                ["integerValue"] = VisionValue.Integer(integerValue),
+                ["integerValueValid"] = VisionValue.Boolean(integerValueValid),
+                ["numberValueLossless"] = VisionValue.Boolean(numberValueLossless),
                 ["textValue"] = VisionValue.String(sample.AsText()),
                 ["quality"] = VisionValue.String(sample.Quality.ToString()),
                 ["timestamp"] = VisionValue.String(sample.Timestamp.ToString("O")),
-                ["ageMs"] = VisionValue.Double(ageMs),
+                ["timestampValid"] = VisionValue.Boolean(timestampValid),
+                ["ageMs"] = VisionValue.Double(observableAgeMs),
                 ["isGoodQuality"] = VisionValue.Boolean(sample.Quality == DeviceTagQuality.Good),
                 ["diagnostics"] = VisionValue.String(diag)
             },
@@ -91,10 +105,23 @@ public sealed class DeviceReadTagNode(DeviceManager devices) : IVisionNodeExecut
                 ["value"] = sample.Value,
                 ["quality"] = sample.Quality.ToString(),
                 ["timestamp"] = sample.Timestamp,
+                ["timestampValid"] = timestampValid,
+                ["ageMs"] = observableAgeMs,
                 ["boolValueValid"] = boolValueValid,
                 ["numberValueValid"] = numberValueValid,
+                ["integerValue"] = integerValue,
+                ["integerValueValid"] = integerValueValid,
+                ["numberValueLossless"] = numberValueLossless,
                 ["diagnostics"] = diag
             });
+    }
+
+    internal static bool IsTimestampValid(DateTimeOffset timestamp)
+    {
+        if (timestamp == default) return false;
+        var now = DateTimeOffset.UtcNow;
+        // A small skew allowance avoids rejecting devices whose clock is only marginally ahead.
+        return timestamp <= now.AddSeconds(1);
     }
 }
 
@@ -112,6 +139,10 @@ public sealed class DeviceWriteTagNode(DeviceManager devices) : IVisionNodeExecu
         var deviceId = DeviceNodeValidation.RequireId(node.GetString("deviceId", "virtual-modbus-1"), "device.writeTag deviceId");
         var tagId = DeviceNodeValidation.RequireId(node.GetString("tagId", "statusText"), "device.writeTag tagId");
         var autoConnect = node.GetBool("autoConnect", true);
+        var valueTolerance = node.GetDouble("valueTolerance", 1e-9);
+        if (!double.IsFinite(valueTolerance) || valueTolerance < 0)
+            throw new InvalidOperationException("device.writeTag valueTolerance must be finite and >= 0.");
+        var commandId = Guid.NewGuid().ToString("N");
         object? value;
 
         var hasInput = context.TryGetValue("value", out var incoming);
@@ -127,7 +158,10 @@ public sealed class DeviceWriteTagNode(DeviceManager devices) : IVisionNodeExecu
         try
         {
             if (value is null) throw new InvalidOperationException($"device.writeTag value is null for '{deviceId}/{tagId}'.");
-            await devices.WriteTagAsync(deviceId, tagId, value, autoConnect, cancellationToken);
+            var definition = devices.Require(deviceId).Tags.FirstOrDefault(tag => tag.Id.Equals(tagId, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"device.writeTag tag '{tagId}' is not defined on '{deviceId}'.");
+            var expectedValue = DeviceValueConversion.ConvertTo(definition.DataType, value);
+            await devices.WriteTagAsync(deviceId, tagId, expectedValue, autoConnect, cancellationToken);
             DeviceTagSample sample;
             try
             {
@@ -139,20 +173,39 @@ public sealed class DeviceWriteTagNode(DeviceManager devices) : IVisionNodeExecu
                 throw new InvalidOperationException($"device.writeTag wrote '{deviceId}/{tagId}' but read-back failed; the write may already be applied. {ex.Message}", ex);
             }
             var result = DeviceReadTagNode.Result(sample, deviceId, fresh: true, autoConnect: autoConnect);
+            var confirmed = sample.Quality == DeviceTagQuality.Good
+                && sample.DataType == definition.DataType
+                && ValuesMatch(sample.DataType, expectedValue, sample.Value, valueTolerance);
             var diag = CoordinateValidation.Diagnostics(Type,
-                ("deviceId", deviceId), ("tagId", tagId), ("operation", "Write"),
-                ("quality", sample.Quality.ToString()), ("autoConnect", autoConnect),
+                ("deviceId", deviceId), ("tagId", tagId), ("operation", "WriteAndVerify"),
+                ("commandId", commandId), ("quality", sample.Quality.ToString()), ("autoConnect", autoConnect),
                 ("valueSource", hasInput ? "input" : "fallback"),
-                ("valueType", hasInput ? null : node.GetString("valueType", "String")),
+                ("valueType", hasInput ? definition.DataType.ToString() : node.GetString("valueType", "String")),
+                ("expectedValue", expectedValue), ("actualValue", sample.Value), ("valueTolerance", valueTolerance),
+                ("confirmed", confirmed), ("retryAllowed", false),
                 ("boolValueValid", result.Summary["boolValueValid"]), ("numberValueValid", result.Summary["numberValueValid"]));
-            var outputs = new Dictionary<string, VisionValue>(result.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
+            var outputs = new Dictionary<string, VisionValue>(result.Outputs)
+            {
+                ["diagnostics"] = VisionValue.String(diag),
+                ["confirmed"] = VisionValue.Boolean(confirmed),
+                ["commandId"] = VisionValue.String(commandId),
+                ["expectedValue"] = VisionValue.String(Convert.ToString(expectedValue, CultureInfo.InvariantCulture) ?? string.Empty),
+                ["actualValue"] = VisionValue.String(Convert.ToString(sample.Value, CultureInfo.InvariantCulture) ?? string.Empty),
+                ["valueTolerance"] = VisionValue.Double(valueTolerance)
+            };
             return result with
             {
                 Outputs = outputs,
                 Summary = new Dictionary<string, object?>(result.Summary)
                 {
-                    ["operation"] = "Write",
+                    ["operation"] = "WriteAndVerify",
+                    ["commandId"] = commandId,
                     ["writtenValue"] = sample.Value,
+                    ["expectedValue"] = expectedValue,
+                    ["actualValue"] = sample.Value,
+                    ["valueTolerance"] = valueTolerance,
+                    ["confirmed"] = confirmed,
+                    ["retryAllowed"] = false,
                     ["diagnostics"] = diag
                 }
             };
@@ -161,6 +214,20 @@ public sealed class DeviceWriteTagNode(DeviceManager devices) : IVisionNodeExecu
         {
             throw new InvalidOperationException($"device.writeTag failed for '{deviceId}/{tagId}': {ex.Message}", ex);
         }
+    }
+
+    private static bool ValuesMatch(DeviceTagDataType type, object? expected, object? actual, double tolerance)
+    {
+        if (expected is null || actual is null) return expected is null && actual is null;
+        return type switch
+        {
+            DeviceTagDataType.Boolean => expected is bool e && actual is bool a && e == a,
+            DeviceTagDataType.Integer => expected is long e && actual is long a && e == a,
+            DeviceTagDataType.Double => expected is double e && actual is double a && Math.Abs(e - a) <= tolerance,
+            DeviceTagDataType.String => string.Equals(Convert.ToString(expected, CultureInfo.InvariantCulture),
+                Convert.ToString(actual, CultureInfo.InvariantCulture), StringComparison.Ordinal),
+            _ => false
+        };
     }
 
     private static object ParseFallback(string type, string text)
@@ -218,11 +285,14 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
         var autoConnect = node.GetBool("autoConnect", true);
         var triggerMode = node.GetString("triggerMode", "Level").Trim();
         var qualityMode = node.GetString("qualityMode", "Any").Trim();
+        var qualityLossPolicy = node.GetString("qualityLossPolicy", "resetHold").Trim();
         var onTimeout = node.GetString("onTimeout", "Fail").Trim();
         if (triggerMode.ToLowerInvariant() is not ("level" or "rising" or "falling"))
             throw new InvalidOperationException($"device.waitTag triggerMode '{triggerMode}' is not supported.");
         if (qualityMode.ToLowerInvariant() is not ("any" or "good" or "goodoruncertain"))
             throw new InvalidOperationException($"device.waitTag qualityMode '{qualityMode}' is not supported.");
+        if (qualityLossPolicy.ToLowerInvariant() is not ("resethold" or "fail"))
+            throw new InvalidOperationException($"device.waitTag qualityLossPolicy '{qualityLossPolicy}' is not supported.");
         if (onTimeout.ToLowerInvariant() is not ("fail" or "continue"))
             throw new InvalidOperationException($"device.waitTag onTimeout '{onTimeout}' is not supported.");
         if (stableMs > timeoutMs)
@@ -233,7 +303,9 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
         timeoutCts.CancelAfter(timeoutMs);
         DeviceTagSample? last = null;
         bool? previousLevel = null;
-        var edgeArmed = false;
+        var edgeArmed = !context.TryGetValue("armed", out var armedInput) || armedInput.Require<bool>("armed");
+        var qualityRejectedCount = 0;
+        string? lastRejectedQuality = null;
         long? stableSince = null;
         try
         {
@@ -245,7 +317,11 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
                 last = sample;
                 if (!QualityAccepted(sample.Quality, qualityMode))
                 {
+                    qualityRejectedCount++;
+                    lastRejectedQuality = sample.Quality.ToString();
                     stableSince = null;
+                    if (qualityLossPolicy.Equals("fail", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"device.waitTag qualityLossPolicy=fail rejected quality '{sample.Quality}' for '{deviceId}/{tagId}' after {qualityRejectedCount} rejection(s).");
                     await Task.Delay(pollMs, timeoutCts.Token);
                     continue;
                 }
@@ -265,7 +341,8 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
                 if (Stopwatch.GetElapsedTime(stableSince.Value, now).TotalMilliseconds >= stableMs)
                 {
                     timeoutCts.Token.ThrowIfCancellationRequested();
-                    return Matched(sample, deviceId, op, compare, triggerMode, qualityMode, Stopwatch.GetElapsedTime(started, now).TotalMilliseconds);
+                    return Matched(sample, deviceId, op, compare, triggerMode, qualityMode, qualityLossPolicy,
+                        edgeArmed, qualityRejectedCount, lastRejectedQuality, Stopwatch.GetElapsedTime(started, now).TotalMilliseconds);
                 }
                 await Task.Delay(pollMs, timeoutCts.Token);
             }
@@ -273,7 +350,8 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
             if (onTimeout.Equals("Continue", StringComparison.OrdinalIgnoreCase))
-                return TimedOut(deviceId, tagId, last, op, compare, triggerMode, qualityMode, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                return TimedOut(deviceId, tagId, last, op, compare, triggerMode, qualityMode, qualityLossPolicy,
+                    edgeArmed, qualityRejectedCount, lastRejectedQuality, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             throw new TimeoutException($"Timed out waiting for device '{deviceId}' tag '{tagId}' after {timeoutMs:0} ms.");
         }
     }
@@ -288,6 +366,13 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
 
     private static bool Arm(string triggerMode, bool level, bool? previousLevel, ref bool edgeArmed)
     {
+        if (previousLevel is null)
+        {
+            // The first sample establishes the baseline. Explicit armed=true enables edge
+            // observation from here; it never turns the baseline itself into an edge.
+            if (triggerMode.Equals("level", StringComparison.OrdinalIgnoreCase)) return level;
+            return false;
+        }
         switch (triggerMode.ToLowerInvariant())
         {
             case "rising":
@@ -311,13 +396,19 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
             _ => true
         };
 
-    private static NodeExecutorResult Matched(DeviceTagSample sample, string deviceId, string op, string compare, string triggerMode, string qualityMode, double waitMs)
+    private static NodeExecutorResult Matched(DeviceTagSample sample, string deviceId, string op, string compare,
+        string triggerMode, string qualityMode, string qualityLossPolicy, bool edgeArmed,
+        int qualityRejectedCount, string? lastRejectedQuality, double waitMs)
     {
         var result = DeviceReadTagNode.Result(sample, deviceId);
-        var diag = WaitDiagnostics(result, op, compare, triggerMode, qualityMode, waitMs, true);
+        var diag = WaitDiagnostics(result, op, compare, triggerMode, qualityMode, qualityLossPolicy,
+            waitMs, true, edgeArmed, qualityRejectedCount, lastRejectedQuality);
         var outputs = new Dictionary<string, VisionValue>(result.Outputs)
         {
             ["matched"] = VisionValue.Boolean(true),
+            ["armed"] = VisionValue.Boolean(edgeArmed),
+            ["qualityRejectedCount"] = VisionValue.Integer(qualityRejectedCount),
+            ["qualityLossPolicy"] = VisionValue.String(qualityLossPolicy),
             ["waitMs"] = VisionValue.Double(waitMs),
             ["diagnostics"] = VisionValue.String(diag)
         };
@@ -327,6 +418,10 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
             ["compareValue"] = compare,
             ["triggerMode"] = triggerMode,
             ["qualityMode"] = qualityMode,
+            ["qualityLossPolicy"] = qualityLossPolicy,
+            ["armed"] = edgeArmed,
+            ["qualityRejectedCount"] = qualityRejectedCount,
+            ["lastRejectedQuality"] = lastRejectedQuality,
             ["waitMs"] = Math.Round(waitMs, 2),
             ["matched"] = true,
             ["diagnostics"] = diag
@@ -334,15 +429,25 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
         return new NodeExecutorResult(outputs, summary);
     }
 
-    private static NodeExecutorResult TimedOut(string deviceId, string tagId, DeviceTagSample? last, string op, string compare, string triggerMode, string qualityMode, double waitMs)
+    private static NodeExecutorResult TimedOut(string deviceId, string tagId, DeviceTagSample? last, string op,
+        string compare, string triggerMode, string qualityMode, string qualityLossPolicy, bool edgeArmed,
+        int qualityRejectedCount, string? lastRejectedQuality, double waitMs)
     {
         var result = last is null
             ? DeviceReadTagNode.Result(new DeviceTagSample(deviceId, tagId, DeviceTagDataType.String, null, DeviceTagQuality.Disconnected, DateTimeOffset.UtcNow, "Timeout"), deviceId)
             : DeviceReadTagNode.Result(last, deviceId);
-        var diag = WaitDiagnostics(result, op, compare, triggerMode, qualityMode, waitMs, false, last is null ? "Timeout" : null);
+        var conditionHeld = last is not null && QualityAccepted(last.Quality, qualityMode) && Matches(last, op, compare);
+        var diag = WaitDiagnostics(result, op, compare, triggerMode, qualityMode, qualityLossPolicy,
+            waitMs, false, edgeArmed, qualityRejectedCount, lastRejectedQuality, last is null ? "Timeout" : null, conditionHeld);
         var outputs = new Dictionary<string, VisionValue>(result.Outputs)
         {
             ["matched"] = VisionValue.Boolean(false),
+            ["timedOut"] = VisionValue.Boolean(true),
+            ["conditionHeld"] = VisionValue.Boolean(conditionHeld),
+            ["resultValid"] = VisionValue.Boolean(false),
+            ["armed"] = VisionValue.Boolean(edgeArmed),
+            ["qualityRejectedCount"] = VisionValue.Integer(qualityRejectedCount),
+            ["qualityLossPolicy"] = VisionValue.String(qualityLossPolicy),
             ["waitMs"] = VisionValue.Double(waitMs),
             ["diagnostics"] = VisionValue.String(diag)
         };
@@ -353,21 +458,32 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
             ["compareValue"] = compare,
             ["triggerMode"] = triggerMode,
             ["qualityMode"] = qualityMode,
+            ["qualityLossPolicy"] = qualityLossPolicy,
             ["onTimeout"] = "Continue",
+            ["armed"] = edgeArmed,
+            ["qualityRejectedCount"] = qualityRejectedCount,
+            ["lastRejectedQuality"] = lastRejectedQuality,
             ["waitMs"] = Math.Round(waitMs, 2),
             ["matched"] = false,
+            ["timedOut"] = true,
+            ["conditionHeld"] = conditionHeld,
+            ["resultValid"] = false,
             ["diagnostics"] = diag
         };
         if (last is null) summary["quality"] = "Timeout";
         return new NodeExecutorResult(outputs, summary);
     }
 
-    private static string WaitDiagnostics(NodeExecutorResult result, string op, string compare, string triggerMode, string qualityMode, double waitMs, bool matched, string? quality = null)
+    private static string WaitDiagnostics(NodeExecutorResult result, string op, string compare, string triggerMode,
+        string qualityMode, string qualityLossPolicy, double waitMs, bool matched, bool edgeArmed,
+        int qualityRejectedCount, string? lastRejectedQuality, string? quality = null, bool? conditionHeld = null)
         => CoordinateValidation.Diagnostics("device.waitTag",
             ("deviceId", result.Summary["deviceId"]), ("tagId", result.Summary["tagId"]),
             ("dataType", result.Summary["dataType"]), ("quality", quality ?? result.Summary["quality"]),
             ("operator", op), ("compareValue", compare), ("triggerMode", triggerMode), ("qualityMode", qualityMode),
-            ("waitMs", waitMs), ("matched", matched),
+            ("qualityLossPolicy", qualityLossPolicy), ("armed", edgeArmed),
+            ("qualityRejectedCount", qualityRejectedCount), ("lastRejectedQuality", lastRejectedQuality),
+            ("waitMs", waitMs), ("matched", matched), ("conditionHeld", conditionHeld), ("resultValid", matched),
             ("boolValueValid", result.Summary["boolValueValid"]), ("numberValueValid", result.Summary["numberValueValid"]));
 
     private static bool Matches(DeviceTagSample sample, string op, string compare)
@@ -439,13 +555,27 @@ public sealed class DeviceWriteVisionResultNode(DeviceManager devices) : IVision
 
         var readyTag = DeviceNodeValidation.RequireId(node.GetString("resultReadyTag", "resultReady"), "resultReadyTag");
         var okTag = DeviceNodeValidation.RequireId(node.GetString("resultOkTag", "resultOk"), "resultOkTag");
-        var writes = new List<(string, object?)> { (readyTag, false), (okTag, pass) };
+        var resultSequenceTag = node.GetString("resultSequenceTag", string.Empty).Trim();
+        long? resultSequence = null;
+        if (resultSequenceTag.Length > 0)
+        {
+            resultSequenceTag = DeviceNodeValidation.RequireId(resultSequenceTag, "resultSequenceTag");
+            if (!context.TryGetValue("sequence", out var sequenceInput))
+                throw new InvalidOperationException("device.writeVisionResult resultSequenceTag requires a non-negative sequence input.");
+            resultSequence = sequenceInput.Require<long>("sequence");
+            if (resultSequence < 0) throw new InvalidOperationException("device.writeVisionResult sequence must be non-negative.");
+        }
+        var writes = new List<(string, object?)> { (readyTag, false) };
+        if (resultSequenceTag.Length > 0) writes.Add((resultSequenceTag, 0L)); // invalidate the previous result before payload
+        writes.Add((okTag, pass));
         var validityWrites = new List<(string, object?)>();
         var writtenCoordinates = new Dictionary<string, double>(StringComparer.Ordinal);
         var coordinateValidity = new Dictionary<string, bool>(StringComparer.Ordinal);
         var skipped = new List<string>();
         var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { readyTag };
         if (!tags.Add(okTag)) throw new InvalidOperationException("Ready 和 OK 标签不能相同。");
+        if (resultSequenceTag.Length > 0 && !tags.Add(resultSequenceTag))
+            throw new InvalidOperationException($"PLC 结果标签重复：{resultSequenceTag}。请为各字段配置独立标签。");
         foreach (var field in new[] { "x", "y", "r" })
         {
             var tag = node.GetString(field + "Tag", "result" + field.ToUpperInvariant()).Trim();
@@ -464,12 +594,16 @@ public sealed class DeviceWriteVisionResultNode(DeviceManager devices) : IVision
             tag = DeviceNodeValidation.RequireId(tag, field + "Tag");
             if (!tags.Add(tag)) throw new InvalidOperationException($"PLC 结果标签重复：{tag}。请为各字段配置独立标签。");
             if (!connected && missingPolicy == "fail") throw new InvalidOperationException($"{field} 标签已启用但坐标未接入；请连接坐标、清空标签或调整缺失坐标策略。");
+            // skip/zero substitutes cannot be distinguished from a genuine coordinate without a validity channel.
+            if ((!connected && missingPolicy is "skip" or "zero") && validTag.Length == 0)
+                throw new InvalidOperationException($"{field} 标签已启用且 missingCoordinatePolicy={missingPolicy}，必须配置 {field}ValidTag 才能区分真实坐标与缺失替代值。");
             if (!connected && missingPolicy == "skip") { skipped.Add(field + ":missing"); continue; }
             var coordinate = connected ? context.RequireNumber(field) : 0d;
             if (!double.IsFinite(coordinate)) throw new InvalidOperationException($"PLC 坐标 {field} 必须是有限数值。");
             writes.Add((tag, coordinate)); writtenCoordinates[field] = coordinate;
         }
         writes.AddRange(validityWrites);
+        if (resultSequenceTag.Length > 0) writes.Add((resultSequenceTag, resultSequence!.Value));
         writes.Add((readyTag, true));
 
         // One mutually exclusive device command: lower Ready, write payload, raise Ready last.
@@ -500,9 +634,12 @@ public sealed class DeviceWriteVisionResultNode(DeviceManager devices) : IVision
             };
             var lastConfirmed = confirmedWrites == 0 ? "none" : writes[confirmedWrites - 1].Item1;
             var uncertain = activeWrite is { } index ? writes[index].Item1 : "none";
+            var compensation = stage == "preflight"
+                ? "not required; validation failed before any write"
+                : await CompensateAsync(devices, deviceId, readyTag, validityWrites, CancellationToken.None);
             var message = $"device.writeVisionResult failed for '{deviceId}' at {stage}; " +
                 $"confirmed writes: {confirmedWrites}/{writes.Count}, last confirmed tag: {lastConfirmed}, " +
-                $"write with unknown outcome: {uncertain}. {ex.Message}";
+                $"write with unknown outcome: {uncertain}. Compensation: {compensation}. The sequence was NOT retried. {ex.Message}";
             if (ex is OperationCanceledException canceled)
                 throw new OperationCanceledException(message, canceled, canceled.CancellationToken);
             throw new InvalidOperationException(message, ex);
@@ -511,6 +648,7 @@ public sealed class DeviceWriteVisionResultNode(DeviceManager devices) : IVision
         var diag = CoordinateValidation.Diagnostics(Type,
             ("deviceId", deviceId), ("pass", pass), ("coordinatesWritten", writtenCoordinates), ("coordinateValidity", coordinateValidity),
             ("skippedCoordinates", skipped), ("missingCoordinatePolicy", missingPolicy),
+            ("resultSequenceTag", resultSequenceTag.Length == 0 ? null : resultSequenceTag), ("resultSequence", resultSequence),
             ("autoConnect", autoConnect), ("readyTag", readyTag), ("okTag", okTag), ("tagsWritten", writes.Count));
         var outputs = new Dictionary<string, VisionValue>
             {
@@ -520,8 +658,10 @@ public sealed class DeviceWriteVisionResultNode(DeviceManager devices) : IVision
                 ["yWritten"] = VisionValue.Boolean(writtenCoordinates.ContainsKey("y")),
                 ["rWritten"] = VisionValue.Boolean(writtenCoordinates.ContainsKey("r")),
                 ["tagsWritten"] = VisionValue.Integer(writes.Count),
+                ["resultSequence"] = VisionValue.Integer(resultSequence ?? 0),
                 ["diagnostics"] = VisionValue.String(diag)
             };
+        if (resultSequenceTag.Length > 0) outputs["resultSequenceTag"] = VisionValue.String(resultSequenceTag);
         foreach (var (field, coordinate) in writtenCoordinates) outputs[field] = VisionValue.Double(coordinate);
         return new NodeExecutorResult(outputs,
             new Dictionary<string, object?>
@@ -532,10 +672,48 @@ public sealed class DeviceWriteVisionResultNode(DeviceManager devices) : IVision
                 ["coordinatesWritten"] = writtenCoordinates,
                 ["coordinateValidity"] = coordinateValidity,
                 ["skippedCoordinates"] = skipped,
+                ["resultSequenceTag"] = resultSequenceTag.Length == 0 ? null : resultSequenceTag,
+                ["resultSequence"] = resultSequence,
                 ["tagsWritten"] = writes.Count,
                 ["writeOrder"] = $"{readyTag}=0 -> payload and configured validity flags -> {readyTag}=1",
                 ["diagnostics"] = diag
             });
+    }
+
+    private static async Task<string> CompensateAsync(
+        DeviceManager devices,
+        string deviceId,
+        string readyTag,
+        IReadOnlyList<(string TagId, object? Value)> validityWrites,
+        CancellationToken cancellationToken)
+    {
+        // Best effort only: never rerun the payload sequence. Independent token and bounded budget
+        // keep a dead PLC from hanging failure handling; an unconfirmed compensation is reported.
+        using var cleanup = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cleanup.CancelAfter(TimeSpan.FromSeconds(3));
+        var confirmed = new List<string>();
+        var failures = new List<string>();
+        var writes = new[] { (readyTag, (object?)false) }
+            .Concat(validityWrites.Select(write => (write.TagId, (object?)false)));
+        foreach (var (tagId, value) in writes)
+        {
+            try
+            {
+                await devices.WriteTagAsync(deviceId, tagId, value, autoConnect: false, cancellationToken: cleanup.Token);
+                confirmed.Add(tagId);
+            }
+            catch (OperationCanceledException) when (cleanup.IsCancellationRequested)
+            {
+                failures.Add($"{tagId}=unconfirmed(cleanup-timeout)");
+                break;
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{tagId}=unconfirmed({ex.Message})");
+            }
+        }
+        return confirmed.Count == 0 ? $"none confirmed; {string.Join("; ", failures)}" :
+            $"confirmed [{string.Join(", ", confirmed)}]; failures [{string.Join("; ", failures)}]";
     }
 }
 

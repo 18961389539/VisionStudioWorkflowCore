@@ -37,8 +37,15 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
         var maxInputPixels = node.GetInt("maxInputPixels", 64_000_000);
         if (maxInputPixels is < 1 or > 500_000_000)
             throw new InvalidOperationException("image.stitch maxInputPixels must be within 1..500000000.");
+        var portPolicy = node.GetString("portPolicy", "reject").Trim().ToLowerInvariant();
+        if (portPolicy is not ("reject" or "compact"))
+            throw new InvalidOperationException("image.stitch portPolicy must be reject or compact.");
+        var cameraOrderMode = node.GetString("cameraOrderMode", "all").Trim().ToLowerInvariant();
+        if (cameraOrderMode is not ("all" or "subset"))
+            throw new InvalidOperationException("image.stitch cameraOrderMode must be all or subset.");
 
-        var images = CollectImages(context, node, sourceMode);
+        var images = CollectImages(context, node, sourceMode, portPolicy, cameraOrderMode,
+            out var inputSources, out var cameraIds, out var cameraOrder);
         if (images.Count < 2)
             throw new InvalidOperationException(sourceMode == "frameset"
                 ? "image.stitch requires at least two camera images in the FrameSet."
@@ -62,6 +69,17 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
         if (totalPixels > maxInputPixels)
             throw new InvalidOperationException(
                 $"image.stitch inputs total {totalPixels} pixels above maxInputPixels={maxInputPixels}; downscale upstream or raise the budget.");
+        var inputContracts = images.Select((image, index) => new
+        {
+            source = inputSources[index],
+            cameraId = cameraIds.ElementAtOrDefault(index),
+            order = index,
+            width = image.Width,
+            height = image.Height,
+            channels = image.Mat.Channels(),
+            depth = image.Mat.Depth().ToString(),
+            pixels = (long)image.Width * image.Height
+        }).ToArray();
 
         var copies = new List<Mat>(images.Count);
         Mat? panorama = null;
@@ -89,8 +107,25 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
             cancellationToken.ThrowIfCancellationRequested();
             if (status != Stitcher.Status.OK)
             {
+                var pairDiagnostics = new List<object>();
+                for (var index = 0; index + 1 < copies.Count; index++)
+                {
+                    using var pairStitcher = Stitcher.Create(mode == "scans" ? Stitcher.Mode.Scans : Stitcher.Mode.Panorama);
+                    using var pairOutput = new Mat();
+                    var pairStatus = pairStitcher.Stitch([copies[index], copies[index + 1]], pairOutput);
+                    pairDiagnostics.Add(new
+                    {
+                        first = inputSources[index],
+                        second = inputSources[index + 1],
+                        firstCameraId = cameraIds.ElementAtOrDefault(index),
+                        secondCameraId = cameraIds.ElementAtOrDefault(index + 1),
+                        status = pairStatus.ToString(),
+                        overlapOrHomography = pairStatus == Stitcher.Status.OK ? "estimated" : "failed"
+                    });
+                }
+                var pairJson = System.Text.Json.JsonSerializer.Serialize(pairDiagnostics);
                 throw new InvalidOperationException(
-                    $"image.stitch failed with {status}; check overlap, texture and ordering, or switch mode between panorama and scans.");
+                    $"image.stitch failed with {status}; check overlap, texture and ordering, or switch mode between panorama and scans. Pair diagnostics: {pairJson}");
             }
             if (panorama.Empty())
                 throw new InvalidOperationException("image.stitch produced an empty panorama.");
@@ -109,6 +144,16 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
                 }
                 var result = VisionImage.Own(stitched!);
                 stitched = null;
+                var inputContractsJson = System.Text.Json.JsonSerializer.Serialize(inputContracts);
+                var cameraOrderJson = System.Text.Json.JsonSerializer.Serialize(cameraOrder);
+                var pairDiagnosticsJson = System.Text.Json.JsonSerializer.Serialize(Enumerable.Range(0, Math.Max(0, images.Count - 1)).Select(index => new
+                {
+                    first = inputSources[index],
+                    second = inputSources[index + 1],
+                    firstCameraId = cameraIds.ElementAtOrDefault(index),
+                    secondCameraId = cameraIds.ElementAtOrDefault(index + 1),
+                    overlapOrHomography = "estimated-by-opencv-stitcher"
+                }).ToArray());
             timer.Stop();
             return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(result, () =>
             {
@@ -118,6 +163,9 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
                     ("sourceMode", sourceMode),
                     ("inputCount", images.Count),
                     ("inputPixels", totalPixels),
+                    ("inputSources", inputSources), ("cameraIds", cameraIds), ("cameraOrder", cameraOrder),
+                    ("inputContracts", inputContracts),
+                    ("portPolicy", portPolicy), ("cameraOrderMode", cameraOrderMode),
                     ("width", result.Width),
                     ("height", result.Height),
                     ("channels", result.Mat.Channels()),
@@ -130,6 +178,9 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
                         ["height"] = VisionValue.Integer(result.Height),
                         ["inputCount"] = VisionValue.Integer(images.Count),
                         ["found"] = VisionValue.Boolean(true),
+                        ["inputContractsJson"] = VisionValue.String(inputContractsJson),
+                        ["cameraOrderJson"] = VisionValue.String(cameraOrderJson),
+                        ["pairDiagnosticsJson"] = VisionValue.String(pairDiagnosticsJson),
                         ["diagnostics"] = VisionValue.String(diagnostics)
                     },
                     new Dictionary<string, object?>
@@ -137,6 +188,8 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
                         ["mode"] = mode,
                         ["inputCount"] = images.Count,
                         ["inputPixels"] = totalPixels,
+                        ["inputSources"] = inputSources, ["cameraIds"] = cameraIds, ["cameraOrder"] = cameraOrder,
+                        ["inputContractsJson"] = inputContractsJson, ["pairDiagnosticsJson"] = pairDiagnosticsJson,
                         ["width"] = result.Width,
                         ["height"] = result.Height,
                         ["channels"] = result.Mat.Channels(),
@@ -159,20 +212,35 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
         }
     }
 
-    private static List<VisionImage> CollectImages(NodeExecutionContext context, NodeDefinition node, string sourceMode)
+    private static List<VisionImage> CollectImages(NodeExecutionContext context, NodeDefinition node, string sourceMode,
+        string portPolicy, string cameraOrderMode, out string[] inputSources, out string[] cameraIds, out string[] cameraOrder)
     {
         if (sourceMode == "images")
         {
+            if (context.TryGetValue("frameSet", out _))
+                throw new InvalidOperationException("image.stitch sourceMode=images cannot also receive frameSet; choose one source mode.");
             var wired = new List<VisionImage>(8);
+            var sources = new List<string>(8);
+            var emptyBefore = false;
             for (var index = 1; index <= 8; index++)
             {
                 var port = $"image{index}";
-                if (!context.TryGetValue(port, out var value)) continue;
+                if (!context.TryGetValue(port, out var value))
+                {
+                    emptyBefore = true;
+                    continue;
+                }
+                if (emptyBefore && portPolicy == "reject")
+                    throw new InvalidOperationException($"image.stitch port '{port}' leaves an empty image slot; connect ports contiguously or select compact.");
                 var image = value.Require<IVisionImage>(port);
                 if (image is not VisionImage engineImage)
                     throw new InvalidOperationException($"Input '{port}' must be an engine VisionImage; got '{image.GetType().FullName}'.");
                 wired.Add(engineImage);
+                sources.Add(port);
             }
+            inputSources = sources.ToArray();
+            cameraIds = [];
+            cameraOrder = inputSources;
             return wired;
         }
 
@@ -186,18 +254,27 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
             ? frameSetValue.Require<IVisionFrameSet>("frameSet")
             : throw new InvalidOperationException("image.stitch sourceMode=frameSet requires a frameSet input.");
 
-        var available = frameSet.Images.Keys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase).ToArray();
+        var available = frameSet.Images.Keys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(key => key, StringComparer.Ordinal).ToArray();
         var requested = (node.GetString("cameraOrder", "") ?? string.Empty)
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var order = requested.Length > 0 ? requested : available;
-        foreach (var cameraId in order)
+        if (requested.Distinct(StringComparer.OrdinalIgnoreCase).Count() != requested.Length)
+            throw new InvalidOperationException("image.stitch cameraOrder contains duplicate camera ids.");
+        foreach (var cameraId in requested)
         {
             if (!frameSet.Images.ContainsKey(cameraId))
                 throw new InvalidOperationException(
                     $"image.stitch cameraOrder id '{cameraId}' is not in the FrameSet. Available: {string.Join(", ", available)}.");
         }
+        if (requested.Length > 0 && cameraOrderMode == "all")
+        {
+            var missing = available.Except(requested, StringComparer.OrdinalIgnoreCase).ToArray();
+            if (missing.Length > 0)
+                throw new InvalidOperationException(
+                    $"image.stitch cameraOrder omits FrameSet cameras [{string.Join(", ", missing)}]; include every id or select subset mode.");
+        }
+        var order = requested.Length > 0 ? requested : available;
 
         var images = new List<VisionImage>(order.Length);
         foreach (var cameraId in order)
@@ -206,6 +283,9 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
                 throw new InvalidOperationException($"image.stitch frameSet image '{cameraId}' is not a VisionImage.");
             images.Add(frame);
         }
+        inputSources = order.ToArray();
+        cameraIds = order.ToArray();
+        cameraOrder = order.ToArray();
         return images;
     }
 }

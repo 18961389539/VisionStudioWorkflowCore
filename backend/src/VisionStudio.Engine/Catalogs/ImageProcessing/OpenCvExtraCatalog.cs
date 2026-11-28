@@ -17,6 +17,7 @@ internal static class OpenCvExtraCatalog
                 new("image", VisionDataType.Image), new("found", VisionDataType.Boolean),
                 new("count", VisionDataType.Integer), new("classCounts", VisionDataType.String),
                 new("dominantClass", VisionDataType.Integer), new("unmatchedPixels", VisionDataType.Integer),
+                new("unmatchedRatio", VisionDataType.Double), new("unmatchedThresholdExceeded", VisionDataType.Boolean),
                 new("diagnostics", VisionDataType.String), Next
             ],
             [
@@ -42,6 +43,8 @@ internal static class OpenCvExtraCatalog
                     Description: "JSON array of reference colours. In lab mode provide {name,l,a,b,tolerance}; in rgb mode provide {name,r,g,b,tolerance}. Tolerance is the maximum distance in the selected space; omitted values use Default Tolerance."),
                 new("defaultTolerance", "Default Tolerance", "number", 30, 0, 500, 0.1, Group: "Reference",
                     VisibleWhen: new("mode", ["reference"]), Description: "Tolerance used when a reference entry omits its own tolerance. Lab values are Delta E 76 distances; RGB values are Euclidean distances in 0..255."),
+                new("maxUnmatchedRatio", "Maximum Unmatched Ratio", "number", 0.5, 0, 1, 0.01, Group: "Reference",
+                    VisibleWhen: new("mode", ["reference"]), Description: "Reference mode fails found=false when the fraction of ROI pixels outside every tolerance exceeds this value. Unknown colors remain label 0 and are never assigned to the dominant class."),
             ],
             "Cluster or classify colours in an 8-bit 1/3/4-channel image. cluster runs deterministic K-means on ROI pixels and emits a 1..N label map, class counts and dominant class; reference assigns pixels to configured colours within their tolerance and marks the rest as 0. Output image is a single-channel label map. Use ROI to exclude background. Failures: non-8-bit image, too few samples, empty reference list, duplicate names or invalid tolerances. algorithmBackend=opencv.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false, Deterministic: true, ExecutionMode: VisionExecutionMode.WorkflowCore),
@@ -84,7 +87,7 @@ internal static class OpenCvExtraCatalog
             [
                 new("image", VisionDataType.Image), new("width", VisionDataType.Integer),
                 new("height", VisionDataType.Integer), new("inputCount", VisionDataType.Integer),
-                new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next
+                new("found", VisionDataType.Boolean), new("inputContractsJson", VisionDataType.String), new("cameraOrderJson", VisionDataType.String), new("pairDiagnosticsJson", VisionDataType.String), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("sourceMode", "Input Source", "select", "images", Group: "Stitching", Options:
@@ -112,7 +115,8 @@ internal static class OpenCvExtraCatalog
                 new("markerIds", VisionDataType.String), new("detections", VisionDataType.DetectionList),
                 new("corners", VisionDataType.String), new("poses", VisionDataType.String, Required: false),
                 new("pose", VisionDataType.Transform3D, Required: false), new("poseAvailable", VisionDataType.Boolean),
-                new("rejectedCount", VisionDataType.Integer), new("overlay", VisionDataType.Image, Required: false),
+                new("duplicateMarkerIds", VisionDataType.String),
+                new("rejectedCount", VisionDataType.Integer), new("rejectedReasonsJson", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false),
                 new("diagnostics", VisionDataType.String), Next
             ],
             [
@@ -150,8 +154,11 @@ internal static class OpenCvExtraCatalog
                     Description: "Fraction of erroneous bits the decoder may correct. Higher values tolerate damaged markers but increase false IDs."),
                 new("markerSize", "Marker Size", "number", 50, 0.001, 1000000, 0.1, Group: "Pose",
                     Description: "Physical marker side length used by solvePnP. Only read when calibrationJson is connected or filled."),
-                new("markerSizeUnit", "Marker Size Unit", "text", "mm", Group: "Pose",
-                    Description: "Unit of Marker Size and of the emitted 3D transform. 1..16 characters, for example mm or m."),
+                new("markerSizeUnit", "Marker Size Unit", "select", "mm", Group: "Pose", Options:
+                [
+                    new("Millimetres", "mm"), new("Centimetres", "cm"), new("Metres", "m"),
+                    new("Micrometres", "um"), new("Inches", "in")
+                ], Description: "Physical unit of Marker Size and of the emitted 3D transform. Unknown or mixed unit labels are rejected before pose estimation."),
                 new("calibrationJson", "Calibration JSON", "textarea", "{}", Group: "Pose",
                     Description: "Optional CameraCalibrationModel JSON from calibration.cameraIntrinsics. Connected calibrationJson takes precedence. Without calibration the node still detects markers but poseAvailable=false; fisheye and telecentric models are rejected for pose.")
                     { OverriddenByPorts = ["calibrationJson"] },
@@ -181,7 +188,11 @@ internal static class OpenCvExtraCatalog
                 new("templateAssetId", "Template Image Asset", "text", "", Group: "Template",
                     Description: "Use this template image asset when the template port is disconnected.") { OverriddenByPorts = ["template"] },
                 new("templateAssetVersion", "Template Image Version", "number", 0, 0, 1000000, 1, Group: "Template",
-                    Description: "Select a positive immutable version when using a template image asset.") { Integer = true, OverriddenByPorts = ["template"] },
+                    Description: "Select a positive immutable version when using a template image asset. The version and content fingerprint are recorded in transformJson so a refreshed template cannot reuse stale geometry.") { Integer = true, OverriddenByPorts = ["template"] },
+                new("templateAssetWidth", "Expected Template Width", "number", 0, 0, 16384, 1, Group: "Template",
+                    Description: "Optional pinned width of the selected template. A mismatch fails before feature extraction; 0 disables the check."),
+                new("templateAssetHeight", "Expected Template Height", "number", 0, 0, 16384, 1, Group: "Template",
+                    Description: "Optional pinned height of the selected template. A mismatch fails before feature extraction; 0 disables the check."),
                 new("detector", "Detector", "select", "sift", Group: "Detector", Options:
                 [
                     new("SIFT (rotation + scale, float descriptors)", "sift"),
@@ -203,11 +214,13 @@ internal static class OpenCvExtraCatalog
                 new("ransacReprojThresholdPx", "RANSAC Reprojection Threshold", "number", 3, 0.1, 50, 0.1, Unit: "px", Group: "Matching",
                     Description: "A correspondence within this distance of the model counts as an inlier. Keep it near the expected keypoint localisation error (2-4 px typical)."),
                 new("minMatches", "Minimum Matches", "number", 8, 3, 500, 1, Group: "Gates",
-                    Description: "Minimum ratio-test matches required before RANSAC runs. Below it the node returns found=false with reason=too-few-matches."),
+                    Description: "Minimum ratio-test matches required before RANSAC runs. Below it the node returns found=false with reason=ratio-test-failed."),
                 new("minInliers", "Minimum Inliers", "number", 6, 3, 500, 1, Group: "Gates",
                     Description: "Minimum RANSAC inliers for a valid result. Too low a value lets accidental alignments pass; 6-10 is typical for textured parts."),
                 new("minInlierRatio", "Minimum Inlier Ratio", "number", 0.2, 0, 1, 0.01, Group: "Gates",
                     Description: "Minimum inliers/matches. Low ratios mean the matches disagreed, which usually indicates a repeated texture rather than a real target."),
+                new("maxReprojErrorPx", "Maximum Reprojection RMS", "number", 5, 0, 100, 0.1, Unit: "px", Group: "Gates",
+                    Description: "Combined acceptance gate with minInlierRatio and minInliers. 0 disables only the RMS check; failures are reported as ransac-unreliable with the measured RMS."),
                 new("angleRangeDeg", "Angle Range (±deg)", "number", 180, 0, 180, 1, Unit: "deg", Group: "Gates",
                     Description: "Reject results whose rotation exceeds this half-width. 180 disables the gate."),
                 new("scaleMinPercent", "Minimum Scale", "number", 50, 10, 400, 1, Unit: "%", Group: "Gates",

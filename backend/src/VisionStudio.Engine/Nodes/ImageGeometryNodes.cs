@@ -91,10 +91,36 @@ public sealed class ImageFlipNode : IVisionNodeExecutor
             throw new InvalidOperationException("image.flip emptyPolicy must be fail or passthrough.");
 
         var source = context.RequireImage("image");
+        if (source.Mat.Empty())
+        {
+            if (emptyPolicy == "fail")
+                throw new InvalidOperationException("image.flip requires a non-empty image.");
+            var sentinel = new Mat(1, 1, source.Mat.Type(), Scalar.All(0));
+            var emptyDiag = CoordinateValidation.Diagnostics(Type, ("mode", mode), ("emptyPassthrough", true),
+                ("sourceWidth", source.Width), ("sourceHeight", source.Height), ("sourceChannels", source.Mat.Channels()),
+                ("sourceType", source.Mat.Type().ToString()), ("sentinelWidth", 1), ("sentinelHeight", 1));
+            return ValueTask.FromResult(new NodeExecutorResult(
+                new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["image"] = VisionValue.Image(VisionImage.Own(sentinel)), ["width"] = VisionValue.Integer(source.Width),
+                    ["height"] = VisionValue.Integer(source.Height), ["channels"] = VisionValue.Integer(source.Mat.Channels()),
+                    ["diagnostics"] = VisionValue.String(emptyDiag)
+                },
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["mode"] = mode, ["emptyPassthrough"] = true, ["sourceWidth"] = source.Width, ["sourceHeight"] = source.Height,
+                    ["sourceChannels"] = source.Mat.Channels(), ["sentinelWidth"] = 1, ["sentinelHeight"] = 1, ["diagnostics"] = emptyDiag
+                }));
+        }
         ImageGeometryMath.ValidateGeometryDepth(source.Mat, Type);
 
         var flipped = ImageGeometryAlgorithms.Flip(source.Mat, flip);
         var image = VisionImage.Own(flipped);
+        var sx = mode is "horizontal" or "both" ? -1d : 1d;
+        var sy = mode is "vertical" or "both" ? -1d : 1d;
+        var tx = sx < 0 ? source.Width - 1d : 0d;
+        var ty = sy < 0 ? source.Height - 1d : 0d;
+        var transform = new VisionTransform2D("CurrentImage", "FlippedImage", "px", sx, 0, tx, 0, sy, ty, 0, 0, 1);
         timer.Stop();
 
         return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
@@ -102,6 +128,13 @@ public sealed class ImageFlipNode : IVisionNodeExecutor
             var diagnostics = CoordinateValidation.Diagnostics(
                 Type,
                 ("mode", mode), ("flipCode", flipCode),
+                ("coordinateMapping", mode switch
+                {
+                    "horizontal" => "x'=width-1-x; y'=y",
+                    "vertical" => "x'=x; y'=height-1-y",
+                    _ => "x'=width-1-x; y'=height-1-y"
+                }),
+                ("transformSource", "CurrentImage"), ("transformTarget", "FlippedImage"),
                 ("width", image.Width), ("height", image.Height), ("channels", image.Mat.Channels()),
                 ("sourceType", source.Mat.Depth().ToString()),
                 ("elapsedMs", timer.Elapsed.TotalMilliseconds));
@@ -112,13 +145,14 @@ public sealed class ImageFlipNode : IVisionNodeExecutor
                     ["width"] = VisionValue.Integer(image.Width),
                     ["height"] = VisionValue.Integer(image.Height),
                     ["channels"] = VisionValue.Integer(image.Mat.Channels()),
+                    ["transform"] = VisionValue.Transform(transform),
                     ["diagnostics"] = VisionValue.String(diagnostics)
                 },
                 new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["mode"] = mode, ["flipCode"] = flipCode,
                     ["width"] = image.Width, ["height"] = image.Height,
-                    ["channels"] = image.Mat.Channels(),
+                    ["channels"] = image.Mat.Channels(), ["transform"] = transform,
                     ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                     ["algorithmBackend"] = "opencv", ["diagnostics"] = diagnostics
                 });
@@ -180,7 +214,11 @@ public sealed class ImageGradientNode : IVisionNodeExecutor
                 var diagnostics = CoordinateValidation.Diagnostics(
                     Type,
                     ("operator", op), ("kernelSize", op == "scharr" ? 3 : kernelSize), ("scaleMode", scaleMode),
-                    ("emitDirection", emitDirection),
+                    ("emitDirection", emitDirection), ("inputDepth", source.Mat.Depth().ToString()),
+                    ("inputChannels", source.Mat.Channels()), ("grayWeights", "BGR(A)->BT.601; alpha ignored"),
+                    ("intermediateDepth", "CV_32F"), ("outputScale", gradient.OutputScale),
+                    ("zeroGradientPixels", gradient.ZeroGradientPixels), ("zeroGradientDirection", 0),
+                    ("directionUnit", "degree"), ("directionConvention", "atan2(dy,dx), +x=0deg, +y=90deg, y-down"),
                     ("meanMagnitude", meanMagnitude), ("maxMagnitude", maxMagnitude), ("p99Magnitude", p99Magnitude),
                     ("width", image.Width), ("height", image.Height),
                     ("elapsedMs", timer.Elapsed.TotalMilliseconds));
@@ -255,8 +293,21 @@ public sealed class ImageDistanceTransformNode : IVisionNodeExecutor
         var mode = (node.GetString("mode", "foreground") ?? "foreground").Trim().ToLowerInvariant();
         if (mode is not ("foreground" or "background"))
             throw new InvalidOperationException("image.distanceTransform mode must be foreground or background.");
+        var paddingName = (node.GetString("padding", "background") ?? "background").Trim().ToLowerInvariant();
+        var padding = paddingName switch
+        {
+            "background" => BorderTypes.Constant,
+            "reflect" => BorderTypes.Reflect,
+            "replicate" => BorderTypes.Replicate,
+            _ => throw new InvalidOperationException("image.distanceTransform padding must be background, reflect or replicate.")
+        };
+        var maskPolicy = (node.GetString("maskPolicy", "nonzero") ?? "nonzero").Trim().ToLowerInvariant();
+        if (maskPolicy is not ("nonzero" or "binaryonly"))
+            throw new InvalidOperationException("image.distanceTransform maskPolicy must be nonzero or binaryOnly.");
+        if (maskPolicy == "binaryonly" && !PreprocessP1Diagnostics.IsBinary(source.Mat))
+            throw new InvalidOperationException("image.distanceTransform maskPolicy=binaryOnly requires at most one nonzero value; threshold first or choose nonzero.");
 
-        var distance = ImageGeometryAlgorithms.DistanceTransform(source.Mat, mode, metric, maskSize, cancellationToken);
+        var distance = ImageGeometryAlgorithms.DistanceTransform(source.Mat, mode, metric, maskSize, padding, cancellationToken);
         var maxDistance = distance.Maximum;
         var foregroundCount = distance.ForegroundCount;
         var meanDistance = distance.Mean;
@@ -268,7 +319,11 @@ public sealed class ImageDistanceTransformNode : IVisionNodeExecutor
             var diagnostics = CoordinateValidation.Diagnostics(
                 Type,
                 ("distanceType", distanceType), ("maskSize", maskSize), ("mode", mode),
-                ("foregroundCount", foregroundCount), ("maxDistance", maxDistance), ("meanDistance", meanDistance),
+                ("padding", paddingName), ("maskPolicy", maskPolicy),
+                ("nonzeroValues", PreprocessP1Diagnostics.NonZeroValues(source.Mat)),
+                ("foregroundCount", foregroundCount), ("backgroundCount", source.Mat.Total() - foregroundCount),
+                ("borderTouchingCount", distance.BorderTouchingCount), ("borderAffectedRatio", distance.BorderAffectedRatio),
+                ("maxDistance", maxDistance), ("meanDistance", meanDistance),
                 ("width", image.Width), ("height", image.Height),
                 ("elapsedMs", timer.Elapsed.TotalMilliseconds));
             return new NodeExecutorResult(
@@ -283,7 +338,9 @@ public sealed class ImageDistanceTransformNode : IVisionNodeExecutor
                 new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["distanceType"] = distanceType, ["maskSize"] = maskSize, ["mode"] = mode,
+                    ["padding"] = paddingName, ["maskPolicy"] = maskPolicy,
                     ["foregroundCount"] = foregroundCount, ["maxDistance"] = maxDistance,
+                    ["borderAffectedRatio"] = distance.BorderAffectedRatio,
                     ["meanDistance"] = meanDistance,
                     ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                     ["algorithmBackend"] = "opencv", ["diagnostics"] = diagnostics

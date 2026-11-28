@@ -15,7 +15,8 @@ public sealed class ContourFromPointsNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
         var closed = node.GetBool("closed", true);
         VisionPoint2D[] raw;
-        if (context.TryGetValue("pointList", out var wired))
+        var source = context.TryGetValue("pointList",out var wired)?"pointList-port":context.TryGetValue("pointsJson",out _)?"pointsJson-port":"pointsJson-parameter";
+        if (source=="pointList-port")
         {
             // 断链修复：轮廓/检测点集可以直连，不再强制走 JSON 文本
             var list = wired.Require<IReadOnlyList<VisionPoint2D>>("pointList");
@@ -33,8 +34,20 @@ public sealed class ContourFromPointsNode : IVisionNodeExecutor
             raw = data.Select(p => new VisionPoint2D(p[0], p[1])).ToArray();
         }
         var points = ToleranceGeometry.Points(raw, closed);
+        var removedCount=raw.Length-points.Length;
+        var sourceIndices=new List<int>();
+        for(var i=0;i<raw.Length;i++)
+        {
+            if(sourceIndices.Count==0 || raw[i]!=points[sourceIndices.Count-1]) { sourceIndices.Add(i); if(sourceIndices.Count==points.Length) break; }
+        }
+        if(sourceIndices.Count!=points.Length)
+        {
+            sourceIndices=[];
+            for(var i=0;i<raw.Length&&sourceIndices.Count<points.Length;i++) if(raw[i]==points[sourceIndices.Count]) sourceIndices.Add(i);
+        }
+        var indexMap=JsonSerializer.Serialize(sourceIndices);
         if (points.Distinct().Count() < 2)
-            return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", new() { ["contours"] = VisionValue.Contours([]), ["count"] = VisionValue.Integer(0) }, nodeType: Type));
+            return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", new() { ["contours"] = VisionValue.Contours([]), ["count"] = VisionValue.Integer(0),["warningCount"]=VisionValue.Integer(removedCount),["sourceIndicesJson"]=VisionValue.String(indexMap),["inputSource"]=VisionValue.String(source) }, nodeType: Type));
         using var curve = ToleranceGeometry.Curve(points, closed);
         using var length = curve.LengthXld();
         var area = closed && points.Length >= 3 ? Math.Abs(curve.AreaCenterXld(out double _, out double _, out string _)) : 0;
@@ -45,11 +58,13 @@ public sealed class ContourFromPointsNode : IVisionNodeExecutor
             new(left, top, right - left, bottom - top), new(col, row, radius)) { Closed = closed };
         cancellationToken.ThrowIfCancellationRequested();
         var diag = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", points.Length), ("area", area),
-            ("perimeter", perimeter), ("closed", closed), ("boundingWidth", right - left), ("boundingHeight", bottom - top));
+            ("perimeter", perimeter), ("closed", closed), ("boundingWidth", right - left), ("boundingHeight", bottom - top),
+            ("inputSource",source),("inputCount",raw.Length),("removedCount",removedCount),("sourceIndices",sourceIndices));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
             ["contours"] = VisionValue.Contours([contour]), ["found"] = VisionValue.Boolean(true),
             ["count"] = VisionValue.Integer(1), ["sampleCount"] = VisionValue.Integer(points.Length),
+            ["warningCount"] = VisionValue.Integer(removedCount),["sourceIndicesJson"] = VisionValue.String(indexMap),["inputSource"] = VisionValue.String(source),
             ["diagnostics"] = VisionValue.String(diag)
         },
             new Dictionary<string, object?> { ["found"] = true, ["sampleCount"] = points.Length, ["area"] = area, ["perimeter"] = perimeter, ["closed"] = closed, ["algorithmBackend"] = "jlvision", ["diagnostics"] = diag },
@@ -79,6 +94,7 @@ var inner = ToleranceGeometry.Circle(context, "inner"); var outer = ToleranceGeo
             return ValueTask.FromResult(ToleranceGeometry.Missing(0, "inner-disk-not-contained", new()
             {
                 ["contained"] = VisionValue.Boolean(false), ["centerDistance"] = VisionValue.Double(distance),
+                ["toleranceEnabled"] = VisionValue.Boolean(false),
                 ["samplesJson"] = VisionValue.String("[]"), ["diagnostics"] = VisionValue.String(missDiag)
             }, nodeType: Type));
         }
@@ -102,7 +118,14 @@ var inner = ToleranceGeometry.Circle(context, "inner"); var outer = ToleranceGeo
         if (!double.IsFinite(nominal) || nominal < 0) throw new InvalidOperationException("nominalThickness must be finite and >= 0 (0 disables the gate).");
         if (!double.IsFinite(tolerance) || tolerance < 0) throw new InvalidOperationException("tolerance must be finite and >= 0.");
         if (nominal > 0 && tolerance <= 0) throw new InvalidOperationException("tolerance must be > 0 when nominalThickness is set.");
-        var within = nominal <= 0 || Math.Abs(mean - nominal) <= tolerance;
+        var minimumLimit = node.GetDouble("minThicknessLimit", 0);
+        var maximumLimit = node.GetDouble("maxThicknessLimit", 0);
+        if (!double.IsFinite(minimumLimit) || minimumLimit < 0 || !double.IsFinite(maximumLimit) || maximumLimit < 0
+            || maximumLimit > 0 && maximumLimit < minimumLimit)
+            throw new InvalidOperationException("Wall thickness extrema limits must be finite, non-negative and ordered.");
+        var meanWithin = nominal <= 0 || Math.Abs(mean - nominal) <= tolerance;
+        var within = meanWithin && (minimumLimit <= 0 || min >= minimumLimit)
+            && (maximumLimit <= 0 || max <= maximumLimit);
         var variation = max - min;
         var cv = Math.Abs(mean) > 1e-12 ? deviation / Math.Abs(mean) : 0;
         var uniformity = mean > 1e-12 ? Math.Max(0, 1 - variation / mean) : 0;
@@ -110,13 +133,16 @@ var inner = ToleranceGeometry.Circle(context, "inner"); var outer = ToleranceGeo
             ("found", true), ("contained", true), ("sampleCount", count), ("centerDistance", distance),
             ("minThickness", min), ("maxThickness", max), ("meanThickness", mean), ("stdDev", deviation),
             ("variation", variation), ("cv", cv), ("uniformity", uniformity),
-            ("nominalThickness", nominal), ("tolerance", tolerance), ("withinTolerance", within));
+            ("nominalThickness", nominal), ("tolerance", tolerance),
+            ("minThicknessLimit", minimumLimit), ("maxThicknessLimit", maximumLimit),
+            ("meanWithinTolerance", meanWithin), ("withinTolerance", within));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
             ["found"] = VisionValue.Boolean(true), ["contained"] = VisionValue.Boolean(true), ["sampleCount"] = VisionValue.Integer(count), ["centerDistance"] = VisionValue.Double(distance),
             ["minThickness"] = VisionValue.Double(min), ["maxThickness"] = VisionValue.Double(max), ["meanThickness"] = VisionValue.Double(mean), ["variation"] = VisionValue.Double(variation),
             ["stdDev"] = VisionValue.Double(deviation), ["cv"] = VisionValue.Double(cv), ["uniformity"] = VisionValue.Double(uniformity),
             ["withinTolerance"] = VisionValue.Boolean(within),
+            ["toleranceEnabled"] = VisionValue.Boolean(nominal > 0 || minimumLimit > 0 || maximumLimit > 0),
             ["samplesJson"] = VisionValue.String(JsonSerializer.Serialize(samples)), ["diagnostics"] = VisionValue.String(diag)
         }, new Dictionary<string, object?> { ["found"] = true, ["contained"] = true, ["minThickness"] = min, ["maxThickness"] = max, ["meanThickness"] = mean, ["sampleCount"] = count, ["unit"] = "px", ["withinTolerance"] = within, ["diagnostics"] = diag }, overlays));
     }
@@ -138,10 +164,13 @@ var a = ToleranceGeometry.Circle(context, "circleA"); var b = ToleranceGeometry.
         var offset = new VisionPoint2D(b.X - a.X, b.Y - a.Y); var distance = MeasurementMath.Hypot(offset.X, offset.Y);
         if (!double.IsFinite(distance) || !double.IsFinite(offset.X) || !double.IsFinite(offset.Y)) throw new InvalidOperationException("measure.concentricity produced non-finite output.");
         var limit = node.GetDouble("maxCenterDistance", 0); if (!double.IsFinite(limit) || limit < 0) throw new InvalidOperationException("measure.concentricity maxCenterDistance must be finite and >= 0 (0 disables the tolerance).");
-        var within = limit <= 0 || distance <= limit; var angle = Math.Atan2(offset.Y, offset.X) * 180 / Math.PI;
-        var diag = CoordinateValidation.Diagnostics(Type, ("centerDistance", distance), ("diametralOffset", 2 * distance), ("offsetAngleDeg", angle), ("maxCenterDistance", limit), ("withinTolerance", within));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["centerDistance"] = VisionValue.Double(distance), ["diametralOffset"] = VisionValue.Double(2 * distance), ["centerOffset"] = VisionValue.Point(offset), ["withinTolerance"] = VisionValue.Boolean(within), ["diagnostics"] = VisionValue.String(diag) },
-            new Dictionary<string, object?> { ["centerDistance"] = distance, ["diametralOffset"] = 2 * distance, ["unit"] = "px", ["withinTolerance"] = within, ["diagnostics"] = diag },
+        var within = limit <= 0 || distance <= limit;
+        var toleranceEnabled = limit > 0;
+        var evaluationState = !toleranceEnabled ? "not-evaluated" : within ? "pass" : "fail";
+        var angle = Math.Atan2(offset.Y, offset.X) * 180 / Math.PI;
+        var diag = CoordinateValidation.Diagnostics(Type, ("centerDistance", distance), ("diametralOffset", 2 * distance), ("offsetAngleDeg", angle), ("maxCenterDistance", limit), ("toleranceEnabled", toleranceEnabled), ("evaluationState", evaluationState), ("withinTolerance", within));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["centerDistance"] = VisionValue.Double(distance), ["diametralOffset"] = VisionValue.Double(2 * distance), ["centerOffset"] = VisionValue.Point(offset), ["withinTolerance"] = VisionValue.Boolean(within), ["toleranceEnabled"] = VisionValue.Boolean(toleranceEnabled), ["evaluationState"] = VisionValue.String(evaluationState), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["centerDistance"] = distance, ["diametralOffset"] = 2 * distance, ["unit"] = "px", ["withinTolerance"] = within, ["toleranceEnabled"] = toleranceEnabled, ["evaluationState"] = evaluationState, ["diagnostics"] = diag },
             [ToleranceGeometry.Segment("circle-centre-offset", new(new(a.X, a.Y), new(b.X, b.Y)))]));
     }
 }

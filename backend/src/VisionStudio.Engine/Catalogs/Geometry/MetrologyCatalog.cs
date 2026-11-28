@@ -7,7 +7,7 @@ internal static class MetrologyCatalog
         new("measure.metrology", "Metrology Model", "Measurement",
             [new("exec", VisionDataType.Control), new("image", VisionDataType.Image), new("pose", VisionDataType.Pose2D, Required: false)],
             [new("image", VisionDataType.Image), new("found", VisionDataType.Boolean), new("count", VisionDataType.Integer),
-                new("foundCount", VisionDataType.Integer), new("measurements", VisionDataType.String), new("results", VisionDataType.MetrologyResults),
+                new("foundCount", VisionDataType.Integer), new("qualityUnknownCount", VisionDataType.Integer), new("measurements", VisionDataType.String), new("results", VisionDataType.MetrologyResults),
                 new("residualRms", VisionDataType.Double, Required: false), new("residualMax", VisionDataType.Double, Required: false),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
@@ -15,7 +15,7 @@ internal static class MetrologyCatalog
                 new("objects", "Measurement Objects (JSON)", "textarea", "[]", Group: "Model", Description:
                     "JSON array of measurement objects. line: {type,rowBegin,columnBegin,rowEnd,columnEnd}; circle: {type,row,column,radius}; " +
                     "ellipse: {type,row,column,phiDeg,radius1,radius2}; rectangle2: {type,row,column,phiDeg,length1,length2}. " +
-                    "Optional per object: name, measureLength1, measureLength2, sigma, threshold, transition, select, minScore."),
+                    "Optional per object: name, measureLength1, measureLength2, sigma, threshold, transition, select, minScore, qualityConfirmed."),
                 new("alignMode", "Alignment", "select", "none", Group: "Alignment", Options:
                     [
                         new("None (geometry is already in image coordinates)", "none"),
@@ -42,14 +42,15 @@ internal static class MetrologyCatalog
                         new("Last from start", "last")
                     ], Group: "Measure", Description: "Which detected edge inside each measure region feeds the fit."),
                 new("minScore", "Minimum Edge Score", "number", 0.3, 0, 1, 0.01, Group: "Measure", Description: "Native minimum fuzzy score for a measure region to contribute."),
-                new("requireAllFound", "Require All Objects", "boolean", true, Group: "Result", Description: "true = found requires every object to produce a result; false = found when at least one object succeeds. Per-object results are always returned in measurements.")
+                new("requireAllFound", "Require All Objects", "boolean", true, Group: "Result", Description: "true = found requires every object to produce a result; false = found when at least one object succeeds. Per-object results are always returned in measurements."),
+                new("confirmUnknownQuality", "Confirm Unknown Quality", "boolean", false, Group: "Result", Description: "Explicit manual confirmation for ellipse/rectangle2 qualityUnknown results. Default false blocks automatic PASS; per-object qualityConfirmed can be used instead.")
             ],
             "One JLVision metrology model with mixed line / circle / ellipse / rectangle2 measurement objects, applied once per image. " +
             "Objects can be rigidly aligned by a pose input (dynamic ROI) or fixed offsets, which is the intended way to measure at a located position. " +
             "Outputs one JSON row per object in image coordinates: circle -> row/column/radius; ellipse -> row/column/phiDeg/radius1/radius2; " +
             "rectangle2 -> row/column/phiDeg/length1/length2; line -> ny/nx/distancePx (Hesse normal form) plus normalAngleDeg. " +
             "Real limits of JLVisionLib 1.0.0: get_metrology_object_result returns a fixed value tuple per object type and no native score, " +
-            "so quality is reported as residualPx computed from the native measure points for circle and line only; ellipse/rectangle2 carry no residual. " +
+            "so quality is reported as residualPx computed from the native measure points for circle and line only; ellipse/rectangle2 carry qualityUnknown=true and qualityStatus=unknown until explicitly confirmed. found never auto-passes unknown quality. " +
             "Alignment is applied to the object geometry before measuring (AlignMetrologyModel is not used because its pose semantics are undocumented in this wrapper). " +
             "No fuzzy-score map, no per-region rejection list, and no multi-instance (instance='all' only) in this version.",
             "builtin", new VisionToolCapabilities(EmitsOverlay: true)),

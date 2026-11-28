@@ -13,7 +13,7 @@ public sealed class ConstructLineNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 
-        var operation = node.GetString("operation", "perpendicular").ToLowerInvariant();
+        var operation = node.GetString("operation", "perpendicular").Trim().ToLowerInvariant();
         var offsetParam = node.GetDouble("offset", 0);
         if (!double.IsFinite(offsetParam)) throw new InvalidOperationException("geometry.lineConstruct offset must be finite.");
         var span = node.GetDouble("spanScale", 1);
@@ -109,10 +109,12 @@ public sealed class ConstructLineNode : IVisionNodeExecutor
         }
 
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("operation", operation),
-            ("angleDeg", angle ?? 0), ("length", result.Length), ("offset", reportedOffset ?? 0));
+            ("angleDeg", angle ?? 0), ("length", result.Length), ("offset", reportedOffset ?? 0),
+            ("line2Valid", second is not null), ("spanScale", span));
         var outputs = new Dictionary<string, VisionValue>
         {
             ["found"] = VisionValue.Boolean(true), ["line"] = VisionValue.Line(result),
+            ["line2Valid"] = VisionValue.Boolean(second is not null),
             ["angleDeg"] = VisionValue.Double(angle ?? 0), ["length"] = VisionValue.Double(result.Length),
             ["offset"] = VisionValue.Double(reportedOffset ?? 0), ["diagnostics"] = VisionValue.String(diagnostics)
         };
@@ -158,6 +160,7 @@ public sealed class AffineTransformNode : IVisionNodeExecutor
         var translateX = Read(context, node, "translateX", 0);
         var translateY = Read(context, node, "translateY", 0);
         var shear = Read(context, node, "shear", 0);
+        foreach (var (name,value) in new[]{("scaleX",scaleX),("scaleY",scaleY),("rotationDeg",rotation),("translateX",translateX),("translateY",translateY),("shear",shear)}) CoordinateValidation.RequireFinite(value,name);
         if (Math.Abs(scaleX) < 1e-12 || Math.Abs(scaleY) < 1e-12)
             throw new InvalidOperationException("coordinate.transformAffine rejects a zero scale: a collapsed axis is not an invertible transform.");
         var sourceFrame = CoordinateValidation.RequireFrame(node.GetString("sourceFrame", "Image"), "sourceFrame");
@@ -174,7 +177,10 @@ public sealed class AffineTransformNode : IVisionNodeExecutor
         var determinant = CoordinateValidation.ValidateTransform(transform, "coordinate.transformAffine");
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("determinant", determinant), ("scaleX", scaleX),
             ("scaleY", scaleY), ("rotationDeg", rotation), ("shear", shear),
-            ("sourceFrame", sourceFrame), ("targetFrame", targetFrame));
+            ("sourceFrame", sourceFrame), ("targetFrame", targetFrame),("sourceUnit",sourceUnit),("targetUnit",targetUnit),
+            ("matrix2x3",new[]{new[]{transform.H00,transform.H01,transform.H02},new[]{transform.H10,transform.H11,transform.H12}}),
+            ("convention","column vectors; p'=R*S*[[1,shear],[0,1]]*p+t; translation in target frame"),
+            ("sources",CoordinateLiteral.Sources(context,"scaleX","scaleY","rotationDeg","translateX","translateY","shear")));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {

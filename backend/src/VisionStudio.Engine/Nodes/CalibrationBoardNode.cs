@@ -17,8 +17,26 @@ public sealed class CalibrationDetectBoardNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 var source = context.RequireImage("image");
-        var columns = node.GetInt("columns", 7); var rows = node.GetInt("rows", 6); var spacing = node.GetDouble("spacingMm", 10);
-        var error = node.GetDouble("maxGridError", 2); var pattern = node.GetString("pattern", "chessboard");
+        var request = new CameraCalibrationRequest(source.Width, source.Height, []);
+        if (context.TryGetValue("calibrationDataJson", out var previous))
+        {
+            try { request = JsonSerializer.Deserialize<CameraCalibrationRequest>(previous.Require<string>("calibrationDataJson"), Json) ?? throw new JsonException("empty request"); }
+            catch (JsonException ex) { throw new InvalidOperationException("Invalid calibrationDataJson.", ex); }
+            if (request.Views is null || request.Views.Count > 100)
+                throw new InvalidOperationException("Accumulated board views must contain at most 100 views.");
+            // Copy the list so callers' payloads are never mutated.
+            request = request with { Views = request.Views.ToList() };
+        }
+
+        // Older callers append a view by supplying only the pattern (or no board parameters).
+        // Omitted fields continue the accumulated board configuration; explicitly supplied
+        // fields still go through the metadata mismatch gate below.
+        var inheritedBoard = request.Views.Select(view => view.Board).OfType<CameraCalibrationBoardInfo>().LastOrDefault();
+        var columns = node.GetInt("columns", inheritedBoard?.Columns ?? 7);
+        var rows = node.GetInt("rows", inheritedBoard?.Rows ?? 6);
+        var spacing = node.GetDouble("spacingMm", inheritedBoard?.SquareLengthMm ?? 10);
+        var error = node.GetDouble("maxGridError", 2);
+        var pattern = node.GetString("pattern", inheritedBoard?.Kind ?? "chessboard");
         var minBlur = node.GetDouble("minBlurVariance", 0); var minCoverage = node.GetDouble("minCoverage", 0);
         var rejectWeak = node.GetBool("rejectWeakViews", false);
         if (columns is < 2 or > 30 || rows is < 2 or > 30 || rows * columns < 6 || !double.IsFinite(spacing) || spacing <= 0 || spacing > 10000 || !double.IsFinite(error) || error is < .1 or > 20)
@@ -26,16 +44,10 @@ var source = context.RequireImage("image");
         if (pattern is not ("chessboard" or "circles")) throw new InvalidOperationException("Board pattern must be chessboard or circles.");
         if (!double.IsFinite(minBlur) || minBlur < 0) throw new InvalidOperationException("minBlurVariance must be finite and non-negative (0 disables).");
         if (!double.IsFinite(minCoverage) || minCoverage is < 0 or > 1) throw new InvalidOperationException("minCoverage must be in 0..1 (0 disables).");
-        var request = new CameraCalibrationRequest(source.Width, source.Height, []);
-        if (context.TryGetValue("calibrationDataJson", out var previous))
-        {
-            try { request = JsonSerializer.Deserialize<CameraCalibrationRequest>(previous.Require<string>("calibrationDataJson"), Json) ?? throw new JsonException("empty request"); }
-            catch (JsonException ex) { throw new InvalidOperationException("Invalid calibrationDataJson.", ex); }
-            if (request.ImageWidth != source.Width || request.ImageHeight != source.Height || request.Views is null || request.Views.Count > 100)
-                throw new InvalidOperationException("Accumulated board views must use the same image dimensions and contain at most 100 views.");
-            // Copy the list so callers' payloads are never mutated.
-            request = request with { Views = request.Views.ToList() };
-        }
+        var boardInfo = new CameraCalibrationBoardInfo(pattern, columns, rows, spacing);
+        var legacyBoardMetadata = false;
+        if (context.TryGetValue("calibrationDataJson", out _))
+            legacyBoardMetadata = CalibrationBoardMetadata.ValidatePrevious(request, boardInfo, source.Width, source.Height, Type);
         var candidateCount = 0;
         var points = new List<VisionPoint2D>();
         using var native = JLVisionImages.FromMat(source.Mat); using var channels = native.CountChannels();
@@ -52,7 +64,7 @@ var source = context.RequireImage("image");
             using (ys) using (xs)
             {
                 candidateCount = ys.Length;
-                if (ys.Length > 3600) return ValueTask.FromResult(Result(null, "too-many-candidates", CalibrationViewQuality.Evaluate(null, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage)));
+                if (ys.Length > 3600) return ValueTask.FromResult(Result(null, null, "too-many-candidates", CalibrationViewQuality.Evaluate(null, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage), legacyBoardMetadata));
                 for (var i = 0; i < ys.Length; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -82,64 +94,68 @@ var source = context.RequireImage("image");
             using (ys) using (xs)
             {
                 candidateCount = ys.Length;
-                if (ys.Length > 900) return ValueTask.FromResult(Result(null, "too-many-candidates", CalibrationViewQuality.Evaluate(null, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage)));
+                if (ys.Length > 900) return ValueTask.FromResult(Result(null, null, "too-many-candidates", CalibrationViewQuality.Evaluate(null, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage), legacyBoardMetadata));
                 for (var i = 0; i < ys.Length; i++) points.Add(new(xs[i].D, ys[i].D));
             }
         }
         cancellationToken.ThrowIfCancellationRequested();
         var ordered = BoardLattice.Order(points, columns, rows, error, cancellationToken);
-        CameraCalibrationView? view = null;
+        CameraCalibrationView? candidateView = null;
+        CameraCalibrationView? acceptedView = null;
         string? reason = ordered is null ? "incomplete-or-inconsistent-grid" : null;
         CalibrationViewQuality.Report? quality = null;
         if (ordered is not null)
         {
             var objects = Enumerable.Range(0, rows * columns).Select(i => new List<double> { i % columns * spacing, i / columns * spacing, 0 }).ToList();
-            view = new CameraCalibrationView(objects, ordered.Select(p => new List<double> { p.X, p.Y }).ToList());
-            quality = CalibrationViewQuality.Evaluate(view.ImagePoints, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage);
+            candidateView = new CameraCalibrationView(objects, ordered.Select(p => new List<double> { p.X, p.Y }).ToList(), source.Width, source.Height, boardInfo);
+            quality = CalibrationViewQuality.Evaluate(candidateView.ImagePoints, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage);
             if (rejectWeak && quality.Verdict == CalibrationViewQuality.Verdict.Fail)
             {
                 reason = quality.Reason;
-                view = null;
             }
             else
             {
                 if (request.Views.Count >= 100) throw new InvalidOperationException("Calibration view budget exceeded (100).");
-                request.Views.Add(view);
+                request.Views.Add(candidateView);
+                acceptedView = candidateView;
             }
         }
         else
         {
             quality = CalibrationViewQuality.Evaluate(null, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage);
         }
-        return ValueTask.FromResult(Result(view, reason, quality));
+        return ValueTask.FromResult(Result(candidateView, acceptedView, reason, quality, legacyBoardMetadata));
 
-        NodeExecutorResult Result(CameraCalibrationView? accepted, string? failReason, CalibrationViewQuality.Report? report)
+        NodeExecutorResult Result(CameraCalibrationView? candidate, CameraCalibrationView? accepted, string? failReason, CalibrationViewQuality.Report? report, bool legacyMetadata)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var outputs = new Dictionary<string, VisionValue> { ["found"] = VisionValue.Boolean(accepted is not null), ["count"] = VisionValue.Integer(accepted?.ImagePoints.Count ?? 0),
+            var found = candidate is not null;
+            var outputs = new Dictionary<string, VisionValue> { ["found"] = VisionValue.Boolean(found), ["count"] = VisionValue.Integer(candidate?.ImagePoints.Count ?? 0),
                 ["calibrationDataJson"] = VisionValue.String(JsonSerializer.Serialize(request)),
                 ["blurVariance"] = VisionValue.Double(blurVariance) };
-            if (accepted is not null) outputs["viewJson"] = VisionValue.String(JsonSerializer.Serialize(accepted));
+            if (candidate is not null) outputs["viewJson"] = VisionValue.String(JsonSerializer.Serialize(candidate));
             if (report is not null)
             {
                 outputs["coverageX"] = VisionValue.Double(report.CoverageX);
                 outputs["coverageY"] = VisionValue.Double(report.CoverageY);
                 outputs["quality"] = VisionValue.String(report.Verdict.ToString());
             }
-            var overlays = accepted?.ImagePoints.Select((p, i) => new VisionOverlay($"board-{i}", VisionOverlayType.Circle, X: p[0], Y: p[1], Radius: 3, Label: i.ToString())).ToArray();
+            var overlays = candidate?.ImagePoints.Select((p, i) => new VisionOverlay($"board-{i}", VisionOverlayType.Circle, X: p[0], Y: p[1], Radius: 3, Label: i.ToString())).ToArray();
             outputs["image"] = VisionValue.Image(source.CloneOwned());
             var boardDiag = CoordinateValidation.Diagnostics(Type,
-                ("found", accepted is not null), ("count", accepted?.ImagePoints.Count ?? 0),
+                ("found", found), ("accepted", accepted is not null), ("count", candidate?.ImagePoints.Count ?? 0),
                 ("views", request.Views.Count), ("pattern", pattern), ("blurVariance", blurVariance),
                 ("coverageX", report?.CoverageX), ("coverageY", report?.CoverageY),
-                ("quality", report?.Verdict.ToString()), ("reason", failReason));
+                ("quality", report?.Verdict.ToString()), ("qualityReason", report?.Reason), ("reason", failReason),
+                ("boardMetadata", boardInfo), ("legacyBoardMetadata", legacyMetadata));
             outputs["diagnostics"] = VisionValue.String(boardDiag);
-            return new(outputs, new Dictionary<string, object?> { ["found"] = accepted is not null, ["count"] = accepted?.ImagePoints.Count ?? 0,
+            return new(outputs, new Dictionary<string, object?> { ["found"] = found, ["accepted"] = accepted is not null, ["count"] = candidate?.ImagePoints.Count ?? 0,
                 ["views"] = request.Views.Count, ["pattern"] = pattern, ["candidateCount"] = candidateCount, ["gridCandidates"] = points.Count,
                 ["reason"] = failReason, ["blurVariance"] = blurVariance,
                 ["coverageX"] = report?.CoverageX, ["coverageY"] = report?.CoverageY, ["quality"] = report?.Verdict.ToString(),
                 ["qualityReason"] = report?.Reason, ["guidance"] = report?.Guidance,
-                ["rejectWeakViews"] = rejectWeak, ["algorithmBackend"] = "jlvision", ["diagnostics"] = boardDiag }, overlays);
+                ["rejectWeakViews"] = rejectWeak, ["boardMetadata"] = boardInfo, ["legacyBoardMetadata"] = legacyMetadata,
+                ["algorithmBackend"] = "jlvision", ["diagnostics"] = boardDiag }, overlays);
         }
     }
 
@@ -204,5 +220,41 @@ internal static class BoardLattice
         var z = matrix.At<double>(2, 0) * p.X + matrix.At<double>(2, 1) * p.Y + matrix.At<double>(2, 2);
         return new((matrix.At<double>(0, 0) * p.X + matrix.At<double>(0, 1) * p.Y + matrix.At<double>(0, 2)) / z,
             (matrix.At<double>(1, 0) * p.X + matrix.At<double>(1, 1) * p.Y + matrix.At<double>(1, 2)) / z);
+    }
+}
+
+internal static class CalibrationBoardMetadata
+{
+    public static bool ValidatePrevious(CameraCalibrationRequest request, CameraCalibrationBoardInfo expected,
+        int imageWidth, int imageHeight, string nodeType)
+    {
+        if (request.ImageWidth != imageWidth || request.ImageHeight != imageHeight)
+            throw new InvalidOperationException($"{nodeType} accumulated image size {request.ImageWidth}x{request.ImageHeight} does not match {imageWidth}x{imageHeight}.");
+        var legacyViews = 0;
+        for (var i = 0; i < request.Views.Count; i++)
+        {
+            var view = request.Views[i];
+            if (view.ImageWidth is { } width && width != imageWidth)
+                throw new InvalidOperationException($"{nodeType} accumulated view {i} imageWidth {width} does not match {imageWidth}.");
+            if (view.ImageHeight is { } height && height != imageHeight)
+                throw new InvalidOperationException($"{nodeType} accumulated view {i} imageHeight {height} does not match {imageHeight}.");
+            if (view.Board is not { } board) { legacyViews++; continue; }
+            var mismatch = DescribeMismatch(board, expected);
+            if (mismatch is not null)
+                throw new InvalidOperationException($"{nodeType} accumulated view {i} board metadata mismatch: {mismatch}.");
+        }
+        return legacyViews > 0;
+    }
+
+    private static string? DescribeMismatch(CameraCalibrationBoardInfo actual, CameraCalibrationBoardInfo expected)
+    {
+        if (!string.Equals(actual.Kind, expected.Kind, StringComparison.OrdinalIgnoreCase)) return $"kind expected {expected.Kind}, actual {actual.Kind}";
+        if (actual.Columns != expected.Columns) return $"columns expected {expected.Columns}, actual {actual.Columns}";
+        if (actual.Rows != expected.Rows) return $"rows expected {expected.Rows}, actual {actual.Rows}";
+        if (Math.Abs(actual.SquareLengthMm - expected.SquareLengthMm) > 1e-9) return $"squareLengthMm expected {expected.SquareLengthMm}, actual {actual.SquareLengthMm}";
+        if (actual.MarkerLengthMm != expected.MarkerLengthMm) return $"markerLengthMm expected {expected.MarkerLengthMm}, actual {actual.MarkerLengthMm}";
+        if (!string.Equals(actual.Dictionary, expected.Dictionary, StringComparison.OrdinalIgnoreCase)) return $"dictionary expected {expected.Dictionary}, actual {actual.Dictionary}";
+        if (actual.LegacyPattern != expected.LegacyPattern) return $"legacyPattern expected {expected.LegacyPattern}, actual {actual.LegacyPattern}";
+        return null;
     }
 }

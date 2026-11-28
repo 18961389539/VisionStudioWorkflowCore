@@ -48,6 +48,9 @@ public sealed class JsonBuildNode : IVisionNodeExecutor
             throw new InvalidOperationException("value.jsonBuild mode must be object or array.");
 
         var pretty = node.GetBool("pretty", false);
+        var emptyPolicy = node.GetString("emptyPolicy", "compact").Trim().ToLowerInvariant();
+        if (emptyPolicy is not ("compact" or "preserveNull"))
+            throw new InvalidOperationException("value.jsonBuild emptyPolicy must be compact or preserveNull.");
         var maxBytes = node.GetInt("maxBytes", 65536);
         if (maxBytes is < 64 or > 4 * 1024 * 1024)
             throw new InvalidOperationException("value.jsonBuild maxBytes must be within 64..4194304.");
@@ -61,11 +64,22 @@ public sealed class JsonBuildNode : IVisionNodeExecutor
         var array = new JsonArray();
         var usedKeys = new HashSet<string>(StringComparer.Ordinal);
         var fieldCount = 0;
+        var lastFieldKey = "a";
+        var maxFieldBytes = 0;
+        var largestFieldKey = "a";
 
         for (var index = 0; index < Ports.Length; index++)
         {
             var port = Ports[index];
-            if (!context.TryGetValue(port, out var value)) continue;
+            if (!context.TryGetValue(port, out var value))
+            {
+                if (mode == "array" && emptyPolicy == "preserveNull")
+                {
+                    array.Add((JsonNode?)null);
+                    fieldCount++;
+                }
+                continue;
+            }
 
             var converted = JsonSerializer.SerializeToNode(Convert(value, port));
             if (mode == "array")
@@ -82,8 +96,11 @@ public sealed class JsonBuildNode : IVisionNodeExecutor
                 if (!usedKeys.Add(key))
                     throw new InvalidOperationException($"value.jsonBuild key '{key}' is used by more than one port.");
                 node2[key] = converted;
+                lastFieldKey = key;
             }
             fieldCount++;
+            var fieldBytes = System.Text.Encoding.UTF8.GetByteCount(converted?.ToJsonString(JsonText) ?? "null");
+            if (fieldBytes > maxFieldBytes) { maxFieldBytes = fieldBytes; largestFieldKey = mode == "array" ? port : lastFieldKey; }
         }
 
         if (fieldCount == 0)
@@ -94,10 +111,10 @@ public sealed class JsonBuildNode : IVisionNodeExecutor
         var bytes = System.Text.Encoding.UTF8.GetByteCount(payload);
         if (bytes > maxBytes)
             throw new InvalidOperationException(
-                $"value.jsonBuild payload is {bytes} bytes which exceeds maxBytes={maxBytes}; drop fields or raise the limit.");
+                $"value.jsonBuild errorCode=maxBytesExceeded: attemptedBytes={bytes}, maxBytes={maxBytes}, fieldKey={largestFieldKey}, largestFieldBytes={maxFieldBytes}; no json/document output was produced.");
 
         var diagnostics = CoordinateValidation.Diagnostics(
-            Type, ("mode", mode), ("fieldCount", fieldCount), ("bytes", bytes), ("pretty", pretty));
+            Type, ("mode", mode), ("fieldCount", fieldCount), ("bytes", bytes), ("pretty", pretty), ("emptyPolicy", emptyPolicy));
 
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -146,11 +163,29 @@ public sealed class JsonParseNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 
-        var text = context.TryGetValue("document", out var documentInput)
-            ? documentInput.Require<VisionJson>("document").Text
-            : context.TryGetValue("json", out var jsonInput)
-                ? jsonInput.Require<string>("json")
-                : node.GetString("json", string.Empty);
+        var source = node.GetString("source", "auto").Trim().ToLowerInvariant();
+        if (source is not ("auto" or "document" or "json" or "parameter"))
+            throw new InvalidOperationException("value.jsonParse source must be auto, document, json or parameter.");
+        var hasDocument = context.TryGetValue("document", out var documentInput);
+        var hasJson = context.TryGetValue("json", out var jsonInput);
+        if (source == "auto" && hasDocument && hasJson)
+            throw new InvalidOperationException("value.jsonParse errorCode=ambiguousSource: both document and json ports are connected; select source explicitly.");
+        var actualSource = source switch
+        {
+            "document" when hasDocument => "document",
+            "json" when hasJson => "json",
+            "parameter" => "parameter",
+            "auto" when hasDocument => "document",
+            "auto" when hasJson => "json",
+            "auto" => "parameter",
+            _ => throw new InvalidOperationException($"value.jsonParse source={source} requires its connected input port.")
+        };
+        var text = actualSource switch
+        {
+            "document" => documentInput.Require<VisionJson>("document").Text,
+            "json" => jsonInput.Require<string>("json"),
+            _ => node.GetString("json", string.Empty)
+        };
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("value.jsonParse requires a non-empty JSON input.");
 
@@ -162,25 +197,40 @@ public sealed class JsonParseNode : IVisionNodeExecutor
             throw new InvalidOperationException(
                 $"value.jsonParse payload is {bytes} bytes which exceeds maxBytes={maxBytes}; parse a smaller response or raise the limit.");
 
+        var maxDepth = node.GetInt("maxDepth", 64);
+        if (maxDepth is < 1 or > 256)
+            throw new InvalidOperationException("value.jsonParse maxDepth must be within 1..256.");
+        var duplicatePropertyPolicy = node.GetString("duplicatePropertyPolicy", "fail").Trim().ToLowerInvariant();
+        if (duplicatePropertyPolicy is not ("fail" or "first" or "last"))
+            throw new InvalidOperationException("value.jsonParse duplicatePropertyPolicy must be fail, first or last.");
+
         var path = node.GetString("path", string.Empty).Trim();
         var kind = node.GetString("type", "auto").Trim().ToLowerInvariant();
         if (kind is not ("auto" or "number" or "text" or "boolean"))
             throw new InvalidOperationException("value.jsonParse type must be auto, number, text or boolean.");
         var required = node.GetBool("required", true);
 
-        JsonDocument document;
+        JsonNode? root;
         try
         {
-            document = JsonDocument.Parse(text, new JsonDocumentOptions { AllowTrailingCommas = false });
+            var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(text), new JsonReaderOptions
+            {
+                // The configured lower limit is enforced by ParseValue so its errorCode is deterministic.
+                MaxDepth = int.MaxValue,
+                AllowTrailingCommas = false,
+                CommentHandling = JsonCommentHandling.Disallow
+            });
+            if (!reader.Read()) throw InvalidJson("input is empty or incomplete");
+            root = ParseValue(ref reader, maxDepth, duplicatePropertyPolicy);
+            if (reader.Read()) throw InvalidJson("input contains multiple JSON values");
         }
         catch (JsonException ex)
         {
-            throw new InvalidOperationException($"value.jsonParse input is not valid JSON: {ex.Message}", ex);
+            throw new InvalidOperationException($"value.jsonParse errorCode=invalidJson: input is not valid JSON: {ex.Message}", ex);
         }
 
-        using (document)
         {
-            var found = TryResolve(document.RootElement, path, out var element);
+            var found = TryResolve(root, path, out var selected);
             if (!found && required)
                 throw new InvalidOperationException(
                     $"value.jsonParse path '{Display(path)}' was not found in the payload; set required=false to get found=false instead.");
@@ -188,14 +238,33 @@ public sealed class JsonParseNode : IVisionNodeExecutor
             var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
             {
                 ["found"] = VisionValue.Boolean(found),
-                ["kind"] = VisionValue.String(found ? element.ValueKind.ToString() : "missing"),
+                ["valid"] = VisionValue.Boolean(found),
+                ["kind"] = VisionValue.String(found ? GetKind(selected!) : "missing"),
+                ["errorCode"] = VisionValue.String("none"),
                 ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(
-                    Type, ("path", Display(path)), ("found", found), ("kind", found ? element.ValueKind.ToString() : "missing")))
+                    Type, ("path", Display(path)), ("found", found), ("valid", found), ("source", actualSource), ("kind", found ? GetKind(selected!) : "missing"),
+                    ("maxDepth", maxDepth), ("duplicatePropertyPolicy", duplicatePropertyPolicy), ("errorCode", "none")))
             };
 
             if (found)
             {
-                var (objectValue, count) = Materialize(element, kind, path);
+                var materialized = Materialize(selected!, kind, path);
+                if (!materialized.Valid)
+                {
+                    outputs["valid"] = VisionValue.Boolean(false);
+                    outputs["errorCode"] = VisionValue.String("typeMismatch");
+                    outputs["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(
+                        Type, ("path", Display(path)), ("found", true), ("valid", false), ("source", actualSource),
+                        ("kind", GetKind(selected!)), ("expectedType", kind), ("errorCode", "typeMismatch")));
+                    return ValueTask.FromResult(new NodeExecutorResult(outputs,
+                        new Dictionary<string, object?>
+                        {
+                            ["path"] = Display(path), ["found"] = true, ["valid"] = false, ["source"] = actualSource,
+                            ["type"] = kind, ["kind"] = GetKind(selected!), ["errorCode"] = "typeMismatch",
+                            ["maxDepth"] = maxDepth, ["duplicatePropertyPolicy"] = duplicatePropertyPolicy
+                        }));
+                }
+                var (objectValue, count) = (materialized.Value, materialized.Count);
                 outputs["value"] = new VisionValue(VisionDataType.Any, objectValue);
                 outputs["count"] = VisionValue.Integer(count);
                 switch (objectValue)
@@ -204,13 +273,11 @@ public sealed class JsonParseNode : IVisionNodeExecutor
                     case bool flag: outputs["boolean"] = VisionValue.Boolean(flag); break;
                     case string str: outputs["text"] = VisionValue.String(str); break;
                 }
-                if (element.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
-                    outputs["document"] = VisionValue.Json(new VisionJson(element.GetRawText()));
-                if (element.ValueKind == JsonValueKind.Array)
+                if (selected is JsonObject or JsonArray)
+                    outputs["document"] = VisionValue.Json(new VisionJson(selected!.ToJsonString()));
+                if (selected is JsonArray array)
                 {
-                    var texts = element.EnumerateArray()
-                        .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : null)
-                        .ToArray();
+                    var texts = array.Select(item => item is JsonValue value && value.TryGetValue<string>(out var str) ? str : null).ToArray();
                     if (texts.All(item => item is not null))
                         outputs["texts"] = VisionValue.StringList([.. texts.Select(item => item!)]);
                 }
@@ -219,17 +286,79 @@ public sealed class JsonParseNode : IVisionNodeExecutor
             return ValueTask.FromResult(new NodeExecutorResult(outputs,
                 new Dictionary<string, object?>
                 {
-                    ["path"] = Display(path), ["found"] = found, ["type"] = kind,
-                    ["kind"] = found ? element.ValueKind.ToString() : "missing"
+                    ["path"] = Display(path), ["found"] = found, ["valid"] = found, ["source"] = actualSource, ["type"] = kind,
+                    ["kind"] = found ? GetKind(selected!) : "missing", ["errorCode"] = "none",
+                    ["maxDepth"] = maxDepth, ["duplicatePropertyPolicy"] = duplicatePropertyPolicy
                 }));
         }
     }
+
+    private static InvalidOperationException ParseFailure(string errorCode, string message)
+        => new($"value.jsonParse errorCode={errorCode}: {message}");
+
+    private static InvalidOperationException InvalidJson(string message)
+        => new($"value.jsonParse errorCode=invalidJson: input is not valid JSON: {message}");
+
+    /// <summary>Reader-validated tree construction enforces depth and duplicate policies during parsing.</summary>
+    private static JsonNode? ParseValue(ref Utf8JsonReader reader, int maxDepth, string duplicatePropertyPolicy)
+    {
+        if ((reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray) && reader.CurrentDepth >= maxDepth)
+            throw ParseFailure("maxDepthExceeded", $"nesting depth exceeds maxDepth={maxDepth}");
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.StartObject:
+                // Utf8JsonReader 不把分隔逗号暴露成 Token，靠 AllowTrailingCommas=false 由读取器拒绝尾随逗号，
+                // 这里只需按 PropertyName / EndObject 收敛循环，不要再检查 Comma。
+                var obj = new JsonObject();
+                while (true)
+                {
+                    if (!reader.Read()) throw InvalidJson("unterminated object");
+                    if (reader.TokenType == JsonTokenType.EndObject) return obj;
+                    if (reader.TokenType != JsonTokenType.PropertyName)
+                        throw InvalidJson("expected an object property");
+                    var name = reader.GetString()!;
+                    var duplicate = obj.ContainsKey(name);
+                    if (duplicate && duplicatePropertyPolicy == "fail")
+                        throw ParseFailure("duplicateKey", $"object property '{name}' occurs more than once");
+                    if (!reader.Read()) throw InvalidJson("unterminated object");
+                    var value = ParseValue(ref reader, maxDepth, duplicatePropertyPolicy);
+                    if (!duplicate || duplicatePropertyPolicy == "last") obj[name] = value;
+                }
+            case JsonTokenType.StartArray:
+                var array = new JsonArray();
+                while (true)
+                {
+                    if (!reader.Read()) throw InvalidJson("unterminated array");
+                    if (reader.TokenType == JsonTokenType.EndArray) return array;
+                    array.Add(ParseValue(ref reader, maxDepth, duplicatePropertyPolicy));
+                }
+            case JsonTokenType.String: return JsonValue.Create(reader.GetString());
+            case JsonTokenType.Number:
+                if (reader.TryGetInt64(out var integer)) return JsonValue.Create(integer);
+                if (reader.TryGetDecimal(out var decimalValue)) return JsonValue.Create(decimalValue);
+                return JsonValue.Create(reader.GetDouble());
+            case JsonTokenType.True: return JsonValue.Create(true);
+            case JsonTokenType.False: return JsonValue.Create(false);
+            case JsonTokenType.Null: return null;
+            default: throw InvalidJson($"unexpected token {reader.TokenType}");
+        }
+    }
+
+    private static string GetKind(JsonNode node) => node switch
+    {
+        JsonObject => "Object",
+        JsonArray => "Array",
+        JsonValue value when value.TryGetValue<string>(out _) => "String",
+        JsonValue value when value.TryGetValue<long>(out _) || value.TryGetValue<decimal>(out _) || value.TryGetValue<double>(out _) => "Number",
+        JsonValue value when value.TryGetValue<bool>(out _) => "Boolean",
+        _ => "Null"
+    };
 
     /// <summary>
     /// 路径语法：可选 `$` 前缀，点号分段，段内可带 `[n]` 下标。空路径 = 根节点。
     /// 只支持读取，不支持通配/过滤——工业读响应不需要，也避免把 JSONPath 的语义坑引进来。
     /// </summary>
-    private static bool TryResolve(JsonElement root, string path, out JsonElement element)
+    private static bool TryResolve(JsonNode? root, string path, out JsonNode? element)
     {
         element = root;
         if (string.IsNullOrWhiteSpace(path) || path == "$") return true;
@@ -249,9 +378,8 @@ public sealed class JsonParseNode : IVisionNodeExecutor
                 if (name.Length > 0 && !TryProperty(ref element, name)) return false;
                 foreach (var index in indexes)
                 {
-                    if (element.ValueKind != JsonValueKind.Array) return false;
-                    if (index < 0 || index >= element.GetArrayLength()) return false;
-                    element = element[index];
+                    if (element is not JsonArray array || index < 0 || index >= array.Count) return false;
+                    element = array[index];
                 }
                 continue;
             }
@@ -261,10 +389,9 @@ public sealed class JsonParseNode : IVisionNodeExecutor
         return true;
     }
 
-    private static bool TryProperty(ref JsonElement element, string name)
+    private static bool TryProperty(ref JsonNode? element, string name)
     {
-        if (element.ValueKind != JsonValueKind.Object) return false;
-        if (!element.TryGetProperty(name, out var next)) return false;
+        if (element is not JsonObject obj || !obj.TryGetPropertyValue(name, out var next)) return false;
         element = next;
         return true;
     }
@@ -286,47 +413,56 @@ public sealed class JsonParseNode : IVisionNodeExecutor
         return indexes.Count > 0;
     }
 
-    private static (object? Value, long Count) Materialize(JsonElement element, string kind, string path)
+    private static (object? Value, long Count, bool Valid) Materialize(JsonNode node, string kind, string path)
     {
-        var count = element.ValueKind switch
+        var count = node switch
         {
-            JsonValueKind.Array => element.GetArrayLength(),
-            JsonValueKind.Object => element.EnumerateObject().Count(),
+            JsonArray array => array.Count,
+            JsonObject obj => obj.Count,
             _ => 0
         };
 
-        switch (element.ValueKind)
+        switch (node)
         {
-            case JsonValueKind.String:
-                var text = element.GetString() ?? string.Empty;
-                if (kind == "number" && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
-                    return (parsed, count);
-                if (kind == "boolean" && bool.TryParse(text, out var flag)) return (flag, count);
-                if (kind is "number" or "boolean")
+            case JsonValue value when value.TryGetValue<string>(out var text):
+                if (kind == "number")
+                {
+                    if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) && double.IsFinite(parsed))
+                        return (parsed, count, true);
                     throw new InvalidOperationException(
-                        $"value.jsonParse path '{Display(path)}' holds text '{text}' which is not a valid {kind}.");
-                return (text, count);
+                        $"value.jsonParse path '{Display(path)}' holds text '{text}' which is not a valid number.");
+                }
+                if (kind == "boolean")
+                {
+                    if (bool.TryParse(text, out var flag)) return (flag, count, true);
+                    throw new InvalidOperationException(
+                        $"value.jsonParse path '{Display(path)}' holds text '{text}' which is not a valid boolean.");
+                }
+                return (text, count, true);
 
-            case JsonValueKind.Number:
-                var number = element.GetDouble();
+            case JsonValue value when value.TryGetValue<long>(out var integer):
+                return (Convert.ToDouble(integer, CultureInfo.InvariantCulture), count, true);
+
+            case JsonValue value when value.TryGetValue<decimal>(out var decimalValue):
+                return (Convert.ToDouble(decimalValue, CultureInfo.InvariantCulture), count, true);
+
+            case JsonValue value when value.TryGetValue<double>(out var number):
                 if (!double.IsFinite(number))
                     throw new InvalidOperationException($"value.jsonParse path '{Display(path)}' holds a non-finite number.");
-                return (number, count);
+                return (number, count, true);
 
-            case JsonValueKind.True:
-            case JsonValueKind.False:
-                return (element.GetBoolean(), count);
+            case JsonValue value when value.TryGetValue<bool>(out var booleanValue):
+                return (booleanValue, count, true);
 
-            case JsonValueKind.Null:
-                return (null, count);
+            case null:
+                return (null, count, kind == "auto");
 
             default:
                 // 对象/数组原样返回 JSON 文本：要取子字段请再连一个 jsonParse，保持单职责。
-                var raw = element.GetRawText();
+                var raw = node.ToJsonString();
                 if (kind is "number" or "boolean")
-                    throw new InvalidOperationException(
-                        $"value.jsonParse path '{Display(path)}' holds a {element.ValueKind} which cannot become {kind}; use type=auto or text.");
-                return (raw, count);
+                    return (null, count, false);
+                return (raw, count, true);
         }
     }
 

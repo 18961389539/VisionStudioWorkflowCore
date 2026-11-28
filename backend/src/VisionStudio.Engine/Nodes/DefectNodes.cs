@@ -119,14 +119,16 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
         if (polarity is not ("bright" or "dark" or "both")) throw new InvalidOperationException("image.dynamicThreshold polarity must be bright, dark or both.");
         var window = ResultFileWriter.Integer(node, "windowSize", 31, 3, 255);
         if (window is < 3 or > 255) throw new InvalidOperationException("image.dynamicThreshold windowSize must be between 3 and 255.");
-        if (window % 2 == 0) window++;
+        if (window % 2 == 0) throw new InvalidOperationException("image.dynamicThreshold windowSize must be odd.");
+        if (window > Math.Min(source.Width, source.Height)) throw new InvalidOperationException($"image.dynamicThreshold windowSize must not exceed the smallest image dimension ({Math.Min(source.Width, source.Height)}).");
         var backgroundMode = ResultFileWriter.Choice(node, "backgroundMode", "mean", "mean", "median");
         var minimumArea = node.GetDouble("minArea", 0);
         if (!double.IsFinite(minimumArea) || minimumArea < 0) throw new InvalidOperationException("minArea must be finite and non-negative.");
         var bgSource = context.Inputs.ContainsKey("background") ? "input" : "localMean";
         using var image = DefectNodeHelpers.Gray(source, true);
-        using var background = Background(context, source, image, window, backgroundMode);
         using var domain = DefectNodeHelpers.Domain(image, source.Width, source.Height, scoped, context);
+        using var domainImage = image.ReduceDomain(domain);
+        using var background = Background(context, source, domainImage, window, backgroundMode);
         using var limited = image.ReduceDomain(domain);
         using var defects = Find(limited, background, offset, polarity);
         using var selected = node.GetBool("invert", false) ? domain.Difference(defects) : defects.Union1();
@@ -136,14 +138,25 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
         var result = RegionNodeHelpers.Result(region, cancellationToken);
         var area = result.Outputs.TryGetValue("area", out var a) ? a.Value : null;
         var count = result.Outputs.TryGetValue("count", out var c) ? c.Value : null;
-        var diag = NodeCompletionGuards.BuildDiagnostics(Type, NodeCompletionGuards.DiagnosticsLevel(node), 0, 1, ("backgroundMode", backgroundMode), ("invert", node.GetBool("invert", false)), ("minArea", minimumArea), ("offset", offset), ("polarity", polarity), ("windowSize", window),
-            ("backgroundSource", bgSource), ("area", area), ("count", count), ("width", source.Width), ("height", source.Height));
+        var excludedPixels = checked((long)source.Width * source.Height) - checked((long)Math.Round((double)domain.AreaCenter(out double _, out double _)));
+        var outputMode = node.GetString("outputMode", "region") ?? "region";
+        var migrationWarning = outputMode == "both" ? null : "outputMode is legacy; region and mask are always emitted together.";
+        var diag = NodeCompletionGuards.BuildDiagnostics(Type, NodeCompletionGuards.DiagnosticsLevel(node), 0, 1,
+            new (string Key, object? Value)[]
+            {
+                ("backgroundMode", backgroundMode), ("invert", node.GetBool("invert", false)), ("minArea", minimumArea), ("offset", offset), ("polarity", polarity), ("windowSize", window),
+                ("backgroundSource", bgSource), ("area", area), ("count", count), ("width", source.Width), ("height", source.Height),
+                ("validPixelCount", checked((long)source.Width * source.Height) - excludedPixels), ("excludedPixelCount", excludedPixels),
+                ("domainOrder", "image/domain/region-intersection-before-local-background"), ("outputMode", "region+mask"), ("migrationWarning", migrationWarning)
+            });
         var outputs = new Dictionary<string, VisionValue>(result.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
         var maskImage = outputs["image"].Require<VisionImage>("image");
         outputs["mask"] = VisionValue.Image(maskImage.CloneOwned());
         var summary = new Dictionary<string, object?>(result.Summary)
         {
-            ["offset"] = offset, ["polarity"] = polarity, ["backgroundSource"] = bgSource, ["windowSize"] = window, ["diagnostics"] = diag
+            ["offset"] = offset, ["polarity"] = polarity, ["backgroundSource"] = bgSource, ["windowSize"] = window, ["diagnostics"] = diag,
+            ["validPixelCount"] = checked((long)source.Width * source.Height) - excludedPixels, ["excludedPixelCount"] = excludedPixels,
+            ["effectiveOutputMode"] = "region+mask", ["migrationWarning"] = migrationWarning
         };
         return ValueTask.FromResult(result with { Outputs = outputs, Summary = summary });
     }
@@ -151,7 +164,8 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
     {
         if (!context.TryGetValue("background", out var value)) return mode == "median" ? image.MedianRect(window, window) : image.MeanImage(window, window);
         var background = value.Require<VisionImage>("background"); DefectNodeHelpers.SameSize(source, background);
-        return DefectNodeHelpers.Gray(background, true);
+        using var gray = DefectNodeHelpers.Gray(background, true);
+        return gray.ReduceDomain(image.GetDomain());
     }
     private static JlRegion Find(JlImage image, JlImage background, double offset, string polarity)
     {
@@ -174,6 +188,30 @@ public sealed class ImageDifferenceNode : IVisionNodeExecutor
         var threshold = node.GetDouble("threshold", 0);
         if (!double.IsFinite(threshold) || threshold < 0) throw new InvalidOperationException("Difference threshold must be finite and non-negative.");
         using var image = DefectNodeHelpers.Gray(source, true); using var baseline = DefectNodeHelpers.Gray(reference, true);
+        var registrationTolerance = node.GetInt("registrationTolerance", 0);
+        if (registrationTolerance is < 0 or > 25) throw new InvalidOperationException("registrationTolerance must be between 0 and 25 pixels.");
+        var maxRegistrationError = node.GetDouble("maxRegistrationError", 0);
+        if (!double.IsFinite(maxRegistrationError) || maxRegistrationError < 0 || maxRegistrationError > 65535)
+            throw new InvalidOperationException("maxRegistrationError must be finite and between 0 and 65535.");
+        if (maxRegistrationError > 0 && registrationTolerance == 0)
+            throw new InvalidOperationException("maxRegistrationError requires registrationTolerance greater than zero.");
+        VisionImage? alignedReference = null;
+        var shiftX = 0d; var shiftY = 0d; double? registrationError = null;
+        if (registrationTolerance > 0)
+        {
+            var sourceValues = ReferenceCompareNode.GrayValues(image); var referenceValues = ReferenceCompareNode.GrayValues(baseline);
+            var shift = ReferenceAlignment.SearchShift(sourceValues, referenceValues, source.Width, source.Height, registrationTolerance, cancellationToken: cancellationToken);
+            shiftX = shift.ShiftX; shiftY = shift.ShiftY; registrationError = shift.MeanAbsoluteDifference;
+            if (maxRegistrationError > 0 && registrationError > maxRegistrationError)
+                throw new InvalidOperationException($"Image difference alignment error {registrationError:F3} exceeds maxRegistrationError {maxRegistrationError:F3}.");
+            var alignedValues = ReferenceAlignment.WarpTranslate(referenceValues, sourceValues, source.Width, source.Height, shiftX, shiftY, cancellationToken);
+            using var alignedMat = new Mat(source.Height, source.Width, MatType.CV_32FC1);
+            alignedMat.SetArray(alignedValues);
+            alignedReference = VisionImage.Own(alignedMat.Clone());
+        }
+        using var alignedReferenceOwner = alignedReference;
+        using var alignedBaseline = alignedReference is null ? null : DefectNodeHelpers.Gray(alignedReference, true);
+        var comparisonBaseline = alignedBaseline ?? baseline;
         var offset = node.GetDouble("offset", 0);
         if (!double.IsFinite(offset) || offset < -255 || offset > 255) throw new InvalidOperationException("Difference offset must be finite and in -255..255.");
         var outputType = node.GetString("outputType", "real").Trim().ToLowerInvariant();
@@ -181,28 +219,36 @@ public sealed class ImageDifferenceNode : IVisionNodeExecutor
         var mode = node.GetString("mode", node.GetString("diffMode", "absolute")).Trim().ToLowerInvariant();
         using var rawDifference = mode switch
         {
-            "absolute" => image.AbsDiffImage(baseline, 1d),
-            "signed" => image.SubImage(baseline, 1d, 0d),
+            "absolute" => image.AbsDiffImage(comparisonBaseline, 1d),
+            "signed" => image.SubImage(comparisonBaseline, 1d, 0d),
             // HALCON-style normalized difference: illumination-ratio change in [-1,1].
-            "normalized" => Normalized(image, baseline),
+            "normalized" => Normalized(image, comparisonBaseline),
             _ => throw new InvalidOperationException("Difference mode must be absolute, signed, or normalized.")
         };
         using var scaledDifference = rawDifference.ScaleImage(scale, offset);
+        using var rawDomain = scaledDifference.GetDomain();
+        var rawStats = DefectNodeHelpers.Statistics(scaledDifference, rawDomain);
+        var valueDomain = (node.GetString("valueDomain", "output") ?? "output").Trim().ToLowerInvariant();
+        if (valueDomain is not ("raw" or "output")) throw new InvalidOperationException("valueDomain must be raw or output.");
         using var difference = scaledDifference.ConvertImageType(outputType);
-        using var domain = difference.GetDomain(); var stats = DefectNodeHelpers.Statistics(difference, domain);
+        using var domain = difference.GetDomain(); var stats = valueDomain == "raw" ? rawStats : DefectNodeHelpers.Statistics(difference, domain);
         cancellationToken.ThrowIfCancellationRequested();
         var outputs = new Dictionary<string, VisionValue>();
         var summary = new Dictionary<string, object?>
         {
             ["mode"] = mode, ["scale"] = scale, ["meanDifference"] = stats.Mean, ["stdDevDifference"] = stats.Deviation,
-            ["minDifference"] = stats.Min, ["maxDifference"] = stats.Max, ["outputType"] = outputType, ["offset"] = offset
+            ["minDifference"] = stats.Min, ["maxDifference"] = stats.Max, ["outputType"] = outputType, ["offset"] = offset,
+            ["valueDomain"] = valueDomain, ["rawMean"] = rawStats.Mean, ["rawStdDev"] = rawStats.Deviation,
+            ["rawMin"] = rawStats.Min, ["rawMax"] = rawStats.Max,
+            ["registrationTolerance"] = registrationTolerance, ["shiftX"] = shiftX, ["shiftY"] = shiftY,
+            ["registrationError"] = registrationError, ["maxRegistrationError"] = maxRegistrationError
         };
         double? aboveFraction = null;
         VisionRegion? changedRegion = null;
         long changedPixels = 0;
         if (threshold > 0)
         {
-            using var diffMat = JLVisionImages.ToMat(difference);
+            using var diffMat = JLVisionImages.ToMat(valueDomain == "raw" ? scaledDifference : difference);
             using var floatDifference = new Mat();
             diffMat.ConvertTo(floatDifference, MatType.CV_32FC1);
             floatDifference.GetArray(out float[] pixels);
@@ -232,7 +278,9 @@ public sealed class ImageDifferenceNode : IVisionNodeExecutor
         foreach (var (key, value) in new Dictionary<string, VisionValue>
         {
             ["mean"] = VisionValue.Double(stats.Mean), ["stdDev"] = VisionValue.Double(stats.Deviation),
-            ["min"] = VisionValue.Double(stats.Min), ["max"] = VisionValue.Double(stats.Max)
+            ["min"] = VisionValue.Double(stats.Min), ["max"] = VisionValue.Double(stats.Max),
+            ["rawMean"] = VisionValue.Double(rawStats.Mean), ["rawStdDev"] = VisionValue.Double(rawStats.Deviation),
+            ["rawMin"] = VisionValue.Double(rawStats.Min), ["rawMax"] = VisionValue.Double(rawStats.Max)
         }) outputs[key] = value;
         if (aboveFraction is not null) outputs["aboveThresholdFraction"] = VisionValue.Double(aboveFraction.Value);
         outputs["similarity"] = VisionValue.Double(similarity);
@@ -242,6 +290,8 @@ public sealed class ImageDifferenceNode : IVisionNodeExecutor
             outputs["changedPixelCount"] = VisionValue.Integer(changedPixels);
         }
         var diag = NodeCompletionGuards.BuildDiagnostics(Type, NodeCompletionGuards.DiagnosticsLevel(node), 0, 1, ("outputType", outputType), ("offset", offset), ("legacyClipIgnored", node.Parameters?.ContainsKey("clip") == true), ("mode", mode), ("scale", scale), ("threshold", threshold),
+            ("valueDomain", valueDomain), ("rawMean", rawStats.Mean), ("rawStdDev", rawStats.Deviation), ("rawMin", rawStats.Min), ("rawMax", rawStats.Max),
+            ("registrationTolerance", registrationTolerance), ("shiftX", shiftX), ("shiftY", shiftY), ("registrationError", registrationError),
             ("mean", stats.Mean), ("stdDev", stats.Deviation), ("min", stats.Min), ("max", stats.Max),
             ("similarity", similarity), ("aboveThresholdFraction", aboveFraction), ("changedPixelCount", changedPixels),
             ("width", source.Width), ("height", source.Height));
@@ -333,8 +383,12 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
             throw new InvalidOperationException("maxRegistrationError must be finite and between 0 and 65535.");
         if (maxRegistrationError > 0 && registrationTolerance == 0)
             throw new InvalidOperationException("maxRegistrationError requires registrationTolerance greater than zero.");
-        var compensation = node.GetString("compensation", "none").Trim().ToLowerInvariant();
+        var compensation = (node.GetString("compensation", "none") ?? "none").Trim().ToLowerInvariant();
         if (compensation is not ("none" or "offset" or "gainoffset")) throw new InvalidOperationException("compensation must be none, offset, or gainOffset.");
+        var robustCompensation = node.GetBool("robustCompensation", true);
+        var maxReferenceDisplacement = node.GetDouble("maxReferenceDisplacementPx", 0);
+        if (!double.IsFinite(maxReferenceDisplacement) || maxReferenceDisplacement < 0 || maxReferenceDisplacement > registrationTolerance)
+            throw new InvalidOperationException("maxReferenceDisplacementPx must be within 0..registrationTolerance (0 uses registrationTolerance).");
         var polarity = node.GetString("polarity", "both").Trim().ToLowerInvariant();
         if (polarity is not ("both" or "bright" or "dark")) throw new InvalidOperationException("polarity must be both, bright, or dark.");
         var openSize = node.GetInt("morphologyOpen", 0);
@@ -357,6 +411,7 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
         float[]? effectiveReferenceValues = null; float[]? sourceValuesCache = null; float[]? modelStdDev = null;
         var shiftX = 0d; var shiftY = 0d; var gain = 1d; var offset = 0d; double? registrationError = null;
         var referenceAlignmentErrors = new List<double>();
+        var referenceRegistrations = new List<object>();
         try
         {
             using var image = DefectNodeHelpers.Gray(source, true);
@@ -381,7 +436,9 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
                     var sampleValues = GrayValues(sampleGray);
                     if (compensation != "none")
                     {
-                        var (sampleGain, sampleOffset) = ReferenceAlignment.FitGainOffset(referenceAnchor, sampleValues, domainMask, cancellationToken);
+                        var (sampleGain, sampleOffset) = robustCompensation
+                            ? ReferenceAlignment.FitGainOffsetRobust(referenceAnchor, sampleValues, domainMask, cancellationToken)
+                            : ReferenceAlignment.FitGainOffset(referenceAnchor, sampleValues, domainMask, cancellationToken);
                         if (compensation != "gainoffset") sampleGain = 1d;
                         sampleValues = ReferenceAlignment.ApplyGainOffset(sampleValues, width, height, sampleGain, sampleOffset, cancellationToken);
                     }
@@ -392,6 +449,10 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
                             registrationTolerance, domainMask, cancellationToken, subpixelRegistration);
                         sampleShiftX = sampleShift.ShiftX; sampleShiftY = sampleShift.ShiftY;
                         referenceAlignmentErrors.Add(sampleShift.MeanAbsoluteDifference);
+                        var displacementLimit = maxReferenceDisplacement > 0 ? maxReferenceDisplacement : registrationTolerance;
+                        if (Math.Abs(sampleShiftX) > displacementLimit || Math.Abs(sampleShiftY) > displacementLimit)
+                            throw new InvalidOperationException($"reference{sampleIndex + 1} relative displacement ({sampleShiftX:F3},{sampleShiftY:F3}) exceeds {displacementLimit:F3} px.");
+                        referenceRegistrations.Add(new { referenceIndex = sampleIndex + 1, shiftX = sampleShiftX, shiftY = sampleShiftY, subpixel = subpixelRegistration, error = sampleShift.MeanAbsoluteDifference });
                         if (maxRegistrationError > 0 && sampleShift.MeanAbsoluteDifference > maxRegistrationError)
                             throw new InvalidOperationException($"reference{sampleIndex + 1} alignment error {sampleShift.MeanAbsoluteDifference:F3} exceeds maxRegistrationError {maxRegistrationError:F3}.");
                     }
@@ -406,7 +467,9 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
                     var registrationValues = sourceValues; var registrationScale = 1d;
                     if (compensation != "none")
                     {
-                        var (fittedGain, fittedOffset) = ReferenceAlignment.FitGainOffset(sourceValues, mean, domainMask, cancellationToken);
+                        var (fittedGain, fittedOffset) = robustCompensation
+                            ? ReferenceAlignment.FitGainOffsetRobust(sourceValues, mean, domainMask, cancellationToken)
+                            : ReferenceAlignment.FitGainOffset(sourceValues, mean, domainMask, cancellationToken);
                         registrationScale = compensation == "gainoffset" ? fittedGain : 1d;
                         if (Math.Abs(registrationScale) < 1e-9) registrationScale = 1d;
                         // Inverse illumination: (v - offset) / gain via JLVision ScaleImage.
@@ -417,6 +480,7 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
                         registrationTolerance, domainMask, cancellationToken, subpixelRegistration);
                     shiftX = shift.ShiftX; shiftY = shift.ShiftY;
                     registrationError = shift.MeanAbsoluteDifference * registrationScale;
+                    referenceRegistrations.Add(new { referenceIndex = 0, shiftX = shift.ShiftX, shiftY = shift.ShiftY, subpixel = subpixelRegistration, error = registrationError });
                     if (maxRegistrationError > 0 && registrationError > maxRegistrationError)
                         throw new InvalidOperationException($"Source alignment error {registrationError:F3} exceeds maxRegistrationError {maxRegistrationError:F3}.");
                     // JLVision affine_trans_image_size for the model mean/std; out-of-frame
@@ -430,7 +494,9 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
                 }
                 if (compensation != "none")
                 {
-                    var (fittedGain, fittedOffset) = ReferenceAlignment.FitGainOffset(sourceValues, mean, domainMask, cancellationToken);
+                    var (fittedGain, fittedOffset) = robustCompensation
+                        ? ReferenceAlignment.FitGainOffsetRobust(sourceValues, mean, domainMask, cancellationToken)
+                        : ReferenceAlignment.FitGainOffset(sourceValues, mean, domainMask, cancellationToken);
                     gain = compensation == "gainoffset" ? fittedGain : 1d;
                     offset = fittedOffset;
                     mean = ReferenceAlignment.ApplyGainOffset(mean, width, height, gain, offset, cancellationToken);
@@ -478,9 +544,14 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
             }).ToArray();
             var maxDefectArea = defects.Length == 0 ? 0d : defects.Max(d => (double)d.area);
             var grade = defects.Length == 0 ? "none" : defects.Any(d => d.grade == "critical") ? "critical" : defects.Any(d => d.grade == "major") ? "major" : "minor";
+            if (referenceRegistrations.Count == 0)
+                for (var sampleIndex = 0; sampleIndex < referenceSamples.Count; sampleIndex++)
+                    referenceRegistrations.Add(new { referenceIndex = sampleIndex, shiftX = 0d, shiftY = 0d, subpixel = false, error = (double?)null });
+            var referenceRegistrationsJson = JsonSerializer.Serialize(referenceRegistrations);
             var outputs = new Dictionary<string, VisionValue>(result.Outputs)
             {
                 ["defects"] = VisionValue.String(JsonSerializer.Serialize(defects)),
+                ["referenceRegistrationsJson"] = VisionValue.String(referenceRegistrationsJson),
                 ["maxDefectArea"] = VisionValue.Double(maxDefectArea),
                 ["referenceSampleCount"] = VisionValue.Integer(referenceSamples.Count),
                 ["grade"] = VisionValue.String(grade)
@@ -497,7 +568,11 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
                     ["registrationMeanAbsoluteDifference"] = registrationError,
                     ["referenceSampleCount"] = referenceSamples.Count,
                     ["referenceSampleAlignmentErrors"] = referenceAlignmentErrors,
-                    ["compensation"] = compensation, ["gain"] = Math.Round(gain, 6), ["offset"] = Math.Round(offset, 4),
+                    ["referenceRegistrationsJson"] = referenceRegistrationsJson,
+                    ["maxReferenceDisplacementPx"] = maxReferenceDisplacement,
+                    ["compensation"] = compensation, ["robustCompensation"] = robustCompensation,
+                    ["illuminationFitContract"] = robustCompensation ? "iterative-residual-trimming; defect outliers excluded" : "least-squares-all-valid-domain-pixels",
+                    ["gain"] = Math.Round(gain, 6), ["offset"] = Math.Round(offset, 4),
                     ["morphologyOpen"] = openSize, ["morphologyClose"] = closeSize,
                     ["variationK"] = variationK, ["variationWindow"] = variationWindow,
                     ["grade"] = grade, ["maxDefectArea"] = maxDefectArea,
@@ -550,7 +625,7 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
         return maskRegion.Intersection(domain);
     }
 
-    private static float[] GrayValues(JlImage image)
+    internal static float[] GrayValues(JlImage image)
     {
         using var mat = JLVisionImages.ToMat(image);
         mat.GetArray(out float[] values);
@@ -579,7 +654,7 @@ public sealed class RegionIntensityNode : IVisionNodeExecutor, IVisionNodeDefini
 
 
     private sealed record Settings(double Nominal, double Tolerance, double MinimumMean, double MaximumMean,
-        double MinimumArea, double MaximumStd, double MaximumCv, string EmptyPolicy, string DiagnosticsLevel);
+        double MinimumArea, double MaximumStd, double MaximumCv, string EmptyPolicy, string DiagnosticsLevel, bool NominalEnabled);
 
     private static Settings ReadSettings(NodeDefinition node)
     {
@@ -591,6 +666,7 @@ public sealed class RegionIntensityNode : IVisionNodeExecutor, IVisionNodeDefini
             return value;
         }
         var nominal = Number("meanNominal", 65535);
+        var nominalEnabled = node.GetBool("enableMeanNominal", nominal > 0);
         var tolerance = Number("tolerance", 65535);
         var minimumMean = Number("minMean", 65535);
         var maximumMean = Number("maxMean", 65535);
@@ -599,16 +675,16 @@ public sealed class RegionIntensityNode : IVisionNodeExecutor, IVisionNodeDefini
         var maximumCv = Number("maxCv", 100);
         if (minimumMean > 0 && maximumMean > 0 && minimumMean > maximumMean)
             throw new InvalidOperationException("measure.regionIntensity minMean must not exceed maxMean when both limits are enabled.");
-        if (nominal > 0 && tolerance <= 0)
+        if (nominalEnabled && tolerance <= 0)
             throw new InvalidOperationException("measure.regionIntensity tolerance must be > 0 when meanNominal is set.");
-        if (nominal > 0 && (minimumMean > 0 && nominal + tolerance < minimumMean
+        if (nominalEnabled && (minimumMean > 0 && nominal + tolerance < minimumMean
             || maximumMean > 0 && nominal - tolerance > maximumMean))
             throw new InvalidOperationException("measure.regionIntensity nominal tolerance and mean limits must have an overlapping acceptance range.");
         // The explicit policy wins over the historical duplicate checkbox.
         var legacyPolicy = node.GetBool("requireNonEmpty", false) ? "fail" : "zeros";
         var emptyPolicy = ResultFileWriter.Choice(node, "emptyPolicy", legacyPolicy, "zeros", "fail");
         return new(nominal, tolerance, minimumMean, maximumMean, minimumArea, maximumStd, maximumCv,
-            emptyPolicy, NodeCompletionGuards.DiagnosticsLevel(node));
+            emptyPolicy, NodeCompletionGuards.DiagnosticsLevel(node), nominalEnabled);
     }
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
@@ -637,7 +713,7 @@ public sealed class RegionIntensityNode : IVisionNodeExecutor, IVisionNodeDefini
         if (!found) failedGates.Add("emptyRegion");
         else
         {
-            if (settings.Nominal > 0 && Math.Abs(stats.Mean - settings.Nominal) > settings.Tolerance) failedGates.Add("meanNominal");
+            if (settings.NominalEnabled && Math.Abs(stats.Mean - settings.Nominal) > settings.Tolerance) failedGates.Add("meanNominal");
             if (settings.MinimumMean > 0 && stats.Mean < settings.MinimumMean) failedGates.Add("minMean");
             if (settings.MaximumMean > 0 && stats.Mean > settings.MaximumMean) failedGates.Add("maxMean");
             if (settings.MaximumStd > 0 && stats.Deviation > settings.MaximumStd) failedGates.Add("maxStd");
@@ -647,11 +723,11 @@ public sealed class RegionIntensityNode : IVisionNodeExecutor, IVisionNodeDefini
         var within = failedGates.Count == 0;
         var cvDefined = found && cv is not null;
         var diagnostics = NodeCompletionGuards.BuildDiagnostics(Type, settings.DiagnosticsLevel, found && !cvDefined ? 1 : 0, 1,
-            ("found", found), ("withinTolerance", within), ("failedGates", failedGates), ("pixelCount", pixelCount),
+            ("found", found), ("statsValid", found), ("empty", !found), ("withinTolerance", within), ("failedGates", failedGates), ("pixelCount", pixelCount),
             ("samplingDomain", "region-intersect-image-domain"), ("emptyPolicy", settings.EmptyPolicy),
             ("mean", stats.Mean), ("stdDev", stats.Deviation), ("min", stats.Min), ("max", stats.Max),
             ("range", stats.Max - stats.Min), ("cv", cv), ("cvDefined", cvDefined),
-            ("meanNominal", settings.Nominal), ("tolerance", settings.Tolerance), ("minMean", settings.MinimumMean),
+            ("meanNominal", settings.Nominal), ("enableMeanNominal", settings.NominalEnabled), ("tolerance", settings.Tolerance), ("minMean", settings.MinimumMean),
             ("maxMean", settings.MaximumMean), ("minArea", settings.MinimumArea), ("maxStd", settings.MaximumStd), ("maxCv", settings.MaximumCv),
             ("width", source.Width), ("height", source.Height));
         cancellationToken.ThrowIfCancellationRequested();
@@ -667,12 +743,14 @@ public sealed class RegionIntensityNode : IVisionNodeExecutor, IVisionNodeDefini
             var outputs = new Dictionary<string, VisionValue>(result.Outputs)
             {
                 ["pixelCount"] = VisionValue.Integer(pixelCount), ["withinTolerance"] = VisionValue.Boolean(within),
+                ["statsValid"] = VisionValue.Boolean(found), ["empty"] = VisionValue.Boolean(!found),
                 ["cvDefined"] = VisionValue.Boolean(cvDefined), ["warningCount"] = VisionValue.Integer(found && !cvDefined ? 1 : 0),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             };
             var summary = new Dictionary<string, object?>(result.Summary)
             {
                 ["pixelCount"] = pixelCount, ["withinTolerance"] = within, ["cvDefined"] = cvDefined,
+                ["statsValid"] = found, ["empty"] = !found, ["enableMeanNominal"] = settings.NominalEnabled,
                 ["meanNominal"] = settings.Nominal, ["failedGates"] = failedGates, ["diagnostics"] = diagnostics,
                 ["samplingDomain"] = "region-intersect-image-domain", ["warningCount"] = found && !cvDefined ? 1 : 0
             };

@@ -19,10 +19,25 @@ public sealed class ContourToPointsNode : IVisionNodeExecutor
         var mode = node.GetString("resample", "arcLength");
         var step = node.GetDouble("sampleStep", 2);
         var points = ProfileMath.SelectContour(context, node, closed);
+        var sourceContours=context.Require<IReadOnlyList<VisionContour>>("contours");
+        var sourceIndex=node.GetInt("index",0);
+        var sourceClosed = sourceIndex >= 0 && sourceIndex < sourceContours.Count && sourceContours[sourceIndex].Closed;
         if (points.Length < 2)
             return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", nodeType: Type));
+        var length = Perimeter(points, closed);
+        var estimatedCount = mode.ToLowerInvariant() switch
+        {
+            "everypoint" => points.Length + (closed ? 1 : 0),
+            "uniform" => (int)Math.Ceiling(points.Length / (double)Math.Max(1,(int)Math.Ceiling(points.Length / (double)budget))),
+            "arclength" => (int)Math.Max(2,Math.Ceiling(length / step) + (closed ? 0 : 1)),
+            _ => throw new InvalidOperationException($"contour.toPoints resample mode '{mode}' is not supported (arcLength | uniform | everyPoint).")
+        };
+        if (!double.IsFinite(estimatedCount) || estimatedCount < 2 || estimatedCount > budget)
+        {
+            var suggestedStep = mode.Equals("arcLength",StringComparison.OrdinalIgnoreCase) ? length / Math.Max(1,budget-(closed?0:1)) : 0;
+            throw new InvalidOperationException($"contour.toPoints stage=pre-sample-budget: estimatedCount={estimatedCount}, maxPoints={budget}, length={length:0.###}, sampleStep={step}, suggestedStep={suggestedStep:0.###}. No points were emitted.");
+        }
 
-        double length;
         double stepUsed;
         VisionPoint2D[] samples;
         switch (mode.ToLowerInvariant())
@@ -51,12 +66,15 @@ public sealed class ContourToPointsNode : IVisionNodeExecutor
         }
 
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("pointCount", samples.Length),
-            ("length", length), ("stepUsed", stepUsed), ("resample", mode), ("closed", closed));
+            ("length", length), ("stepUsed", stepUsed), ("resample", mode), ("closed", closed),("sourceClosed",sourceClosed),
+            ("closurePolicy","closed appends first point only for everyPoint; arcLength excludes duplicate endpoint"),
+            ("includesClosingEndpoint",closed && mode.Equals("everyPoint",StringComparison.OrdinalIgnoreCase)),("estimatedCount",estimatedCount),("maxPoints",budget));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
                 ["pointList"] = VisionValue.PointList(samples), ["found"] = VisionValue.Boolean(true),
                 ["pointCount"] = VisionValue.Integer(samples.Length), ["length"] = VisionValue.Double(length),
+                ["sourceClosed"] = VisionValue.Boolean(sourceClosed), ["closurePolicy"] = VisionValue.String("explicit closed parameter overrides source; everyPoint repeats first point, arcLength does not"),
                 ["stepUsed"] = VisionValue.Double(stepUsed), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
@@ -98,7 +116,19 @@ public sealed class ArcFitNode : IVisionNodeExecutor
 
         var circle = JLVisionPointFitting.Circle(points);
         ToleranceGeometry.Finite(circle.X, circle.Y, circle.Radius);
-        var angles = points.Select(p => Math.Atan2(p.Y - circle.Y, p.X - circle.X) * 180 / Math.PI).Order().ToArray();
+        // Canonical angular ordering makes fitting and endpoints independent of input order.
+        var ordered = points.Select((Point, Index) => new
+            {
+                Point, Index,
+                Angle = Math.Atan2(Point.Y - circle.Y, Point.X - circle.X) * 180 / Math.PI
+            })
+            .OrderBy(item => item.Angle).ToArray();
+        var angles = ordered.Select(item => item.Angle).ToArray();
+        var internalGaps = angles.Skip(1).Select((angle, i) => angle - angles[i]).OrderBy(value => value).ToArray();
+        var typicalGap = internalGaps.Length == 0 ? 0 : internalGaps[internalGaps.Length / 2];
+        var discontinuityLimit = Math.Max(2, typicalGap * 6);
+        if (internalGaps.Any(value => value > discontinuityLimit))
+            return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "multiple-arcs-or-discontinuous-input", nodeType: Type));
         var gap = angles[0] + 360 - angles[^1];
         var gapEnd = angles[0]; var gapStart = angles[^1];
         for (var i = 1; i < angles.Length; i++)
@@ -118,7 +148,9 @@ public sealed class ArcFitNode : IVisionNodeExecutor
         var rms = Math.Sqrt(radii.Average(r => (r - circle.Radius) * (r - circle.Radius)));
         var deviation = maximum - minimum;
         var within = maxDeviation <= 0 || deviation <= maxDeviation;
-        var chord = MeasurementMath.Hypot(points[0].X - points[^1].X, points[0].Y - points[^1].Y);
+        var chord = MeasurementMath.Hypot(
+            ordered.First(item => item.Angle == gapEnd).Point.X - ordered.First(item => item.Angle == gapStart).Point.X,
+            ordered.First(item => item.Angle == gapEnd).Point.Y - ordered.First(item => item.Angle == gapStart).Point.Y);
         var arcLength = sweep * Math.PI / 180 * circle.Radius;
 
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", points.Length),
@@ -267,6 +299,13 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
         if (window is < 1 or > 200) throw new InvalidOperationException("measure.curvature fittingWindow must be within 1..200.");
         var cornerRadius = node.GetDouble("cornerRadius", 0);
         if (!double.IsFinite(cornerRadius) || cornerRadius < 0) throw new InvalidOperationException("measure.curvature cornerRadius must be finite and >= 0 (0 disables corner counting).");
+        var minRadiusLimit = node.GetDouble("minRadius", 0);
+        var maxCurvatureLimit = node.GetDouble("maxCurvature", 0);
+        if (!double.IsFinite(minRadiusLimit) || minRadiusLimit < 0 || !double.IsFinite(maxCurvatureLimit) || maxCurvatureLimit < 0)
+            throw new InvalidOperationException("measure.curvature radius/curvature limits must be finite and >= 0.");
+        var toleranceEnabled = minRadiusLimit > 0 || maxCurvatureLimit > 0;
+        if (minRadiusLimit > 0 && maxCurvatureLimit > 0)
+            throw new InvalidOperationException("Enable only one of minRadius or maxCurvature.");
         var closed = node.GetBool("closed", true);
 
         var points = ProfileMath.SelectContour(context, node, closed);
@@ -320,9 +359,14 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
             }
         }
 
+        var within = !toleranceEnabled ? false
+            : minRadiusLimit > 0 ? minEntry.r >= minRadiusLimit : 1 / minEntry.r <= maxCurvatureLimit;
+        var evaluationState = toleranceEnabled ? within ? "pass" : "fail" : "not-evaluated";
+
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", count),
             ("minRadius", minEntry.r), ("minRadiusIndex", minEntry.i), ("meanCurvature", meanCurvature),
-            ("cornerCount", corners.Count), ("window", window), ("cornerRadius", cornerRadius));
+            ("cornerCount", corners.Count), ("window", window), ("cornerRadius", cornerRadius),
+            ("toleranceEnabled", toleranceEnabled), ("evaluationState", evaluationState), ("withinTolerance", within));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -334,13 +378,15 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
                 {
                     index = c.Index, radius = Math.Round(c.Radius, 6), x = Math.Round(c.Point.X, 6), y = Math.Round(c.Point.Y, 6)
                 }))),
-                ["withinTolerance"] = VisionValue.Boolean(true), ["diagnostics"] = VisionValue.String(diagnostics)
+                ["withinTolerance"] = VisionValue.Boolean(within), ["toleranceEnabled"] = VisionValue.Boolean(toleranceEnabled),
+                ["evaluationState"] = VisionValue.String(evaluationState), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["found"] = true, ["minRadius"] = minEntry.r, ["maxCurvature"] = 1 / minEntry.r,
                 ["meanCurvature"] = meanCurvature, ["cornerCount"] = corners.Count, ["sampleCount"] = count,
-                ["withinTolerance"] = true, ["unit"] = "px", ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
+                ["withinTolerance"] = within, ["toleranceEnabled"] = toleranceEnabled,
+                ["evaluationState"] = evaluationState, ["unit"] = "px", ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             },
             corners.Select((c, i) => new VisionOverlay($"corner-{i}", VisionOverlayType.Point, X: c.Point.X, Y: c.Point.Y,
                 Label: $"R{c.Radius:0.###}")).ToArray()));
@@ -568,28 +614,39 @@ public sealed class ContourDistanceNode : IVisionNodeExecutor
             return ValueTask.FromResult(ToleranceGeometry.Missing(0, "insufficient-points", nodeType: Type));
 
         var sa = ProfileMath.Resample(a, closed, step, budget);
-        var sb = ProfileMath.Resample(b, closed, step, budget);
         var min = double.MaxValue; var max = 0.0; var sum = 0.0;
         VisionPoint2D closestA = default; VisionPoint2D closestB = default;
+        // Distance is sample-to-segment, never sample-to-sample. Only the source
+        // sampling introduces an approximation; the target retains every segment.
         foreach (var p in sa)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var direct = double.MaxValue; VisionPoint2D best = default;
-            foreach (var q in sb)
+            var segments = closed ? b.Length : b.Length - 1;
+            for (var j = 0; j < segments; j++)
             {
-                var dx = p.X - q.X; var dy = p.Y - q.Y;
-                var distance = Math.Sqrt(dx * dx + dy * dy);
-                if (distance < direct) { direct = distance; best = q; }
+                var q = b[j]; var end = b[(j + 1) % b.Length];
+                var ex = end.X - q.X; var ey = end.Y - q.Y;
+                var length2 = ex * ex + ey * ey;
+                var t = length2 > 0 ? Math.Clamp(((p.X - q.X) * ex + (p.Y - q.Y) * ey) / length2, 0, 1) : 0;
+                var projection = new VisionPoint2D(q.X + t * ex, q.Y + t * ey);
+                var distance = MeasurementMath.Hypot(p.X - projection.X, p.Y - projection.Y);
+                if (distance < direct) { direct = distance; best = projection; }
             }
             if (direct < min) { min = direct; closestA = p; closestB = best; }
             if (direct > max) max = direct;
             sum += direct;
         }
         var mean = sum / sa.Length;
+        // A source sample is at most half a grid step from any omitted source point.
+        var minSamplingErrorBoundPx = step / 2;
+        var maxSamplingErrorBoundPx = step;
         var reported = mode == "gap" ? min : max;
         var within = limit <= 0 || reported <= limit;
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", sa.Length),
-            ("mode", mode), ("minDistance", min), ("maxDistance", max), ("meanDistance", mean), ("withinTolerance", within));
+            ("mode", mode), ("minDistance", min), ("maxDistance", max), ("meanDistance", mean), ("withinTolerance", within),
+            ("minSamplingErrorBoundPx", minSamplingErrorBoundPx), ("maxSamplingErrorBoundPx", maxSamplingErrorBoundPx),
+            ("distanceDefinition", "source-samples-to-reference-segments"));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -597,6 +654,8 @@ public sealed class ContourDistanceNode : IVisionNodeExecutor
                 ["distance"] = VisionValue.Double(reported), ["minDistance"] = VisionValue.Double(min),
                 ["maxDistance"] = VisionValue.Double(max), ["meanDistance"] = VisionValue.Double(mean),
                 ["closestPointA"] = VisionValue.Point(closestA), ["closestPointB"] = VisionValue.Point(closestB),
+                ["minSamplingErrorBoundPx"] = VisionValue.Double(minSamplingErrorBoundPx),
+                ["maxSamplingErrorBoundPx"] = VisionValue.Double(maxSamplingErrorBoundPx),
                 ["withinTolerance"] = VisionValue.Boolean(within), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>

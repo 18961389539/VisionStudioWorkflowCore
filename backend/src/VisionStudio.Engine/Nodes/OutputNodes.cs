@@ -52,7 +52,10 @@ public sealed class ExportResultNode : IVisionNodeExecutor
 /// <summary>HTTP request with linked timeout, optional retries, and status diagnostics; non-2xx fails after retries.</summary>
 public sealed class HttpRequestNode(HttpClient? httpClient = null) : IVisionNodeExecutor
 {
-    private static readonly HttpClient SharedClient = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly HttpClient SharedClient = new(new HttpClientHandler { AllowAutoRedirect = false })
+    {
+        Timeout = Timeout.InfiniteTimeSpan
+    };
     private readonly HttpClient _client = httpClient ?? SharedClient;
     public string Type => "output.httpRequest";
 
@@ -65,7 +68,7 @@ public sealed class HttpRequestNode(HttpClient? httpClient = null) : IVisionNode
         var timeoutMs = Integer(node, "timeoutMs", 10000, 1, 120000);
         var maxResponseBytes = Integer(node, "maxResponseBytes", 1048576, 1, 67108864);
         var methodText = node.GetString("method", "GET").Trim().ToUpperInvariant();
-        if (methodText is not ("GET" or "POST" or "PUT" or "DELETE" or "HEAD")) throw new InvalidOperationException($"Unsupported HTTP method '{methodText}'.");
+        if (methodText is not ("GET" or "POST" or "PUT" or "PATCH" or "DELETE" or "HEAD")) throw new InvalidOperationException($"Unsupported HTTP method '{methodText}'.");
         var requestedRetries = node.Parameters?.ContainsKey("retries") == true ? Integer(node, "retries", 0, 0, 5)
             : NodeCompletionGuards.RetryAttempts(NodeCompletionGuards.RetryPolicy(node)) - 1;
         var retryDelayMs = Integer(node, "retryDelayMs", 250, 0, 5000);
@@ -75,14 +78,17 @@ public sealed class HttpRequestNode(HttpClient? httpClient = null) : IVisionNode
         if (idempotencyKey.Length > 256 || idempotencyKey.Any(ch => ch < 33 || ch > 126))
             throw new InvalidOperationException("幂等键须为最多 256 个可打印 ASCII 字符，不含空格和换行；可接入每件产品的唯一编号。");
         var retryWrites = node.GetBool("retryWriteRequests", false);
-        if (!readOnly && retryWrites && requestedRetries > 0 && idempotencyKey.Length == 0)
-            throw new InvalidOperationException("写请求重试需要稳定的幂等键，请连接 idempotencyKey 或配置该参数；服务端也须支持此幂等键。");
+        // A write is never retried merely because a retry budget exists. Even an explicitly
+        // requested write retry is reduced to one attempt when no stable key is available.
         var retries = readOnly || retryWrites && idempotencyKey.Length > 0 ? requestedRetries : 0;
         var retrySuppressed = retries != requestedRetries;
+        var retrySuppressedReason = !retrySuppressed ? null
+            : !readOnly && idempotencyKey.Length == 0 ? "missing-idempotency-key"
+            : "write-retry-disabled";
         var hasBodyInput = context.TryGetValue("body", out var bodyInput);
         var hasValueInput = context.TryGetValue("value", out var valueInput);
         if (hasBodyInput && hasValueInput) throw new InvalidOperationException("HTTP 正文只能连接 body 或 value 之一：body 发送原文，value 序列化为 JSON。");
-        if (readOnly && (hasBodyInput || hasValueInput)) throw new InvalidOperationException("GET/HEAD 不发送正文，请断开正文输入或改用 POST/PUT/DELETE。");
+        if (readOnly && (hasBodyInput || hasValueInput)) throw new InvalidOperationException("GET/HEAD 不发送正文，请断开正文输入或改用 POST/PUT/PATCH/DELETE。");
         var body = readOnly ? "" : hasBodyInput ? bodyInput!.Require<string>("body") : node.GetString("body", string.Empty);
         var contentType = node.GetString("contentType", "application/json");
         if (hasValueInput)
@@ -114,12 +120,8 @@ public sealed class HttpRequestNode(HttpClient? httpClient = null) : IVisionNode
                 timeout.CancelAfter(timeoutMs);
                 try
                 {
-                    using var request = new HttpRequestMessage(method, uri);
-                    if (idempotencyKey.Length > 0) request.Headers.Add("Idempotency-Key", idempotencyKey);
-                    if (method != HttpMethod.Get && method != HttpMethod.Head && body.Length > 0)
-                        request.Content = new StringContent(body, Encoding.UTF8, contentType);
                     lastResponse?.Dispose(); lastResponse = null;
-                    lastResponse = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+                    lastResponse = await SendWithSafeRedirectsAsync(method, uri, body, contentType, idempotencyKey, timeout.Token).ConfigureAwait(false);
                     lastBody = await ReadBoundedBodyAsync(lastResponse.Content, maxResponseBytes, timeout.Token).ConfigureAwait(false);
                     responseComplete = true;
                     if (lastResponse.IsSuccessStatusCode) break;
@@ -134,7 +136,7 @@ public sealed class HttpRequestNode(HttpClient? httpClient = null) : IVisionNode
                 catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
                 {
                     // Preserve OperationCanceledException so callers/tests treating linked timeout as cancel still work.
-                    lastError = new TaskCanceledException($"HTTP request timed out after {timeoutMs} ms (attempt {attempts}/{retries + 1}).", ex);
+                    lastError = new TaskCanceledException($"HTTP request timed out after {timeoutMs} ms (attempts={attempts}/{retries + 1}; retrySuppressed={retrySuppressed}; reason={retrySuppressedReason ?? "none"}).", ex);
                     if (attempt == retries) break;
                 }
                 catch (HttpRequestException ex)
@@ -157,10 +159,26 @@ public sealed class HttpRequestNode(HttpClient? httpClient = null) : IVisionNode
                 ("url", uri.GetLeftPart(UriPartial.Path)), ("method", methodText), ("statusCode", statusCode),
                 ("success", success), ("attempts", attempts), ("retries", retries), ("timeoutMs", timeoutMs),
                 ("elapsedMs", elapsedMs), ("responseLength", responseBody.Length), ("requestBytes", requestBytes),
-                ("requestedRetries", requestedRetries), ("retrySuppressed", retrySuppressed), ("idempotencyKeyPresent", idempotencyKey.Length > 0),
+                ("requestedRetries", requestedRetries), ("retrySuppressed", retrySuppressed), ("retrySuppressedReason", retrySuppressedReason), ("idempotencyKeyPresent", idempotencyKey.Length > 0),
+                ("idempotencyHeader", idempotencyKey.Length > 0 ? "Idempotency-Key" : null),
+                ("idempotencyNormalization", "trim+printable-ascii"),
                 ("requestBodySource", hasValueInput ? "value-json" : hasBodyInput ? "body-input" : "parameter"));
+            if (NodeCompletionGuards.DiagnosticsLevel(node) == "minimal" && retrySuppressed)
+            {
+                var minimal = JsonSerializer.Deserialize<Dictionary<string, object?>>(diag)!;
+                minimal["retrySuppressed"] = true;
+                minimal["retrySuppressedReason"] = retrySuppressedReason;
+                diag = JsonSerializer.Serialize(minimal);
+            }
             if (!success)
-                throw lastError ?? new HttpRequestException($"HTTP request failed after {attempts} attempt(s).", null, status);
+            {
+                var error = lastError ?? new HttpRequestException($"HTTP request failed after {attempts} attempt(s).", null, status);
+                // Executors normally publish diagnostics as an output. Preserve them for the
+                // failure path too, including the real send count and retry suppression reason.
+                error.Data["diagnostics"] = diag;
+                error.Data["attempts"] = attempts;
+                throw error;
+            }
 
             return new NodeExecutorResult(new Dictionary<string, VisionValue>
             {
@@ -175,10 +193,62 @@ public sealed class HttpRequestNode(HttpClient? httpClient = null) : IVisionNode
             }, new Dictionary<string, object?>
             {
                 ["statusCode"] = statusCode, ["reasonPhrase"] = reasonPhrase, ["responseLength"] = responseBody.Length,
-                ["attempts"] = attempts, ["elapsedMs"] = Math.Round(elapsedMs, 3), ["warningCount"] = warnings, ["retrySuppressed"] = retrySuppressed, ["diagnostics"] = diag
+                ["attempts"] = attempts, ["elapsedMs"] = Math.Round(elapsedMs, 3), ["warningCount"] = warnings, ["retrySuppressed"] = retrySuppressed, ["retrySuppressedReason"] = retrySuppressedReason, ["diagnostics"] = diag
             });
         }
         finally { lastResponse?.Dispose(); }
+    }
+
+    private async Task<HttpResponseMessage> SendWithSafeRedirectsAsync(
+        HttpMethod method, Uri uri, string body, string contentType, string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var currentMethod = method;
+        var currentUri = uri;
+        for (var redirect = 0; redirect <= 5; redirect++)
+        {
+            using var request = new HttpRequestMessage(currentMethod, currentUri);
+            if (idempotencyKey.Length > 0) request.Headers.Add("Idempotency-Key", idempotencyKey);
+            if (currentMethod != HttpMethod.Get && currentMethod != HttpMethod.Head && body.Length > 0)
+                request.Content = new StringContent(body, Encoding.UTF8, contentType);
+            var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode is not (HttpStatusCode.MovedPermanently or HttpStatusCode.Found
+                or HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect))
+                return response;
+            if (redirect == 5)
+            {
+                response.Dispose();
+                throw new HttpRequestException("HTTP redirect chain exceeded 5 hops.");
+            }
+
+            var location = response.Headers.Location;
+            if (location is null)
+            {
+                response.Dispose();
+                throw new HttpRequestException($"HTTP redirect {(int)response.StatusCode} did not include a Location header.");
+            }
+            if (!location.IsAbsoluteUri)
+                location = new Uri(currentUri, location);
+            if (location.Scheme is not ("http" or "https"))
+            {
+                response.Dispose();
+                throw new InvalidOperationException("HTTP redirect target must use http or https.");
+            }
+            if (!string.Equals(currentUri.Host, location.Host, StringComparison.OrdinalIgnoreCase)
+                && (currentUri.UserInfo.Length > 0 || request.Headers.Authorization is not null))
+            {
+                response.Dispose();
+                throw new InvalidOperationException("HTTP redirect crossed hosts with a credential-bearing request; the redirect was rejected.");
+            }
+
+            var status = response.StatusCode;
+            response.Dispose();
+            if (status == HttpStatusCode.SeeOther || status == HttpStatusCode.Found && currentMethod == HttpMethod.Post
+                || status == HttpStatusCode.MovedPermanently && currentMethod == HttpMethod.Post)
+                currentMethod = HttpMethod.Get;
+            currentUri = location;
+        }
+        throw new HttpRequestException("HTTP redirect chain exceeded 5 hops.");
     }
 
     private static int Integer(NodeDefinition node, string name, int fallback, int min, int max)

@@ -13,8 +13,8 @@ public static class RegionGapCatalog
     private static readonly PortDescriptor Next = new("next", VisionDataType.Control);
     private static readonly PortDescriptor Diagnostics = new("diagnostics", VisionDataType.String);
     private static readonly PortDescriptor Found = new("found", VisionDataType.Boolean);
-    private static readonly ParameterDescriptor Index = new("index", "Zero-based Index", "number", 0, 0, 1999, 1,
-        Description: "Which object in the connected list to use (0-based). Out of range returns found=false.");
+    private static readonly ParameterDescriptor Index = new("index", "Zero-based Index", "number", 0, 0, 100000, 1,
+        Description: "Which object in the connected list to use (0-based). Out of range returns found=false or fails according to emptyPolicy.");
 
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
@@ -55,7 +55,7 @@ public static class RegionGapCatalog
                     VisibleWhen: new("shape", ["circle"]), Description: "Circle radius; must be positive."),
                 new("pointsJson", "Polygon Points JSON", "textarea", "[[20,20],[120,20],[120,120]]", Group: "Geometry",
                     VisibleWhen: new("shape", ["polygon"]),
-                    Description: "Fallback [x,y] pairs when no pointList is wired. At least three points, at most 20000, finite and within +/-100000000 px."),
+                    Description: "Fallback [x,y] pairs when no pointList is wired. At least three points, at most 1000 (the region.fromRoi rasterization limit), finite, non-zero area and within +/-100000000 px."),
                 new("expand", "Expand (px)", "number", 0, -1000, 1000, .5, Unit: "px", Group: "Adjust",
                     Description: "Grows the ROI on every side; negative values shrink it. Use it to leave margin for a following caliper search, or to tighten a located box."),
             ],
@@ -64,11 +64,12 @@ public static class RegionGapCatalog
 
         new("roi.fromDetection", "ROI from Detection", "Region",
             [Exec, new("detections", VisionDataType.DetectionList)],
-            [new("roi", VisionDataType.Roi), new("index", VisionDataType.Integer), new("x", VisionDataType.Double),
+            [new("roi", VisionDataType.Roi, Required: false), new("found", VisionDataType.Boolean), new("index", VisionDataType.Integer), new("x", VisionDataType.Double),
              new("y", VisionDataType.Double), new("width", VisionDataType.Double), new("height", VisionDataType.Double),
              new("radius", VisionDataType.Double), Diagnostics, Next],
             [
                 Index,
+                new("emptyPolicy", "Missing Detection Policy", "select", "empty", Options: [new("Emit empty", "empty"), new("Fail", "fail")], Description: "Out-of-range index emits found=false without roi, or fails before downstream caliper/crop nodes."),
                 new("shape", "Shape", "select", "rectangle", Group: "Geometry", Options:
                 [
                     new("Rectangle (bounding box)", "rectangle"),
@@ -84,11 +85,13 @@ public static class RegionGapCatalog
         new("region.fromContour", "Region from Contour", "Region",
             [Exec, new("contours", VisionDataType.Contour), new("image", VisionDataType.Image, Required: false)],
             [new("region", VisionDataType.Region), new("image", VisionDataType.Image), Found,
-             new("count", VisionDataType.Integer), new("area", VisionDataType.Integer), Diagnostics, Next],
+             new("count", VisionDataType.Integer), new("area", VisionDataType.Integer), new("sourceMappings", VisionDataType.String), Diagnostics, Next],
             [
                 Index,
                 new("allContours", "Fill All Contours", "boolean", false, Group: "Selection",
-                    Description: "Fill every contour in the list into one region instead of only index. Use it when the measured feature is made of several segments (an interrupted edge)."),
+                    Description: "Fill every contour in the list into one region instead of only index. All mode ignores index and validates every selected contour."),
+                new("preserveHierarchy", "Preserve Contour Holes", "boolean", false, Group: "Selection",
+                    Description: "When allContours=true, fill only exterior contours and keep child holes as background. Default flat mode fills every contour."),
                 new("expand", "Expand (px)", "number", 0, 0, 50, 1, Unit: "px", Group: "Raster",
                     Description: "Dilates the filled polygon by an elliptical kernel of this radius, which compensates half-pixel contour sampling and hairline gaps."),
                 new("invert", "Invert", "boolean", false, Group: "Raster",
@@ -101,12 +104,15 @@ public static class RegionGapCatalog
         new("region.toMask", "Region to Mask", "Region",
             [Exec, new("region", VisionDataType.Region)],
             [new("image", VisionDataType.Image), new("width", VisionDataType.Integer), new("height", VisionDataType.Integer),
-             new("area", VisionDataType.Integer), new("count", VisionDataType.Integer), Diagnostics, Next],
+             new("area", VisionDataType.Integer), new("count", VisionDataType.Integer), new("sourceMappings", VisionDataType.String),
+             new("labelImage", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), Diagnostics, Next],
             [
                 new("foreground", "Foreground Value", "number", 255, 0, 255, 1, Group: "Values",
-                    Description: "Gray value written inside the region. 255 is what region.fromMask and contour.fromMask expect; 1 keeps it usable as a weight map."),
+                    Description: "Gray value written inside the region. 255 is what region.fromMask and contour.fromMask expect; 1 keeps it usable as a weight map. 0 cannot be recovered by a non-zero mask threshold and raises a warning."),
                 new("background", "Background Value", "number", 0, 0, 255, 1, Group: "Values",
                     Description: "Gray value outside the region."),
+                new("emitLabels", "Emit Object Label Image", "boolean", false, Group: "Output",
+                    Description: "Also emit an int32 labelImage where 0 is background and label N maps to zero-based object index N-1."),
             ],
             "Renders a pixel region into an 8-bit mask image. Every mask consumer in the catalog (region.fromMask, contour.fromMask, image.reduceDomain, inference) had no producer, so a region could not be fed back as a mask, exported, or handed to a model. Wire: region -> image. Region dimensions are carried by the region itself, so no canvas image is needed. algorithmBackend=managed.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: false), Actions: []),
@@ -114,7 +120,7 @@ public static class RegionGapCatalog
         // ── 凸性缺陷（XLD 凸包差）────────────────────────────────────
         new("contour.convexity", "Contour Convexity", "Contour",
             [Exec, new("contours", VisionDataType.Contour)],
-            [Found, new("pointCount", VisionDataType.Integer), new("hullPointCount", VisionDataType.Integer),
+            [Found, new("closed", VisionDataType.Boolean), new("pointCount", VisionDataType.Integer), new("hullPointCount", VisionDataType.Integer),
              new("area", VisionDataType.Double), new("hullArea", VisionDataType.Double), new("convexity", VisionDataType.Double),
              new("maxDefectDepth", VisionDataType.Double), new("maxDefectPoint", VisionDataType.Point2D),
              new("defectCount", VisionDataType.Integer), new("defectsJson", VisionDataType.String),
@@ -126,7 +132,7 @@ public static class RegionGapCatalog
                 new("minDefectDepth", "Minimum Defect Depth", "number", .5, 0, 1000000, .1, Unit: "px", Group: "Limits",
                     Description: "Depressions shallower than this are ignored when counting defects. Below roughly one pixel you are counting contour sampling noise."),
                 new("maxDefectDepth", "Max Defect Depth (0=off)", "number", 0, 0, 1000000, .1, Unit: "px", Group: "Limits",
-                    Description: "Optional gate: withinTolerance reports maxDefectDepth <= limit. 0 disables it."),
+                    Description: "Optional gate: 0 disables it and diagnostics report an infinite effective threshold; when enabled it must be >= minDefectDepth."),
             ],
             "Convexity of one closed contour: area / hullArea, the deepest dent and how many dents there are. A dent (chipped edge, notch, burr pocket) is a stretch of contour that sits inside the convex hull; the node measures each sample's distance to the hull boundary and groups consecutive samples above minDefectDepth into one defect. jlvision.contourOp has no convexity operator, and building the same result from regions required region.fromContour first. Units: pixels.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: [])

@@ -39,6 +39,10 @@ var width = node.GetInt("width", 1280);
         var maxOffsetY = node.GetDouble("maxOffsetY", 100);
         var maxAngleDeg = node.GetDouble("maxAngleDeg", 15);
 
+        if (width is < 1 or > 16384 || height is < 1 or > 16384 || radius is < 1 or > 10000)
+            throw new InvalidOperationException("Synthetic image width/height must be 1..16384 and radius must be 1..10000.");
+        if (!double.IsFinite(centerX) || !double.IsFinite(centerY))
+            throw new InvalidOperationException("Synthetic image centre coordinates must be finite.");
         if (sampleIndex is < 0 or > 10_000)
             throw new InvalidOperationException("Sample Index must be between 0 and 10000.");
         if (new[] { offsetStepX, offsetStepY, angleStepDeg, maxOffsetX, maxOffsetY, maxAngleDeg }.Any(value => !double.IsFinite(value)))
@@ -49,6 +53,7 @@ var width = node.GetInt("width", 1280);
         var offsetX = 0d;
         var offsetY = 0d;
         var angleDeg = 0d;
+        var effectiveRandomSeed = randomSeed;
         switch (placementMode)
         {
             case "fixed":
@@ -69,7 +74,8 @@ var width = node.GetInt("width", 1280);
             }
             case "randomEachRun":
             {
-                var random = Random.Shared;
+                effectiveRandomSeed = Random.Shared.Next(0, int.MaxValue);
+                var random = new Random(effectiveRandomSeed);
                 var placementFound = false;
                 for (var attempt = 0; attempt < 2048; attempt++)
                 {
@@ -90,6 +96,11 @@ var width = node.GetInt("width", 1280);
             default:
                 throw new InvalidOperationException($"Unsupported synthetic image placement mode '{placementMode}'.");
         }
+
+        // Fixed mode validates the circle but keeps legacy canvas clipping for decorative
+        // rectangles/lines; diagnostics still report placement and circle visibility.
+        if (placementMode == "fixed" && !CircleFitsImage(width, height, centerX, centerY, radius))
+            throw new InvalidOperationException($"Fixed synthetic circle is outside the {width}x{height} canvas. Reduce radius or move centerX/centerY inside the canvas.");
 
         var anchorX = centerX + offsetX;
         var anchorY = centerY + offsetY;
@@ -137,6 +148,7 @@ var width = node.GetInt("width", 1280);
             }
         }
 
+        var visibleAreaRatio = CircleVisibleAreaRatio(width, height, anchorX, anchorY, radius);
         var mat = new Mat(height, width, MatType.CV_8UC1, Scalar.All(28));
         Cv2.Circle(mat, new Point((int)Math.Round(anchorX), (int)Math.Round(anchorY)), radius, Scalar.All(225), -1, LineTypes.AntiAlias);
         if (Math.Abs(angleDeg % 360d) < 1e-9)
@@ -145,6 +157,19 @@ var width = node.GetInt("width", 1280);
             Cv2.FillConvexPoly(mat, rectangle.Select(ToPixel).ToArray(), Scalar.All(95), LineTypes.AntiAlias);
         Cv2.Line(mat, ToPixel(lineStart), ToPixel(lineEnd), Scalar.All(125), 5, LineTypes.AntiAlias);
         var image = VisionImage.Own(mat);
+        image.SetMetadata(new Dictionary<string, string>
+        {
+            ["placementMode"] = placementMode,
+            ["sampleIndex"] = sampleIndex.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["randomSeed"] = effectiveRandomSeed.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["offsetX"] = offsetX.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            ["offsetY"] = offsetY.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            ["angleDeg"] = angleDeg.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            ["centerX"] = anchorX.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            ["centerY"] = anchorY.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            ["radius"] = radius.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["visibleAreaRatio"] = visibleAreaRatio.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+        });
 
         var overlays = new List<VisionOverlay>();
         if (Math.Abs(angleDeg % 360d) < 1e-9)
@@ -161,7 +186,11 @@ var width = node.GetInt("width", 1280);
         JLVisionOperators.MinMax(synthMat, out double synthMin, out double synthMax);
         var synthMean = JLVisionOperators.Mean(synthMat);
         var synthDiag = CoordinateValidation.Diagnostics(Type, ("width", width), ("height", height), ("channels", synthMat.Channels()),
-            ("placementMode", placementMode), ("sampleIndex", sampleIndex), ("meanIntensity", synthMean), ("minIntensity", synthMin), ("maxIntensity", synthMax));
+            ("placementMode", placementMode), ("sampleIndex", sampleIndex), ("randomSeed", effectiveRandomSeed),
+            ("offsetX", offsetX), ("offsetY", offsetY), ("angleDeg", angleDeg),
+            ("requestedOffsetX", requestedOffsetX), ("requestedOffsetY", requestedOffsetY),
+            ("placementAdjusted", placementAdjusted), ("visibleAreaRatio", visibleAreaRatio),
+            ("meanIntensity", synthMean), ("minIntensity", synthMin), ("maxIntensity", synthMax));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(image), ["width"] = VisionValue.Integer(width), ["height"] = VisionValue.Integer(height), ["channels"] = VisionValue.Integer(synthMat.Channels()), ["meanIntensity"] = VisionValue.Double(synthMean), ["minIntensity"] = VisionValue.Double(synthMin), ["maxIntensity"] = VisionValue.Double(synthMax), ["diagnostics"] = VisionValue.String(synthDiag) },
             new Dictionary<string, object?>
@@ -170,14 +199,41 @@ var width = node.GetInt("width", 1280);
                 ["circle"] = $"({anchorX:0.##},{anchorY:0.##}) r={radius}",
                 ["placementMode"] = placementMode,
                 ["sampleIndex"] = sampleIndex,
+                ["randomSeed"] = effectiveRandomSeed,
                 ["offsetX"] = Math.Round(offsetX, 3),
                 ["offsetY"] = Math.Round(offsetY, 3),
                 ["angleDeg"] = Math.Round(angleDeg, 3),
                 ["placementAdjusted"] = placementAdjusted,
                 ["requestedOffsetX"] = Math.Round(requestedOffsetX, 3),
-                ["requestedOffsetY"] = Math.Round(requestedOffsetY, 3)
+                ["requestedOffsetY"] = Math.Round(requestedOffsetY, 3),
+                ["visibleAreaRatio"] = visibleAreaRatio,
+                ["metadata"] = image.Metadata
             },
             overlays));
+    }
+
+    private static bool CircleFitsImage(int width, int height, double centerX, double centerY, int radius)
+        => centerX - radius >= 0 && centerY - radius >= 0
+            && centerX + radius <= width - 1 && centerY + radius <= height - 1;
+
+    private static double CircleVisibleAreaRatio(int width, int height, double centerX, double centerY, int radius)
+    {
+        if (CircleFitsImage(width, height, centerX, centerY, radius)) return 1;
+        var left = Math.Max(0, centerX - radius);
+        var right = Math.Min(width - 1, centerX + radius);
+        if (right <= left) return 0;
+        const int slices = 1024;
+        var step = (right - left) / slices;
+        var visibleArea = 0d;
+        for (var i = 0; i < slices; i++)
+        {
+            var x = left + (i + 0.5) * step;
+            var half = Math.Sqrt(Math.Max(0, radius * radius - (x - centerX) * (x - centerX)));
+            var top = Math.Max(0, centerY - half);
+            var bottom = Math.Min(height - 1, centerY + half);
+            visibleArea += Math.Max(0, bottom - top) * step;
+        }
+        return Math.Clamp(visibleArea / (Math.PI * radius * radius), 0, 1);
     }
 
     private static Point ToPixel((double X, double Y) point)
@@ -318,7 +374,11 @@ public sealed class ThresholdNode : IVisionNodeExecutor
                 ["byteScale"] = source.Depth() == MatType.CV_16U ? PreprocessImageHelpers.ByteScale(inputBitDepth) : 1d,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage"
             };
-            DefectNodeHelpers.AttachByteStats(outputs, summary, output, Type, ("mode", "manual"), ("threshold", threshold), ("invert", invert), ("autoGray", converted));
+            DefectNodeHelpers.AttachByteStats(outputs, summary, output, Type, ("mode", "manual"), ("threshold", threshold), ("invert", invert), ("autoGray", converted),
+                ("inputBitDepthUsed", inputBitDepth?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? (source.Depth() == MatType.CV_16U ? "16" : "8")),
+                ("byteScale", source.Depth() == MatType.CV_16U ? PreprocessImageHelpers.ByteScale(inputBitDepth) : 1d),
+                ("roiBounds", $"{domain.Rect.X},{domain.Rect.Y},{domain.Rect.Width},{domain.Rect.Height}"),
+                ("foregroundDenominator", "ROI pixels; empty ROI fails before thresholding"));
             outputs["nonZeroCount"] = VisionValue.Integer(Convert.ToInt64(summary["nonZeroCount"]!));
             // 分母必须是 ROI 像素数：ROI 外已清零但仍占面积，用整图面积会让 ROI 越小、占比越接近 0。
             // 分子是 long，必须显式转 double，否则 10000/20000 走整除得 0。

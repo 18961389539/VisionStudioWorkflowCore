@@ -101,8 +101,14 @@ public sealed class DefectFilterNode : IVisionNodeExecutor
         if (!double.IsFinite(minContrast) || minContrast < 0) throw new InvalidOperationException("defect.filter minContrast must be >= 0 (0 disables).");
         if (!double.IsFinite(edgeMargin) || edgeMargin < 0) throw new InvalidOperationException("defect.filter edgeMarginPx must be >= 0.");
         if (maxCount is < 0 or > 10000) throw new InvalidOperationException("defect.filter maxCount must be within 0..10000 (0 = all).");
-        if (minContrast > 0 && image is null)
+        var allowMissing = node.GetBool("allowMissingRequiredGates", false);
+        var retention = (node.GetString("maxCountStrategy", "area") ?? "area").Trim().ToLowerInvariant();
+        if (retention is not ("area" or "class-priority" or "confidence"))
+            throw new InvalidOperationException("defect.filter maxCountStrategy must be area, class-priority or confidence.");
+        if (!allowMissing && minContrast > 0 && image is null)
             throw new InvalidOperationException("defect.filter minContrast requires the image port; connect the inspected image or set minContrast to 0.");
+        if (!allowMissing && edgeMargin > 0 && image is null && (node.GetInt("canvasWidth", 0) <= 0 || node.GetInt("canvasHeight", 0) <= 0))
+            throw new InvalidOperationException("defect.filter edgeMarginPx requires an image or an explicit canvasWidth/canvasHeight pair.");
 
         var (canvasWidth, canvasHeight) = DefectAnalysisHelpers.ResolveCanvas(node, image, detections);
         var removed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -110,6 +116,7 @@ public sealed class DefectFilterNode : IVisionNodeExecutor
             ["area"] = 0, ["aspect"] = 0, ["circularity"] = 0, ["contrast"] = 0, ["edge"] = 0, ["region"] = 0, ["count"] = 0
         };
         var kept = new List<VisionDetection>(detections.Length);
+        var discarded = new List<object>();
 
         foreach (var detection in detections)
         {
@@ -144,11 +151,20 @@ public sealed class DefectFilterNode : IVisionNodeExecutor
 
         if (maxCount > 0 && kept.Count > maxCount)
         {
+            var ordered = retention switch
+            {
+                "class-priority" => kept.OrderBy(item => item.ClassId ?? int.MaxValue).ThenByDescending(item => item.Area).ThenBy(item => item.Index),
+                "confidence" => kept.OrderByDescending(item => item.Confidence ?? double.NegativeInfinity).ThenByDescending(item => item.Area).ThenBy(item => item.Index),
+                _ => kept.OrderByDescending(item => item.Area).ThenBy(item => item.Index)
+            };
+            var selectedIndices = ordered.Take(maxCount).Select(item => item.Index).ToHashSet();
+            discarded.AddRange(kept.Where(item => !selectedIndices.Contains(item.Index)).Select(item => new { index = item.Index, classId = item.ClassId, area = item.Area, reason = "maxCount" }));
             removed["count"] += kept.Count - maxCount;
-            kept = kept.OrderByDescending(item => item.Area).Take(maxCount).ToList();
+            kept = kept.Where(item => selectedIndices.Contains(item.Index)).ToList();
         }
 
         var result = kept.Select((item, index) => DefectAnalysisHelpers.Reindex(item, index)).ToArray();
+        var discardedJson = JsonSerializer.Serialize(discarded);
         var removedTotal = detections.Length - result.Length;
         timer.Stop();
 
@@ -157,7 +173,9 @@ public sealed class DefectFilterNode : IVisionNodeExecutor
             ("removedBy", string.Join(",", removed.Where(pair => pair.Value > 0).Select(pair => $"{pair.Key}={pair.Value}"))),
             ("minArea", minArea), ("maxArea", maxArea), ("maxAspectRatio", maxAspect), ("minCircularity", minCircularity),
             ("minContrast", minContrast), ("edgeMarginPx", edgeMargin), ("canvas", $"{canvasWidth}x{canvasHeight}"),
-            ("regionGate", region is not null), ("elapsedMs", timer.Elapsed.TotalMilliseconds));
+            ("regionGate", region is not null), ("maxCount", maxCount), ("maxCountStrategy", retention),
+            ("allowMissingRequiredGates", allowMissing), ("discarded", discardedJson),
+            ("elapsedMs", timer.Elapsed.TotalMilliseconds));
 
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -167,6 +185,7 @@ public sealed class DefectFilterNode : IVisionNodeExecutor
                 ["inputCount"] = VisionValue.Integer(detections.Length),
                 ["removedCount"] = VisionValue.Integer(removedTotal),
                 ["removedByJson"] = VisionValue.String(JsonSerializer.Serialize(removed)),
+                ["discardedByJson"] = VisionValue.String(discardedJson),
                 ["found"] = VisionValue.Boolean(result.Length > 0),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
@@ -212,8 +231,16 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
             throw new InvalidOperationException("defect.geometry angleMode must be length-weighted or mean.");
         var offset = node.GetInt("contourOffset", 0);
         if (offset < 0) throw new InvalidOperationException("defect.geometry contourOffset must be >= 0.");
+        var selection = (node.GetString("selectionStrategy", "first") ?? "first").Trim().ToLowerInvariant();
+        if (selection is not ("first" or "largest-area")) throw new InvalidOperationException("defect.geometry selectionStrategy must be first or largest-area.");
+        if (contours is not null && contours.Count != detections.Length + offset)
+            throw new InvalidOperationException($"defect.geometry requires one contour per detection: got {contours.Count}, expected {detections.Length + offset} with contourOffset={offset}.");
 
-        var useContours = contours is not null && contours.Count >= detections.Length + offset;
+        var useContours = contours is not null;
+        var selectedIndices = selection == "largest-area"
+            ? Enumerable.Range(0, detections.Length).OrderByDescending(i => detections[i].Area).ThenBy(i => detections[i].Index).Take(maxDefects).ToArray()
+            : Enumerable.Range(0, Math.Min(maxDefects, detections.Length)).ToArray();
+        var selectedSet = selectedIndices.ToHashSet();
         var entries = new List<object>();
         double maxLength = 0, maxWidth = 0, totalArea = 0;
         var elongated = 0;
@@ -231,6 +258,8 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
                 (length, width, angle) = DefectGeometryAlgorithms.MeasureContour(contours[offset + index].Points);
                 source = "contour";
             }
+            else if (useContours)
+                throw new InvalidOperationException($"defect.geometry contour at offset+index={offset + index} has fewer than three points.");
             else
             {
                 length = Math.Max(detection.Width, detection.Height);
@@ -262,11 +291,12 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
                 plainCount++;
             }
 
-            if (index < maxDefects)
+            if (selectedSet.Contains(index))
             {
                 entries.Add(new
                 {
                     index = detection.Index,
+                    detectionIndex = index,
                     x = Math.Round(detection.X, 3),
                     y = Math.Round(detection.Y, 3),
                     length = Math.Round(length, 3),
@@ -276,7 +306,8 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
                     area = Math.Round(detection.Area, 2),
                     fill = Math.Round(detection.Width * detection.Height > 1e-9 ? detection.Area / (detection.Width * detection.Height) : 0, 4),
                     classId = detection.ClassId,
-                    source
+                    source,
+                    measurementSource = source
                 });
             }
         }
@@ -295,6 +326,9 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("count", detections.Length), ("elongatedCount", elongated),
             ("geometrySource", useContours ? "contour" : "bbox"), ("maxDefects", maxDefects),
+            ("measuredCount", entries.Count), ("unmeasuredCount", detections.Length - entries.Count),
+            ("truncated", detections.Length > entries.Count), ("selectionStrategy", selection),
+            ("measuredDetectionIndices", selectedIndices),
             ("elongationThreshold", elongationThreshold), ("angleMode", angleMode),
             ("maxLength", maxLength), ("maxWidth", maxWidth), ("dominantAngleDeg", dominantAngle),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
@@ -316,6 +350,9 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
             {
                 ["count"] = detections.Length, ["elongatedCount"] = elongated,
                 ["geometrySource"] = useContours ? "contour" : "bbox",
+                ["measuredCount"] = entries.Count, ["unmeasuredCount"] = detections.Length - entries.Count,
+                ["truncated"] = detections.Length > entries.Count, ["selectionStrategy"] = selection,
+                ["measuredDetectionIndices"] = selectedIndices,
                 ["maxLength"] = Math.Round(maxLength, 3), ["maxWidth"] = Math.Round(maxWidth, 3),
                 ["dominantAngleDeg"] = Math.Round(dominantAngle, 2),
                 ["totalArea"] = Math.Round(totalArea, 2),

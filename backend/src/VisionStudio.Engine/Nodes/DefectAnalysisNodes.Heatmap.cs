@@ -49,9 +49,17 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
         var mergeGap = node.GetDouble("mergeGapPx", 2);
         if (!double.IsFinite(mergeGap) || mergeGap < 0)
             throw new InvalidOperationException("defect.edgeDefect mergeGapPx must be >= 0.");
+        var exitDeviation = node.GetDouble("exitDeviation", 0);
+        if (!double.IsFinite(exitDeviation) || exitDeviation < 0)
+            throw new InvalidOperationException("defect.edgeDefect exitDeviation must be >= 0 (0 uses maxDeviation).");
+        var closed = node.GetBool("closedContour", false);
+        var maxSampleJump = node.GetDouble("maxSampleJumpPx", 0);
+        if (!double.IsFinite(maxSampleJump) || maxSampleJump < 0)
+            throw new InvalidOperationException("defect.edgeDefect maxSampleJumpPx must be >= 0 (0 disables the jump gate).");
 
         var deviations = new double[samples.Count];
         var arcLengths = new double[samples.Count];
+        var residualSum = 0d;
         if (hasLine)
         {
             var line = context.Require<VisionLine2D>("nominalLine");
@@ -66,6 +74,7 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
                 var rx = samples[index].X - line.Start.X;
                 var ry = samples[index].Y - line.Start.Y;
                 deviations[index] = ry * ux - rx * uy;
+                residualSum += Math.Abs(deviations[index]);
             }
         }
         else
@@ -77,14 +86,26 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
                 var dx = samples[index].X - circle.X;
                 var dy = samples[index].Y - circle.Y;
                 deviations[index] = Math.Sqrt(dx * dx + dy * dy) - circle.Radius;
+                residualSum += Math.Abs(deviations[index]);
             }
         }
 
+        var sampleDiagnostics = new List<object>();
         for (var index = 1; index < samples.Count; index++)
         {
             var dx = samples[index].X - samples[index - 1].X;
             var dy = samples[index].Y - samples[index - 1].Y;
             arcLengths[index] = Math.Sqrt(dx * dx + dy * dy);
+            if (arcLengths[index] <= 1e-9 || maxSampleJump > 0 && arcLengths[index] > maxSampleJump)
+                sampleDiagnostics.Add(new { index, previousIndex = index - 1, length = arcLengths[index], issue = arcLengths[index] <= 1e-9 ? "duplicate-or-zero-length" : "jump" });
+        }
+        if (closed)
+        {
+            var dx = samples[0].X - samples[^1].X;
+            var dy = samples[0].Y - samples[^1].Y;
+            arcLengths[0] = Math.Sqrt(dx * dx + dy * dy);
+            if (arcLengths[0] <= 1e-9 || maxSampleJump > 0 && arcLengths[0] > maxSampleJump)
+                sampleDiagnostics.Add(new { index = 0, previousIndex = samples.Count - 1, length = arcLengths[0], issue = arcLengths[0] <= 1e-9 ? "duplicate-or-zero-length" : "jump" });
         }
 
         bool Over(double deviation) => polarity switch
@@ -93,21 +114,23 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
             "short" => deviation < -maxDeviation,
             _ => Math.Abs(deviation) > maxDeviation
         };
+        bool Stay(double deviation) => polarity switch
+        {
+            "excess" => deviation > (exitDeviation > 0 ? exitDeviation : maxDeviation),
+            "short" => deviation < -(exitDeviation > 0 ? exitDeviation : maxDeviation),
+            _ => Math.Abs(deviation) > (exitDeviation > 0 ? exitDeviation : maxDeviation)
+        };
 
         var segments = new List<(int Start, int End)>();
         int? runStart = null;
         for (var index = 0; index < samples.Count; index++)
         {
-            if (Over(deviations[index]))
-            {
-                runStart ??= index;
-                continue;
-            }
-            if (runStart is not null)
+            if (runStart is not null && !Stay(deviations[index]))
             {
                 segments.Add((runStart.Value, index - 1));
                 runStart = null;
             }
+            if (runStart is null && Over(deviations[index])) runStart = index;
         }
         if (runStart is not null) segments.Add((runStart.Value, samples.Count - 1));
 
@@ -122,6 +145,15 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
             if (gap <= mergeGap) merged[^1] = (previous.Start, segment.End);
             else merged.Add(segment);
         }
+        if (closed && merged.Count > 1)
+        {
+            var firstSegment = merged[0]; var lastSegment = merged[^1];
+            if (firstSegment.Start == 0 && lastSegment.End == samples.Count - 1 && arcLengths[0] <= mergeGap)
+            {
+                merged[0] = (lastSegment.Start, firstSegment.End);
+                merged.RemoveAt(merged.Count - 1);
+            }
+        }
 
         var defects = new List<VisionDetection>();
         var segmentInfos = new List<object>();
@@ -130,8 +162,11 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
         {
             double length = 0, depth = 0;
             double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
-            for (var index = segment.Start; index <= segment.End; index++)
+            var wrapped = segment.Start > segment.End;
+            var segmentSamples = wrapped ? (segment.End - segment.Start + samples.Count + 1) : segment.End - segment.Start + 1;
+            for (var position = 0; position < segmentSamples; position++)
             {
+                var index = (segment.Start + position) % samples.Count;
                 length += arcLengths[index];
                 if (Math.Abs(deviations[index]) > Math.Abs(depth)) depth = deviations[index];
                 minX = Math.Min(minX, samples[index].X);
@@ -155,6 +190,7 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
                 index = defects.Count - 1,
                 startIndex = segment.Start,
                 endIndex = segment.End,
+                wrappedClosedSeam = wrapped,
                 length = Math.Round(length, 3),
                 depth = Math.Round(depth, 4),
                 x = Math.Round(centreX, 3),
@@ -163,12 +199,16 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
         }
 
         timer.Stop();
+        var sampleDiagnosticsJson = JsonSerializer.Serialize(sampleDiagnostics);
+        var fitResidual = residualSum / samples.Count;
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("count", defects.Count), ("samples", samples.Count),
-            ("maxDeviation", maxDeviation), ("polarity", polarity),
+            ("maxDeviation", maxDeviation), ("exitDeviation", exitDeviation), ("polarity", polarity),
+            ("closedContour", closed), ("fitResidual", fitResidual), ("sampleDiagnostics", sampleDiagnosticsJson),
             ("minSegmentLength", minLength), ("mergeGapPx", mergeGap),
             ("maxDepth", maxDepth), ("totalLength", totalLength),
             ("nominal", hasLine ? "line" : "circle"),
+            ("nominalType", hasLine ? "line" : "circle"), ("fitResidual", fitResidual),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
 
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -179,6 +219,7 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
                 ["maxDepth"] = VisionValue.Double(maxDepth),
                 ["totalLength"] = VisionValue.Double(totalLength),
                 ["segmentsJson"] = VisionValue.String(JsonSerializer.Serialize(segmentInfos)),
+                ["sampleDiagnosticsJson"] = VisionValue.String(sampleDiagnosticsJson),
                 ["found"] = VisionValue.Boolean(defects.Count > 0),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
@@ -186,6 +227,8 @@ public sealed class EdgeDefectNode : IVisionNodeExecutor
             {
                 ["count"] = defects.Count, ["maxDepth"] = Math.Round(maxDepth, 4),
                 ["totalLength"] = Math.Round(totalLength, 3), ["nominal"] = hasLine ? "line" : "circle",
+                ["fitResidual"] = fitResidual, ["sampleDiagnosticsJson"] = sampleDiagnosticsJson,
+                ["exitDeviation"] = exitDeviation, ["closedContour"] = closed,
                 ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                 ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             }));
@@ -238,18 +281,38 @@ public sealed class DefectHeatmapNode : IVisionNodeExecutor
         var colormap = (node.GetString("colormap", "heat") ?? "heat").Trim().ToLowerInvariant();
         if (colormap is not ("heat" or "gray")) throw new InvalidOperationException("defect.heatmap colormap must be heat or gray.");
 
+        var configuredWidth = node.GetInt("canvasWidth", 0);
+        var configuredHeight = node.GetInt("canvasHeight", 0);
+        if (configuredWidth < 0 || configuredHeight < 0 || configuredWidth == 0 != (configuredHeight == 0))
+            throw new InvalidOperationException("defect.heatmap canvasWidth and canvasHeight must both be 0 (automatic bounds) or both positive.");
+        var automaticBounds = configuredWidth == 0;
         var (canvasWidth, canvasHeight) = DefectAnalysisHelpers.ResolveCanvas(node, null, detections);
         if (canvasWidth < 1 || canvasHeight < 1)
             throw new InvalidOperationException("defect.heatmap needs a positive canvas; set canvasWidth/canvasHeight or feed at least one detection.");
 
+        var originX = 0d;
+        var originY = 0d;
+        if (automaticBounds && detections.Length > 0)
+        {
+            originX = Math.Floor(detections.Min(d => d.BoundingBox.X));
+            originY = Math.Floor(detections.Min(d => d.BoundingBox.Y));
+            canvasWidth = Math.Max(1, (int)Math.Ceiling(detections.Max(d => d.BoundingBox.X + d.BoundingBox.Width) - originX));
+            canvasHeight = Math.Max(1, (int)Math.Ceiling(detections.Max(d => d.BoundingBox.Y + d.BoundingBox.Height) - originY));
+        }
         var counts = new int[rows, cols];
+        var outOfBoundsCount = 0;
         foreach (var detection in detections.DistinctBy(item => item.Index))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var centreX = detection.BoundingBox.X + detection.BoundingBox.Width / 2;
             var centreY = detection.BoundingBox.Y + detection.BoundingBox.Height / 2;
-            var column = (int)(centreX / canvasWidth * cols);
-            var row = (int)(centreY / canvasHeight * rows);
+            if (!automaticBounds && (centreX < 0 || centreY < 0 || centreX > canvasWidth || centreY > canvasHeight))
+            {
+                outOfBoundsCount++;
+                continue;
+            }
+            var column = (int)((centreX - originX) / canvasWidth * cols);
+            var row = (int)((centreY - originY) / canvasHeight * rows);
             column = Math.Clamp(column, 0, cols - 1);
             row = Math.Clamp(row, 0, rows - 1);
             counts[row, column]++;
@@ -286,13 +349,16 @@ public sealed class DefectHeatmapNode : IVisionNodeExecutor
             Cv2.Rectangle(canvas, rect, colour, -1);
         }
 
-        var hotspotX = (hotspotColumn + 0.5) * canvasWidth / cols;
-        var hotspotY = (hotspotRow + 0.5) * canvasHeight / rows;
+        var hotspotX = originX + (hotspotColumn + 0.5) * canvasWidth / cols;
+        var hotspotY = originY + (hotspotRow + 0.5) * canvasHeight / rows;
         var countsJson = JsonSerializer.Serialize(new
         {
             gridCols = cols,
             gridRows = rows,
             canvas = new { width = canvasWidth, height = canvasHeight },
+            effectiveBounds = new { x = originX, y = originY, width = canvasWidth, height = canvasHeight },
+            automaticBounds,
+            outOfBoundsCount,
             rows = Enumerable.Range(0, rows).Select(row => Enumerable.Range(0, cols).Select(column => counts[row, column]).ToArray()).ToArray()
         });
         timer.Stop();
@@ -301,6 +367,8 @@ public sealed class DefectHeatmapNode : IVisionNodeExecutor
             Type, ("count", detections.Length), ("occupiedCells", occupied), ("totalCells", rows * cols),
             ("hotspotCell", $"{hotspotColumn},{hotspotRow}"), ("hotspotCount", hotspotCount),
             ("concentration", concentration), ("canvas", $"{canvasWidth}x{canvasHeight}"),
+            ("effectiveBounds", $"{originX},{originY},{canvasWidth},{canvasHeight}"),
+            ("automaticBounds", automaticBounds), ("outOfBoundsCount", outOfBoundsCount),
             ("grid", $"{cols}x{rows}"), ("elapsedMs", timer.Elapsed.TotalMilliseconds));
 
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -323,6 +391,8 @@ public sealed class DefectHeatmapNode : IVisionNodeExecutor
                 ["hotspotX"] = Math.Round(hotspotX, 2), ["hotspotY"] = Math.Round(hotspotY, 2),
                 ["hotspotCount"] = hotspotCount, ["concentration"] = Math.Round(concentration, 4),
                 ["canvas"] = $"{canvasWidth}x{canvasHeight}", ["grid"] = $"{cols}x{rows}",
+                ["automaticBounds"] = automaticBounds, ["outOfBoundsCount"] = outOfBoundsCount,
+                ["effectiveBounds"] = new { x = originX, y = originY, width = canvasWidth, height = canvasHeight },
                 ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                 ["algorithmBackend"] = "opencv", ["diagnostics"] = diagnostics
             }));

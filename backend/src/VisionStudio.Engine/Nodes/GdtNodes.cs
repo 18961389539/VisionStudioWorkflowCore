@@ -397,9 +397,13 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
         if (!double.IsFinite(tolerance) || tolerance is < 0 or > 1_000_000)
             throw new InvalidOperationException("tolerance.runout tolerance must be finite within 0..1000000 (0 disables).");
 
-        var minCoverageDeg = node.GetDouble("minCoverageDeg", 0);
+        var minCoverageDeg = node.GetDouble("minCoverageDeg", 270);
         if (!double.IsFinite(minCoverageDeg) || minCoverageDeg is < 0 or > 360)
             throw new InvalidOperationException("tolerance.runout minCoverageDeg must be finite within 0..360.");
+        var minAxialSamples = node.GetInt("minAxialSamples", 8);
+        var minAxialSpan = node.GetDouble("minAxialSpan", 0);
+        if (minAxialSamples is < 3 or > 20000 || !double.IsFinite(minAxialSpan) || minAxialSpan < 0)
+            throw new InvalidOperationException("tolerance.runout axial sampling gates are invalid.");
 
         var datum = GdtMath.ReadDatum(context, "datum", Type);
         var samples = context.Require<IReadOnlyList<VisionPoint2D>>("samples");
@@ -409,8 +413,16 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
 
         if (samples.Count < 3)
         {
-            return ValueTask.FromResult(ToleranceGeometry.Missing(samples.Count,
-                $"runout needs at least 3 samples, got {samples.Count}", nodeType: Type));
+            var reason = "insufficient-samples";
+            var diag = CoordinateValidation.Diagnostics(Type, ("found", false), ("reason", reason),
+                ("sampleCount", samples.Count), ("withinTolerance", false), ("evaluationState", "not-evaluated"));
+            return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+            {
+                ["found"] = VisionValue.Boolean(false), ["sampleCount"] = VisionValue.Integer(samples.Count),
+                ["withinTolerance"] = VisionValue.Boolean(false), ["toleranceEnabled"] = VisionValue.Boolean(false),
+                ["evaluationState"] = VisionValue.String("not-evaluated"),
+                ["diagnostics"] = VisionValue.String(diag)
+            }, new Dictionary<string, object?> { ["found"] = false, ["reason"] = reason, ["diagnostics"] = diag }));
         }
 
         var values = new double[samples.Count];
@@ -426,13 +438,12 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
             angles[index] = GdtMath.NormalizeAngle(Math.Atan2(local.Y, local.X) * 180.0 / Math.PI);
         }
 
-        var coverageDeg = mode == "radial" ? Coverage(angles) : 360.0;
-        if (mode == "radial" && minCoverageDeg > 0 && coverageDeg < minCoverageDeg - 1e-9)
-        {
-            return ValueTask.FromResult(ToleranceGeometry.Missing(samples.Count,
-                $"radial coverage {coverageDeg:0.###} deg is below minCoverageDeg={minCoverageDeg:0.###}",
-                nodeType: Type));
-        }
+        var coverageDeg = mode == "radial" ? Coverage(angles) : values.Max() - values.Min();
+        var samplingPlanValid = mode == "radial"
+            ? coverageDeg + 1e-9 >= minCoverageDeg
+            : samples.Count >= minAxialSamples && coverageDeg + 1e-9 >= minAxialSpan;
+        if (!samplingPlanValid)
+            return ValueTask.FromResult(SamplingPlanFailure(samples.Count, mode, coverageDeg, minCoverageDeg, minAxialSamples, minAxialSpan));
 
         var maxIndex = 0;
         var minIndex = 0;
@@ -446,7 +457,9 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
 
         var runout = values[maxIndex] - values[minIndex];
         var mean = sum / values.Length;
-        var within = tolerance <= 0 || runout <= tolerance + 1e-9;
+        var toleranceEnabled = tolerance > 0;
+        var within = toleranceEnabled && runout <= tolerance + 1e-9;
+        var evaluationState = !toleranceEnabled ? "not-evaluated" : within ? "pass" : "fail";
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type,
@@ -464,6 +477,10 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
             ["maxValue"] = VisionValue.Double(values[maxIndex]),
             ["meanValue"] = VisionValue.Double(mean),
             ["withinTolerance"] = VisionValue.Boolean(within),
+            ["toleranceEnabled"] = VisionValue.Boolean(toleranceEnabled),
+            ["evaluationState"] = VisionValue.String(evaluationState),
+            ["samplingPlanValid"] = VisionValue.Boolean(true),
+            ["coverageDeg"] = VisionValue.Double(coverageDeg),
             ["highPoint"] = VisionValue.Point(samples[maxIndex]),
             ["lowPoint"] = VisionValue.Point(samples[minIndex]),
             ["diagnostics"] = VisionValue.String(diagnostics)
@@ -494,8 +511,28 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
                 ["unit"] = unit, ["mode"] = mode, ["sampleCount"] = samples.Count,
                 ["runout"] = runout, ["minValue"] = values[minIndex], ["maxValue"] = values[maxIndex],
                 ["meanValue"] = mean, ["coverageDeg"] = coverageDeg, ["tolerance"] = tolerance,
-                ["withinTolerance"] = within, ["datumApplied"] = true, ["diagnostics"] = diagnostics
+                ["withinTolerance"] = within, ["toleranceEnabled"] = toleranceEnabled,
+                ["evaluationState"] = evaluationState, ["samplingPlanValid"] = true,
+                ["datumApplied"] = true, ["diagnostics"] = diagnostics
             }, pointOverlays));
+    }
+
+    private static NodeExecutorResult SamplingPlanFailure(int count, string mode, double coverage,
+        double minCoverageDeg, int minAxialSamples, double minAxialSpan)
+    {
+        var reason = mode == "radial" ? "insufficient-angular-coverage" : "insufficient-axial-sampling";
+        var diag = CoordinateValidation.Diagnostics("tolerance.runout", ("found", false), ("reason", reason),
+            ("sampleCount", count), ("coverage", coverage), ("minCoverageDeg", minCoverageDeg),
+            ("minAxialSamples", minAxialSamples), ("minAxialSpan", minAxialSpan),
+            ("withinTolerance", false), ("samplingPlanValid", false), ("evaluationState", "not-evaluated"));
+        return new NodeExecutorResult(new Dictionary<string, VisionValue>
+        {
+            ["found"] = VisionValue.Boolean(false), ["sampleCount"] = VisionValue.Integer(count),
+            ["coverageDeg"] = VisionValue.Double(coverage), ["withinTolerance"] = VisionValue.Boolean(false),
+            ["toleranceEnabled"] = VisionValue.Boolean(false),
+            ["samplingPlanValid"] = VisionValue.Boolean(false), ["evaluationState"] = VisionValue.String("not-evaluated"),
+            ["diagnostics"] = VisionValue.String(diag)
+        }, new Dictionary<string, object?> { ["found"] = false, ["reason"] = reason, ["diagnostics"] = diag });
     }
 
     /// <summary>覆盖角 = 360° − 相邻样本的最大角度缺口（与 measure.roundness 同口径）。</summary>

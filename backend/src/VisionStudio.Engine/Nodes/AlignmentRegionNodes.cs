@@ -38,16 +38,23 @@ internal static class PixelAffine
     }
 
     public static VisionRegion Transform(VisionRegion source, VisionTransform2D t, int width, int height, CancellationToken token)
+        => TransformWithStats(source, t, width, height, token).Region;
+
+    public static (VisionRegion Region, int ObjectsBeforeClip, long AreaBeforeClip, int RemovedEmptyObjects) TransformWithStats(
+        VisionRegion source, VisionTransform2D t, int width, int height, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (source.Components.Count == 0) return new(width, height, []);
+        if (source.Components.Count == 0) return (new(width, height, []), 0, 0, 0);
         using var native = JLVisionRegions.ToNative(source);
         var matrix = Native(t);
         using var matrixData = matrix.RawData;
         using var transformed = native.AffineTransRegion(matrix, "nearest_neighbor");
+        var beforeCount = transformed.CountObj();
+        var beforeArea = (long)Math.Round((double)transformed.AreaCenter(out double _, out double _));
         using var bounds = new JlRegion(0d, 0d, (double)height - 1, (double)width - 1);
         using var clipped = transformed.Intersection(bounds);
-        return JLVisionRegions.FromNative(clipped, width, height, token);
+        var region = JLVisionRegions.FromNative(clipped, width, height, token);
+        return (region, beforeCount, beforeArea, Math.Max(0, beforeCount - region.Components.Count));
     }
 }
 
@@ -79,7 +86,7 @@ var source = context.RequireImage("image"); var reference = context.RequireImage
         using (var domain = gray.GetDomain())
         {
             _ = gray.Intensity(domain, out double deviation);
-            if (deviation < 1e-6) return ValueTask.FromResult(Missing("reference-patch-has-no-texture"));
+            if (deviation < 1e-6) return ValueTask.FromResult(Missing("reference-patch-has-no-texture", x, y, width, height, range, step));
         }
         var parameters = new Dictionary<string, JsonElement>
         {
@@ -88,7 +95,25 @@ var source = context.RequireImage("image"); var reference = context.RequireImage
         };
         var match = JLVisionMatching.Execute(new(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(source), ["template"] = VisionValue.Image(patch) }),
             new NodeDefinition(node.Id, "match.template", null, null, parameters), false, cancellationToken);
-        if (!match.Outputs["found"].Require<bool>("found")) return ValueTask.FromResult(Missing("no-match"));
+        if (!match.Outputs["found"].Require<bool>("found"))
+        {
+            var reason = "angle-window-no-candidate";
+            if (match.Summary.TryGetValue("rawCandidateCount", out var raw) && Convert.ToInt64(raw) > 0)
+                reason = "score-below-minimum";
+            else
+            {
+                // A zero-score diagnostic pass tells low score apart from an angle/texture miss
+                // without lowering the production acceptance threshold.
+                var diagnosticParameters = new Dictionary<string, JsonElement>(parameters) { ["minScore"] = JsonSerializer.SerializeToElement(0d) };
+                var diagnostic = JLVisionMatching.Execute(
+                    new(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(source), ["template"] = VisionValue.Image(patch) }),
+                    new NodeDefinition(node.Id, "match.template", null, null, diagnosticParameters), false, cancellationToken);
+                if (diagnostic.Outputs["found"].Require<bool>("found") ||
+                    diagnostic.Summary.TryGetValue("rawCandidateCount", out var diagnosticRaw) && Convert.ToInt64(diagnosticRaw) > 0)
+                    reason = "score-below-minimum";
+            }
+            return ValueTask.FromResult(Missing(reason, x, y, width, height, range, step));
+        }
         // Matching returns the axis-aligned bounds. Undo the rotated patch bounds to recover its true centre.
         var angle = match.Outputs["angle"].Require<double>("angle") * Math.PI / 180;
         var c = Math.Cos(angle); var s = Math.Sin(angle);
@@ -118,23 +143,32 @@ var source = context.RequireImage("image"); var reference = context.RequireImage
         var transform = new VisionTransform2D("CurrentImage", "ReferenceImage", "px", c, -s, x + halfX - c * centerX + s * centerY,
             s, c, y + halfY - s * centerX - c * centerY, 0, 0, 1);
         cancellationToken.ThrowIfCancellationRequested();
+        var templateBox = $"{x},{y},{width},{height}";
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("score", match.Outputs["score"].Require<double>("score")), ("angleDeg", match.Outputs["angle"].Require<double>("angle")), ("centerX", centerX), ("centerY", centerY), ("subpixelRefined", refined), ("patchX", x), ("patchY", y), ("patchWidth", width), ("patchHeight", height), ("templateBox", templateBox), ("angleRangeDeg", range), ("angleStepDeg", step), ("angleWindowCoveredDeg", range * 2));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
             ["found"] = VisionValue.Boolean(true), ["score"] = match.Outputs["score"], ["transform"] = VisionValue.Transform(transform),
             ["angle"] = VisionValue.Double(match.Outputs["angle"].Require<double>("angle")),
             ["center"] = VisionValue.Point(new VisionPoint2D(centerX, centerY)),
-            ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(Type, ("found", true), ("score", match.Outputs["score"].Require<double>("score")), ("angleDeg", match.Outputs["angle"].Require<double>("angle")), ("centerX", centerX), ("centerY", centerY), ("subpixelRefined", refined), ("patchWidth", width), ("patchHeight", height)))
+            ["templateBox"] = VisionValue.String(templateBox), ["reason"] = VisionValue.String("matched"),
+            ["diagnostics"] = VisionValue.String(diagnostics)
         }, new Dictionary<string, object?> { ["found"] = true, ["score"] = match.Outputs["score"].Value, ["transform"] = transform,
             ["angleDeg"] = match.Outputs["angle"].Require<double>("angle"), ["centerX"] = centerX, ["centerY"] = centerY,
+            ["templateBox"] = templateBox, ["angleRangeDeg"] = range, ["angleStepDeg"] = step,
             ["subpixelRefined"] = refined, ["refineOffsetX"] = refineOffsetX, ["refineOffsetY"] = refineOffsetY,
             ["algorithmBackend"] = "jlvision", ["modelCacheHit"] = match.Summary.GetValueOrDefault("modelCacheHit") }, match.Overlays));
     }
-    private static NodeExecutorResult Missing(string reason)
+    private static NodeExecutorResult Missing(string reason, int x, int y, int width, int height, double range, double step)
     {
-        var diag = CoordinateValidation.Diagnostics("image.register", ("found", false), ("reason", reason));
+        var templateBox = $"{x},{y},{width},{height}";
+        var diag = CoordinateValidation.Diagnostics("image.register", ("found", false), ("reason", reason),
+            ("templateBox", templateBox), ("patchX", x), ("patchY", y), ("patchWidth", width), ("patchHeight", height),
+            ("angleRangeDeg", range), ("angleStepDeg", step), ("angleWindowCoveredDeg", range * 2));
         return new(new Dictionary<string, VisionValue>
-        { ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0), ["diagnostics"] = VisionValue.String(diag) },
-        new Dictionary<string, object?> { ["found"] = false, ["reason"] = reason, ["algorithmBackend"] = "jlvision", ["diagnostics"] = diag });
+        { ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0), ["reason"] = VisionValue.String(reason),
+          ["templateBox"] = VisionValue.String(templateBox), ["diagnostics"] = VisionValue.String(diag) },
+        new Dictionary<string, object?> { ["found"] = false, ["reason"] = reason, ["templateBox"] = templateBox,
+            ["angleRangeDeg"] = range, ["angleStepDeg"] = step, ["algorithmBackend"] = "jlvision", ["diagnostics"] = diag });
     }
 }
 
@@ -160,17 +194,27 @@ var source = context.RequireImage("image"); var t = PixelAffine.Read(context);
         if (source.Width > 2 * margin && source.Height > 2 * margin) support.GenRectangle1((double)margin, (double)margin, (double)source.Height - 1 - margin, (double)source.Width - 1 - margin);
         else support.GenEmptyRegion();
         var valid = PixelAffine.Transform(JLVisionRegions.FromNative(support, source.Width, source.Height, cancellationToken), t, width, height, cancellationToken);
+        var validPixelCount = valid.Components.Sum(component => component.Runs.Sum(run => (long)run.EndColumn - run.StartColumn + 1));
+        if (validPixelCount <= 0)
+            throw new InvalidOperationException("image.warpAffine validRegion is empty; the transform maps all source support outside the output canvas.");
+        var determinant = t.H00 * t.H11 - t.H01 * t.H10;
         cancellationToken.ThrowIfCancellationRequested();
         var diag = CoordinateValidation.Diagnostics(Type,
             ("width", width), ("height", height), ("interpolation", interpolation),
-            ("sourceWidth", source.Width), ("sourceHeight", source.Height), ("algorithmBackend", "jlvision"));
+            ("sourceWidth", source.Width), ("sourceHeight", source.Height), ("algorithmBackend", "jlvision"),
+            ("canvasAnchor", "output (0,0); translation terms are preserved when width/height change"),
+            ("determinant", determinant), ("supportMarginPx", margin), ("validPixelCount", validPixelCount),
+            ("validRegionContract", interpolation == "linear" ? "bilinear source support eroded by 1 px" : "nearest-neighbor source pixel support"),
+            ("coordinateContract", "source-to-target pixel-centre affine; origin top-left; homogeneous normalized; JLVision row/column corner conversion +0.5"),
+            ("matrix", new[] { t.H00, t.H01, t.H02, t.H10, t.H11, t.H12, t.H20, t.H21, t.H22 }));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
             ["image"] = VisionValue.Image(VisionImage.Own(JLVisionImages.ToMat(warped))),
             ["validRegion"] = VisionValue.Region(valid),
+            ["validPixelCount"] = VisionValue.Integer(validPixelCount),
             ["diagnostics"] = VisionValue.String(diag)
         },
-            new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["interpolation"] = interpolation, ["algorithmBackend"] = "jlvision", ["diagnostics"] = diag }));
+            new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["interpolation"] = interpolation, ["validPixelCount"] = validPixelCount, ["algorithmBackend"] = "jlvision", ["diagnostics"] = diag }));
     }
 }
 
@@ -207,16 +251,34 @@ public sealed class RegionMorphologyNode : IVisionNodeExecutor
         };
         using var bounds = new JlRegion(0d, 0d, (double)source.Height - 1, (double)source.Width - 1);
         using var clipped = processed.Intersection(bounds);
-        var baseResult = RegionNodeHelpers.Result(JLVisionRegions.FromNative(clipped, source.Width, source.Height, cancellationToken), cancellationToken);
+        var outputRegion = JLVisionRegions.FromNative(clipped, source.Width, source.Height, cancellationToken);
+        var baseResult = RegionNodeHelpers.Result(outputRegion, cancellationToken);
         return ValueTask.FromResult(RegionNodeHelpers.Complete(baseResult, cancellationToken, () =>
         {
             var outCount = baseResult.Summary.TryGetValue("count", out var cs) ? Convert.ToInt32(cs) : 0;
             if (outCount == 0 && emptyPolicy == "fail")
                 throw new InvalidOperationException("region.morphology produced an empty region and emptyPolicy=fail.");
+            var inputArea = JLVisionRegions.PixelArea(source);
+            var outputArea = JLVisionRegions.PixelArea(outputRegion);
+            var mappings = RegionNodeHelpers.SourceMappings(outputRegion, source, null, "morphology", cancellationToken);
+            var bridgedPairs = RegionNodeHelpers.BridgedPairs(mappings);
+            var warnings = bridgedPairs.Count > 0 ? new[] { new { code = "objects-bridged", pairs = bridgedPairs } } : Array.Empty<object>();
             var diag = CoordinateValidation.Diagnostics(Type, ("operation", op), ("kernelWidth", width), ("kernelHeight", height),
-                ("unionFirst", unionFirst), ("emptyPolicy", emptyPolicy), ("outputCount", outCount), ("inputObjects", source.Components.Count));
-            var outputs = new Dictionary<string, VisionValue>(baseResult.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
-            var summary = new Dictionary<string, object?>(baseResult.Summary) { ["operation"] = op, ["kernelWidth"] = width, ["kernelHeight"] = height, ["unionFirst"] = unionFirst, ["diagnostics"] = diag };
+                ("unionFirst", unionFirst), ("emptyPolicy", emptyPolicy), ("outputCount", outCount), ("inputObjects", source.Components.Count),
+                ("inputArea", inputArea), ("outputArea", outputArea), ("addedPixels", outputArea - inputArea),
+                ("bridgedObjectPairs", bridgedPairs), ("warningCount", warnings.Length));
+            var outputs = new Dictionary<string, VisionValue>(baseResult.Outputs)
+            {
+                ["diagnostics"] = VisionValue.String(diag), ["sourceMappings"] = VisionValue.String(mappings),
+                ["warningCount"] = VisionValue.Integer(warnings.Length)
+            };
+            var summary = new Dictionary<string, object?>(baseResult.Summary)
+            {
+                ["operation"] = op, ["kernelWidth"] = width, ["kernelHeight"] = height, ["unionFirst"] = unionFirst,
+                ["inputArea"] = inputArea, ["outputArea"] = outputArea, ["addedPixels"] = outputArea - inputArea,
+                ["bridgedObjectPairs"] = bridgedPairs, ["sourceMappings"] = mappings,
+                ["warningCount"] = warnings.Length, ["diagnostics"] = diag
+            };
             return baseResult with { Outputs = outputs, Summary = summary };
         }));
     }
@@ -237,20 +299,32 @@ var source = context.Require<VisionRegion>("region");
         var transform = PixelAffine.Read(context);
         var (width, height) = PixelAffine.Size(node, source.Width, source.Height);
         var det = transform.H00 * transform.H11 - transform.H01 * transform.H10;
-        var result = RegionNodeHelpers.Result(PixelAffine.Transform(source, transform, width, height, cancellationToken), cancellationToken);
+        var transformed = PixelAffine.TransformWithStats(source, transform, width, height, cancellationToken);
+        var result = RegionNodeHelpers.Result(transformed.Region, cancellationToken);
         var area = result.Outputs.TryGetValue("area", out var a) ? a.Value : null;
         var count = result.Outputs.TryGetValue("count", out var c) ? c.Value : null;
+        var clippedPixels = Math.Max(0, transformed.AreaBeforeClip - JLVisionRegions.PixelArea(transformed.Region));
+        var matrix = new[] { transform.H00, transform.H01, transform.H02, transform.H10, transform.H11, transform.H12, transform.H20, transform.H21, transform.H22 };
         var diag = CoordinateValidation.Diagnostics(Type,
             ("sourceWidth", source.Width), ("sourceHeight", source.Height), ("width", width), ("height", height),
-            ("determinant", det), ("sourceObjects", source.Components.Count), ("area", area), ("count", count));
+            ("determinant", det), ("sourceObjects", source.Components.Count), ("objectsBeforeClip", transformed.ObjectsBeforeClip),
+            ("areaBeforeClip", transformed.AreaBeforeClip), ("area", area), ("count", count),
+            ("clippedPixels", clippedPixels), ("removedEmptyObjects", transformed.RemovedEmptyObjects),
+            ("coordinateContract", "source-to-target pixel-centre affine; origin top-left; homogeneous normalized; JLVision row/column corner conversion +0.5"),
+            ("matrix", matrix));
         var outputs = new Dictionary<string, VisionValue>(result.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
-        var summary = new Dictionary<string, object?>(result.Summary) { ["determinant"] = det, ["diagnostics"] = diag };
+        var summary = new Dictionary<string, object?>(result.Summary)
+        {
+            ["determinant"] = det, ["clippedPixels"] = clippedPixels, ["removedEmptyObjects"] = transformed.RemovedEmptyObjects,
+            ["coordinateContract"] = "image-pixel-center-affine-v1", ["matrix"] = matrix, ["diagnostics"] = diag
+        };
         return ValueTask.FromResult(result with { Outputs = outputs, Summary = summary });
     }
 }
 
 internal sealed record RegionObjectProperties(int Index, double Area, VisionPoint2D Center, double Orientation,
-    double Perimeter, double Circularity, double Rectangularity, VisionRectangle2D Rectangle, VisionCircle Circle);
+    double Perimeter, double Circularity, double Rectangularity, VisionRectangle2D Rectangle, VisionCircle Circle,
+    string? SourceRegionId);
 
 internal static class RegionMeasurements
 {
@@ -272,7 +346,7 @@ internal static class RegionMeasurements
             using var orientation = item.OrientationRegion(); using var perimeter = item.Contlength();
             using var circularity = item.Circularity(); using var rectangularity = item.Rectangularity();
             result.Add(new(i, area, new(col, row), -orientation.D * 180 / Math.PI, perimeter.D, circularity.D, rectangularity.D,
-                new(left, top, right - left + 1, bottom - top + 1), new(col, row, radius)));
+                new(left, top, right - left + 1, bottom - top + 1), new(col, row, radius), source.SourceRegionId));
         }
         return result;
     }
@@ -291,13 +365,18 @@ var selectBy = node.GetString("selectBy", "index").Trim().ToLowerInvariant();
         if (selectBy is not ("index" or "largest")) throw new InvalidOperationException("region.properties selectBy must be index or largest.");
         var index = node.GetInt("index", 0);
         if (index < 0) throw new InvalidOperationException("region.properties index must be nonnegative.");
+        var emptyPolicy = node.GetString("emptyPolicy", "empty").Trim().ToLowerInvariant();
+        if (emptyPolicy is not ("empty" or "fail")) throw new InvalidOperationException("region.properties emptyPolicy must be empty or fail.");
         var region = context.Require<VisionRegion>("region");
         if (region.Width < 1 || region.Height < 1) throw new InvalidOperationException("region.properties requires a non-empty region canvas.");
         if (region.Components.Count > 100_000) throw new InvalidOperationException("region.properties refuses more than 100000 region objects.");
         var properties = RegionMeasurements.Read(region, cancellationToken);
+        var requestedIndex = index;
         if (selectBy == "largest" && properties.Count > 0)
-            index = properties.Select((p, i) => (Area: p.Area, Index: i)).MaxBy(x => x.Area).Index;
+            index = properties.OrderByDescending(p => p.Area).ThenBy(p => p.Center.X).ThenBy(p => p.Center.Y).ThenBy(p => p.Index).First().Index;
         var found = index < properties.Count;
+        if (!found && emptyPolicy == "fail")
+            throw new InvalidOperationException($"region.properties found no object: requestedIndex={requestedIndex}, selectedIndex={index}, objectCount={properties.Count}, selectBy={selectBy}.");
         RegionObjectProperties? selected = found ? properties[index] : null;
         double aspect = 0, equiv = 0, rectW = 0, rectH = 0;
         if (selected is { } p0)
@@ -306,7 +385,9 @@ var selectBy = node.GetString("selectBy", "index").Trim().ToLowerInvariant();
             aspect = rectH > 1e-12 ? rectW / rectH : 0;
             equiv = Math.Sqrt(Math.Max(0, p0.Area) / Math.PI) * 2;
         }
-        var diag = CoordinateValidation.Diagnostics(Type, ("count", properties.Count), ("index", index), ("selectBy", selectBy), ("found", found),
+        var diag = CoordinateValidation.Diagnostics(Type, ("count", properties.Count), ("requestedIndex", requestedIndex),
+            ("selectedIndex", found ? index : -1), ("selectBy", selectBy), ("found", found), ("emptyPolicy", emptyPolicy),
+            ("sourceRegionId", region.SourceRegionId), ("coordinateSystem", region.CoordinateSystem),
             ("width", region.Width), ("height", region.Height),
             ("area", selected?.Area ?? 0), ("orientation", selected?.Orientation ?? 0),
             ("aspectRatio", aspect), ("equivalentDiameter", equiv));
@@ -327,7 +408,7 @@ var selectBy = node.GetString("selectBy", "index").Trim().ToLowerInvariant();
             outputs["aspectRatio"] = VisionValue.Double(aspect); outputs["equivalentDiameter"] = VisionValue.Double(equiv);
             outputs["selectedIndex"] = VisionValue.Integer(index);
         }
-        var summary = new Dictionary<string, object?> { ["count"] = properties.Count, ["found"] = found, ["index"] = index, ["selectBy"] = selectBy, ["properties"] = properties, ["diagnostics"] = diag };
+        var summary = new Dictionary<string, object?> { ["count"] = properties.Count, ["found"] = found, ["requestedIndex"] = requestedIndex, ["selectedIndex"] = found ? index : -1, ["selectBy"] = selectBy, ["emptyPolicy"] = emptyPolicy, ["sourceRegionId"] = region.SourceRegionId, ["properties"] = properties, ["diagnostics"] = diag };
         if (selected is { } s) { summary["area"] = s.Area; summary["orientation"] = s.Orientation; summary["aspectRatio"] = aspect; }
         return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
     }
@@ -353,6 +434,8 @@ var region = context.Require<VisionRegion>("region");
         if (region.Width < 1 || region.Height < 1) throw new InvalidOperationException("region.toDetections requires a non-empty region canvas.");
         var maxCount = node.GetInt("maxCount", 0);
         if (maxCount < 0 || maxCount > 100000) throw new InvalidOperationException("region.toDetections maxCount must be 0 (unlimited) or 1..100000.");
+        var truncationPolicy = node.GetString("truncationPolicy", "truncate").Trim().ToLowerInvariant();
+        if (truncationPolicy is not ("truncate" or "fail")) throw new InvalidOperationException("region.toDetections truncationPolicy must be truncate or fail.");
         var sortBy = node.GetString("sortBy", "area").Trim().ToLowerInvariant();
         if (sortBy is not ("area" or "x" or "y"))
             throw new InvalidOperationException("region.toDetections sortBy must be area, x, or y.");
@@ -361,15 +444,18 @@ var region = context.Require<VisionRegion>("region");
         {
             "x" => properties.OrderBy(p => p.Center.X).ThenBy(p => p.Center.Y).ThenBy(p => p.Index),
             "y" => properties.OrderBy(p => p.Center.Y).ThenBy(p => p.Center.X).ThenBy(p => p.Index),
-            _ => properties.OrderByDescending(p => p.Area).ThenBy(p => p.Index)
+            _ => properties.OrderByDescending(p => p.Area).ThenBy(p => p.Center.X).ThenBy(p => p.Center.Y).ThenBy(p => p.Index)
         };
+        var truncated = maxCount > 0 && properties.Count > maxCount;
+        if (truncated && truncationPolicy == "fail")
+            throw new InvalidOperationException($"region.toDetections sourceCount={properties.Count} exceeds maxCount={maxCount}; truncationPolicy=fail.");
         var selected = (maxCount > 0 ? ordered.Take(maxCount) : ordered).ToArray();
         var detections = selected.Select(p => new VisionDetection(p.Index, p.Center.X, p.Center.Y, p.Rectangle.Width, p.Rectangle.Height,
             p.Area, p.Perimeter, p.Circularity, p.Circle, p.Rectangle)).ToArray();
         if (detections.Length == 0 && emptyPolicy == "fail")
             throw new InvalidOperationException("region.toDetections produced no detections and emptyPolicy=fail.");
         var diag = CoordinateValidation.Diagnostics(Type, ("count", detections.Length), ("sourceCount", properties.Count),
-            ("truncated", properties.Count > detections.Length),
+            ("truncated", truncated), ("truncationPolicy", truncationPolicy),
             ("found", detections.Length > 0), ("maxCount", maxCount), ("sortBy", sortBy), ("emptyPolicy", emptyPolicy), ("width", region.Width), ("height", region.Height));
         // 截断必须可见：maxCount 会静默丢弃多余连通域，调用方需要 truncated 才能把"只有 3 个"和"被裁到 3 个"区分开。
         var emittedArea = 0d;
@@ -378,13 +464,14 @@ var region = context.Require<VisionRegion>("region");
         {
             ["detections"] = VisionValue.Detections(detections),
             ["count"] = VisionValue.Integer(detections.Length),
+            ["sourceCount"] = VisionValue.Integer(properties.Count),
             ["found"] = VisionValue.Boolean(detections.Length > 0),
             ["emitted"] = VisionValue.Integer(detections.Length),
-            ["truncated"] = VisionValue.Boolean(properties.Count > detections.Length),
+            ["truncated"] = VisionValue.Boolean(truncated),
             ["totalArea"] = VisionValue.Double(emittedArea),
             ["diagnostics"] = VisionValue.String(diag)
         },
-            new Dictionary<string, object?> { ["count"] = detections.Length, ["found"] = detections.Length > 0, ["sourceCount"] = properties.Count, ["truncated"] = properties.Count > detections.Length, ["totalArea"] = emittedArea, ["diagnostics"] = diag }));
+            new Dictionary<string, object?> { ["count"] = detections.Length, ["found"] = detections.Length > 0, ["sourceCount"] = properties.Count, ["truncated"] = truncated, ["truncationPolicy"] = truncationPolicy, ["totalArea"] = emittedArea, ["diagnostics"] = diag }));
     }
 }
 

@@ -12,7 +12,11 @@ internal static class CaliperWidthCatalog
                 new("width", VisionDataType.Double, Required: false), new("point1", VisionDataType.Point2D, Required: false),
                 new("point2", VisionDataType.Point2D, Required: false), new("center", VisionDataType.Point2D, Required: false),
                 new("strength", VisionDataType.Double, Required: false), new("pairCount", VisionDataType.Integer),
-                new("sampleCount", VisionDataType.Integer), new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
+                new("sampleCount", VisionDataType.Integer), new("searchLine", VisionDataType.Line2D),
+                new("widthDeviation", VisionDataType.Double, Required: false), new("withinTolerance", VisionDataType.Boolean),
+                new("widthOutOfTolerance", VisionDataType.Boolean), new("toleranceEnabled", VisionDataType.Boolean),
+                new("evaluationState", VisionDataType.String),
+                new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
                 new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
                 new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in pixels.") { OverriddenByPorts = ["searchLine"] },
@@ -32,7 +36,11 @@ internal static class CaliperWidthCatalog
                 new("minWidth", "Minimum Pair Width", "number", 0, 0, 10000000, 0.1, Unit: "px", Group: "Validation", Description: "Minimum accepted width in pixels; 0 disables."),
                 new("maxWidth", "Maximum Pair Width (0=unlimited)", "number", 0, 0, 10000000, 0.1, Unit: "px", Group: "Validation", Description: "Maximum accepted width in pixels; 0 disables."),
                 new("nominalWidth", "Nominal Width (closest selection)", "number", 20, 0, 10000000, 0.1, Unit: "px", Group: "Validation",
-                    Description: "Only used when Pair Selection is Closest to nominal width; must be greater than zero in that mode.")
+                    Description: "Only used when Pair Selection is Closest to nominal width; must be greater than zero in that mode."),
+                new("lowerTolerance", "Lower Tolerance", "number", 0, 0, 10000000, 0.01, Unit: "px", Group: "Validation",
+                    Description: "Allowed minus deviation from nominalWidth. 0/0 disables the tolerance gate and evaluationState becomes not-evaluated."),
+                new("upperTolerance", "Upper Tolerance", "number", 0, 0, 10000000, 0.01, Unit: "px", Group: "Validation",
+                    Description: "Allowed plus deviation from nominalWidth. Keep minWidth/maxWidth for candidate filtering only; this gate decides pass/fail.")
             ],
             "Native subpixel edge-pair measurement of bright strips, dark gaps and line widths. Returns width along the search line, ordered endpoints and center; supports width filtering and nominal-width selection. Place the line perpendicular to the target boundaries for perpendicular width. Uses Gaussian sigma=1 and at least 8 contiguous profile samples. ROI holes split profiles and cannot be bridged. No qualifying pair returns found=false with no width or points. Supports rigid px-to-px localization transforms; outputs remain in image pixels.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), RoiImageBindings: [new("roi", "image")]),
@@ -49,7 +57,13 @@ internal static class CaliperWidthCatalog
                 new("widthMax", VisionDataType.Double, Required: false), new("widthStd", VisionDataType.Double, Required: false),
                 new("widthCv", VisionDataType.Double, Required: false), new("center", VisionDataType.Point2D, Required: false),
                 new("strength", VisionDataType.Double, Required: false), new("caliperCount", VisionDataType.Integer),
-                new("validCount", VisionDataType.Integer), new("calipersJson", VisionDataType.String),
+                new("validCount", VisionDataType.Integer), new("validRatio", VisionDataType.Double),
+                new("coverageRatio", VisionDataType.Double), new("continuousRatio", VisionDataType.Double),
+                new("invalidStations", VisionDataType.String),
+                new("calipersJson", VisionDataType.String),
+                new("widthDeviation", VisionDataType.Double),
+                new("withinTolerance", VisionDataType.Boolean), new("toleranceEnabled", VisionDataType.Boolean),
+                new("evaluationState", VisionDataType.String),
                 new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
                 new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
@@ -62,6 +76,9 @@ internal static class CaliperWidthCatalog
                     Description: "Number of width stations along the array. Use 1 for a single caliperWidth-equivalent measurement."),
                 new("minValidCalipers", "Minimum Valid Calipers", "number", 1, 1, 101, 1, Group: "Array",
                     Description: "found=true only when at least this many stations return a qualifying pair (and maxWidthStd gate passes)."),
+                new("minValidRatio", "Minimum Valid Ratio", "number", .5, 0, 1, .05, Group: "Coverage", Description: "Minimum fraction of all stations that must be valid."),
+                new("minCoverageRatio", "Minimum Span Coverage", "number", .5, 0, 1, .05, Group: "Coverage", Description: "Minimum first-to-last valid station span divided by total array span."),
+                new("minContinuousRatio", "Minimum Continuous Block", "number", .5, 0, 1, .05, Group: "Coverage", Description: "Minimum longest consecutive valid-station block divided by station count."),
                 new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
                     Description: "Odd projection width; even values round up. Average across the strip perpendicular to each station search line."),
                 new("edgeThreshold", "Edge Threshold", "number", 12, 0, 255, 1, Unit: "gray", Group: "Sampling", Description: "Minimum edge strength to accept a caliper hit."),
@@ -72,7 +89,11 @@ internal static class CaliperWidthCatalog
                         new("Closest to nominal width", "closestwidth")], Group: "Sampling", Description: "Scan direction along the search geometry."),
                 new("minWidth", "Minimum Pair Width", "number", 0, 0, 10000000, 0.1, Unit: "px", Group: "Validation", Description: "Minimum accepted width in pixels; 0 disables."),
                 new("maxWidth", "Maximum Pair Width (0=unlimited)", "number", 0, 0, 10000000, 0.1, Unit: "px", Group: "Validation", Description: "Maximum accepted width in pixels; 0 disables."),
-                new("nominalWidth", "Nominal Width (report only)", "number", 20, 0, 10000000, 0.1, Unit: "px", Group: "Validation", Description: "Used only to report width deviation; it does not gate found and has no tolerance parameter."),
+                new("nominalWidth", "Nominal Width (report + tolerance base)", "number", 20, 0, 10000000, 0.1, Unit: "px", Group: "Validation", Description: "Reference width for widthDeviation. The tolerance gate is disabled unless lowerTolerance or upperTolerance is greater than zero."),
+                new("lowerTolerance", "Lower Tolerance", "number", 0, 0, 10000000, 0.01, Unit: "px", Group: "Validation",
+                    Description: "Allowed minus deviation of widthMean from nominalWidth. 0/0 disables the gate and evaluationState becomes not-evaluated."),
+                new("upperTolerance", "Upper Tolerance", "number", 0, 0, 10000000, 0.01, Unit: "px", Group: "Validation",
+                    Description: "Allowed plus deviation of widthMean from nominalWidth. Independent of maxWidthStd, which only constrains dispersion."),
                 new("maxWidthStd", "Maximum Width Std (0=off)", "number", 0, 0, 10000000, 0.01, Unit: "px", Group: "Validation",
                     Description: "Reject the array (found=false) when the population std of valid widths exceeds this value. 0 disables the gate."),
                 new("includeProfiles", "Include Profile Samples", "boolean", false, Group: "Diagnostics",
@@ -80,7 +101,7 @@ internal static class CaliperWidthCatalog
                 new("profileSampleCap", "Profile Sample Cap", "number", 64, 8, 256, 1, Group: "Diagnostics", VisibleWhen: new("includeProfiles", ["true"]),
                     Description: "Maximum samples stored per station when includeProfiles is enabled.")
             ],
-            "Multi-station edge-pair width array (Cognex Caliper Tool / HALCON measure_pairs style). Places caliperCount search profiles parallel to the authored search line, spaced along the edge-normal direction over edgeLength (or the search-line length when 0). Each station reuses native JLVision pair measurement with the same polarity, threshold, width filter and pair-selection rules as measure.caliperWidth. Outputs aggregate width mean/min/max/std/cv, validCount, mean center/strength, and calipersJson with per-station status, geometry and optional profile samples. found requires minValidCalipers and optional maxWidthStd. Linear layout only—circular arrays use measure.caliperCircle. No interactive score-curve editor. Supports ROI masks and rigid px-to-px transforms; results stay in image pixels.",
+            "Multi-station edge-pair width array (Cognex Caliper Tool / HALCON measure_pairs style). Places caliperCount search profiles parallel to the authored search line, spaced along the edge-normal direction over edgeLength (or the search-line length when 0). Each station reuses native JLVision pair measurement with the same polarity, threshold, width filter and pair-selection rules as measure.caliperWidth. Outputs aggregate width mean/min/max/std/cv, validCount, mean center/strength, and calipersJson with per-station status, geometry and optional profile samples. found requires minValidCalipers, minValidRatio, span and continuous-block coverage, and optional maxWidthStd. invalidStations lists every missing station and reason. Linear layout only—circular arrays use measure.caliperCircle. No interactive score-curve editor. Supports ROI masks and rigid px-to-px transforms; results stay in image pixels.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), RoiImageBindings: [new("roi", "image")])
     ];
 }

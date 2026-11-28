@@ -101,8 +101,9 @@ var source = context.RequireImage("image").Mat;
         var classStats = boxStats.Select(s => new InferenceStats.ClassStat(s.ClassId, s.PixelCount, s.Fraction, s.MeanScore)).ToArray();
         var dominant = classStats.OrderByDescending(s => s.PixelCount).FirstOrDefault();
         var scaleX = (double)source.Width / width; var scaleY = (double)source.Height / height;
-        var meanConfidence = bestScores.Length == 0 ? 0 : bestScores.Average(v => (double)v);
-        var lowConfidenceFraction = bestScores.Length == 0 ? 0 : (double)bestScores.Count(v => v < lowConfidenceThreshold) / bestScores.Length;
+        var confidenceAvailable = layout != "yolo26-semantic";
+        var meanConfidence = confidenceAvailable ? (bestScores.Length == 0 ? 0 : bestScores.Average(v => (double)v)) : (double?)null;
+        var lowConfidenceFraction = confidenceAvailable ? (bestScores.Length == 0 ? 0 : (double)bestScores.Count(v => v < lowConfidenceThreshold) / bestScores.Length) : (double?)null;
         var mask = new Mat();
         try
         {
@@ -125,22 +126,28 @@ var source = context.RequireImage("image").Mat;
             ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
             ["classes"] = VisionValue.String(JsonSerializer.Serialize(boxStats.Select(s => new
             {
-                classId = s.ClassId, pixelCount = s.PixelCount, fraction = s.Fraction, meanScore = s.MeanScore,
+                classId = s.ClassId, pixelCount = s.PixelCount, fraction = s.Fraction, meanScore = confidenceAvailable ? (double?)s.MeanScore : null,
                 x = Math.Round(s.X * scaleX, 2), y = Math.Round(s.Y * scaleY, 2),
                 width = Math.Round(s.Width * scaleX, 2), height = Math.Round(s.Height * scaleY, 2),
                 centroidX = Math.Round(s.CentroidX * scaleX, 2), centroidY = Math.Round(s.CentroidY * scaleY, 2)
             }))),
             ["classCount"] = VisionValue.Integer(classStats.Length),
-            ["meanConfidence"] = VisionValue.Double(meanConfidence),
-            ["lowConfidenceFraction"] = VisionValue.Double(lowConfidenceFraction)
+            ["confidenceAvailable"] = VisionValue.Boolean(confidenceAvailable)
         };
+        if (meanConfidence is { } mean) segOutputs["meanConfidence"] = VisionValue.Double(mean);
+        if (lowConfidenceFraction is { } low) segOutputs["lowConfidenceFraction"] = VisionValue.Double(low);
         if (dominant is not null)
         {
             segOutputs["dominantClass"] = VisionValue.Integer(dominant.ClassId);
             segOutputs["dominantFraction"] = VisionValue.Double(dominant.Fraction);
         }
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("outputShape", shape),
+            ("classChannels", channels), ("maskClassOffset", 0), ("confidenceAvailable", confidenceAvailable),
+            ("binaryThresholdApplied", confidenceAvailable && channels == 1),
+            ("meanConfidence", meanConfidence), ("lowConfidenceFraction", lowConfidenceFraction));
+        segOutputs["diagnostics"] = VisionValue.String(diagnostics);
         return ValueTask.FromResult(new NodeExecutorResult(segOutputs,
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["layout"] = layout, ["classChannels"] = channels, ["maskWidth"] = source.Width, ["maskHeight"] = source.Height, ["maskClassOffset"] = 0, ["classCount"] = classStats.Length, ["dominantClass"] = dominant?.ClassId, ["dominantFraction"] = dominant?.Fraction, ["meanConfidence"] = meanConfidence, ["lowConfidenceFraction"] = lowConfidenceFraction, ["lowConfidenceThreshold"] = lowConfidenceThreshold }));
+            new Dictionary<string, object?> { ["outputShape"] = shape, ["layout"] = layout, ["classChannels"] = channels, ["maskWidth"] = source.Width, ["maskHeight"] = source.Height, ["maskClassOffset"] = 0, ["classCount"] = classStats.Length, ["dominantClass"] = dominant?.ClassId, ["dominantFraction"] = dominant?.Fraction, ["confidenceAvailable"] = confidenceAvailable, ["meanConfidence"] = meanConfidence, ["lowConfidenceFraction"] = lowConfidenceFraction, ["lowConfidenceThreshold"] = lowConfidenceThreshold, ["diagnostics"] = diagnostics }));
     }
 
     /// <summary>Crop letterbox padding from a model-resolution mask, then the caller resizes to source.</summary>
@@ -264,8 +271,6 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             var maskDim = protoShape[1];
             var protoH = protoShape[2];
             var protoW = protoShape[3];
-            var detValues = OnnxInferenceHelpers.ReadFloatTensor(det, "instance-seg-det");
-            var protoValues = OnnxInferenceHelpers.ReadFloatTensor(proto, "instance-seg-proto");
             var layout = node.GetString("layout", "yolo26-seg").Trim().ToLowerInvariant();
             if (layout is "yolo26-e2e" or "end2end") layout = "xyxy";
             if (layout is not ("yolo26-seg" or "xyxy"))
@@ -273,16 +278,20 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             var tensorOrder = node.GetString("tensorOrder", "auto").Trim().ToLowerInvariant();
             if (tensorOrder is not ("auto" or "channelsfirst" or "channelslast"))
                 throw new InvalidOperationException("Instance segmentation tensorOrder must be auto, channelsFirst, or channelsLast.");
+            if (layout == "xyxy" && tensorOrder != "auto")
+                throw new InvalidOperationException("Instance segmentation tensorOrder is only valid for raw yolo26-seg output; use auto for end-to-end rows.");
+            var nmsMode = node.GetString("nmsMode", "auto").Trim().ToLowerInvariant();
+            if (nmsMode is not ("auto" or "on" or "off"))
+                throw new InvalidOperationException("nmsMode must be auto, on, or off.");
+            var applyNms = nmsMode == "on" || (nmsMode == "auto" && layout == "yolo26-seg");
+            var detValues = OnnxInferenceHelpers.ReadFloatTensor(det, "instance-seg-det");
+            var protoValues = OnnxInferenceHelpers.ReadFloatTensor(proto, "instance-seg-proto");
             var candidates = layout == "xyxy"
                 ? InferenceStats.DecodeYoloSegXyxy(detValues, detShape, maskDim)
                 : InferenceStats.DecodeYoloSeg(detValues, detShape, maskDim, tensorOrder);
             var threshold = node.GetDouble("confidenceThreshold", 0.25);
             var nmsThreshold = node.GetDouble("nmsThreshold", 0.45);
             var maskThreshold = (float)node.GetDouble("maskThreshold", 0.5);
-            var nmsMode = node.GetString("nmsMode", "auto").Trim().ToLowerInvariant();
-            if (nmsMode is not ("auto" or "on" or "off"))
-                throw new InvalidOperationException("nmsMode must be auto, on, or off.");
-            var applyNms = nmsMode == "on" || (nmsMode == "auto" && layout == "yolo26-seg");
             var includeMaskRuns = node.GetBool("includeMaskRuns", false);
             var maxCount = node.GetInt("maxCount", 100);
             if (maxCount is < 1 or > 1000) throw new InvalidOperationException("maxCount must be between 1 and 1000.");
@@ -321,8 +330,10 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                 cancellationToken);
 
             var combined = new byte[source.Height * source.Width];
+            var overlapOwnerCounts = new byte[source.Height * source.Width];
             var labels = OnnxInferenceHelpers.ResolveLabels(node);
             var instancePayload = new List<object>();
+            var ownershipPayload = new List<object>();
             var detections = new List<VisionDetection>();
             var contours = new List<VisionContour>(kept.Count);
             for (var i = 0; i < kept.Count; i++)
@@ -338,6 +349,8 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                     mapping.ToInputX(left), mapping.ToInputY(top), mapping.ToInputX(right), mapping.ToInputY(bottom),
                     mapping, maskThreshold);
                 var area = 0;
+                var instanceOverlapPixels = 0;
+                var compositeOwnerPixels = 0;
                 var maskRuns = includeMaskRuns ? new List<int>() : null;
                 var runValue = 0;
                 var runLength = 0;
@@ -355,7 +368,16 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                     area++;
                     // Store classId+1 so background stays 0. Candidates are score-sorted,
                     // so the first foreground instance owns composite-mask overlaps.
-                    if (combined[p] == 0) combined[p] = (byte)(c.ClassId + 1);
+                    if (combined[p] == 0)
+                    {
+                        combined[p] = (byte)(c.ClassId + 1);
+                        compositeOwnerPixels++;
+                    }
+                    else
+                    {
+                        instanceOverlapPixels++;
+                        overlapOwnerCounts[p]++;
+                    }
                 }
                 maskRuns?.Add(runLength);
                 contours.Add(ExtractInstanceContour(instanceMask, source.Width, source.Height, left, top, right, bottom, i));
@@ -365,12 +387,16 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                     new VisionRectangle2D(left, top, w, h), c.Score, c.ClassId));
                 var label = labels.Length > c.ClassId ? labels[c.ClassId] : $"class_{c.ClassId}";
                 instancePayload.Add(new { index = i, classId = c.ClassId, label, score = c.Score, x1 = left, y1 = top, x2 = right, y2 = bottom, area,
+                    overlapPixelCount = instanceOverlapPixels, compositeOwnerPixelCount = compositeOwnerPixels,
                     maskRuns = maskRuns?.ToArray() });
+                ownershipPayload.Add(new { instanceIndex = i, classId = c.ClassId, compositeOwnerPixelCount = compositeOwnerPixels, overlapPixelCount = instanceOverlapPixels });
             }
 
+            var overlapPixelCount = overlapOwnerCounts.Count(count => count > 0);
             var summary = new Dictionary<string, object?>
             {
                 ["count"] = detections.Count, ["truncated"] = truncated, ["maskDim"] = maskDim, ["maskClassOffset"] = 1,
+                ["overlapPixelCount"] = overlapPixelCount, ["compositePolicy"] = "highest-score-wins",
                 ["contourCount"] = contours.Count, ["contourPoints"] = contours.Sum(c => c.Points.Count),
                 ["letterbox"] = letterbox, ["layout"] = layout, ["tensorOrder"] = tensorOrder,
                 ["nmsMode"] = nmsMode, ["applyNms"] = applyNms, ["includeMaskRuns"] = includeMaskRuns,
@@ -382,7 +408,10 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             var instancesDocument = new Dictionary<string, object?>
             {
                 ["maskWidth"] = source.Width,
-                ["maskHeight"] = source.Height
+                ["maskHeight"] = source.Height,
+                ["overlapPixelCount"] = overlapPixelCount,
+                ["compositePolicy"] = "highest-score-wins",
+                ["ownership"] = ownershipPayload
             };
             if (includeMaskRuns)
                 instancesDocument["maskRunOrder"] = "row-major, alternating background/foreground runs";

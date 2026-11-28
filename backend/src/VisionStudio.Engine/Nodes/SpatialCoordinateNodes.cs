@@ -24,13 +24,16 @@ public sealed class CoordinatePoint3DNode : IVisionNodeExecutor
         var magnitude = double.Hypot(xyMagnitude, z);
         if (!double.IsFinite(magnitude) || !double.IsFinite(xyMagnitude))
             throw new InvalidOperationException("coordinate.point3D magnitude must be finite.");
-        var azimuthDeg = Math.Atan2(y, x) * 180 / Math.PI;
+        var azimuthDefined = !(x == 0 && y == 0);
+        var azimuthDeg = azimuthDefined ? VisionTransform2D.NormalizeAngleDeg(Math.Atan2(y, x) * 180 / Math.PI) : 0;
         var elevationDeg = Math.Atan2(z, xyMagnitude) * 180 / Math.PI;
         var isOrigin = Math.Abs(x) < 1e-15 && Math.Abs(y) < 1e-15 && Math.Abs(z) < 1e-15;
         var diagnostics = CoordinateValidation.Diagnostics(Type,
             ("x", x), ("y", y), ("z", z), ("magnitude", magnitude), ("xyMagnitude", xyMagnitude),
             ("azimuthDeg", azimuthDeg), ("elevationDeg", elevationDeg),
-            ("isOrigin", isOrigin), ("frame", frame), ("unit", unit));
+            ("isOrigin", isOrigin), ("frame", frame), ("unit", unit), ("azimuthDefined",azimuthDefined),
+            ("azimuthConvention","atan2(Y,X), +X=0, CCW positive, (-180,180]; 0 when XY projection is zero"),
+            ("elevationConvention","atan2(Z,hypot(X,Y)), [-90,90]"),("sources",CoordinateLiteral.Sources(context,"x","y","z")));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -38,7 +41,7 @@ public sealed class CoordinatePoint3DNode : IVisionNodeExecutor
                 ["y"] = VisionValue.Double(y), ["z"] = VisionValue.Double(z),
                 ["magnitude"] = VisionValue.Double(magnitude),
                 ["xyMagnitude"] = VisionValue.Double(xyMagnitude),
-                ["azimuthDeg"] = VisionValue.Double(azimuthDeg),
+                ["azimuthDeg"] = VisionValue.Double(azimuthDeg), ["azimuthDefined"] = VisionValue.Boolean(azimuthDefined),
                 ["elevationDeg"] = VisionValue.Double(elevationDeg),
                 ["frame"] = VisionValue.String(frame), ["unit"] = VisionValue.String(unit),
                 ["diagnostics"] = VisionValue.String(diagnostics)
@@ -90,7 +93,8 @@ var point = context.Require<VisionCoordinatePoint3D>("point");
             throw new InvalidOperationException("coordinate.transformPoint3D produced non-finite or out-of-range coordinates.");
         var result = new VisionCoordinatePoint3D(x, y, z, transform.TargetFrame, transform.Unit);
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("sourceFrame", sourceFrame), ("targetFrame", transform.TargetFrame),
-            ("sourceUnit", sourceUnit), ("unit", transform.Unit), ("x", x), ("y", y), ("z", z));
+            ("sourceUnit", sourceUnit), ("unit", transform.Unit), ("x", x), ("y", y), ("z", z),
+            ("transformId",node.Id),("convention","row-major 4x4; column vectors p'=M*p; active rotation; translation in target unit"));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -110,20 +114,21 @@ var point = context.Require<VisionCoordinatePoint3D>("point");
         if (transform.Matrix is not { Length: 16 } || transform.Matrix.Any(x => !double.IsFinite(x) || Math.Abs(x) > 1e9))
             throw new InvalidOperationException("transform.matrix must be a finite row-major 4x4 matrix.");
         var matrix = transform.Matrix;
-        if (Math.Abs(matrix[12]) > 1e-6 || Math.Abs(matrix[13]) > 1e-6 || Math.Abs(matrix[14]) > 1e-6 || Math.Abs(matrix[15] - 1) > 1e-6)
-            throw new InvalidOperationException("transform.matrix must have homogeneous last row [0,0,0,1].");
+        var violations = new List<string>();
+        var residuals = new[] { matrix[12], matrix[13], matrix[14], matrix[15] - 1 };
+        for (var i = 0; i < residuals.Length; i++)
+            if (Math.Abs(residuals[i]) > 1e-6) violations.Add($"homogeneous[{i}] residual={residuals[i]:0.####}");
         for (var r = 0; r < 3; r++)
         for (var c = 0; c < 3; c++)
         {
             var dot = 0d;
             for (var k = 0; k < 3; k++) dot += matrix[k * 4 + r] * matrix[k * 4 + c];
-            if (Math.Abs(dot - (r == c ? 1 : 0)) > 1e-3)
-                throw new InvalidOperationException("transform.matrix rotation must be orthonormal.");
+            if (Math.Abs(dot - (r == c ? 1 : 0)) > 1e-3) violations.Add($"orthogonality[{r},{c}] residual={dot - (r == c ? 1 : 0):0.####}");
         }
         var determinant = matrix[0] * (matrix[5] * matrix[10] - matrix[6] * matrix[9])
             - matrix[1] * (matrix[4] * matrix[10] - matrix[6] * matrix[8])
             + matrix[2] * (matrix[4] * matrix[9] - matrix[5] * matrix[8]);
-        if (Math.Abs(determinant - 1) > 1e-3)
-            throw new InvalidOperationException($"transform.matrix rotation determinant must be +1; measured {determinant:0.####}.");
+        if (Math.Abs(determinant - 1) > 1e-3) violations.Add($"rotation determinant={determinant:0.####} (expected +1)");
+        if (violations.Count > 0) throw new InvalidOperationException($"transform.matrix is not a rigid transform: {string.Join("; ", violations)}.");
     }
 }

@@ -70,9 +70,9 @@ internal static class PreprocessImageHelpers
     {
         var text = node.GetString("inputBitDepth", "auto").Trim();
         if (text.Length == 0 || text.Equals("auto", StringComparison.OrdinalIgnoreCase)) return null;
-        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var bits) && bits is >= 8 and <= 16)
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var bits) && bits is 8 or 10 or 12 or 14 or 16)
             return bits;
-        throw new InvalidOperationException($"{nodeType} inputBitDepth '{text}' is unsupported; use auto or 8..16.");
+        throw new InvalidOperationException($"{nodeType} inputBitDepth '{text}' is unsupported; use auto or an even bit depth in 8..16 (8, 10, 12, 14 or 16).");
     }
 
     /// <summary>ROI 掩膜：ROI 外清零（调用方交出 processed 的所有权；返回可继续持有的新 Mat）。</summary>

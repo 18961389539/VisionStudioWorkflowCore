@@ -55,9 +55,14 @@ public sealed class ImageDenoiseNode : IVisionNodeExecutor
         var searchWindowSize = node.GetInt("searchWindowSize", 21);
         if (searchWindowSize is < 3 or > 255 || searchWindowSize % 2 == 0)
             throw new InvalidOperationException("image.denoise searchWindowSize must be an odd integer within 3..255.");
+        if (searchWindowSize < templateWindowSize)
+            throw new InvalidOperationException($"image.denoise requires searchWindowSize >= templateWindowSize; received search={searchWindowSize}, template={templateWindowSize}.");
 
         var roi = ReadRoi(context, node);
         using var mask = roi?.BuildMask(sourceMat.Size(), cancellationToken);
+        var roiStats = PreprocessP1Diagnostics.Roi(mask, sourceMat.Size());
+        if (roi is not null && roiStats.Count <= 0)
+            throw new InvalidOperationException("image.denoise ROI selects no pixels; move or enlarge it.");
         cancellationToken.ThrowIfCancellationRequested();
 
         Mat? denoised = null;
@@ -98,20 +103,24 @@ public sealed class ImageDenoiseNode : IVisionNodeExecutor
                     ("hColor", useColor ? hColor : null),
                     ("templateWindowSize", templateWindowSize),
                     ("searchWindowSize", searchWindowSize),
-                    ("roiApplied", roi is not null),
+                    ("windowRelation", "searchWindowSize >= templateWindowSize"),
+                    ("roiApplied", roi is not null), ("roiPixelCount", roiStats.Count),
+                    ("roiBounds", $"{roiStats.Bounds.X},{roiStats.Bounds.Y},{roiStats.Bounds.Width},{roiStats.Bounds.Height}"),
+                    ("roiComposite", "hard mask; pixels outside ROI are unchanged; roiMask exposes the exact valid domain"),
                     ("width", image.Width),
                     ("height", image.Height),
                     ("channels", image.Mat.Channels()),
                     ("elapsedMs", timer.Elapsed.TotalMilliseconds));
-                return new NodeExecutorResult(
-                    new Dictionary<string, VisionValue>
-                    {
-                        ["image"] = VisionValue.Image(image),
-                        ["width"] = VisionValue.Integer(image.Width),
-                        ["height"] = VisionValue.Integer(image.Height),
-                        ["channels"] = VisionValue.Integer(image.Mat.Channels()),
-                        ["diagnostics"] = VisionValue.String(diagnostics)
-                    },
+                var outputValues = new Dictionary<string, VisionValue>
+                {
+                    ["image"] = VisionValue.Image(image),
+                    ["width"] = VisionValue.Integer(image.Width),
+                    ["height"] = VisionValue.Integer(image.Height),
+                    ["channels"] = VisionValue.Integer(image.Mat.Channels()),
+                    ["diagnostics"] = VisionValue.String(diagnostics)
+                };
+                if (mask is not null) outputValues["roiMask"] = VisionValue.Image(VisionImage.Own(mask.Clone()));
+                return new NodeExecutorResult(outputValues,
                     new Dictionary<string, object?>
                     {
                         ["mode"] = useColor ? "color" : "gray",

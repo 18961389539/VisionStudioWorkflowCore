@@ -58,6 +58,13 @@ var source = context.RequireImage("image").Mat;
         if (coordinates is not ("normalized" or "pixels"))
             throw new InvalidOperationException($"Unsupported coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
         var drawSkeleton = node.GetBool("drawSkeleton", true);
+        var keypointTopology = node.GetString("keypointTopology", "coco17").Trim().ToLowerInvariant();
+        if (keypointTopology is not ("coco17" or "custom"))
+            throw new InvalidOperationException("Pose keypointTopology must be coco17 or custom.");
+        if (keypointTopology == "custom" && drawSkeleton)
+            throw new InvalidOperationException("Pose drawSkeleton is valid only for the coco17 topology; disable it for custom keypoints.");
+        if (keypointTopology == "coco17" && numKeypoints != 17)
+            throw new InvalidOperationException("Pose coco17 topology requires numKeypoints=17.");
 
         var tensorOrder = node.GetString("tensorOrder", "auto").Trim().ToLowerInvariant();
         if (tensorOrder is not ("auto" or "channelsfirst" or "channelslast"))
@@ -130,12 +137,18 @@ var source = context.RequireImage("image").Mat;
             for (var k = 0; k < numKeypoints; k++)
             {
                 var baseIdx = k * keypointDims;
+                var confidence = keypointDims == 3 ? kpts[baseIdx + 2] : 1.0;
+                var finite = double.IsFinite(kpts[baseIdx]) && double.IsFinite(kpts[baseIdx + 1]) && double.IsFinite(confidence);
+                var visible = finite && confidence >= keypointThreshold;
                 points.Add(new
                 {
                     index = k,
                     x = kpts[baseIdx],
                     y = kpts[baseIdx + 1],
-                    conf = keypointDims == 3 ? kpts[baseIdx + 2] : 1.0
+                    conf = confidence,
+                    visible,
+                    valid = visible,
+                    threshold = keypointThreshold
                 });
             }
             posePayload.Add(new { index = i, classId, label = labels.Length > classId ? labels[classId] : $"class_{classId}", score, x1 = left, y1 = top, x2 = right, y2 = bottom, keypoints = points });
@@ -150,9 +163,9 @@ var source = context.RequireImage("image").Mat;
                 ["truncated"] = VisionValue.Boolean(truncated),
                 ["keypoints"] = VisionValue.String(JsonSerializer.Serialize(posePayload)),
                 ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
-                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, tensorOrder, numKeypoints, keypointDims, outputShape = shape, nmsApplied = applyNms, poses = posePayload }))
+                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, tensorOrder, numKeypoints, keypointDims, keypointTopology, keypointThreshold, outputShape = shape, nmsApplied = applyNms, poses = posePayload }))
             },
-            new Dictionary<string, object?> { ["count"] = detections.Count, ["layout"] = layout, ["tensorOrder"] = tensorOrder, ["letterbox"] = letterbox, ["nmsApplied"] = applyNms, ["numKeypoints"] = numKeypoints, ["keypointDims"] = keypointDims, ["outputShape"] = shape }));
+            new Dictionary<string, object?> { ["count"] = detections.Count, ["layout"] = layout, ["tensorOrder"] = tensorOrder, ["letterbox"] = letterbox, ["nmsApplied"] = applyNms, ["numKeypoints"] = numKeypoints, ["keypointDims"] = keypointDims, ["keypointTopology"] = keypointTopology, ["keypointThreshold"] = keypointThreshold, ["outputShape"] = shape }));
     }
 
     private static double BoxIoU(PoseCandidate a, PoseCandidate b)
@@ -237,8 +250,6 @@ var source = context.RequireImage("image").Mat;
             throw new InvalidOperationException("Anomaly inference with crop=true is unsupported because map and peak coordinates cannot be mapped through the center crop. Set crop=false.");
         using var net = OnnxInferenceHelpers.LoadNet(node);
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
-        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
-        cancellationToken.ThrowIfCancellationRequested();
         var threshold = node.GetDouble("threshold", 0.5);
         if (!double.IsFinite(threshold)) throw new InvalidOperationException("Anomaly threshold must be finite.");
         var mapThreshold = node.GetDouble("mapThreshold", 0.5);
@@ -257,6 +268,9 @@ var source = context.RequireImage("image").Mat;
         var explicitNames = new[] { scoreOutputName, mapOutputName }.Where(x => x.Length > 0).ToArray();
         var legacyOutputName = node.GetString("outputName", string.Empty).Trim();
         var requested = explicitNames.Length > 0 ? explicitNames : string.IsNullOrEmpty(legacyOutputName) ? null : [legacyOutputName];
+        var outputContract = ValidateAnomalyMetadata(net, requested, scoreOutputName, mapOutputName, mapLayout);
+        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
+        cancellationToken.ThrowIfCancellationRequested();
         var outputs = OnnxInferenceHelpers.ForwardOutputs(net, requested, modelPath, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -321,15 +335,21 @@ var source = context.RequireImage("image").Mat;
             : mapPeak!.Value >= effectiveMapThreshold!.Value;
         var outputShape = explicitNames.Length == 0 ? scoreShape ?? mapShape : null;
         var legacyThreshold = scalarScore is null ? effectiveMapThreshold ?? threshold : threshold;
+        var decisionSource = scalarScore is null ? "mapPeak" : "score";
         var json = JsonSerializer.Serialize(new
         {
             score,
             scoreSource = scalarScore is null ? "mapPeak" : "scalarOutput",
+            decisionSource,
+            outputContract,
             isAnomaly,
             threshold = legacyThreshold,
             scoreThreshold = threshold,
             mapThreshold = effectiveMapThreshold,
             thresholdMode,
+            thresholdUnit = "model-score",
+            scoreCalibration = "raw-model-score",
+            mapThresholdUnit = "map-value",
             useSeparateMapThreshold,
             mapLayout,
             scoreOutputName = scoreOutputName.Length > 0 ? scoreOutputName : null,
@@ -353,6 +373,7 @@ var source = context.RequireImage("image").Mat;
         {
             ["score"] = VisionValue.Double(score),
             ["isAnomaly"] = VisionValue.Boolean(isAnomaly),
+            ["decisionSource"] = VisionValue.String(decisionSource),
             ["result"] = VisionValue.String(json)
         };
         if (heatmap is not null) values["heatmap"] = VisionValue.Image(VisionImage.Own(heatmap));
@@ -364,19 +385,68 @@ var source = context.RequireImage("image").Mat;
         if (peakY is { } y) values["peakY"] = VisionValue.Double(y);
         if (areaFraction is { } fraction) values["areaFraction"] = VisionValue.Double(fraction);
         if (suggestedThreshold is { } suggested) values["suggestedThreshold"] = VisionValue.Double(suggested);
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("outputContract", outputContract), ("decisionSource", decisionSource),
+            ("scoreOutputShape", scoreShape), ("mapOutputShape", mapShape), ("mapLayout", mapLayout),
+            ("thresholdUnit", "model-score"), ("scoreCalibration", "raw-model-score"), ("thresholdMode", thresholdMode),
+            ("scoreThreshold", threshold), ("mapThreshold", effectiveMapThreshold), ("isAnomaly", isAnomaly));
+        values["diagnostics"] = VisionValue.String(diagnostics);
 
         return ValueTask.FromResult(new NodeExecutorResult(values,
             new Dictionary<string, object?>
             {
-                ["score"] = score, ["scoreSource"] = scalarScore is null ? "mapPeak" : "scalarOutput", ["threshold"] = legacyThreshold,
+                ["score"] = score, ["scoreSource"] = scalarScore is null ? "mapPeak" : "scalarOutput", ["decisionSource"] = decisionSource,
+                ["outputContract"] = outputContract, ["thresholdUnit"] = "model-score", ["scoreCalibration"] = "raw-model-score", ["threshold"] = legacyThreshold,
                 ["scoreThreshold"] = threshold, ["mean"] = mapMean, ["min"] = mapMin, ["max"] = mapMax,
                 ["mapThreshold"] = effectiveMapThreshold, ["useSeparateMapThreshold"] = useSeparateMapThreshold, ["thresholdMode"] = thresholdMode,
                 ["mapLayout"] = mapLayout, ["isAnomaly"] = isAnomaly,
                 ["scoreOutputName"] = scoreOutputName, ["mapOutputName"] = mapOutputName, ["scoreOutputShape"] = scoreShape,
                 ["mapOutputShape"] = mapShape, ["mapPeak"] = mapPeak, ["mapMean"] = mapMean, ["mapMin"] = mapMin,
                 ["mapMax"] = mapMax, ["suggestedThreshold"] = suggestedThreshold, ["peakX"] = peakX,
-                ["peakY"] = peakY, ["areaFraction"] = areaFraction, ["outputShape"] = outputShape
+                ["peakY"] = peakY, ["areaFraction"] = areaFraction, ["outputShape"] = outputShape, ["diagnostics"] = diagnostics
             }));
+    }
+
+    private static string ValidateAnomalyMetadata(OnnxModelSession net, string[]? requested, string scoreOutputName, string mapOutputName, string mapLayout)
+    {
+        var metadata = net.Session.OutputMetadata;
+        if (metadata.Count == 0) throw new InvalidOperationException("Anomaly model exposes no outputs.");
+        var names = requested ?? metadata.Keys.ToArray();
+        if (names.Length is < 1 or > 2)
+            throw new InvalidOperationException($"Anomaly output contract requires one score output, one map output, or one of each; received {names.Length} outputs.");
+        var scoreCount = 0; var mapCount = 0;
+        foreach (var name in names)
+        {
+            if (!metadata.TryGetValue(name, out var output))
+                throw new InvalidOperationException($"Anomaly output '{name}' is not exposed by the model.");
+            var shape = output.Dimensions;
+            var isScore = name == scoreOutputName || (scoreOutputName.Length == 0 && mapOutputName.Length == 0 && IsScalarOutput(shape));
+            var isMap = name == mapOutputName || (scoreOutputName.Length == 0 && mapOutputName.Length == 0 && !isScore);
+            if (isScore)
+            {
+                if (!IsScalarOutput(shape))
+                    throw new InvalidOperationException($"Anomaly score output '{name}' must contain exactly one value; received [{string.Join(',', shape)}].");
+                scoreCount++;
+            }
+            else if (isMap)
+            {
+                try { _ = ReadMapDimensions(shape, mapLayout); }
+                catch (InvalidOperationException ex) { throw new InvalidOperationException($"Anomaly map output '{name}' has an invalid shape: {ex.Message}"); }
+                mapCount++;
+            }
+            else
+            {
+                throw new InvalidOperationException($"Anomaly output '{name}' cannot be classified as a scalar score or spatial map.");
+            }
+        }
+        if (scoreCount > 1 || mapCount > 1 || scoreCount + mapCount == 0)
+            throw new InvalidOperationException($"Anomaly output contract is ambiguous: scoreCount={scoreCount}, mapCount={mapCount}.");
+        return (scoreCount, mapCount) switch
+        {
+            (1, 0) => "scoreOnly",
+            (0, 1) => "mapOnly",
+            (1, 1) => "scoreAndMap",
+            _ => "invalid"
+        };
     }
 
     private static bool IsScalarOutput(IReadOnlyList<int> shape) =>

@@ -2,6 +2,7 @@ using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
+using JLVisionLib;
 
 namespace VisionStudio.Engine.Nodes;
 
@@ -50,8 +51,14 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             cancellationToken.ThrowIfCancellationRequested();
             var croppedRoi = TranslateRoiToCrop(roi, bounds.X, bounds.Y, cancellationToken);
             var cropDiag = CoordinateValidation.Diagnostics(Type,
+                ("sourceWidth", source.Width), ("sourceHeight", source.Height),
                 ("x", bounds.X), ("y", bounds.Y), ("width", bounds.Width), ("height", bounds.Height),
-                ("roiType", roi.Type.ToString()), ("selectedPixels", selectedPixels));
+                ("roiType", roi.Type.ToString()), ("roiX", roi.X), ("roiY", roi.Y), ("roiWidth", roi.Width), ("roiHeight", roi.Height),
+                ("requestedRoi", System.Text.Json.JsonSerializer.Serialize(roi)),
+                ("selectedPixels", selectedPixels), ("coordinateConvention", "pixel centers; crop bounds are half-open [x,x+width)"),
+                ("boundaryRounding", "rectangle ceil(left/top), ceil(right/bottom); circle/polygon/brush nearest plus antialias padding"),
+                ("transformComposition", "apply roi.transform first, then CurrentImage->CropImage translation"),
+                ("cropOriginX", bounds.X), ("cropOriginY", bounds.Y));
             return ValueTask.FromResult(new NodeExecutorResult(
                 new Dictionary<string, VisionValue>
                 {
@@ -400,15 +407,45 @@ public sealed class ImageResizeNode : IVisionNodeExecutor
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-var source = context.RequireImage("image").Mat;
-        var width = node.GetInt("width", source.Width); var height = node.GetInt("height", source.Height);
+        var source = context.RequireImage("image").Mat;
+        var widthSet = HasDimension(node, "width");
+        var heightSet = HasDimension(node, "height");
+        var width = widthSet ? node.GetInt("width", source.Width) : source.Width;
+        var height = heightSet ? node.GetInt("height", source.Height) : source.Height;
+        var aspectMode = node.GetString("aspectMode", "stretch").Trim().ToLowerInvariant();
+        if (aspectMode is not ("stretch" or "lock"))
+            throw new InvalidOperationException("image.resize aspectMode must be stretch or lock.");
+        if (aspectMode == "lock")
+        {
+            if (widthSet && !heightSet) height = Math.Max(1, (int)Math.Round(source.Height * (double)width / source.Width));
+            else if (heightSet && !widthSet) width = Math.Max(1, (int)Math.Round(source.Width * (double)height / source.Height));
+            else if (widthSet && heightSet && Math.Abs((double)width / source.Width - (double)height / source.Height) > 1.0 / Math.Max(source.Width, source.Height))
+                throw new InvalidOperationException("image.resize aspectMode=lock requires width and height to preserve the source aspect ratio; leave one dimension empty or use stretch.");
+        }
         if (width < 1 || height < 1 || width > 16384 || height > 16384) throw new InvalidOperationException("Resize width and height must be between 1 and 16384.");
         var method = node.GetString("interpolation", "linear").Trim().ToLowerInvariant();
         var interpolation = method switch { "nearest" => InterpolationFlags.Nearest, "cubic" => InterpolationFlags.Cubic, "area" => InterpolationFlags.Area, "linear" => InterpolationFlags.Linear, _ => throw new InvalidOperationException("Interpolation must be nearest, linear, cubic, or area.") };
+        var inputKind = node.GetString("inputKind", "auto").Trim().ToLowerInvariant();
+        if (inputKind is not ("auto" or "gray" or "mask" or "label"))
+            throw new InvalidOperationException("image.resize inputKind must be auto, gray, mask or label.");
+        var detectedMask = inputKind is "mask" or "label" || (inputKind == "auto" && PreprocessP1Diagnostics.IsBinary(source));
+        if (detectedMask && method != "nearest")
+            throw new InvalidOperationException($"image.resize mask/label input requires nearest interpolation; received {method}, which can create invalid intermediate values.");
         var output = ImageTransformOutput.Create(mat => JLVisionOperators.Resize(source, mat, new Size(width, height), interpolation: interpolation));
         var scaleX = source.Width > 0 ? (double)width / source.Width : 0; var scaleY = source.Height > 0 ? (double)height / source.Height : 0;
-        var diag = CoordinateValidation.Diagnostics(Type, ("inputWidth", source.Width), ("inputHeight", source.Height), ("outputWidth", width), ("outputHeight", height), ("scaleX", scaleX), ("scaleY", scaleY), ("interpolation", method));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["outputWidth"] = VisionValue.Integer(width), ["outputHeight"] = VisionValue.Integer(height), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["interpolation"] = method, ["diagnostics"] = diag }));
+        var diag = CoordinateValidation.Diagnostics(Type, ("inputWidth", source.Width), ("inputHeight", source.Height), ("outputWidth", width), ("outputHeight", height), ("scaleX", scaleX), ("scaleY", scaleY), ("interpolation", method), ("aspectMode", aspectMode), ("widthSpecified", widthSet), ("heightSpecified", heightSet), ("inputKind", detectedMask ? "mask/label" : "gray"), ("anisotropic", Math.Abs(scaleX - scaleY) > 1e-12));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["outputWidth"] = VisionValue.Integer(width), ["outputHeight"] = VisionValue.Integer(height), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["interpolation"] = method, ["aspectMode"] = aspectMode, ["scaleX"] = scaleX, ["scaleY"] = scaleY, ["diagnostics"] = diag }));
+    }
+
+    private static bool HasDimension(NodeDefinition node, string name)
+    {
+        if (node.Parameters is null || !node.Parameters.TryGetValue(name, out var value)) return false;
+        return value.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.Number => value.TryGetDouble(out var number) && number > 0,
+            System.Text.Json.JsonValueKind.String => double.TryParse(value.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number) && number > 0,
+            _ => false
+        };
     }
 }
 
@@ -425,6 +462,20 @@ var source = context.RequireImage("image").Mat;
         var angle = node.GetDouble("angleDeg", 0);
         if (!double.IsFinite(angle)) throw new InvalidOperationException("Rotation angle must be finite.");
         var expand = node.GetBool("expand", true);
+        var requestedInterpolation = node.GetString("interpolation", "linear").Trim().ToLowerInvariant();
+        var interpolation = requestedInterpolation switch
+        {
+            "nearest" => InterpolationFlags.Nearest,
+            "linear" => InterpolationFlags.Linear,
+            "cubic" => InterpolationFlags.Cubic,
+            _ => throw new InvalidOperationException("image.rotate interpolation must be nearest, linear or cubic.")
+        };
+        var inputKind = node.GetString("inputKind", "auto").Trim().ToLowerInvariant();
+        if (inputKind is not ("auto" or "gray" or "mask" or "label"))
+            throw new InvalidOperationException("image.rotate inputKind must be auto, gray, mask or label.");
+        var detectedMask = inputKind is "mask" or "label" || (inputKind == "auto" && PreprocessP1Diagnostics.IsBinary(source));
+        var interpolationUsed = detectedMask ? "nearest" : requestedInterpolation;
+        if (detectedMask) interpolation = InterpolationFlags.Nearest;
         var center = new Point2f((source.Width - 1) / 2f, (source.Height - 1) / 2f);
         using var matrix = JLVisionOperators.GetRotationMatrix2D(center, angle, 1);
         var width = source.Width; var height = source.Height;
@@ -436,9 +487,15 @@ var source = context.RequireImage("image").Mat;
             matrix.Set(0, 2, matrix.At<double>(0, 2) + (width - 1) / 2d - center.X);
             matrix.Set(1, 2, matrix.At<double>(1, 2) + (height - 1) / 2d - center.Y);
         }
-        var output = ImageTransformOutput.Create(mat => JLVisionOperators.WarpAffine(source, mat, matrix, new Size(width, height), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0)));
-        var diag = CoordinateValidation.Diagnostics(Type, ("inputWidth", source.Width), ("inputHeight", source.Height), ("outputWidth", width), ("outputHeight", height), ("angleDeg", angle), ("normalizedAngleDeg", VisionTransform2D.NormalizeAngleDeg(angle)), ("expand", expand));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["outputWidth"] = VisionValue.Integer(width), ["outputHeight"] = VisionValue.Integer(height), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["angleDeg"] = angle, ["expand"] = expand, ["width"] = width, ["height"] = height, ["diagnostics"] = diag }));
+        var output = ImageTransformOutput.Create(mat => JLVisionOperators.WarpAffine(source, mat, matrix, new Size(width, height), interpolation, BorderTypes.Constant, Scalar.All(0)));
+        var transform = new VisionTransform2D("CurrentImage", "RotatedImage", "px",
+            matrix.At<double>(0, 0), matrix.At<double>(0, 1), matrix.At<double>(0, 2),
+            matrix.At<double>(1, 0), matrix.At<double>(1, 1), matrix.At<double>(1, 2), 0, 0, 1);
+        var diag = CoordinateValidation.Diagnostics(Type, ("inputWidth", source.Width), ("inputHeight", source.Height), ("outputWidth", width), ("outputHeight", height), ("angleDeg", angle), ("normalizedAngleDeg", VisionTransform2D.NormalizeAngleDeg(angle)), ("expand", expand),
+            ("centerX", center.X), ("centerY", center.Y), ("cropWhenNotExpanded", "fixed source-sized canvas anchored at (0,0)"),
+            ("interpolationRequested", requestedInterpolation), ("interpolationUsed", interpolationUsed),
+            ("inputKind", detectedMask ? "mask/label" : "gray"), ("transformSource", "CurrentImage"), ("transformTarget", "RotatedImage"));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["outputWidth"] = VisionValue.Integer(width), ["outputHeight"] = VisionValue.Integer(height), ["transform"] = VisionValue.Transform(transform), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["angleDeg"] = angle, ["expand"] = expand, ["width"] = width, ["height"] = height, ["interpolation"] = interpolationUsed, ["transform"] = transform, ["diagnostics"] = diag }));
     }
 }
 
@@ -459,6 +516,19 @@ public sealed class PerspectiveCorrectionNode : IVisionNodeExecutor
             (float)node.GetDouble($"x{i}", cornerDefaults[(i - 1) * 2]),
             (float)node.GetDouble($"y{i}", cornerDefaults[(i - 1) * 2 + 1]))).ToArray();
         if (points.Any(p => !float.IsFinite(p.X) || !float.IsFinite(p.Y))) throw new InvalidOperationException("Four finite source corner points (x1,y1 through x4,y4) are required in top-left, top-right, bottom-right, bottom-left order.");
+        for (var edge = 0; edge < 4; edge++)
+        {
+            var a = points[edge]; var b = points[(edge + 1) % 4];
+            if (Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2)) < 1e-6)
+                throw new InvalidOperationException($"Perspective source edge {edge + 1} is degenerate; corners {edge + 1} and {(edge + 1) % 4 + 1} coincide.");
+        }
+        if (SegmentsIntersect(points[0], points[1], points[2], points[3]) || SegmentsIntersect(points[1], points[2], points[3], points[0]))
+            throw new InvalidOperationException("Perspective source corners self-intersect; reorder them around the perimeter as top-left, top-right, bottom-right, bottom-left.");
+        var area = Math.Abs(JLVisionOperators.ContourArea(points, oriented: false));
+        if (area < 1) throw new InvalidOperationException("Perspective source corners must enclose a non-degenerate quadrilateral; three corners are collinear or the area is too small.");
+        if (!JLVisionOperators.IsContourConvex(points)) throw new InvalidOperationException("Perspective source corners must form a convex quadrilateral in perimeter order.");
+        var outsideCorners = points.Count(point => point.X < 0 || point.Y < 0 || point.X > image.Width - 1 || point.Y > image.Height - 1);
+        var maxOutside = points.Max(point => Math.Max(0, Math.Max(-point.X, Math.Max(-point.Y, Math.Max(point.X - (image.Width - 1), point.Y - (image.Height - 1))))));
         var width = node.GetInt("width", 0); var height = node.GetInt("height", 0);
         var autoWidth = width == 0; var autoHeight = height == 0;
         var method = node.GetString("interpolation", "linear").Trim().ToLowerInvariant();
@@ -469,9 +539,6 @@ public sealed class PerspectiveCorrectionNode : IVisionNodeExecutor
             "cubic" => InterpolationFlags.Cubic,
             _ => throw new InvalidOperationException("Perspective interpolation must be nearest, linear, or cubic.")
         };
-        var area = Math.Abs(JLVisionOperators.ContourArea(points, oriented: false));
-        if (area < 1) throw new InvalidOperationException("Perspective source corners must enclose a non-degenerate quadrilateral.");
-        if (!JLVisionOperators.IsContourConvex(points)) throw new InvalidOperationException("Perspective source corners must form a convex quadrilateral in perimeter order.");
         static double EdgeLength(Point2f a, Point2f b)
         {
             var dx = (double)a.X - b.X; var dy = (double)a.Y - b.Y;
@@ -482,6 +549,16 @@ public sealed class PerspectiveCorrectionNode : IVisionNodeExecutor
         if (width < 2 || height < 2 || width > 16384 || height > 16384) throw new InvalidOperationException("Perspective output width and height must be between 2 and 16384; a one-pixel axis makes the target quadrilateral degenerate. Automatic size derives from the quadrilateral edges; set width/height explicitly if the edges exceed 16383 px.");
         Point2f[] target = [new(0, 0), new(width - 1, 0), new(width - 1, height - 1), new(0, height - 1)];
         using var matrix = JLVisionOperators.GetPerspectiveTransform(points, target);
+        var homography = new[]
+        {
+            matrix.At<double>(0, 0), matrix.At<double>(0, 1), matrix.At<double>(0, 2),
+            matrix.At<double>(1, 0), matrix.At<double>(1, 1), matrix.At<double>(1, 2),
+            matrix.At<double>(2, 0), matrix.At<double>(2, 1), matrix.At<double>(2, 2)
+        };
+        var homographyJson = System.Text.Json.JsonSerializer.Serialize(homography);
+        using var validNative = new JlRegion();
+        validNative.GenRectangle1(0, 0, height - 1d, width - 1d);
+        var validRegion = JLVisionRegions.FromNative(validNative, width, height, cancellationToken);
         var output = ImageTransformOutput.Create(mat => JLVisionOperators.WarpPerspective(source, mat, matrix, new Size(width, height), interpolation, BorderTypes.Constant, Scalar.All(0)));
         try
         {
@@ -490,11 +567,22 @@ public sealed class PerspectiveCorrectionNode : IVisionNodeExecutor
             cancellationToken.ThrowIfCancellationRequested();
             var diag = CoordinateValidation.Diagnostics(Type,
                 ("inputWidth", image.Width), ("inputHeight", image.Height), ("width", width), ("height", height), ("autoWidth", autoWidth), ("autoHeight", autoHeight),
-                ("sourceArea", area), ("convex", true), ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity), ("interpolation", method));
+                ("sourceArea", area), ("convex", true), ("outsideCorners", outsideCorners), ("maxOutsidePixels", maxOutside),
+                ("roundingRule", "auto size = round(mean opposite edge length)+1; explicit size used as-is"),
+                ("mappingDirection", "source image -> rectified output"), ("homographyRowMajor", homography),
+                ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity), ("interpolation", method));
             return ValueTask.FromResult(new NodeExecutorResult(
-                new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["meanIntensity"] = VisionValue.Double(meanIntensity), ["minIntensity"] = VisionValue.Double(minIntensity), ["maxIntensity"] = VisionValue.Double(maxIntensity), ["diagnostics"] = VisionValue.String(diag) },
-                new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["autoWidth"] = autoWidth, ["autoHeight"] = autoHeight, ["sourceArea"] = area, ["interpolation"] = method, ["diagnostics"] = diag }));
+                new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["meanIntensity"] = VisionValue.Double(meanIntensity), ["minIntensity"] = VisionValue.Double(minIntensity), ["maxIntensity"] = VisionValue.Double(maxIntensity), ["homographyJson"] = VisionValue.String(homographyJson), ["validRegion"] = VisionValue.Region(validRegion), ["warningCount"] = VisionValue.Integer(outsideCorners > 0 ? 1 : 0), ["diagnostics"] = VisionValue.String(diag) },
+                new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["autoWidth"] = autoWidth, ["autoHeight"] = autoHeight, ["sourceArea"] = area, ["outsideCorners"] = outsideCorners, ["homographyJson"] = homographyJson, ["interpolation"] = method, ["diagnostics"] = diag }));
         }
         catch { output.Dispose(); throw; }
+    }
+
+    private static bool SegmentsIntersect(Point2f a, Point2f b, Point2f c, Point2f d)
+    {
+        static double Cross(Point2f p, Point2f q, Point2f r) => (q.X - p.X) * (r.Y - p.Y) - (q.Y - p.Y) * (r.X - p.X);
+        var abC = Cross(a, b, c); var abD = Cross(a, b, d);
+        var cdA = Cross(c, d, a); var cdB = Cross(c, d, b);
+        return ((abC > 0 && abD < 0) || (abC < 0 && abD > 0)) && ((cdA > 0 && cdB < 0) || (cdA < 0 && cdB > 0));
     }
 }

@@ -60,6 +60,7 @@ var sourceImage = context.RequireImage("image");
         var maxFitOutliers = common.MaxFitOutliers;
         var fitOutlierThreshold = common.FitOutlierThreshold;
         var maxFitError = common.MaxFitError;
+        var acceptanceMetric = SubpixelEdgeCore.ChoiceParameter(node, "acceptanceMetric", "all", "all", "robust");
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -78,6 +79,7 @@ var sourceImage = context.RequireImage("image");
                 var tangentX = -(search.End.Y - search.Start.Y) / length;
                 var tangentY = (search.End.X - search.Start.X) / length;
                 var points = new List<VisionPoint2D>(caliperCount);
+                var pointStations = new List<int>(caliperCount);
                 var strengths = new List<double>(caliperCount);
                 var failures = 0;
                 var outsideImage = 0;
@@ -118,10 +120,15 @@ var sourceImage = context.RequireImage("image");
                         continue;
                     }
                     points.Add(SubpixelEdgeCore.Locate(profileStart, profileEnd, edge.Position));
+                    pointStations.Add(i);
                     strengths.Add(edge.Strength);
                 }
                 var fit = FitCaliperLine(points, maxFitOutliers, fitOutlierThreshold);
-                var fitErrorExceedsLimit = fit is not null && maxFitError > 0 && fit.Error > maxFitError;
+                var allResiduals = fit is not null ? LineResiduals(Enumerable.Range(0, points.Count).ToArray(), points, fit.Line) : [];
+                var allRms = allResiduals.Length > 0 ? Math.Sqrt(allResiduals.Sum(r => r * r) / allResiduals.Length) : (double?)null;
+                var allMax = allResiduals.Length > 0 ? allResiduals.Max() : (double?)null;
+                var acceptanceError = acceptanceMetric == "all" ? allMax : fit?.Error;
+                var fitErrorExceedsLimit = acceptanceError is not null && maxFitError > 0 && acceptanceError > maxFitError;
                 var found = fit is not null && fit.UsedIndices.Length >= minValidCalipers && !fitErrorExceedsLimit;
                 var reportedSearchLine = baseIntersects ? new VisionLine2D(start, end) : search;
 
@@ -131,7 +138,8 @@ var sourceImage = context.RequireImage("image");
                     ["found"] = VisionValue.Boolean(found),
                     ["searchLine"] = VisionValue.Line(reportedSearchLine),
                     ["sampleCount"] = VisionValue.Integer(fit?.UsedIndices.Length ?? points.Count),
-                    ["ignoredCount"] = VisionValue.Integer(fit?.IgnoredIndices.Length ?? 0)
+                    ["ignoredCount"] = VisionValue.Integer(fit?.IgnoredIndices.Length ?? 0),
+                    ["acceptanceMetric"] = VisionValue.String(acceptanceMetric)
                 };
 
                 if (fit is not null)
@@ -141,6 +149,11 @@ var sourceImage = context.RequireImage("image");
                     // Keep the computed fit-quality metric available for downstream diagnostics
                     // even when the acceptance gate rejects the geometry.
                     outputs["fitError"] = VisionValue.Double(fit.Error);
+                    outputs["allRms"] = VisionValue.Double(allRms!.Value);
+                    outputs["allMaxResidual"] = VisionValue.Double(allMax!.Value);
+                    outputs["robustRms"] = VisionValue.Double(fit.Error);
+                    outputs["robustMaxResidual"] = VisionValue.Double(LineResiduals(fit.UsedIndices, points, fit.Line).Max());
+                    outputs["ignoredStationsJson"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(fit.IgnoredIndices.Select(index => pointStations[index])));
                     if (found)
                     {
                         outputs["point"] = VisionValue.Point(fit.Point);
@@ -200,6 +213,10 @@ var sourceImage = context.RequireImage("image");
                         ["maxFitOutliers"] = maxFitOutliers,
                         ["fitOutlierThreshold"] = fitOutlierThreshold,
                         ["maxFitError"] = maxFitError,
+                        ["acceptanceMetric"] = acceptanceMetric,
+                        ["allRms"] = allRms, ["allMaxResidual"] = allMax,
+                        ["robustRms"] = fit?.Error,
+                        ["robustMaxResidual"] = fit is not null ? LineResiduals(fit.UsedIndices, points, fit.Line).Max() : null,
                         ["minValidCalipers"] = minValidCalipers,
                         ["sampleWidth"] = sampleWidth,
                         ["polarity"] = polarity,
@@ -389,6 +406,7 @@ var sourceImage = context.RequireImage("image");
         var fitOutlierThreshold = common.FitOutlierThreshold;
         var fitRadiusTolerance = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitRadiusTolerance", 0));
         var maxFitError = common.MaxFitError;
+        var acceptanceMetric = SubpixelEdgeCore.ChoiceParameter(node, "acceptanceMetric", "all", "all", "robust");
         var innerRadius = Math.Max(0, nominalRadius - band);
         var outerRadius = nominalRadius + band;
         var roi = ContourNodesHelper.ResolveRoi(context, node);
@@ -405,6 +423,7 @@ var sourceImage = context.RequireImage("image");
                     ? BuildAnglesByCount(angleStart, angleEnd, caliperCount, out var effectiveStep)
                     : BuildAnglesByStep(angleStart, angleEnd, angleStep, out effectiveStep);
                 var edgePoints = new List<VisionPoint2D>();
+                var edgeSampleIndices = new List<int>();
                 var rejected = 0;
                 var rejectedByDeviation = 0;
                 var spokesOutsideImage = 0;
@@ -491,6 +510,7 @@ var sourceImage = context.RequireImage("image");
                         X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
                         Stroke: "#91d5ff", StrokeWidth: 0.7));
                     edgePoints.Add(new VisionPoint2D(center.X + dirX * edgeRadius, center.Y + dirY * edgeRadius));
+                    edgeSampleIndices.Add(spokeIndex);
                     edgeSpokeIndices?.Add(spokeIndex);
                 }
 
@@ -498,7 +518,8 @@ var sourceImage = context.RequireImage("image");
                 var fit = hasEnoughPoints ? FitCircleWithOutlierRejection(edgePoints, maxFitOutliers, fitOutlierThreshold, cancellationToken) : null;
                 var radiusOutsideTolerance = fit is not null && fitRadiusTolerance > 0
                     && Math.Abs(fit.Circle.Radius - nominalRadius) > fitRadiusTolerance;
-                var fitErrorExceedsLimit = fit is not null && maxFitError > 0 && fit.Rmse > maxFitError;
+                var fitErrorExceedsLimit = fit is not null && maxFitError > 0
+                    && (acceptanceMetric == "all" ? AllResiduals(edgePoints, fit.Circle).Max() : fit.Rmse) > maxFitError;
                 var hasMinimumCalipers = fit is not null
                     ? fit.UsedIndices.Length >= minValidCalipers
                     : edgePoints.Count >= minValidCalipers;
@@ -508,7 +529,8 @@ var sourceImage = context.RequireImage("image");
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
                     ["found"] = VisionValue.Boolean(found),
                     ["sampleCount"] = VisionValue.Integer(fit?.UsedIndices.Length ?? edgePoints.Count),
-                    ["ignoredCount"] = VisionValue.Integer(fit?.IgnoredIndices.Length ?? 0)
+                    ["ignoredCount"] = VisionValue.Integer(fit?.IgnoredIndices.Length ?? 0),
+                    ["acceptanceMetric"] = VisionValue.String(acceptanceMetric)
                 };
                 var overlays = new List<VisionOverlay>
                 {
@@ -595,6 +617,12 @@ var sourceImage = context.RequireImage("image");
                     // a radius or fit-error gate rejects its geometry.
                     outputs["radiusSpread"] = VisionValue.Double(radiusSpread);
                     outputs["fitError"] = VisionValue.Double(rmse);
+                    var allResiduals = AllResiduals(edgePoints, circle);
+                    outputs["allRms"] = VisionValue.Double(Math.Sqrt(allResiduals.Sum(r => r * r) / allResiduals.Length));
+                    outputs["allMaxResidual"] = VisionValue.Double(allResiduals.Max());
+                    outputs["robustRms"] = VisionValue.Double(rmse);
+                    outputs["robustMaxResidual"] = VisionValue.Double(usedRadii.Select(r => Math.Abs(r - circle.Radius)).Max());
+                    outputs["ignoredSamplesJson"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(fit.IgnoredIndices.Select(index => edgeSampleIndices[index])));
                     if (found)
                     {
                         outputs["circle"] = VisionValue.Circle(circle);
@@ -690,6 +718,9 @@ var sourceImage = context.RequireImage("image");
         try { return MultiPointFit.Circle(points.ToArray(), cancellationToken); }
         catch (InvalidOperationException) { return null; }
     }
+
+    private static double[] AllResiduals(IReadOnlyList<VisionPoint2D> points, VisionCircle circle)
+        => Residuals(Enumerable.Range(0, points.Count).ToArray(), points, circle);
 
     private static double[] Residuals(IReadOnlyList<int> indices, IReadOnlyList<VisionPoint2D> points, VisionCircle circle) =>
         indices.Select(i => Math.Abs(MeasurementMath.Hypot(points[i].X - circle.X, points[i].Y - circle.Y) - circle.Radius)).ToArray();

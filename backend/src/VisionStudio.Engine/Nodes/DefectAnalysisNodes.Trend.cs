@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using OpenCvSharp;
@@ -36,6 +37,11 @@ public sealed class DefectTrendNode : IVisionNodeExecutor
         var baselineSamples = node.GetInt("baselineSamples", 0);
         if (baselineSamples is < 0 or > 100000) throw new InvalidOperationException("defect.trend baselineSamples must be within 0..100000 (0 = whole series).");
 
+        if (baselineSamples > series.Count)
+            throw new InvalidOperationException($"defect.trend baselineSamples must not exceed count={series.Count}.");
+        if (baselineSamples > 0 && baselineSamples < minSamples)
+            throw new InvalidOperationException($"defect.trend minSamples={minSamples} must not exceed baselineSamples={baselineSamples}.");
+
         if (series.Count < minSamples)
         {
             timer.Stop();
@@ -44,14 +50,15 @@ public sealed class DefectTrendNode : IVisionNodeExecutor
         }
 
         // 控制限必须用"稳定期"估计：把异常点也算进 σ 会把限抬高，异常反而报不出来。
-        var baselineCount = baselineSamples > 0 ? Math.Min(baselineSamples, series.Count) : series.Count;
-        if (baselineCount < 2) baselineCount = series.Count;
+        var baselineCount = baselineSamples > 0 ? baselineSamples : series.Count;
         var baseline = new double[baselineCount];
         for (var index = 0; index < baselineCount; index++) baseline[index] = series[index];
 
         var mean = baseline.Average();
         var variance = baseline.Sum(value => (value - mean) * (value - mean)) / Math.Max(1, baselineCount - 1);
         var sigma = Math.Sqrt(variance);
+        var sigmaZero = sigma <= 1e-12;
+        if (sigmaZero) sigma = 0;
         var ucl = mean + sigmaK * sigma;
         var lcl = Math.Max(0, mean - sigmaK * sigma);
         var last = series[^1];
@@ -69,12 +76,16 @@ public sealed class DefectTrendNode : IVisionNodeExecutor
         }
         var denominator = series.Count * sumXx - sumX * sumX;
         var slope = Math.Abs(denominator) < 1e-12 ? 0 : (series.Count * sumXy - sumX * sumY) / denominator;
-        var outOfControl = last > ucl || last < lcl;
+        var outOfControl = sigmaZero
+            ? series.Any(value => Math.Abs(value - mean) > 1e-12)
+            : last > ucl || last < lcl;
         var direction = Math.Abs(slope) < 1e-9 ? "flat" : slope > 0 ? "rising" : "falling";
         timer.Stop();
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("count", series.Count), ("mean", mean), ("sigma", sigma), ("ucl", ucl), ("lcl", lcl),
+            ("baselineMean", mean), ("baselineSigma", sigma), ("baselineSampleCount", baselineCount),
+            ("baselineStartIndex", 0), ("baselineEndIndex", baselineCount - 1), ("sigmaZero", sigmaZero),
             ("last", last), ("movingAverage", movingAverage), ("slope", slope), ("direction", direction),
             ("outOfControl", outOfControl), ("sigmaK", sigmaK), ("window", window),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
@@ -84,6 +95,10 @@ public sealed class DefectTrendNode : IVisionNodeExecutor
             {
                 ["mean"] = VisionValue.Double(mean),
                 ["sigma"] = VisionValue.Double(sigma),
+                ["baselineMean"] = VisionValue.Double(mean),
+                ["baselineSigma"] = VisionValue.Double(sigma),
+                ["baselineSampleCount"] = VisionValue.Integer(baselineCount),
+                ["sigmaZero"] = VisionValue.Boolean(sigmaZero),
                 ["ucl"] = VisionValue.Double(ucl),
                 ["lcl"] = VisionValue.Double(lcl),
                 ["last"] = VisionValue.Double(last),
@@ -98,6 +113,9 @@ public sealed class DefectTrendNode : IVisionNodeExecutor
             new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
                 ["count"] = series.Count, ["mean"] = Math.Round(mean, 4), ["sigma"] = Math.Round(sigma, 4),
+                ["baselineMean"] = Math.Round(mean, 4), ["baselineSigma"] = Math.Round(sigma, 4),
+                ["baselineSampleCount"] = baselineCount, ["baselineStartIndex"] = 0, ["baselineEndIndex"] = baselineCount - 1,
+                ["sigmaZero"] = sigmaZero,
                 ["ucl"] = Math.Round(ucl, 4), ["lcl"] = Math.Round(lcl, 4),
                 ["last"] = Math.Round(last, 4), ["movingAverage"] = Math.Round(movingAverage, 4),
                 ["slope"] = Math.Round(slope, 6), ["direction"] = direction, ["outOfControl"] = outOfControl,
@@ -127,11 +145,29 @@ public sealed class DefectTrendNode : IVisionNodeExecutor
 }
 
 /// <summary>
-/// 缺陷样本入库（defect.dataset）：裁剪缺陷 → 写图像文件 → 输出可追溯的样本清单。
-/// 路径必须是工作目录下的相对路径，绝对路径与 ".." 一律拒绝。
+/// 缺陷样本入库（defect.dataset）：裁剪缺陷 → 原子写图像/索引 → 输出可追溯的样本清单。
+/// 路径被限制在工作目录内；overwrite 需要目录独占锁与既有索引校验。
 /// </summary>
 public sealed class DefectDatasetNode : IVisionNodeExecutor
 {
+    private const int IndexSchemaVersion = 1;
+    private static readonly JsonSerializerOptions IndexJson = new() { WriteIndented = true };
+
+    private sealed class DatasetIndex
+    {
+        public int SchemaVersion { get; set; }
+        public string Dataset { get; set; } = string.Empty;
+        public List<DatasetIndexSample> Samples { get; set; } = [];
+    }
+
+    private sealed class DatasetIndexSample
+    {
+        public string File { get; set; } = string.Empty;
+        public string Sha256 { get; set; } = string.Empty;
+        public int Width { get; set; }
+        public int Height { get; set; }
+    }
+
     public string Type => "defect.dataset";
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(
@@ -153,11 +189,12 @@ public sealed class DefectDatasetNode : IVisionNodeExecutor
         var directory = (node.GetString("directory", "artifacts/defect-samples") ?? "artifacts/defect-samples").Trim();
         if (string.IsNullOrWhiteSpace(directory))
             throw new InvalidOperationException("defect.dataset directory is required.");
-        if (Path.IsPathRooted(directory) || directory.Contains("..", StringComparison.Ordinal))
-            throw new InvalidOperationException("defect.dataset directory must be a relative path inside the working directory; absolute paths and '..' are rejected.");
 
         var maxSamples = node.GetInt("maxSamples", 50);
         if (maxSamples is < 1 or > 10000) throw new InvalidOperationException("defect.dataset maxSamples must be within 1..10000.");
+        var sampling = (node.GetString("samplingStrategy", "detection-order") ?? "detection-order").Trim().ToLowerInvariant();
+        if (sampling is not ("detection-order" or "class-stratified" or "severity"))
+            throw new InvalidOperationException("defect.dataset samplingStrategy must be detection-order, class-stratified or severity.");
         var margin = node.GetInt("cropMarginPx", 4);
         if (margin is < 0 or > 512) throw new InvalidOperationException("defect.dataset cropMarginPx must be within 0..512.");
         var format = (node.GetString("format", "png") ?? "png").Trim().ToLowerInvariant();
@@ -168,67 +205,146 @@ public sealed class DefectDatasetNode : IVisionNodeExecutor
         if (conflict is not ("suffix" or "overwrite" or "skip"))
             throw new InvalidOperationException("defect.dataset conflictPolicy must be suffix, overwrite or skip.");
 
-        var root = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), directory));
         var workingDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
-        if (!root.StartsWith(workingDirectory, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("defect.dataset resolved directory escapes the working directory.");
+        var root = WorkspacePathSecurity.ResolveRoot(directory, workingDirectory);
         Directory.CreateDirectory(root);
+        var lockPath = Path.Combine(root, ".defect-dataset.lock");
+        using var directoryLock = AcquireDirectoryLock(lockPath);
+        var indexPath = Path.Combine(root, "index.json");
+        var existing = LoadIndex(root, indexPath, dataset, conflict == "overwrite");
 
         var extension = format == "png" ? ".png" : ".jpg";
-        var samples = new List<object>();
-        int saved = 0, skipped = 0;
-        foreach (var detection in detections.Take(maxSamples))
+        var selected = sampling switch
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var x = (int)Math.Floor(detection.BoundingBox.X) - margin;
-            var y = (int)Math.Floor(detection.BoundingBox.Y) - margin;
-            var width = (int)Math.Ceiling(detection.BoundingBox.Width) + margin * 2;
-            var height = (int)Math.Ceiling(detection.BoundingBox.Height) + margin * 2;
-            x = Math.Clamp(x, 0, Math.Max(0, image.Width - 1));
-            y = Math.Clamp(y, 0, Math.Max(0, image.Height - 1));
-            width = Math.Clamp(width, 1, image.Width - x);
-            height = Math.Clamp(height, 1, image.Height - y);
-            using var crop = new Mat(image.Mat, new Rect(x, y, width, height));
-            using var owned = crop.Clone();
-
-            var baseName = $"{dataset}_{detection.Index:D4}";
-            var path = Path.Combine(root, baseName + extension);
-            if (File.Exists(path))
+            "severity" => detections.OrderByDescending(d => d.Area).ThenBy(d => d.Index),
+            "class-stratified" => Stratify(detections),
+            _ => detections
+        };
+        var selectedDetections = selected.Take(maxSamples).ToArray();
+        var unexportedCount = detections.Length - selectedDetections.Length;
+        Cv2.ImEncode(".png", image.Mat, out var sourceBytes);
+        var sourceHash = Convert.ToHexString(SHA256.HashData(sourceBytes)).ToLowerInvariant();
+        var samples = new List<object>();
+        var indexSamples = new List<DatasetIndexSample>();
+        var saved = 0;
+        var skipped = 0;
+        string? stagingDirectory = null;
+        string? generationDirectory = null;
+        try
+        {
+            if (conflict == "overwrite")
             {
-                if (conflict == "skip") { skipped++; continue; }
-                if (conflict == "suffix")
-                {
-                    var counter = 1;
-                    do { path = Path.Combine(root, $"{baseName}_{counter:D2}{extension}"); counter++; }
-                    while (File.Exists(path) && counter < 1000);
-                }
+                var generation = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}";
+                stagingDirectory = Path.Combine(root, $".staging-{Guid.NewGuid():N}");
+                generationDirectory = Path.Combine(root, "generations", generation);
+                Directory.CreateDirectory(stagingDirectory);
             }
 
-            ImageEncodingParam[] parameters = format == "jpg"
-                ? [new ImageEncodingParam(ImwriteFlags.JpegQuality, quality)]
-                : [new ImageEncodingParam(ImwriteFlags.PngCompression, 3)];
-            Cv2.ImEncode(extension, owned, out var bytes, parameters);
-            File.WriteAllBytes(path, bytes);
-            saved++;
-            samples.Add(new
+            foreach (var detection in selectedDetections)
             {
-                id = $"{dataset}#{detection.Index}",
-                file = Path.GetFileName(path),
-                path = path.Replace('\\', '/'),
-                classId = detection.ClassId,
-                area = Math.Round(detection.Area, 2),
-                x = Math.Round(detection.X, 2),
-                y = Math.Round(detection.Y, 2),
-                width = Math.Round(detection.Width, 2),
-                height = Math.Round(detection.Height, 2)
-            });
+                cancellationToken.ThrowIfCancellationRequested();
+                var requestedX = (int)Math.Floor(detection.BoundingBox.X) - margin;
+                var requestedY = (int)Math.Floor(detection.BoundingBox.Y) - margin;
+                var requestedWidth = (int)Math.Ceiling(detection.BoundingBox.Width) + margin * 2;
+                var requestedHeight = (int)Math.Ceiling(detection.BoundingBox.Height) + margin * 2;
+                var x = Math.Clamp(requestedX, 0, Math.Max(0, image.Width - 1));
+                var y = Math.Clamp(requestedY, 0, Math.Max(0, image.Height - 1));
+                var width = Math.Clamp(requestedWidth, 1, image.Width - x);
+                var height = Math.Clamp(requestedHeight, 1, image.Height - y);
+                var overflow = new { left = Math.Max(0, -requestedX), top = Math.Max(0, -requestedY), right = Math.Max(0, requestedX + requestedWidth - image.Width), bottom = Math.Max(0, requestedY + requestedHeight - image.Height) };
+                using var crop = new Mat(image.Mat, new Rect(x, y, width, height));
+                using var owned = crop.Clone();
+
+                var baseName = $"{dataset}_{detection.Index:D4}";
+                var fileName = baseName + extension;
+                var relativeFile = fileName;
+                var targetPath = Path.Combine(root, fileName);
+                if (conflict == "overwrite")
+                {
+                    targetPath = Path.Combine(stagingDirectory!, fileName);
+                    relativeFile = Path.GetRelativePath(root, Path.Combine(generationDirectory!, fileName)).Replace('\\', '/');
+                }
+                else if (File.Exists(targetPath))
+                {
+                    if (conflict == "skip") { skipped++; continue; }
+                    var counter = 1;
+                    do
+                    {
+                        fileName = $"{baseName}_{counter:D2}{extension}";
+                        targetPath = Path.Combine(root, fileName);
+                        counter++;
+                    } while (File.Exists(targetPath) && counter < 1000);
+                    relativeFile = fileName;
+                }
+
+                ImageEncodingParam[] parameters = format == "jpg"
+                    ? [new ImageEncodingParam(ImwriteFlags.JpegQuality, quality)]
+                    : [new ImageEncodingParam(ImwriteFlags.PngCompression, 3)];
+                Cv2.ImEncode(extension, owned, out var bytes, parameters);
+                var hash = Convert.ToHexString(SHA256.HashData(bytes));
+                WriteFileAtomically(targetPath, bytes, overwrite: false);
+                saved++;
+                indexSamples.Add(new DatasetIndexSample
+                {
+                    File = relativeFile.Replace('\\', '/'), Sha256 = hash, Width = width, Height = height
+                });
+                samples.Add(new
+                {
+                    id = $"{dataset}#{detection.Index}",
+                    file = Path.GetFileName(targetPath),
+                    path = (conflict == "overwrite" ? Path.Combine(root, relativeFile) : targetPath).Replace('\\', '/'),
+                    sha256 = hash,
+                    sourceSha256 = sourceHash,
+                    sourceWidth = image.Width,
+                    sourceHeight = image.Height,
+                    requestedCrop = new { x = requestedX, y = requestedY, width = requestedWidth, height = requestedHeight },
+                    crop = new { x, y, width, height },
+                    clippedOverflow = overflow,
+                    cropContract = "intersect-with-image; no padding",
+                    cropWidth = width,
+                    cropHeight = height,
+                    classId = detection.ClassId,
+                    area = Math.Round(detection.Area, 2),
+                    x = Math.Round(detection.X, 2),
+                    y = Math.Round(detection.Y, 2),
+                    width = Math.Round(detection.Width, 2),
+                    height = Math.Round(detection.Height, 2)
+                });
+            }
+
+            if (conflict == "overwrite" && saved > 0)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(generationDirectory!)!);
+                Directory.Move(stagingDirectory!, generationDirectory!);
+                stagingDirectory = null;
+            }
+
+            if (saved > 0)
+            {
+                var nextSamples = conflict == "overwrite" ? indexSamples : existing.Samples.Concat(indexSamples).ToList();
+                var nextIndex = new DatasetIndex
+                {
+                    SchemaVersion = IndexSchemaVersion, Dataset = dataset, Samples = nextSamples
+                };
+                WriteIndexAtomically(indexPath, nextIndex);
+            }
+        }
+        catch
+        {
+            if (stagingDirectory is not null) TryDeleteDirectory(stagingDirectory);
+            throw;
         }
 
+        skipped = detections.Length - saved;
         timer.Stop();
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("savedCount", saved), ("skippedCount", skipped), ("inputCount", detections.Length),
+            ("unexportedCount", unexportedCount), ("samplingStrategy", sampling),
+            ("selectedDetectionIndices", selectedDetections.Select(d => d.Index).ToArray()),
+            ("cropContract", "intersect-with-image; no padding"),
             ("dataset", dataset), ("directory", root), ("format", format), ("maxSamples", maxSamples),
-            ("cropMarginPx", margin), ("conflictPolicy", conflict),
+            ("cropMarginPx", margin), ("conflictPolicy", conflict), ("exclusiveDirectory", true),
+            ("indexValidated", existing.Samples.Count > 0 || !File.Exists(indexPath)),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
 
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -237,6 +353,7 @@ public sealed class DefectDatasetNode : IVisionNodeExecutor
                 ["directory"] = VisionValue.String(root.Replace('\\', '/')),
                 ["savedCount"] = VisionValue.Integer(saved),
                 ["skippedCount"] = VisionValue.Integer(skipped),
+                ["unexportedCount"] = VisionValue.Integer(unexportedCount),
                 ["samplesJson"] = VisionValue.String(JsonSerializer.Serialize(samples)),
                 ["found"] = VisionValue.Boolean(saved > 0),
                 ["diagnostics"] = VisionValue.String(diagnostics)
@@ -244,9 +361,99 @@ public sealed class DefectDatasetNode : IVisionNodeExecutor
             new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
                 ["savedCount"] = saved, ["skippedCount"] = skipped, ["inputCount"] = detections.Length,
+                ["unexportedCount"] = unexportedCount, ["samplingStrategy"] = sampling,
+                ["selectedDetectionIndices"] = selectedDetections.Select(d => d.Index).ToArray(),
                 ["dataset"] = dataset, ["directory"] = root.Replace('\\', '/'),
-                ["format"] = format, ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
+                ["format"] = format, ["conflictPolicy"] = conflict, ["exclusiveDirectory"] = true,
+                ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                 ["algorithmBackend"] = "opencv", ["diagnostics"] = diagnostics
             }));
+    }
+
+    private static IEnumerable<VisionDetection> Stratify(IReadOnlyList<VisionDetection> detections)
+    {
+        var groups = detections.GroupBy(d => d.ClassId ?? 0).OrderBy(g => g.Key).ToArray();
+        for (var position = 0; groups.Any(g => g.Count() > position); position++)
+        foreach (var group in groups)
+        {
+            if (position >= group.Count()) continue;
+            yield return group.ElementAt(position);
+        }
+    }
+
+    private static FileStream AcquireDirectoryLock(string path)
+    {
+        try
+        {
+            return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException("defect.dataset could not acquire exclusive access to the output directory.", ex);
+        }
+    }
+
+    private static DatasetIndex LoadIndex(string root, string indexPath, string dataset, bool requireIndexForOverwrite)
+    {
+        if (!File.Exists(indexPath))
+        {
+            if (requireIndexForOverwrite && Directory.EnumerateFiles(root, "*", SearchOption.TopDirectoryOnly)
+                    .Any(path => !Path.GetFileName(path).Equals(".defect-dataset.lock", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("defect.dataset overwrite requires a valid index.json before replacing an existing dataset directory.");
+            return new DatasetIndex { SchemaVersion = IndexSchemaVersion, Dataset = dataset, Samples = [] };
+        }
+
+        DatasetIndex index;
+        try
+        {
+            index = JsonSerializer.Deserialize<DatasetIndex>(File.ReadAllText(indexPath), IndexJson)
+                ?? throw new JsonException("empty payload");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("defect.dataset index.json is invalid; overwrite/append refused.", ex);
+        }
+        if (index.SchemaVersion != IndexSchemaVersion || !string.Equals(index.Dataset, dataset, StringComparison.Ordinal))
+            throw new InvalidOperationException("defect.dataset index.json schema or dataset name does not match; retrain/re-export the dataset explicitly.");
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sample in index.Samples)
+        {
+            if (string.IsNullOrWhiteSpace(sample.File) || !seen.Add(sample.File) ||
+                sample.Sha256.Length != 64 || sample.Width <= 0 || sample.Height <= 0)
+                throw new InvalidOperationException("defect.dataset index.json contains an invalid or duplicate sample record.");
+            var path = WorkspacePathSecurity.ResolveRelative(root, sample.File, "dataset index sample");
+            if (!File.Exists(path))
+                throw new InvalidOperationException($"defect.dataset index references missing sample '{sample.File}'.");
+            var actual = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+            if (!string.Equals(actual, sample.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"defect.dataset index hash mismatch for sample '{sample.File}'.");
+        }
+        return index;
+    }
+
+    private static void WriteFileAtomically(string path, byte[] bytes, bool overwrite)
+    {
+        var temp = SaveImageNode.CreateTempPath(path);
+        try
+        {
+            File.WriteAllBytes(temp, bytes);
+            SaveImageNode.Commit(temp, path, overwrite);
+        }
+        finally
+        {
+            SaveImageNode.TryDelete(temp);
+        }
+    }
+
+    private static void WriteIndexAtomically(string path, DatasetIndex index)
+    {
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(index, IndexJson));
+        WriteFileAtomically(path, bytes, overwrite: true);
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); }
+        catch { /* preserve the original failure */ }
     }
 }

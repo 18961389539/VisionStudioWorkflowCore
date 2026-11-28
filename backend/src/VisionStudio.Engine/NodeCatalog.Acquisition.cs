@@ -15,7 +15,7 @@ public static partial class BuiltInNodeCatalog
                 new("timestamp", VisionDataType.String),
                 new("cameraId", VisionDataType.String),
                 new("width", VisionDataType.Integer),
-                new("height", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next
+                new("height", VisionDataType.Integer), new("triggerSequence", VisionDataType.Integer, Required: false), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("cameraId", "Camera ID", "text", "virtual-1", Group: "Camera", Description: "Camera device id to acquire from."),
@@ -41,7 +41,7 @@ public static partial class BuiltInNodeCatalog
 
 
                 ],
-            "Grab one frame from a running camera stream (CameraFrameHub). Wire: no image input; output image feeds preprocess/match; cameraId selects the device. Key params: frameMode Latest reuses the newest frame, Next waits for a newer sequence; timeoutMs; exposureUs=0 and gainDb=-1 leave device settings unchanged; triggerBeforeGrab fires a soft trigger before the grab. Backend is the camera device layer, not JLVision. Common failures: camera not open/autoStart, grab timeout, or camera rejects the exposure/gain set.",
+            "Grab one frame from a running camera stream (CameraFrameHub). Wire: no image input; output image feeds preprocess/match; cameraId selects the device. Key params: frameMode Latest reuses the newest frame, Next waits for a newer sequence; timeoutMs; exposureUs=0 and gainDb=-1 leave device settings unchanged; triggerBeforeGrab fires a soft trigger before the grab. Exposure/gain changes are applied transactionally before any grab and rolled back on failure. A software trigger always waits for a newer frame; diagnostics report triggerSequence, effective Next mode, trigger-to-frame latency and frameReuseRisk for Latest+trigger. Backend is the camera device layer, not JLVision. Common failures: camera not open/autoStart, grab timeout, or camera rejects the exposure/gain set.",
             "builtin",
             // R02：triggerBeforeGrab=true 时节点会主动触发相机（物理动作）；纯取图（false/缺省）保持只读语义。
             Actions: [new(NodeActionKind.CameraTrigger, NodeActionCompletion.Synchronous, WhenParameter: "triggerBeforeGrab", WhenValue: "true")],
@@ -70,7 +70,9 @@ public static partial class BuiltInNodeCatalog
                 new("frameTimeoutMs", "Frame Timeout", "number", 3000, 100, 30000, 100, Unit: "ms", Group: "Acquisition", Description: "Maximum wait in milliseconds for every group member frame after the trigger."),
                 new("requireWithinTolerance", "Require Skew Within Tolerance", "boolean", false, Group: "Synchronization", Description: "Fail the node when the captured FrameSet reports withinTolerance=false."),
                 new("minCameraCount", "Minimum Cameras", "number", 1, 1, 64, 1, Group: "Synchronization", Description: "Partial captures below this count fail instead of returning a thin FrameSet."),
-                new("maxSkewUs", "Max Skew (us, 0=off)", "number", 0, 0, 100000000, 10, Group: "Synchronization", Description: "Fail when the measured trigger skew exceeds this many microseconds; 0 disables this explicit gate (requireWithinTolerance uses the service tolerance).")
+                new("maxSkewUs", "Max Skew (us, 0=off)", "number", 0, 0, 100000000, 10, Group: "Synchronization", Description: "Fail when the measured trigger skew exceeds this many microseconds; 0 disables this explicit gate (requireWithinTolerance uses the service tolerance)."),
+                new("requireGroupedTrigger", "Require Grouped Trigger", "boolean", true, Group: "Synchronization", Description: "Require every member to expose the same non-null triggerId when any member provides one; inconsistent groups are recaptured."),
+                new("captureAttempts", "Capture Attempts", "number", 3, 1, 10, 1, Group: "Synchronization", Description: "Maximum attempts when duplicate frame storage or triggerId grouping is inconsistent.")
             ,
 
 
@@ -115,7 +117,7 @@ public static partial class BuiltInNodeCatalog
 
 
                 ],
-            "Select one camera image from a synchronized FrameSet without cloning the underlying frame. Emits diagnostics with size and skew context.",
+            "Select one camera image from a synchronized FrameSet without cloning the underlying frame. Diagnostics include groupId, memberCount, skewUs and selected sequence. Missing device timestamps are reported as unsupported with warningCount=1 for host-timestamped sets, or rejected as corrupted when the set otherwise uses device timestamps.",
             "builtin",
             Resources: [new("camera", "cameraId")]),
         new(
@@ -153,7 +155,7 @@ public static partial class BuiltInNodeCatalog
 
 
                 ],
-            "Generate a large test image with a fixed-size pattern. The pattern can stay fixed, follow a sample-index sequence, use repeatable seeded random offsets, or choose a new valid random placement on every run. Sequence and seeded placements are minimally translated into the image when needed; random-each-run placements are resampled instead.",
+            "Generate a large test image with a fixed-size pattern. Fixed placements that clip the canvas fail with correction guidance; sequence and random placements are fitted inside the image. Image metadata and diagnostics preserve placementMode, sampleIndex, effective random seed, offsets, angle and visible-area ratio so seeded samples can be reconstructed exactly.",
             "builtin",
             // placementMode=randomEachRun 每次运行都重新采样位置与角度，不能进自动重试（重试会得到另一张图）。
             new VisionToolCapabilities(Deterministic: false)),

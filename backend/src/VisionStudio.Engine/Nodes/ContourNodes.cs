@@ -1,3 +1,4 @@
+using System.Text.Json;
 using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -141,6 +142,8 @@ public sealed class ContourExtractNode : IVisionNodeExecutor
         if (maxCount is < 1 or > 2000 || maxPoints is < 16 or > 20000)
             throw new InvalidOperationException("contour.extract maxCount must be 1..2000 and maxPoints must be 16..20000.");
         var roi = ContourNodesHelper.ResolveRoi(context, node);
+        var roiSource=context.TryGetValue("roi",out _)?"port":"parameter";
+        var failOnTruncate=node.GetBool("failOnTruncate",false);
 
         Mat? masked = null;
         Mat? binary = null;
@@ -182,6 +185,8 @@ public sealed class ContourExtractNode : IVisionNodeExecutor
             // 截断必须可见：maxCount 默认 200，超过 200 条候选时下游只能看到前 200 条。
             var inputCount = candidates.Count;
             var truncated = inputCount > selected.Length;
+            if(truncated && failOnTruncate)
+                throw new InvalidOperationException($"contour.extract stage=maxCount: candidateCount={inputCount}, retainedCount={selected.Length}, maxCount={maxCount}; strict truncation policy rejected the result without emitting partial contours.");
             var outputIndexBySource = selected.Select((candidate, index) => (candidate.SourceIndex, index))
                 .ToDictionary(x => x.SourceIndex, x => x.index);
             var results = selected.Select((candidate, index) =>
@@ -195,7 +200,9 @@ public sealed class ContourExtractNode : IVisionNodeExecutor
                 ("found", results.Count > 0), ("count", results.Count), ("inputCount", inputCount), ("truncated", truncated),
                 ("holes", results.Count(x => x.IsHole)),
                 ("mode", mode), ("binarize", effectiveBinarize), ("minArea", minArea),
-                ("maxCount", maxCount), ("pointBudget", maxPoints), ("roi", roi?.Type.ToString() ?? "FullImage"));
+                ("maxCount", maxCount), ("pointBudget", maxPoints), ("roi", roi?.Type.ToString() ?? "FullImage"),
+                ("roiSource",roiSource),("roiContract","port overrides parameter; ROI and output points stay in original-image coordinates"),
+                ("truncationStage",truncated?"maxCount":"none"),("candidateCount",inputCount),("retainedCount",results.Count),("failOnTruncate",failOnTruncate));
             var overlays = new List<VisionOverlay>();
             for (var i = 0; i < results.Count; i++)
             {
@@ -276,9 +283,11 @@ public sealed class ContourFilterNode : IVisionNodeExecutor
             throw new InvalidOperationException("contour.filter area bounds must be finite and nonnegative.");
         if (!double.IsFinite(minCircularity) || minCircularity is < 0 or > 1 || !double.IsFinite(maxCircularity) || maxCircularity is < 0 or > 1)
             throw new InvalidOperationException("contour.filter circularity bounds must be finite in 0..1.");
-        if (!double.IsFinite(windowX) || !double.IsFinite(windowY) || !double.IsFinite(windowWidth) || windowWidth < 0 || !double.IsFinite(windowHeight) || windowHeight < 0)
-            throw new InvalidOperationException("contour.filter window must have finite coordinates and nonnegative dimensions.");
-        var windowEnabled = windowWidth > 0 && windowHeight > 0 && windowX >= 0 && windowY >= 0;
+        var windowEnabled = node.GetBool("windowEnabled", false);
+        if (!double.IsFinite(windowX) || !double.IsFinite(windowY) || !double.IsFinite(windowWidth) || !double.IsFinite(windowHeight))
+            throw new InvalidOperationException("contour.filter window must have finite coordinates and dimensions.");
+        if (windowEnabled && (windowWidth <= 0 || windowHeight <= 0))
+            throw new InvalidOperationException("contour.filter enabled window requires positive width and height; disable it explicitly for an all-zero window.");
         if (windowEnabled && (!double.IsFinite(windowX + windowWidth) || !double.IsFinite(windowY + windowHeight)))
             throw new InvalidOperationException("contour.filter window bounds must be finite.");
         var maxCountRaw = node.GetInt("maxCount", 200);
@@ -291,25 +300,19 @@ public sealed class ContourFilterNode : IVisionNodeExecutor
         var kept = new List<VisionContour>();
         var dropped = 0;
         var limitDropped = 0;
+        var areaRejected=0; var circularityRejected=0; var hierarchyRejected=0; var windowRejected=0;
         foreach (var contour in contours)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var keep = contour.Area >= minArea
-                && (maxArea <= 0 || contour.Area <= maxArea)
-                && contour.Circularity >= minCircularity - 1e-9
-                && contour.Circularity <= maxCircularity + 1e-9
-                && (hierarchy switch
-                {
-                    "external" => !contour.IsHole,
-                    "holes" => contour.IsHole,
-                    _ => true
-                });
+            var keep = true;
+            if (contour.Area < minArea || (maxArea > 0 && contour.Area > maxArea)) { keep=false; areaRejected++; }
+            if (keep && (contour.Circularity < minCircularity - 1e-9 || contour.Circularity > maxCircularity + 1e-9)) { keep=false; circularityRejected++; }
+            if (keep && (hierarchy switch { "external" => contour.IsHole, "holes" => !contour.IsHole, _ => false })) { keep=false; hierarchyRejected++; }
             if (keep && windowEnabled)
             {
-                // 位置窗口：轮廓外接矩形中心须落在窗口内（窗口越界由调用方保证）。
                 var cx = contour.BoundingBox.X + contour.BoundingBox.Width / 2d;
                 var cy = contour.BoundingBox.Y + contour.BoundingBox.Height / 2d;
-                keep = cx >= windowX && cx <= windowX + windowWidth && cy >= windowY && cy <= windowY + windowHeight;
+                if (!double.IsFinite(cx) || !double.IsFinite(cy) || cx < windowX || cx > windowX + windowWidth || cy < windowY || cy > windowY + windowHeight) { keep=false; windowRejected++; }
             }
             if (keep && kept.Count < maxCount) kept.Add(contour);
             else
@@ -334,7 +337,7 @@ public sealed class ContourFilterNode : IVisionNodeExecutor
         var truncated = limitDropped > 0;
         var diag = CoordinateValidation.Diagnostics(Type, ("inputCount", contours.Count), ("count", reindexed.Length),
             ("dropped", dropped), ("filteredCount", dropped - limitDropped), ("limitDroppedCount", limitDropped), ("truncated", truncated),
-            ("windowEnabled", windowEnabled), ("minArea", minArea), ("maxArea", maxArea), ("hierarchy", hierarchy), ("maxCount", maxCount));
+            ("windowEnabled", windowEnabled), ("areaRejected",areaRejected),("circularityRejected",circularityRejected),("hierarchyRejected",hierarchyRejected),("windowRejected",windowRejected), ("minArea", minArea), ("maxArea", maxArea), ("hierarchy", hierarchy), ("maxCount", maxCount));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -380,16 +383,19 @@ public sealed class ContourPropertiesNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
         var contours = ContourNodesHelper.ReadContours(context, cancellationToken);
         var selectBy = node.GetString("selectBy", "largest").Trim().ToLowerInvariant();
-        var index = selectBy == "index" ? node.GetInt("index", 0) : 0;
+        var indexRaw = selectBy == "index" ? node.GetDouble("index", 0) : 0;
         if (selectBy is not ("largest" or "smallest" or "first" or "last" or "index"))
             throw new InvalidOperationException("contour.properties selectBy must be largest, smallest, first, last or index.");
-        if (selectBy == "index" && index < 0)
-            throw new InvalidOperationException("contour.properties index must be nonnegative when selectBy=index.");
+        if (selectBy == "index" && (!double.IsFinite(indexRaw) || indexRaw < 0 || indexRaw != Math.Truncate(indexRaw)))
+            throw new InvalidOperationException($"contour.properties error=invalid-index: requestedIndex={indexRaw}; expected a nonnegative integer.");
+        if (selectBy == "index" && indexRaw > int.MaxValue)
+            throw new InvalidOperationException($"contour.properties error=invalid-index: requestedIndex={indexRaw}; expected a nonnegative Int32.");
+        var index=(int)indexRaw;
 
         if (contours.Count == 0)
-            throw new InvalidOperationException("Contour properties requires at least one contour; the input list is empty.");
+            throw new InvalidOperationException("contour.properties error=empty-contours: at least one contour is required (requestedIndex=0; candidateCount=0).");
         if (selectBy == "index" && index >= contours.Count)
-            throw new InvalidOperationException($"contour.properties index {index} is out of range for {contours.Count} contour(s).");
+            throw new InvalidOperationException($"contour.properties error=index-out-of-range: requestedIndex={index}; candidateCount={contours.Count}.");
         foreach (var c in contours)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -440,7 +446,9 @@ public sealed class ContourPropertiesNode : IVisionNodeExecutor
             ["solidity"] = VisionValue.Double(selectedProperties.Solidity),
             ["extent"] = VisionValue.Double(selectedProperties.Extent),
             ["aspectRatio"] = VisionValue.Double(selectedProperties.AspectRatio),
-            ["equivalentDiameter"] = VisionValue.Double(selectedProperties.EquivalentDiameter)
+            ["equivalentDiameter"] = VisionValue.Double(selectedProperties.EquivalentDiameter),
+            ["geometryValid"] = VisionValue.Boolean(selectedProperties.IsValid),
+            ["invalidFields"] = VisionValue.String(JsonSerializer.Serialize(selectedProperties.InvalidFields))
         };
         var diag = CoordinateValidation.Diagnostics(Type,
             ("count", properties.Length), ("selectBy", selectBy), ("selectedIndex", selectedProperties.Index),
@@ -448,6 +456,7 @@ public sealed class ContourPropertiesNode : IVisionNodeExecutor
             ("circularity", selectedProperties.Circularity), ("solidity", selectedProperties.Solidity),
             ("extent", selectedProperties.Extent), ("aspectRatio", selectedProperties.AspectRatio),
             ("equivalentDiameter", selectedProperties.EquivalentDiameter),
+            ("geometryValid",selectedProperties.IsValid),("invalidFields",selectedProperties.InvalidFields),
             ("pointCount", selectedProperties.PointCount));
         outputs["diagnostics"] = VisionValue.String(diag);
         var overlays = new[]
@@ -527,6 +536,12 @@ public sealed class ContourPropertiesNode : IVisionNodeExecutor
         var shortSide = Math.Max(1e-9, Math.Min(rotated.Width, rotated.Height));
         var equivalentDiameter = 2 * Math.Sqrt(contour.Area / Math.PI);
         var aspectRatio = longSide / shortSide;
+        var invalid = new List<string>();
+        if (contour.Area <= 1e-12) invalid.AddRange(["area","circularity","solidity","extent","equivalentDiameter"]);
+        if (contour.Perimeter <= 1e-12) invalid.Add("circularity");
+        if (hullArea <= 1e-9) invalid.Add("solidity");
+        if (rotated.Width <= 1e-12 || rotated.Height <= 1e-12) invalid.Add("aspectRatio");
+        invalid=invalid.Distinct().ToList();
         if (new[] { centroid.X, centroid.Y, rotated.X, rotated.Y, rotated.Width, rotated.Height, rotated.AngleDeg,
             hullArea, solidity, extent, aspectRatio, equivalentDiameter }.Any(value => !double.IsFinite(value)))
             throw new InvalidOperationException("contour.properties geometry exceeds the finite numeric range; adjust coordinates or units.");
@@ -545,7 +560,11 @@ public sealed class ContourPropertiesNode : IVisionNodeExecutor
             solidity,
             extent,
             aspectRatio,
-            equivalentDiameter);
+            equivalentDiameter)
+        {
+            IsValid = invalid.Count == 0,
+            InvalidFields = invalid
+        };
     }
 
     private static VisionPoint2D Centroid(VisionContour contour, CancellationToken cancellationToken)

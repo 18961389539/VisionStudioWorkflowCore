@@ -64,6 +64,8 @@ public sealed class CharucoBoardNode : IVisionNodeExecutor
         var rejectWeak = node.GetBool("rejectWeakViews", false);
 
         var request = new CameraCalibrationRequest(source.Width, source.Height, []);
+        var boardInfo = new CameraCalibrationBoardInfo("charuco", squaresX, squaresY, squareLength, markerLength, dictionaryType.ToString(), legacyPattern);
+        var legacyBoardMetadata = false;
         if (context.TryGetValue("calibrationDataJson", out var previous))
         {
             try
@@ -75,9 +77,9 @@ public sealed class CharucoBoardNode : IVisionNodeExecutor
             {
                 throw new InvalidOperationException("Invalid calibrationDataJson.", ex);
             }
-            if (request.ImageWidth != source.Width || request.ImageHeight != source.Height ||
-                request.Views is null || request.Views.Count > 100)
-                throw new InvalidOperationException("Accumulated ChArUco views must use the same image dimensions and contain at most 100 views.");
+            if (request.Views is null || request.Views.Count > 100)
+                throw new InvalidOperationException("Accumulated ChArUco views must contain at most 100 views.");
+            legacyBoardMetadata = CalibrationBoardMetadata.ValidatePrevious(request, boardInfo, source.Width, source.Height, Type);
             request = request with { Views = request.Views.ToList() };
         }
 
@@ -120,11 +122,16 @@ public sealed class CharucoBoardNode : IVisionNodeExecutor
             if (charucoIds.Any(id => id < 0 || id >= boardCorners.Length) || charucoIds.Distinct().Count() != charucoIds.Length)
                 throw new InvalidOperationException("calibration.charuco detector returned invalid or duplicate ChArUco ids.");
 
-            CameraCalibrationView? view = null;
+            CameraCalibrationView? candidateView = null;
+            CameraCalibrationView? acceptedView = null;
             string? reason = null;
             CalibrationViewQuality.Report? quality = null;
             var collinear = false;
-            if (charucoCorners.Length < minCorners)
+            if (markerIds.Length < minMarkers)
+            {
+                reason = "insufficient-markers";
+            }
+            else if (charucoCorners.Length < minCorners)
             {
                 reason = "insufficient-charuco-corners";
             }
@@ -145,41 +152,44 @@ public sealed class CharucoBoardNode : IVisionNodeExecutor
                         objects.Add([objectPoint.X, objectPoint.Y, objectPoint.Z]);
                         images.Add([charucoCorners[index].X, charucoCorners[index].Y]);
                     }
-                    view = new CameraCalibrationView(objects, images);
+                    candidateView = new CameraCalibrationView(objects, images, source.Width, source.Height, boardInfo);
                     quality = CalibrationViewQuality.Evaluate(images, source.Width, source.Height,
                         boardCorners.Length, blurVariance, minBlur, minCoverage);
                     if (rejectWeak && quality.Verdict == CalibrationViewQuality.Verdict.Fail)
                     {
                         reason = quality.Reason;
-                        view = null;
                     }
                     else
                     {
                         if (request.Views.Count >= 100)
                             throw new InvalidOperationException("Calibration view budget exceeded (100).");
-                        request.Views.Add(view);
+                        request.Views.Add(candidateView);
+                        acceptedView = candidateView;
                     }
                 }
             }
             quality ??= CalibrationViewQuality.Evaluate(charucoCorners.Select(point => new List<double> { point.X, point.Y }).ToList(),
                 source.Width, source.Height, boardCorners.Length, blurVariance, minBlur, minCoverage);
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(BuildResult(view, reason, quality,
+            return ValueTask.FromResult(BuildResult(candidateView, acceptedView, reason, quality,
                 charucoCorners, charucoIds, markerIds, markerCorners, gray, request, blurVariance,
-                dictionaryType, squaresX, squaresY, collinear, rejectWeak, cancellationToken));
+                dictionaryType, squaresX, squaresY, collinear, rejectWeak, legacyBoardMetadata, cancellationToken));
         }
     }
 
     private NodeExecutorResult BuildResult(
-        CameraCalibrationView? accepted, string? failReason, CalibrationViewQuality.Report quality,
+        CameraCalibrationView? candidate, CameraCalibrationView? accepted, string? failReason, CalibrationViewQuality.Report quality,
         Point2f[] charucoCorners, int[] charucoIds, int[] markerIds, Point2f[][] markerCorners,
         Mat gray, CameraCalibrationRequest request, double blurVariance, PredefinedDictionaryType dictionaryType,
-        int squaresX, int squaresY, bool collinear, bool rejectWeak, CancellationToken cancellationToken)
+        int squaresX, int squaresY, bool collinear, bool rejectWeak, bool legacyMetadata, CancellationToken cancellationToken)
     {
+        // Keep the candidate/viewJson available for diagnostics, but found means a usable
+        // view was accepted. A weak-view rejection must not report success to flow consumers.
+        var found = accepted is not null;
         var outputs = new Dictionary<string, VisionValue>
         {
-            ["found"] = VisionValue.Boolean(accepted is not null),
-            ["count"] = VisionValue.Integer(accepted?.ImagePoints.Count ?? charucoCorners.Length),
+            ["found"] = VisionValue.Boolean(found),
+            ["count"] = VisionValue.Integer(candidate?.ImagePoints.Count ?? charucoCorners.Length),
             ["charucoCorners"] = VisionValue.String(JsonSerializer.Serialize(charucoCorners.Select(point => new { x = point.X, y = point.Y }))),
             ["charucoIds"] = VisionValue.String(JsonSerializer.Serialize(charucoIds)),
             ["markerCount"] = VisionValue.Integer(markerIds.Length),
@@ -190,8 +200,9 @@ public sealed class CharucoBoardNode : IVisionNodeExecutor
             ["quality"] = VisionValue.String(quality.Verdict.ToString()),
             ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(
                 Type,
-                ("found", accepted is not null),
-                ("count", accepted?.ImagePoints.Count ?? charucoCorners.Length),
+                ("found", found),
+                ("accepted", accepted is not null),
+                ("count", candidate?.ImagePoints.Count ?? charucoCorners.Length),
                 ("markerCount", markerIds.Length),
                 ("views", request.Views.Count),
                 ("dictionary", dictionaryType.ToString()),
@@ -200,10 +211,12 @@ public sealed class CharucoBoardNode : IVisionNodeExecutor
                 ("coverageX", quality.CoverageX),
                 ("coverageY", quality.CoverageY),
                 ("quality", quality.Verdict.ToString()),
+                ("qualityReason", quality.Reason),
                 ("collinear", collinear),
-                ("reason", failReason)))
+                ("reason", failReason),
+                ("legacyBoardMetadata", legacyMetadata)))
         };
-        if (accepted is not null) outputs["viewJson"] = VisionValue.String(JsonSerializer.Serialize(accepted));
+        if (candidate is not null) outputs["viewJson"] = VisionValue.String(JsonSerializer.Serialize(candidate));
 
         var overlay = MarkerOverlayAlgorithms.Charuco(gray, charucoCorners, charucoIds, markerCorners, markerIds);
         try
@@ -215,8 +228,9 @@ public sealed class CharucoBoardNode : IVisionNodeExecutor
             {
                 return new NodeExecutorResult(outputs, new Dictionary<string, object?>
                 {
-                    ["found"] = accepted is not null,
-                    ["count"] = accepted?.ImagePoints.Count ?? charucoCorners.Length,
+                    ["found"] = found,
+                    ["accepted"] = accepted is not null,
+                    ["count"] = candidate?.ImagePoints.Count ?? charucoCorners.Length,
                     ["markerCount"] = markerIds.Length,
                     ["views"] = request.Views.Count,
                     ["dictionary"] = dictionaryType.ToString(),
@@ -229,6 +243,7 @@ public sealed class CharucoBoardNode : IVisionNodeExecutor
                     ["qualityReason"] = quality.Reason,
                     ["guidance"] = quality.Guidance,
                     ["rejectWeakViews"] = rejectWeak,
+                    ["legacyBoardMetadata"] = legacyMetadata,
                     ["algorithmBackend"] = "opencv",
                     ["calibrationBackend"] = "opencv",
                     ["diagnostics"] = outputs["diagnostics"].Require<string>("diagnostics")

@@ -29,14 +29,42 @@ var point = context.Require<VisionPoint2D>("point"); var line = context.Require<
         var signed = (point.X - line.Start.X) * uy - (point.Y - line.Start.Y) * ux;
         if (new[] { distance, closest.X, closest.Y, projected.X, projected.Y, rawT, signed }.Any(v => !double.IsFinite(v)))
             throw new InvalidOperationException("点线距离计算超出有限数值范围，请检查坐标单位和幅值。");
-        var clamped = segment && t != rawT;
-        var diag = CoordinateValidation.Diagnostics(Type, ("distance", distance), ("distanceTo", segment ? "segment" : "line"), ("signedDistance", signed),
-            ("signedDistanceTo", "infiniteLine"), ("rawProjectionT", rawT), ("projectionT", t), ("projectionClamped", clamped), ("withinSegment", within));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> {
+        var clamped = Math.Abs(t - rawT) > 1e-9;
+        var endpointDistance = Math.Min(MeasurementMath.Hypot(point.X - line.Start.X, point.Y - line.Start.Y),
+            MeasurementMath.Hypot(point.X - line.End.X, point.Y - line.End.Y));
+        var maxDistance = node.GetDouble("maxDistance", 0);
+        if (!double.IsFinite(maxDistance) || maxDistance < 0)
+            throw new InvalidOperationException("measure.pointLineDistance maxDistance must be finite and >= 0 (0 disables the gate).");
+        var requireWithinSegment = node.GetBool("requireWithinSegment", false);
+        var gateEnabled = maxDistance > 0 || requireWithinSegment;
+        var segmentPassed = !requireWithinSegment || within;
+        var distancePassed = maxDistance <= 0 || distance <= maxDistance + 1e-9;
+        var withinTolerance = gateEnabled && segmentPassed && distancePassed;
+        var reason = !segmentPassed ? "outside-segment" : !distancePassed ? "distance-exceeded" : gateEnabled ? "ok" : "not-evaluated";
+        var evaluationState = !gateEnabled ? "not-evaluated" : withinTolerance ? "pass" : "fail";
+        var referenceKind = segment ? "segment" : "infinite-line";
+        var diag = CoordinateValidation.Diagnostics(Type,
+            ("distance", distance), ("referenceKind", referenceKind), ("distanceTo", segment ? "segment" : "line"), ("signedDistance", signed),
+            ("signedDistanceTo", "infiniteLine"), ("endpointDistance", endpointDistance), ("rawProjectionT", rawT), ("projectionT", t),
+            ("projectionClamped", clamped), ("withinSegment", within),
+            ("maxDistance", maxDistance), ("requireWithinSegment", requireWithinSegment),
+            ("withinTolerance", withinTolerance), ("reason", reason), ("evaluationState", evaluationState));
+        var outputs = new Dictionary<string, VisionValue> {
             ["distance"] = VisionValue.Double(distance), ["closestPoint"] = VisionValue.Point(closest), ["projectedPoint"] = VisionValue.Point(projected),
-            ["signedDistance"] = VisionValue.Double(signed), ["lineDistance"] = VisionValue.Double(Math.Abs(signed)), ["projectionT"] = VisionValue.Double(t),
+            // signedDistance/lineDistance 始终是无限直线垂距；segment 只在投影落在线段内时才有定义。
+            ["signedDistance"] = VisionValue.Double(signed), ["lineDistance"] = VisionValue.Double(Math.Abs(signed)),
+            ["referenceKind"] = VisionValue.String(referenceKind), ["endpointDistance"] = VisionValue.Double(endpointDistance),
+            ["projectionT"] = VisionValue.Double(t),
             ["rawProjectionT"] = VisionValue.Double(rawT), ["projectionClamped"] = VisionValue.Boolean(clamped), ["withinSegment"] = VisionValue.Boolean(within),
-            ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["distance"] = distance, ["segment"] = segment, ["signedDistanceMeaning"] = "到无限直线的有向垂距", ["diagnostics"] = diag },
+            ["withinTolerance"] = VisionValue.Boolean(withinTolerance), ["reason"] = VisionValue.String(reason),
+            ["evaluationState"] = VisionValue.String(evaluationState),
+            ["diagnostics"] = VisionValue.String(diag) };
+        if (segment && within) outputs["signedSegmentDistance"] = VisionValue.Double(signed);
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> {
+            ["distance"] = distance, ["segment"] = segment, ["referenceKind"] = referenceKind,
+            ["signedDistanceMeaning"] = "到无限直线的有向垂距", ["endpointDistance"] = endpointDistance,
+            ["withinTolerance"] = withinTolerance, ["reason"] = reason, ["evaluationState"] = evaluationState,
+            ["diagnostics"] = diag },
             [new VisionOverlay("point-line-distance", VisionOverlayType.Line, X: point.X, Y: point.Y, X2: closest.X, Y2: closest.Y, Stroke: "#722ed1", StrokeWidth: 2)]));
     }
 }
@@ -53,15 +81,39 @@ public sealed class CircleSpacingNode : IVisionNodeExecutor
         var a = context.Require<VisionCircle>("circleA"); var b = context.Require<VisionCircle>("circleB");
         if (new[] { a.X, a.Y, b.X, b.Y }.Any(v => !double.IsFinite(v))) throw new InvalidOperationException("Circle centers must be finite.");
         if (!double.IsFinite(a.Radius) || !double.IsFinite(b.Radius) || a.Radius < 0 || b.Radius < 0) throw new InvalidOperationException("Circle radii must be finite and non-negative.");
-        var centers = MeasurementMath.Hypot(a.X - b.X, a.Y - b.Y); var gap = centers - a.Radius - b.Radius;
-        if (!double.IsFinite(centers) || !double.IsFinite(gap)) throw new InvalidOperationException("measure.circleSpacing produced non-finite output.");
+        var centers = MeasurementMath.Hypot(a.X - b.X, a.Y - b.Y);
+        if (!double.IsFinite(centers)) throw new InvalidOperationException("measure.circleSpacing produced non-finite output.");
+        // 相切判据必须是可解释的长度公差：1e-9 px 远小于拟合/标定不确定度，
+        // 会让本应相切的结果因数值噪声跳到 overlapping/separate。
+        var tolerance = node.GetDouble("relationTolerancePx", 1e-6);
+        if (!double.IsFinite(tolerance) || tolerance is < 0 or > 1)
+            throw new InvalidOperationException("measure.circleSpacing relationTolerancePx must be finite within 0..1 px.");
         var radiusDifference = Math.Abs(a.Radius - b.Radius);
-        var contained = centers <= radiusDifference + 1e-9;
-        var internalTangent = radiusDifference > 0 && Math.Abs(centers - radiusDifference) < 1e-9;
-        var relation = Math.Abs(gap) < 1e-9 || internalTangent ? "tangent" : gap > 0 ? "separate" : contained ? "contained" : "overlapping";
-        var diag = CoordinateValidation.Diagnostics(Type, ("centerDistance", centers), ("gap", gap), ("relation", relation),
-            ("contained", contained), ("internalTangent", internalTangent), ("radiusA", a.Radius), ("radiusB", b.Radius));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["centerDistance"] = VisionValue.Double(centers), ["gap"] = VisionValue.Double(gap), ["measurement"] = VisionValue.Measurement(new VisionMeasurement(gap, "px", "signedCircleGap")), ["relation"] = VisionValue.String(relation), ["overlapping"] = VisionValue.Boolean(gap < 0), ["contained"] = VisionValue.Boolean(contained), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["centerDistance"] = centers, ["gap"] = gap, ["overlapping"] = gap < 0, ["contained"] = contained, ["relation"] = relation, ["diagnostics"] = diag }, [new VisionOverlay("circle-centers", VisionOverlayType.Line, X: a.X, Y: a.Y, X2: b.X, Y2: b.Y, Stroke: "#722ed1", StrokeWidth: 1.5)]));
+        var externalGap = Math.Abs(centers - (a.Radius + b.Radius));
+        var internalGap = Math.Abs(centers - radiusDifference);
+        var internalTangent = radiusDifference > 0 && internalGap <= tolerance;
+        var boundariesIntersect = externalGap <= tolerance || internalTangent;
+        var contained = !boundariesIntersect && centers < radiusDifference;
+        var disksIntersect = centers <= a.Radius + b.Radius;
+        // A signed negative gap is not a physical clearance for contained disks.
+        var gapValid = !contained && !boundariesIntersect;
+        var gap = gapValid ? centers - a.Radius - b.Radius : double.NaN;
+        var relation = boundariesIntersect ? "tangent" : contained ? "contained" : disksIntersect ? "overlapping" : "separate";
+        var diag = CoordinateValidation.Diagnostics(Type, ("centerDistance", centers), ("gap", gap), ("gapValid", gapValid), ("relation", relation),
+            ("contained", contained), ("disksIntersect", disksIntersect), ("boundariesIntersect", boundariesIntersect),
+            ("internalTangent", internalTangent), ("relationTolerancePx", tolerance),
+            ("externalGap", externalGap), ("internalGap", internalGap), ("radiusA", a.Radius), ("radiusB", b.Radius));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> {
+            ["centerDistance"] = VisionValue.Double(centers), ["gap"] = VisionValue.Double(gap),
+            ["gapValid"] = VisionValue.Boolean(gapValid),
+            ["measurement"] = VisionValue.Measurement(new VisionMeasurement(gap, "px", "minimumCircumferenceGap")),
+            ["relation"] = VisionValue.String(relation), ["overlapping"] = VisionValue.Boolean(disksIntersect && !boundariesIntersect),
+            ["disksIntersect"] = VisionValue.Boolean(disksIntersect), ["boundariesIntersect"] = VisionValue.Boolean(boundariesIntersect),
+            ["contained"] = VisionValue.Boolean(contained), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["centerDistance"] = centers, ["gap"] = gap, ["gapValid"] = gapValid,
+                ["overlapping"] = disksIntersect && !boundariesIntersect, ["disksIntersect"] = disksIntersect,
+                ["boundariesIntersect"] = boundariesIntersect, ["contained"] = contained, ["relation"] = relation, ["diagnostics"] = diag },
+            [new VisionOverlay("circle-centers", VisionOverlayType.Line, X: a.X, Y: a.Y, X2: b.X, Y2: b.Y, Stroke: "#722ed1", StrokeWidth: 1.5)]));
     }
 }
 
@@ -167,7 +219,9 @@ internal static class MultiPointFit
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (p.Length < 3) throw new InvalidOperationException("A circle fit requires at least three points.");
-        var circle = JLVisionPointFitting.Circle(p);
+        // 最小二乘会被离群点整体拉偏，一旦圆本身偏了，MAD 就再也分不出内外点。
+        // 先用确定性 3 点采样挑“支撑最多”的种子圆，再做 MAD 精修。
+        var circle = p.Length > 3 ? RobustCircleSeed(p, cancellationToken) : JLVisionPointFitting.Circle(p);
         cancellationToken.ThrowIfCancellationRequested();
         var residuals = Residuals(p, pt => Math.Abs(double.Hypot(pt.X - circle.X, pt.Y - circle.Y) - circle.Radius), cancellationToken);
         var (limit, rms, maxErr, count) = MadInliers(residuals, 3, cancellationToken);
@@ -182,6 +236,54 @@ internal static class MultiPointFit
             count = keep.Length;
         }
         return new(circle, rms, maxErr, count, p.Length);
+    }
+
+    /// <summary>支撑集固定的 2px 容差：只用于种子评估，不参与最终质量判定。</summary>
+    private const double SeedTolerancePx = 2;
+
+    private static VisionCircle RobustCircleSeed(VisionPoint2D[] p, CancellationToken cancellationToken)
+    {
+        var best = JLVisionPointFitting.Circle(p);
+        var bestCount = CountWithin(best, p, cancellationToken);
+        if (bestCount == p.Length) return best;
+        var bestScore = double.MaxValue;
+        uint state = 0x9E3779B9u;
+        int Next(int bound) { state = unchecked(state * 1664525u + 1013904223u); return (int)(state % (uint)bound); }
+        // 点数越多，单次采样成本越高；大轮廓降低采样次数，保持节拍稳定。
+        var attempts = p.Length > 200 ? 80 : 400;
+        for (var attempt = 0; attempt < attempts && bestCount < p.Length; attempt++)
+        {
+            if ((attempt & 31) == 0) cancellationToken.ThrowIfCancellationRequested();
+            var i = Next(p.Length); var j = Next(p.Length); var k = Next(p.Length);
+            if (i == j || j == k || i == k) continue;
+            VisionCircle candidate;
+            try { candidate = JLVisionPointFitting.Circle([p[i], p[j], p[k]]); }
+            catch { continue; }
+            if (!double.IsFinite(candidate.Radius) || candidate.Radius <= 0 || !double.IsFinite(candidate.X) || !double.IsFinite(candidate.Y)) continue;
+            var count = CountWithin(candidate, p, cancellationToken);
+            var score = 0d;
+            foreach (var point in p)
+            {
+                var residual = Math.Abs(double.Hypot(point.X - candidate.X, point.Y - candidate.Y) - candidate.Radius);
+                score += Math.Min(residual, SeedTolerancePx) * Math.Min(residual, SeedTolerancePx);
+            }
+            if (count > bestCount || count == bestCount && score < bestScore)
+            {
+                bestCount = count; bestScore = score; best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private static int CountWithin(VisionCircle circle, VisionPoint2D[] points, CancellationToken cancellationToken)
+    {
+        var count = 0;
+        for (var index = 0; index < points.Length; index++)
+        {
+            if ((index & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
+            if (Math.Abs(double.Hypot(points[index].X - circle.X, points[index].Y - circle.Y) - circle.Radius) <= SeedTolerancePx) count++;
+        }
+        return count;
     }
 
     private static (double Limit, double Rms, double MaxError, int Count) MadInliers(double[] residuals, int minimumCount, CancellationToken cancellationToken)
@@ -256,6 +358,33 @@ internal static class MultiPointFit
     public static VisionLine2D Line(VisionPoint2D[] p, CancellationToken cancellationToken = default) => LineFit(p, cancellationToken).Line;
     public static VisionCircle Circle(VisionPoint2D[] p, CancellationToken cancellationToken = default) => CircleFit(p, cancellationToken).Circle;
 
+    /// <summary>全点 RMS：不剔除离群点，用来暴露“少数点撑起高置信结果”。</summary>
+    public static double AllPointRms(VisionPoint2D[] points, VisionCircle circle, CancellationToken cancellationToken = default)
+        => Rms(Residuals(points, pt => Math.Abs(double.Hypot(pt.X - circle.X, pt.Y - circle.Y) - circle.Radius), cancellationToken), cancellationToken);
+
+    public static double AllPointRms(VisionPoint2D[] points, VisionLine2D line, CancellationToken cancellationToken = default)
+    {
+        var dx = line.End.X - line.Start.X; var dy = line.End.Y - line.Start.Y;
+        var length = double.Hypot(dx, dy);
+        if (!double.IsFinite(length) || length < 1e-12) throw new InvalidOperationException("JLVision line fit is degenerate.");
+        return Rms(Residuals(points, pt => LineResidual(pt, line.Start, dx / length, dy / length), cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// 质量门：内点 RMS + 支撑数量 + 支撑比例三者同时约束。门限全关时返回 not-evaluated，避免“未设置即合格”。
+    /// </summary>
+    public static (bool Found, string Reason, bool GatesEnabled) EvaluateGates(
+        double rms, int inlierCount, int pointCount, double maxRms, int minInlierCount, double minInlierRatio)
+    {
+        var enabled = maxRms > 0 || minInlierCount > 0 || minInlierRatio > 0;
+        if (!enabled) return (true, "ok", false);
+        if (inlierCount < minInlierCount) return (false, "insufficient-inliers", true);
+        var ratio = pointCount == 0 ? 0 : (double)inlierCount / pointCount;
+        if (minInlierRatio > 0 && ratio < minInlierRatio - 1e-12) return (false, "insufficient-inlier-ratio", true);
+        if (maxRms > 0 && rms > maxRms) return (false, "rms-exceeded", true);
+        return (true, "ok", true);
+    }
+
 }
 
 public sealed class FitLineNode : IVisionNodeExecutor
@@ -268,12 +397,48 @@ public sealed class FitLineNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
         var maxRms = node.GetDouble("maxRmsError", 0); if (!double.IsFinite(maxRms) || maxRms < 0) throw new InvalidOperationException("measure.fitLine maxRmsError must be finite and >= 0 (0 disables the gate).");
+        var minInlierCount = node.GetInt("minInlierCount", 0); if (minInlierCount < 0) throw new InvalidOperationException("measure.fitLine minInlierCount must be >= 0 (0 disables the gate).");
+        var minInlierRatio = node.GetDouble("minInlierRatio", 0); if (!double.IsFinite(minInlierRatio) || minInlierRatio is < 0 or > 1) throw new InvalidOperationException("measure.fitLine minInlierRatio must be within 0..1 (0 disables the gate).");
         var points = MultiPointFit.Read(context, cancellationToken);
         var fit = MultiPointFit.LineFit(points, cancellationToken); var line = fit.Line;
-        if (maxRms > 0 && fit.RmsError > maxRms) throw new InvalidOperationException($"measure.fitLine RMS error {fit.RmsError:0.####} exceeds maxRmsError {maxRms:0.####}.");
         if (!double.IsFinite(fit.RmsError) || !double.IsFinite(fit.MaxError)) throw new InvalidOperationException("measure.fitLine produced non-finite residuals.");
-        var outliers = points.Length - fit.InlierCount; var diag = CoordinateValidation.Diagnostics(Type, ("pointCount", points.Length), ("inlierCount", fit.InlierCount), ("outlierCount", outliers), ("rmsError", fit.RmsError), ("maxError", fit.MaxError), ("length", line.Length), ("angleDeg", line.AngleDeg));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["line"] = VisionValue.Line(line), ["length"] = VisionValue.Double(line.Length), ["angle"] = VisionValue.Double(line.AngleDeg), ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["inlierCount"] = VisionValue.Integer(fit.InlierCount), ["pointCount"] = VisionValue.Integer(points.Length), ["outlierCount"] = VisionValue.Integer(outliers), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["length"] = line.Length, ["angleDeg"] = line.AngleDeg, ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["inlierCount"] = fit.InlierCount, ["diagnostics"] = diag }));
+        var allPointRms = MultiPointFit.AllPointRms(points, line, cancellationToken);
+        var (found, reason, gatesEnabled) = MultiPointFit.EvaluateGates(fit.RmsError, fit.InlierCount, points.Length, maxRms, minInlierCount, minInlierRatio);
+        var outliers = points.Length - fit.InlierCount;
+        var inlierRatio = points.Length == 0 ? 0 : (double)fit.InlierCount / points.Length;
+        // 方向极性显式化：angle 由 Start→End 决定，反向输入会差 180°，而平行度等下游只关心无向直线。
+        var angleMod180 = VisionTransform2D.NormalizeAngleDeg(line.AngleDeg) % 180;
+        if (angleMod180 < 0) angleMod180 += 180;
+        // 极性按输入点序（首点→末点）在拟合方向上的投影判定：反向输入翻转符号，
+        // 而角度本身可能被拟合库归一化，不能直接拿端点方向当极性。
+        var dx = line.End.X - line.Start.X; var dy = line.End.Y - line.Start.Y;
+        var length = double.Hypot(dx, dy);
+        var axial = length < 1e-12 ? 0 : ((points[^1].X - points[0].X) * dx + (points[^1].Y - points[0].Y) * dy) / length;
+        var directionSign = axial >= 0 ? 1 : -1;
+        var evaluationState = !gatesEnabled ? "not-evaluated" : found ? "pass" : "fail";
+        var diag = CoordinateValidation.Diagnostics(Type,
+            ("pointCount", points.Length), ("inlierCount", fit.InlierCount), ("outlierCount", outliers), ("inlierRatio", inlierRatio),
+            ("rmsError", fit.RmsError), ("maxError", fit.MaxError), ("allPointRmsError", allPointRms),
+            ("maxRmsError", maxRms), ("minInlierCount", minInlierCount), ("minInlierRatio", minInlierRatio),
+            ("gatesEnabled", gatesEnabled), ("found", found), ("reason", reason), ("evaluationState", evaluationState),
+            ("length", line.Length), ("angleDeg", line.AngleDeg), ("angleMod180", angleMod180), ("directionSign", directionSign),
+            ("polarityKnown", true));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+        {
+            ["line"] = VisionValue.Line(line), ["length"] = VisionValue.Double(line.Length), ["angle"] = VisionValue.Double(line.AngleDeg),
+            ["angleMod180"] = VisionValue.Double(angleMod180), ["directionSign"] = VisionValue.Integer(directionSign), ["polarityKnown"] = VisionValue.Boolean(true),
+            ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["allPointRmsError"] = VisionValue.Double(allPointRms),
+            ["inlierCount"] = VisionValue.Integer(fit.InlierCount), ["pointCount"] = VisionValue.Integer(points.Length), ["outlierCount"] = VisionValue.Integer(outliers),
+            ["inlierRatio"] = VisionValue.Double(inlierRatio), ["found"] = VisionValue.Boolean(found), ["reason"] = VisionValue.String(reason),
+            ["evaluationState"] = VisionValue.String(evaluationState), ["diagnostics"] = VisionValue.String(diag)
+        }, new Dictionary<string, object?>
+        {
+            ["pointCount"] = points.Length, ["length"] = line.Length, ["angleDeg"] = line.AngleDeg,
+            ["angleMod180"] = Math.Round(angleMod180, 6), ["directionSign"] = directionSign,
+            ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["allPointRmsError"] = Math.Round(allPointRms, 4),
+            ["inlierCount"] = fit.InlierCount, ["inlierRatio"] = Math.Round(inlierRatio, 6),
+            ["found"] = found, ["reason"] = reason, ["evaluationState"] = evaluationState, ["diagnostics"] = diag
+        }));
     }
 }
 
@@ -287,11 +452,36 @@ public sealed class FitCircleNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
         var maxRms = node.GetDouble("maxRmsError", 0); if (!double.IsFinite(maxRms) || maxRms < 0) throw new InvalidOperationException("measure.fitCircle maxRmsError must be finite and >= 0 (0 disables the gate).");
+        var minInlierCount = node.GetInt("minInlierCount", 0); if (minInlierCount < 0) throw new InvalidOperationException("measure.fitCircle minInlierCount must be >= 0 (0 disables the gate).");
+        var minInlierRatio = node.GetDouble("minInlierRatio", 0); if (!double.IsFinite(minInlierRatio) || minInlierRatio is < 0 or > 1) throw new InvalidOperationException("measure.fitCircle minInlierRatio must be within 0..1 (0 disables the gate).");
         var points = MultiPointFit.Read(context, cancellationToken, minimumCount: 3);
         var fit = MultiPointFit.CircleFit(points, cancellationToken); var circle = fit.Circle;
-        if (maxRms > 0 && fit.RmsError > maxRms) throw new InvalidOperationException($"measure.fitCircle RMS error {fit.RmsError:0.####} exceeds maxRmsError {maxRms:0.####}.");
         if (!double.IsFinite(fit.RmsError) || !double.IsFinite(fit.MaxError) || !double.IsFinite(circle.Radius) || circle.Radius <= 0) throw new InvalidOperationException("measure.fitCircle produced a non-finite or non-positive circle.");
-        var outliers = points.Length - fit.InlierCount; var diag = CoordinateValidation.Diagnostics(Type, ("pointCount", points.Length), ("inlierCount", fit.InlierCount), ("outlierCount", outliers), ("rmsError", fit.RmsError), ("maxError", fit.MaxError), ("radius", circle.Radius), ("centerX", circle.X), ("centerY", circle.Y));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["circle"] = VisionValue.Circle(circle), ["center"] = VisionValue.Point(new(circle.X,circle.Y)), ["radius"] = VisionValue.Double(circle.Radius), ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["inlierCount"] = VisionValue.Integer(fit.InlierCount), ["pointCount"] = VisionValue.Integer(points.Length), ["outlierCount"] = VisionValue.Integer(outliers), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["x"] = circle.X, ["y"] = circle.Y, ["radius"] = circle.Radius, ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["inlierCount"] = fit.InlierCount, ["diagnostics"] = diag }));
+        var allPointRms = MultiPointFit.AllPointRms(points, circle, cancellationToken);
+        var (found, reason, gatesEnabled) = MultiPointFit.EvaluateGates(fit.RmsError, fit.InlierCount, points.Length, maxRms, minInlierCount, minInlierRatio);
+        var outliers = points.Length - fit.InlierCount;
+        var inlierRatio = points.Length == 0 ? 0 : (double)fit.InlierCount / points.Length;
+        var evaluationState = !gatesEnabled ? "not-evaluated" : found ? "pass" : "fail";
+        // 质量不合格不再抛异常：圆与残差保留，供复检区分“拟合失败”和“拟合出来但不合格”。
+        var diag = CoordinateValidation.Diagnostics(Type,
+            ("pointCount", points.Length), ("inlierCount", fit.InlierCount), ("outlierCount", outliers), ("inlierRatio", inlierRatio),
+            ("rmsError", fit.RmsError), ("maxError", fit.MaxError), ("allPointRmsError", allPointRms),
+            ("maxRmsError", maxRms), ("minInlierCount", minInlierCount), ("minInlierRatio", minInlierRatio),
+            ("gatesEnabled", gatesEnabled), ("found", found), ("reason", reason), ("evaluationState", evaluationState),
+            ("radius", circle.Radius), ("centerX", circle.X), ("centerY", circle.Y));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+        {
+            ["circle"] = VisionValue.Circle(circle), ["center"] = VisionValue.Point(new(circle.X, circle.Y)), ["radius"] = VisionValue.Double(circle.Radius),
+            ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["allPointRmsError"] = VisionValue.Double(allPointRms),
+            ["inlierCount"] = VisionValue.Integer(fit.InlierCount), ["pointCount"] = VisionValue.Integer(points.Length), ["outlierCount"] = VisionValue.Integer(outliers),
+            ["inlierRatio"] = VisionValue.Double(inlierRatio), ["found"] = VisionValue.Boolean(found), ["reason"] = VisionValue.String(reason),
+            ["evaluationState"] = VisionValue.String(evaluationState), ["diagnostics"] = VisionValue.String(diag)
+        }, new Dictionary<string, object?>
+        {
+            ["pointCount"] = points.Length, ["x"] = circle.X, ["y"] = circle.Y, ["radius"] = circle.Radius,
+            ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["allPointRmsError"] = Math.Round(allPointRms, 4),
+            ["inlierCount"] = fit.InlierCount, ["inlierRatio"] = Math.Round(inlierRatio, 6),
+            ["found"] = found, ["reason"] = reason, ["evaluationState"] = evaluationState, ["diagnostics"] = diag
+        }));
     }
 }

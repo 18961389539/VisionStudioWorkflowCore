@@ -9,7 +9,9 @@ internal static class ImageFileWriter
     public static async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var plan = ImageSavePlan.Create(context, node);
+        var (safeContext, archiveRoot) = ConfineInputs(context, node);
+        var plan = ImageSavePlan.Create(safeContext, node);
+        EnsureWithinRoot(archiveRoot, plan.TargetPath);
         var path = plan.TargetPath;
         var codec = plan.Codec;
         var image = context.RequireImage("image");
@@ -89,6 +91,77 @@ internal static class ImageFileWriter
             }
             finally { SaveImageNode.TryDelete(temporary); }
         }
+    }
+
+    /// <summary>
+    /// A configured base path is host-owned and may be absolute (historical recipes rely on
+    /// this). A wired path is untrusted runtime data: it must be relative, contain no parent
+    /// segment, and resolve beneath the configured base directory.
+    /// </summary>
+    private static (NodeExecutionContext Context, string ArchiveRoot) ConfineInputs(
+        NodeExecutionContext context, NodeDefinition node)
+    {
+        var configuredPath = node.GetString("path", "artifacts/output.png").Trim();
+        if (configuredPath.Length == 0 || configuredPath.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
+            throw new InvalidOperationException("保存路径不能为空，且必须是有效文件路径。");
+        RejectParentSegments(configuredPath, "path");
+        var configuredFullPath = Path.GetFullPath(configuredPath);
+        var archiveRoot = Path.GetDirectoryName(configuredFullPath)!;
+        var safeContext = context;
+
+        if (context.TryGetValue("path", out var pathInput))
+        {
+            var relativePath = pathInput.Require<string>("path").Trim();
+            if (relativePath.Length == 0 || Path.IsPathRooted(relativePath) || HasDrivePrefix(relativePath)
+                || relativePath.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || relativePath.Contains(':'))
+                throw new InvalidOperationException("动态保存路径必须是安全相对路径，不允许绝对路径、盘符或冒号。");
+            RejectParentSegments(relativePath, "path");
+            var resolved = Path.GetFullPath(Path.Combine(archiveRoot, relativePath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar)));
+            EnsureWithinRoot(archiveRoot, resolved);
+            var inputs = new Dictionary<string, VisionValue>(context.Inputs, StringComparer.OrdinalIgnoreCase)
+            {
+                ["path"] = VisionValue.String(resolved)
+            };
+            safeContext = new NodeExecutionContext(inputs, context.WorkflowScope, context.RunId, context.ModelAssets)
+            {
+                WorkflowId = context.WorkflowId,
+                IsDebugRun = context.IsDebugRun
+            };
+        }
+
+        var naming = node.GetString("namingMode", "fixed");
+        var template = node.GetString("filenameTemplate", "{timestamp}_{saveId}");
+        if (naming.Equals("template", StringComparison.OrdinalIgnoreCase)
+            && template.Contains("{partId}", StringComparison.OrdinalIgnoreCase))
+        {
+            var partId = context.TryGetValue("partId", out var partInput)
+                ? partInput.Require<string>("partId")
+                : node.GetString("partId", string.Empty);
+            if (string.IsNullOrWhiteSpace(partId) || partId.Length > 128 || Path.IsPathRooted(partId) || HasDrivePrefix(partId)
+                || partId.IndexOfAny(['/', '\\', ':', '<', '>', '"', '|', '?', '*']) >= 0
+                || partId.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries).Any(segment => segment == "..")
+                || partId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                throw new InvalidOperationException("模板产品编号必须是安全文件名称，不允许路径分隔符、绝对路径、盘符或 .. 逃逸。");
+        }
+
+        return (safeContext, Path.GetFullPath(archiveRoot));
+    }
+
+    private static bool HasDrivePrefix(string value)
+        => value.Length >= 2 && char.IsLetter(value[0]) && value[1] == ':';
+
+    private static void RejectParentSegments(string value, string label)
+    {
+        if (value.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries).Any(segment => segment == ".."))
+            throw new InvalidOperationException($"保存 {label} 不允许包含 .. 逃逸段。");
+    }
+
+    private static void EnsureWithinRoot(string root, string target)
+    {
+        var relative = Path.GetRelativePath(root, target);
+        if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || relative.StartsWith("../", StringComparison.Ordinal))
+            throw new InvalidOperationException("保存路径逃逸出配置的输出目录，已拒绝写入。");
     }
 
     private static Mat Prepare(Mat source, string colorMode, string pixelPolicy)

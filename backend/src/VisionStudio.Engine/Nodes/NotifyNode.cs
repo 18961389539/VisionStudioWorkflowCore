@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Mail;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using VisionStudio.Abstractions;
 
 namespace VisionStudio.Engine.Nodes;
@@ -67,18 +69,45 @@ public sealed class NotifyNode(HttpClient? httpClient = null) : IVisionNodeExecu
         var maxPayloadBytes = ProtocolFraming.RequireRange(node.GetInt("maxPayloadBytes", 32768), 256, 1_048_576, "output.notify maxPayloadBytes");
 
         var timer = Stopwatch.StartNew();
+        var redactor = new NotificationRedactor();
+        redactor.AddSecret(node.GetString("smtpPassword", string.Empty));
         var attempts = 0;
         var truncated = false;
         var statusCode = 0;
         string? responseBody = null;
         string? failure = null;
+        string? failureKind = null;
 
         try
         {
             if (channel == "smtp")
             {
-                await SendMailAsync(node, subject, message, maxPayloadBytes, cancellationToken).ConfigureAwait(false);
-                attempts = 1;
+                for (var attempt = 1; attempt <= retries + 1; attempt++)
+                {
+                    attempts = attempt;
+                    try
+                    {
+                        await SendMailAsync(node, subject, message, maxPayloadBytes, cancellationToken).ConfigureAwait(false);
+                        failure = null; failureKind = null;
+                        break;
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        failure = $"timeout after {timeoutMs} ms"; failureKind = "timeout";
+                    }
+                    catch (SmtpException ex)
+                    {
+                        failureKind = ClassifySmtpFailure(ex);
+                        failure = $"SMTP {failureKind}: {ex.Message}";
+                        if (!IsRecoverableFailureKind(failureKind)) break;
+                    }
+                    catch (Exception ex) when (ex is IOException or SocketException)
+                    {
+                        failure = ex.Message; failureKind = "network";
+                    }
+                    if (attempt <= retries && retryDelayMs > 0)
+                        await Task.Delay(retryDelayMs, cancellationToken).ConfigureAwait(false);
+                }
             }
             else
             {
@@ -87,6 +116,7 @@ public sealed class NotifyNode(HttpClient? httpClient = null) : IVisionNodeExecu
                     : node.GetString("url", string.Empty)).Trim();
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
                     throw new InvalidOperationException("output.notify url must be an absolute http or https URL.");
+                redactor.AddUri(uri);
 
                 var (payload, wasTruncated) = BuildPayload(channel, context, node, subject, message);
                 truncated = wasTruncated;
@@ -112,17 +142,24 @@ public sealed class NotifyNode(HttpClient? httpClient = null) : IVisionNodeExecu
                         responseBody = body.Length > 512 ? body[..512] : body;
                         if (response.IsSuccessStatusCode) { failure = null; break; }
 
-                        failure = $"HTTP {statusCode}: {responseBody}";
+                        // Never echo an arbitrary remote error body: webhook endpoints often
+                        // reflect the token, credential-bearing value, or request headers.
+                        failure = $"HTTP {statusCode}";
+                        failureKind = statusCode is 401 or 403 ? "authentication"
+                            : statusCode >= 400 && statusCode < 500 ? "client"
+                            : "server";
                         // 4xx 是配置问题（URL/令牌/字段），重试只会把一次错配置刷成 N 次告警。
                         if (statusCode is >= 400 and < 500) break;
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
                         failure = $"timeout after {timeoutMs} ms";
+                        failureKind = "timeout";
                     }
                     catch (HttpRequestException ex)
                     {
                         failure = ex.Message;
+                        failureKind = "network";
                     }
 
                     if (attempt <= retries && retryDelayMs > 0)
@@ -130,16 +167,20 @@ public sealed class NotifyNode(HttpClient? httpClient = null) : IVisionNodeExecu
                 }
             }
         }
-        catch (Exception ex) when (ex is InvalidOperationException or SmtpException or FormatException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             failure = ex.Message;
+            failureKind = ex is SmtpException smtpException ? ClassifySmtpFailure(smtpException) : "configuration";
         }
 
         timer.Stop();
+        responseBody = redactor.Redact(responseBody);
+        failure = redactor.Redact(failure);
         var delivered = failure is null;
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("channel", channel), ("delivered", delivered), ("attempts", attempts),
             ("statusCode", statusCode), ("truncated", truncated), ("reason", failure),
+            ("failureKind", failureKind), ("retryable", IsRecoverableFailureKind(failureKind)),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
 
         var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -147,6 +188,7 @@ public sealed class NotifyNode(HttpClient? httpClient = null) : IVisionNodeExecu
             ["delivered"] = VisionValue.Boolean(delivered),
             ["attempts"] = VisionValue.Integer(attempts),
             ["truncated"] = VisionValue.Boolean(truncated),
+            ["failureKind"] = VisionValue.String(failureKind ?? "none"),
             ["diagnostics"] = VisionValue.String(diagnostics)
         };
         if (statusCode > 0) outputs["statusCode"] = VisionValue.Integer(statusCode);
@@ -160,6 +202,7 @@ public sealed class NotifyNode(HttpClient? httpClient = null) : IVisionNodeExecu
             {
                 ["channel"] = channel, ["delivered"] = delivered, ["attempts"] = attempts,
                 ["statusCode"] = statusCode, ["truncated"] = truncated, ["reason"] = failure,
+                ["failureKind"] = failureKind, ["retryable"] = IsRecoverableFailureKind(failureKind),
                 ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
                 ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             });
@@ -224,6 +267,76 @@ public sealed class NotifyNode(HttpClient? httpClient = null) : IVisionNodeExecu
         builder.Append('…');
         return (builder.ToString(), true);
     }
+
+    /// <summary>
+    /// Redacts both configured secrets and credential-shaped content reflected by a remote
+    /// endpoint. The outgoing payload is deliberately not changed; only observable failure
+    /// and response text passes through this class.
+    /// </summary>
+    private sealed class NotificationRedactor
+    {
+        private static readonly Regex CredentialAssignment = new(
+            "(?<prefix>[\"']?(?:password|passwd|pwd|token|access[_-]?token|refresh[_-]?token|api[_-]?key|secret|client[_-]?secret|authorization|proxy-authorization|credential|credentials|signature|sig|key)[\"']?\\s*[:=]\\s*)(?<value>\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s&,;]+)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex AuthorizationValue = new(
+            "\\b(?:Bearer|Basic)\\s+[A-Za-z0-9._~+/=-]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex UriUserInfo = new(
+            "(?<scheme>https?://)[^/\\s@]+@", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private readonly HashSet<string> _secrets = new(StringComparer.Ordinal);
+
+        public void AddSecret(string? secret)
+        {
+            if (string.IsNullOrEmpty(secret)) return;
+            _secrets.Add(secret);
+            _secrets.Add(Uri.UnescapeDataString(secret));
+            // A credential containing quotes or backslashes may be reflected JSON-escaped.
+            _secrets.Add(JsonSerializer.Serialize(secret)[1..^1]);
+        }
+
+        public void AddUri(Uri uri)
+        {
+            AddSecret(uri.ToString());
+            AddSecret(uri.PathAndQuery);
+            foreach (var segment in uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+                if (segment.Length >= 8) AddSecret(Uri.UnescapeDataString(segment));
+            if (uri.UserInfo.Length > 0)
+            {
+                AddSecret(uri.UserInfo);
+                foreach (var part in uri.UserInfo.Split(':', 2)) AddSecret(Uri.UnescapeDataString(part));
+            }
+            foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var value = part.Contains('=') ? part[(part.IndexOf('=') + 1)..] : part;
+                if (value.Length > 0) AddSecret(Uri.UnescapeDataString(value));
+            }
+            if (uri.Fragment.Length > 0) AddSecret(Uri.UnescapeDataString(uri.Fragment.TrimStart('#')));
+        }
+
+        public string? Redact(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            foreach (var secret in _secrets.OrderByDescending(value => value.Length, Comparer<int>.Default))
+                text = text.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
+            text = AuthorizationValue.Replace(text, "[REDACTED]");
+            text = UriUserInfo.Replace(text, "${scheme}[REDACTED]@");
+            return CredentialAssignment.Replace(text, match =>
+            {
+                var value = match.Groups["value"].Value;
+                var quoted = value.Length >= 2 && value[0] is '\"' or '\'' && value[^1] == value[0];
+                return match.Groups["prefix"].Value + (quoted ? value[..1] + "[REDACTED]" + value[^1..] : "[REDACTED]");
+            });
+        }
+    }
+
+    private static string ClassifySmtpFailure(SmtpException ex)
+        => (int)ex.StatusCode is 530 or 534 or 535 ? "authentication"
+            : (int)ex.StatusCode is >= 400 and < 500 ? "client"
+            : (int)ex.StatusCode is >= 500 and < 600 ? "server"
+            : ex.StatusCode is SmtpStatusCode.MailboxBusy or SmtpStatusCode.InsufficientStorage or SmtpStatusCode.SystemStatus
+                ? "server" : "smtp";
+
+    private static bool IsRecoverableFailureKind(string? kind)
+        => kind is "timeout" or "network" or "server";
 
     private static async Task SendMailAsync(
         NodeDefinition node, string subject, string message, int maxPayloadBytes, CancellationToken cancellationToken)

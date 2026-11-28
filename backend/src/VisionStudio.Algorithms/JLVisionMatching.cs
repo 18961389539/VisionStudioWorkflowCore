@@ -88,14 +88,37 @@ internal static partial class JLVisionMatching
             if (shape && savedModel.Length == 0 && node.GetString("modelMode", "legacy").Equals("trained", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("This shape node requires a trained model. Select a training image and train the model before running.");
 
+            var modelSet = shape ? DeserializeShapeModelSet(savedModel) : null;
             if (shape && savedModel.Length > 0)
             {
+                // A legacy model set is a JSON envelope, not one base64 native model. Parse it
+                // before the single-model base64/hash gate and hash its canonical representation
+                // (including every sample's geometry) so tampering still fails closed.
+                byte[] modelBytes;
+                if (modelSet is not null)
+                    modelBytes = JsonSerializer.SerializeToUtf8Bytes(modelSet);
+                else
+                {
+                    try { modelBytes = Convert.FromBase64String(savedModel); }
+                    catch (FormatException ex) { throw new InvalidOperationException("Shape trainedModelData is not valid base64; retrain the model.", ex); }
+                }
+                if (modelBytes.Length == 0 || modelBytes.Length > 16 * 1024 * 1024)
+                    throw new InvalidOperationException("Shape trainedModelData must decode to 1..16 MB of model bytes.");
+                var expectedModelHash = node.GetString("trainedModelHash", string.Empty).Trim();
+                if (expectedModelHash.Length > 0)
+                {
+                    var actualModelHash = Convert.ToHexString(SHA256.HashData(modelBytes));
+                    if (!string.Equals(expectedModelHash, actualModelHash, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException(
+                            $"Shape trained model hash mismatch: pinned {expectedModelHash}, loaded {actualModelHash}. Retrain or restore the expected model bytes.");
+                }
                 var trainingConfig = ShapeTrainingConfig(node);
                 var savedConfig = node.GetString("trainedModelConfig", string.Empty);
                 if (!string.Equals(trainingConfig, savedConfig, StringComparison.Ordinal) && !IsCompatibleLegacyShapeConfig(node, savedConfig))
                     throw new InvalidOperationException("Shape model training parameters changed. Train the model again before matching.");
             }
             Mat templateBuffer;
+            var templateCacheIdentity = fromPort ? "input-port" : "file";
             if (shape && savedModel.Length > 0) templateBuffer = savedModelPlaceholder = new Mat(1, 1, MatType.CV_8UC1); // geometry metadata is restored below
             else if (fromPort) templateBuffer = context.RequireImage("template").Mat;
             else if (!string.IsNullOrWhiteSpace(node.GetString("templateAssetId", string.Empty)))
@@ -103,12 +126,14 @@ internal static partial class JLVisionMatching
                 var templateAssetId = node.GetString("templateAssetId", string.Empty).Trim();
                 var templateAssetVersion = node.GetInt("templateAssetVersion", 0);
                 templateBuffer = fileImage = MatchingTemplateAsset.Load(context, node, templateAssetId, templateAssetVersion, ImreadModes.Grayscale);
+                templateCacheIdentity = $"asset:{templateAssetId}:v{templateAssetVersion}";
             }
             else
             {
                 var path = node.GetString("templatePath", string.Empty).Trim();
                 if (path.Length == 0) throw new InvalidOperationException("Matching requires a connected template or templatePath.");
                 fileImage = Cv2.ImRead(Path.GetFullPath(path), ImreadModes.Grayscale); templateBuffer = fileImage;
+                templateCacheIdentity = "file:" + Path.GetFullPath(path);
                 if (fileImage.Empty()) throw new InvalidOperationException($"Template image '{Path.GetFullPath(path)}' could not be loaded.");
             }
             if (templateBuffer.Empty()) throw new InvalidOperationException("Matching requires a non-empty template image.");
@@ -118,11 +143,13 @@ internal static partial class JLVisionMatching
             using var template = templateChannels.I == 1 ? templateColor.CopyImage() : templateColor.Rgb1ToGray();
             var p = ParseMatchParameters(context, node, shape, savedModel.Length > 0, templateBuffer);
             using var contrastSceneImage = p.ContrastEnabled ? JLVisionImages.ToMat(gray) : null;
-            var templateSource = shape && savedModel.Length > 0 ? "trained-model" : fromPort ? "input-port" : "file";
+            var templateSource = shape && savedModel.Length > 0 ? "trained-model" : fromPort ? "input-port" : templateCacheIdentity.StartsWith("asset:", StringComparison.Ordinal) ? "asset" : "file";
             var (outputs, summary) = BuildInitialOutputs(p, shape, savedModel.Length > 0, templateSource);
+            summary["templateSource"] = templateSource;
+            summary["templatePriority"] = "input-port>templateAssetId>templatePath";
+            summary["templateCacheIdentity"] = templateCacheIdentity;
             var overlays = new List<VisionOverlay>();
             var detections = new List<VisionDetection>();
-            var modelSet = shape ? DeserializeShapeModelSet(savedModel) : null;
             if (p.ContrastEnabled && modelSet is { Models.Length: > 0 })
                 throw new InvalidOperationException("Runtime contrast checks require one fused native shape model; retrain this legacy model set as a composite model first.");
             if (p.ClutterEnabled && modelSet is { Models.Length: > 0 })
@@ -141,7 +168,22 @@ internal static partial class JLVisionMatching
             var nmsAccepted = new List<(VisionRectangle2D Box, double Cx, double Cy, double AngleDeg)>();
             var nmsSuppressedCount = 0;
             var nmsSoftDecayedCount = 0;
-            IEnumerable<ShapeMatchCandidate> rankedCandidates = matchedCandidates.OrderByDescending(candidate => CandidateScore(candidate, p.ScoreUsingClutter));
+            var suppressed = new List<object>();
+            var hardIgnoredCount = 0;
+            var softIgnoredCount = 0;
+            var softWeightSum = 0d;
+            var softWeightMin = 1d;
+            // maxOverlap 控制原生搜索阶段能否返回重叠候选；后置去重针对“同一目标的重复命中”，
+            // 沿用更严的 0.3 并单独暴露，避免把相邻角度/尺度的重复命中当成两个目标。
+            var duplicateOverlap = Math.Clamp(node.GetDouble("duplicateOverlap", .3), 0, 1);
+            IEnumerable<ShapeMatchCandidate> rankedCandidates = shape
+                ? matchedCandidates
+                    .OrderByDescending(candidate => CandidateScore(candidate, p.ScoreUsingClutter))
+                    .ThenBy(candidate => Math.Abs(VisionTransform2D.NormalizeAngleDeg(candidate.Angle * 180 / Math.PI)))
+                    .ThenBy(candidate => Math.Abs(candidate.Scale - 1d))
+                    .ThenBy(candidate => candidate.X).ThenBy(candidate => candidate.Y)
+                    .ThenBy(candidate => candidate.Index)
+                : matchedCandidates.OrderByDescending(candidate => CandidateScore(candidate, p.ScoreUsingClutter));
             if (!shape)
             {
                 rankedCandidates = p.NmsSortKey switch
@@ -168,6 +210,12 @@ internal static partial class JLVisionMatching
                 if (!shape && ignoreRoi is not null && p.IgnoreMode == "soft")
                 {
                     var softW = SampleIgnoreWeight(ignoreRoi, x, y, p.IgnoreSoftWeight, p.IgnoreFeatherPx);
+                    if (softW < 1d - 1e-9)
+                    {
+                        softIgnoredCount++;
+                        softWeightSum += softW;
+                        softWeightMin = Math.Min(softWeightMin, softW);
+                    }
                     score *= softW;
                     if (score < p.MinScore) continue;
                 }
@@ -186,7 +234,12 @@ internal static partial class JLVisionMatching
                 if (shape && savedModel.Length > 0 && (candidate.ScaleX < p.SearchScaleXMin - 1e-9 || candidate.ScaleX > p.SearchScaleXMax + 1e-9
                     || candidate.ScaleY < p.SearchScaleYMin - 1e-9 || candidate.ScaleY > p.SearchScaleYMax + 1e-9)) continue;
                 if (searchRoi is not null && !Contains(searchRoi, x, y)) continue;
-                if (!shape && ignoreRoi is not null && p.IgnoreMode == "hard" && Contains(ignoreRoi, x, y)) continue;
+                if (!shape && ignoreRoi is not null && p.IgnoreMode == "hard" && Contains(ignoreRoi, x, y))
+                {
+                    hardIgnoredCount++;
+                    suppressed.Add(new { candidateIndex = candidate.Index, x, y, angleDeg = radians * 180 / Math.PI, scale, score, reason = "hard-ignore-roi" });
+                    continue;
+                }
                 double? contrast = null;
                 double? contrastFraction = null;
                 if (p.ContrastEnabled)
@@ -212,8 +265,16 @@ internal static partial class JLVisionMatching
                 var left = corners.Min(pt => pt.X); var top = corners.Min(pt => pt.Y); var width = corners.Max(pt => pt.X) - left + 1; var height = corners.Max(pt => pt.Y) - top + 1;
                 if (shape && candidateBox.Width * candidateBox.Height * candidate.ScaleX * candidate.ScaleY < p.MinArea) continue;
                 var distance = Math.Max(0, node.GetDouble("minCenterDistance", shape ? 20 : 0));
-                if (distance > 0 && detections.Any(d => Math.Sqrt(Math.Pow(d.Circle.X - x, 2) + Math.Pow(d.Circle.Y - y, 2)) < distance)) continue;
-                if (shape && detections.Any(d => Overlap(d.BoundingBox, new(left, top, width, height)) > .3)) continue;
+                if (distance > 0 && detections.Any(d => Math.Sqrt(Math.Pow(d.Circle.X - x, 2) + Math.Pow(d.Circle.Y - y, 2)) < distance))
+                {
+                    suppressed.Add(new { candidateIndex = candidate.Index, x, y, angleDeg = radians * 180 / Math.PI, scale, score, reason = "min-center-distance" });
+                    continue;
+                }
+                if (shape && detections.Any(d => Overlap(d.BoundingBox, new(left, top, width, height)) > duplicateOverlap))
+                {
+                    suppressed.Add(new { candidateIndex = candidate.Index, x, y, angleDeg = radians * 180 / Math.PI, scale, score, reason = "max-overlap" });
+                    continue;
+                }
                 var degrees = VisionTransform2D.NormalizeAngleDeg(radians * 180 / Math.PI);
                 if (!shape && p.DuplicateOverlapThreshold > 0)
                 {
@@ -244,6 +305,7 @@ internal static partial class JLVisionMatching
                     if (hardReject)
                     {
                         nmsSuppressedCount++;
+                        suppressed.Add(new { candidateIndex = candidate.Index, x, y, angleDeg = degrees, scale, score, reason = "nms-hard" });
                         continue;
                     }
                     if (softDecayed)
@@ -252,6 +314,7 @@ internal static partial class JLVisionMatching
                         if (score < p.MinScore)
                         {
                             nmsSuppressedCount++;
+                            suppressed.Add(new { candidateIndex = candidate.Index, x, y, angleDeg = degrees, scale, score, reason = "nms-soft-decayed" });
                             continue;
                         }
                     }
@@ -305,7 +368,21 @@ internal static partial class JLVisionMatching
             EmitScoreMap(context, node, p, shape, gray, templateBuffer, source, outputs, summary, token);
             outputs["count"] = VisionValue.Integer(detections.Count);
             outputs["detections"] = VisionValue.Detections(detections);
+            outputs["suppressionReasonsJson"] = VisionValue.String(JsonSerializer.Serialize(suppressed));
+            outputs["suppressedCount"] = VisionValue.Integer(suppressed.Count);
             summary["accepted"] = detections.Count;
+            summary["suppressedCount"] = suppressed.Count;
+            summary["suppressionReasons"] = suppressed;
+            summary["overlapMetric"] = "axis-aligned IoU in scene pixels";
+            summary["duplicateOverlap"] = duplicateOverlap;
+            summary["minCenterDistanceUnit"] = "scene-pixels";
+            summary["hardIgnoredCount"] = hardIgnoredCount;
+            summary["softIgnoredCount"] = softIgnoredCount;
+            summary["softIgnoreMeanWeight"] = softIgnoredCount == 0 ? 1d : softWeightSum / softIgnoredCount;
+            summary["softIgnoreMinWeight"] = softIgnoredCount == 0 ? 1d : softWeightMin;
+            outputs["hardIgnoredCount"] = VisionValue.Integer(hardIgnoredCount);
+            outputs["softIgnoredCount"] = VisionValue.Integer(softIgnoredCount);
+            outputs["softIgnoreMeanWeight"] = VisionValue.Double(softIgnoredCount == 0 ? 1d : softWeightSum / softIgnoredCount);
             if (!shape)
             {
                 summary["nmsSuppressedCount"] = nmsSuppressedCount;

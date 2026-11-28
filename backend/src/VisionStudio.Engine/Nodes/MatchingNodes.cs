@@ -50,6 +50,14 @@ public sealed class TemplateMatchNode : IVisionNodeExecutor
         EmitSummaryString(outputs, summary, "scaleSearch", "scaleSearch");
         EmitSummaryBool(outputs, summary, "scoreMapEmitted", "scoreMapEmitted");
         EmitSummaryBool(outputs, summary, "modelCacheHit", "modelCacheHit");
+        EmitSummaryString(outputs, summary, "templateSource", "templateSource");
+        EmitSummaryString(outputs, summary, "templatePriority", "templatePriority");
+        EmitSummaryDouble(outputs, summary, "suppressedCount", "suppressedCount");
+        EmitSummaryDouble(outputs, summary, "hardIgnoredCount", "hardIgnoredCount");
+        EmitSummaryDouble(outputs, summary, "softIgnoredCount", "softIgnoredCount");
+        EmitSummaryDouble(outputs, summary, "softIgnoreMeanWeight", "softIgnoreMeanWeight");
+        if (summary.TryGetValue("suppressionReasons", out var suppressionReasons))
+            outputs["suppressionReasonsJson"] = VisionValue.String(JsonSerializer.Serialize(suppressionReasons));
         EmitSummaryString(outputs, summary, "polarityMode", "polarityMode");
         if (!outputs.ContainsKey("scale") && summary.TryGetValue("matchedScale", out var ms) && ms is double msd && double.IsFinite(msd))
             outputs["scale"] = VisionValue.Double(msd);
@@ -85,6 +93,12 @@ public sealed class TemplateMatchNode : IVisionNodeExecutor
             ("scoreMapEmitted", summary.GetValueOrDefault("scoreMapEmitted")),
             ("polarityMode", summary.GetValueOrDefault("polarityMode")),
             ("modelCacheHit", summary.GetValueOrDefault("modelCacheHit")),
+            ("templateSource", summary.GetValueOrDefault("templateSource")),
+            ("templatePriority", summary.GetValueOrDefault("templatePriority")),
+            ("suppressedCount", summary.GetValueOrDefault("suppressedCount")),
+            ("hardIgnoredCount", summary.GetValueOrDefault("hardIgnoredCount")),
+            ("softIgnoredCount", summary.GetValueOrDefault("softIgnoredCount")),
+            ("softIgnoreMeanWeight", summary.GetValueOrDefault("softIgnoreMeanWeight")),
             ("angleSpanDeg", angleSpan),
             ("subpixelMethod", summary["subpixelMethod"]),
             ("limits", "JLVision NCC pyramid; hard multi-match prefers Find MaxOverlap; Soft-NMS/soft-ignore are explicit engine extras; scoreMap is diagnostic OpenCV; discrete JL resize scale only (no anisotropic NCC / PatMax)"));

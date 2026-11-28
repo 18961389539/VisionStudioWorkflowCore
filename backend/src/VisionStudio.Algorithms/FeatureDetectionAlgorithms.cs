@@ -4,14 +4,16 @@ namespace VisionStudio.Engine.Algorithms;
 
 internal static class FeatureDetectionAlgorithms
 {
-    internal sealed record CornerResult(VisionPoint2D[] Points, double MeanResponse, double PeakResponse);
+    internal sealed record CornerResult(VisionPoint2D[] Points, double MeanResponse, double PeakResponse,
+        int Requested, int Refined, int Discarded);
     internal sealed record EllipseCandidate(
         double CenterX, double CenterY, double SemiMajor, double SemiMinor, double AngleDeg,
         double Rms, double Coverage, int SupportPoints, double Area, double Confidence);
     internal sealed record EllipseResult(EllipseCandidate[] Ordered, int InputCount, int ContourCount, int CandidateCount);
     internal sealed record GaborResult(
         Mat Image, Mat? Direction, double[] Energies, double Mean, double Maximum,
-        double DominantDegrees, double Anisotropy, double Sigma, int KernelSize);
+        double DominantDegrees, double Anisotropy, double Sigma, int KernelSize,
+        bool GainNormalized, double KernelGain);
 
     internal static CornerResult Corners(
         Mat analysis, string method, int fastThreshold, int maxCorners, double qualityLevel,
@@ -32,12 +34,30 @@ internal static class FeatureDetectionAlgorithms
             foreach (var corner in corners) points.Add(new VisionPoint2D(corner.X, corner.Y));
         }
 
+        var requested = points.Count;
+        var refinedCount = 0;
+        var discarded = 0;
         if (subpixel && points.Count > 0)
         {
-            var refined = points.Select(point => new Point2f((float)point.X, (float)point.Y)).ToArray();
-            Cv2.CornerSubPix(analysis, refined, new Size(5, 5), new Size(-1, -1),
-                new TermCriteria(CriteriaTypes.Eps | CriteriaTypes.MaxIter, 30, 0.01));
-            points = refined.Select(point => new VisionPoint2D(point.X, point.Y)).ToList();
+            var refinedPoints = new List<VisionPoint2D>(points.Count);
+            foreach (var point in points)
+            {
+                var refined = new[] { new Point2f((float)point.X, (float)point.Y) };
+                Cv2.CornerSubPix(analysis, refined, new Size(5, 5), new Size(-1, -1),
+                    new TermCriteria(CriteriaTypes.Eps | CriteriaTypes.MaxIter, 30, 0.01));
+                var candidate = refined[0];
+                var moved = Distance(point, new VisionPoint2D(candidate.X, candidate.Y));
+                if (!double.IsFinite(candidate.X) || !double.IsFinite(candidate.Y) ||
+                    candidate.X < 0 || candidate.Y < 0 || candidate.X >= analysis.Width || candidate.Y >= analysis.Height ||
+                    !double.IsFinite(moved) || moved > 1.5)
+                {
+                    discarded++;
+                    continue;
+                }
+                refinedPoints.Add(new VisionPoint2D(candidate.X, candidate.Y));
+                refinedCount++;
+            }
+            points = refinedPoints;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -55,7 +75,8 @@ internal static class FeatureDetectionAlgorithms
         return new CornerResult(
             selected.Select(entry => entry.Point).ToArray(),
             selected.Count > 0 ? selected.Average(entry => entry.Response) : 0d,
-            selected.Count > 0 ? selected.Max(entry => entry.Response) : 0d);
+            selected.Count > 0 ? selected.Max(entry => entry.Response) : 0d,
+            requested, refinedCount, discarded);
     }
 
     internal static EllipseResult Ellipses(
@@ -140,7 +161,7 @@ internal static class FeatureDetectionAlgorithms
 
     internal static GaborResult GaborBank(
         Mat analysis, double wavelength, int orientations, double sigmaRatio, double gamma,
-        string energyMode, bool emitDirection, CancellationToken cancellationToken)
+        string energyMode, bool emitDirection, bool gainNormalized, CancellationToken cancellationToken)
     {
         var sigma = sigmaRatio * wavelength;
         var kernelSize = (int)Math.Round(6 * sigma) | 1;
@@ -151,6 +172,7 @@ internal static class FeatureDetectionAlgorithms
         using var best = new Mat(analysis.Rows, analysis.Cols, MatType.CV_32FC1, Scalar.All(0));
         using var bestDirection = new Mat(analysis.Rows, analysis.Cols, MatType.CV_32FC1, Scalar.All(0));
         var energies = new double[orientations];
+        var kernelGain = 0d;
         var degreesStep = 180.0 / orientations;
         for (var index = 0; index < orientations; index++)
         {
@@ -158,6 +180,28 @@ internal static class FeatureDetectionAlgorithms
             var degrees = degreesStep * index;
             using var kernel = Cv2.GetGaborKernel(
                 new Size(kernelSize, kernelSize), sigma, degrees * Math.PI / 180.0, wavelength, gamma, 0, MatType.CV_32F);
+            if (gainNormalized)
+            {
+                using var kernelValues = new Mat();
+                Cv2.Absdiff(kernel, kernel, kernelValues);
+                kernelGain = Math.Max(1e-12, Cv2.Sum(kernelValues).Val0);
+                using var normalizedKernel = new Mat();
+                kernel.ConvertTo(normalizedKernel, MatType.CV_32F, 1.0 / kernelGain, 0);
+                using var responseNormalized = new Mat();
+                Cv2.Filter2D(gray32, responseNormalized, MatType.CV_32F, normalizedKernel);
+                using var squaredNormalized = new Mat();
+                Cv2.Multiply(responseNormalized, responseNormalized, squaredNormalized);
+                energies[index] = Cv2.Mean(squaredNormalized).Val0;
+                if (energyMode == "sum") Cv2.Add(accumulated, squaredNormalized, accumulated);
+                else
+                {
+                    using var improved = new Mat();
+                    Cv2.Compare(squaredNormalized, best, improved, CmpTypes.GT);
+                    squaredNormalized.CopyTo(best, improved);
+                    bestDirection.SetTo(Scalar.All((float)degrees), improved);
+                }
+                continue;
+            }
             using var response = new Mat();
             Cv2.Filter2D(gray32, response, MatType.CV_32F, kernel);
             using var squared = new Mat();
@@ -174,6 +218,8 @@ internal static class FeatureDetectionAlgorithms
         }
 
         using var combined = energyMode == "sum" ? accumulated.Clone() : best.Clone();
+        if (gainNormalized && energyMode == "sum")
+            combined.ConvertTo(combined, MatType.CV_32FC1, 1.0 / orientations, 0);
         Cv2.MinMaxLoc(combined, out _, out var maximum, out _, out _);
         var mean = Cv2.Mean(combined).Val0;
         var dominant = 0d;
@@ -204,7 +250,7 @@ internal static class FeatureDetectionAlgorithms
                 }
                 else bestDirection.ConvertTo(direction, MatType.CV_8UC1, 255.0 / 180.0, 0);
             }
-            return new GaborResult(normalized, direction, energies, mean, maximum, dominant, anisotropy, sigma, kernelSize);
+            return new GaborResult(normalized, direction, energies, mean, maximum, dominant, anisotropy, sigma, kernelSize, gainNormalized, kernelGain);
         }
         catch
         {

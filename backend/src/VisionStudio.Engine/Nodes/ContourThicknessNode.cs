@@ -45,11 +45,24 @@ var mode = SubpixelEdgeCore.ChoiceParameter(node, "measurementMode", "shortest",
                 ? ContourThicknessMeasurement.Measure(inner, outer, mode, step, (int)budgetValue, cancellationToken)
                 : new ContourThicknessMeasurement.Result("open-contour", false, [], 0, 0, 0, null);
         var found = result.Reason == "ok";
+        var visibleSamples = found ? result.Samples : [];
+        var maxUnsampledArc = found && visibleSamples.Count > 0 ? visibleSamples.Max(sample => sample.Weight) : 0;
+        var samplingUncertainty = maxUnsampledArc / 2;
         var outputs = new Dictionary<string, VisionValue>
         {
             ["found"] = VisionValue.Boolean(found), ["contained"] = VisionValue.Boolean(result.Contained),
-            ["sampleCount"] = VisionValue.Integer(result.Samples.Count),
-            ["samplesJson"] = VisionValue.String(JsonSerializer.Serialize(result.Samples.Select(sample => new
+            ["measurementValid"] = VisionValue.Boolean(found), ["reason"] = VisionValue.String(result.Reason),
+            ["sampleCount"] = VisionValue.Integer(visibleSamples.Count),
+            ["requestedSamples"] = VisionValue.Integer(result.RequestedSamples),
+            ["invalidSamples"] = VisionValue.Integer(result.InvalidSamples),
+            ["withinTolerance"] = VisionValue.Boolean(false),
+            ["coverageComplete"] = VisionValue.Boolean(found),
+            ["maxUnsampledArcPx"] = VisionValue.Double(maxUnsampledArc),
+            ["samplingUncertaintyPx"] = VisionValue.Double(samplingUncertainty),
+            ["thinSampleCount"] = VisionValue.Integer(0),
+            ["outOfToleranceSampleCount"] = VisionValue.Integer(0),
+            ["upperFailureCount"] = VisionValue.Integer(0),
+            ["samplesJson"] = VisionValue.String(JsonSerializer.Serialize(visibleSamples.Select(sample => new
             {
                 sample.Boundary, sample.Index, sample.ArcLength, sample.Weight, sample.Inner, sample.Outer, sample.Thickness,
                 WithinTolerance = sample.Thickness >= lower && (upper == 0 || sample.Thickness <= upper)
@@ -57,10 +70,12 @@ var mode = SubpixelEdgeCore.ChoiceParameter(node, "measurementMode", "shortest",
         };
         var summary = new Dictionary<string, object?>
         {
-            ["found"] = found, ["reason"] = result.Reason, ["contained"] = result.Contained,
-            ["measurementMode"] = mode, ["sampleCount"] = result.Samples.Count,
+            ["found"] = found, ["reason"] = result.Reason, ["measurementValid"] = found, ["contained"] = result.Contained,
+            ["measurementMode"] = mode, ["sampleCount"] = visibleSamples.Count,
             ["requestedSamples"] = result.RequestedSamples, ["invalidSamples"] = result.InvalidSamples,
             ["sampleStep"] = step, ["maxSamplesPerBoundary"] = budgetValue,
+            ["coverageComplete"] = found, ["maxUnsampledArcPx"] = maxUnsampledArc,
+            ["samplingUncertaintyPx"] = samplingUncertainty,
             ["lowerThicknessLimit"] = lower, ["upperThicknessLimit"] = upper,
             ["unit"] = "px", ["algorithmBackend"] = "jlvision"
         };
@@ -75,7 +90,8 @@ var mode = SubpixelEdgeCore.ChoiceParameter(node, "measurementMode", "shortest",
             var maximum = result.Samples.Max(sample => sample.Thickness);
             var thin = result.Samples.Count(sample => sample.Thickness < lower);
             var outside = result.Samples.Count(sample => sample.Thickness < lower || upper > 0 && sample.Thickness > upper);
-            var pass = result.Minimum >= lower && (upper == 0 || maximum <= upper);
+            var upperFailures = result.Samples.Count(sample => upper > 0 && sample.Thickness > upper);
+            var pass = found && result.Minimum >= lower && (upper == 0 || maximum <= upper);
             var minimumLine = result.MinimumLine!.Value;
             outputs["minThickness"] = VisionValue.Double(result.Minimum);
             outputs["maxThickness"] = VisionValue.Double(maximum);
@@ -84,12 +100,16 @@ var mode = SubpixelEdgeCore.ChoiceParameter(node, "measurementMode", "shortest",
             outputs["variation"] = VisionValue.Double(maximum - result.Minimum);
             outputs["withinTolerance"] = VisionValue.Boolean(pass);
             outputs["thinSampleCount"] = VisionValue.Integer(thin);
+            outputs["outOfToleranceSampleCount"] = VisionValue.Integer(outside);
+            outputs["upperFailureCount"] = VisionValue.Integer(upperFailures);
             outputs["minInnerPoint"] = VisionValue.Point(minimumLine.Start);
             outputs["minOuterPoint"] = VisionValue.Point(minimumLine.End);
             outputs["minLine"] = VisionValue.Line(minimumLine);
             summary["minThickness"] = result.Minimum; summary["maxThickness"] = maximum;
             summary["meanThickness"] = mean; summary["stdDev"] = deviation;
             summary["withinTolerance"] = pass; summary["thinSampleCount"] = thin;
+            summary["outOfToleranceSampleCount"] = outside;
+            summary["upperFailureCount"] = upperFailures;
             summary["outOfToleranceCount"] = outside;
             // Spread the preview across the perimeter; always include the minimum line.
             var stride = Math.Max(1, (int)Math.Ceiling(result.Samples.Count / 160d));
@@ -110,10 +130,12 @@ var mode = SubpixelEdgeCore.ChoiceParameter(node, "measurementMode", "shortest",
         cancellationToken.ThrowIfCancellationRequested();
         if (context.TryGetValue("image", out _)) outputs["image"] = VisionValue.Image(context.RequireImage("image").CloneOwned());
         var diag = CoordinateValidation.Diagnostics(Type,
-            ("found", found), ("reason", result.Reason), ("contained", result.Contained),
-            ("measurementMode", mode), ("sampleCount", result.Samples.Count),
+            ("found", found), ("reason", result.Reason), ("measurementValid", found), ("contained", result.Contained),
+            ("measurementMode", mode), ("sampleCount", visibleSamples.Count),
             ("requestedSamples", result.RequestedSamples), ("invalidSamples", result.InvalidSamples),
             ("sampleStep", step), ("maxSamplesPerBoundary", budgetValue),
+            ("coverageComplete", found), ("maxUnsampledArcPx", maxUnsampledArc),
+            ("samplingUncertaintyPx", samplingUncertainty), ("adaptiveSubdivision", mode == "innernormal"),
             ("minThickness", lower), ("maxThickness", upper));
         outputs["diagnostics"] = VisionValue.String(diag);
         summary["diagnostics"] = diag;

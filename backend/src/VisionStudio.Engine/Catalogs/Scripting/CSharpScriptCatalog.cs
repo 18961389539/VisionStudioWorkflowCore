@@ -45,6 +45,10 @@ internal static class CSharpScriptCatalog
             [
                 new("source", "Script Source", "textarea", DefaultSource, Group: "Script",
                     Description: "C# script body. Use Input.Number/Integer/Boolean/Text/Numbers/Points, Image (Mat), Output.Result/Number/Text/Boolean/Json/Image, Log and Fail. Top-level return also becomes result when Output.Result is not set. Use a using block or explicit Dispose for working Mats; top-level 'using var' declarations are not accepted by the Roslyn script parser in this build."),
+                new("scriptApproved", "Script Approved", "boolean", false, Group: "Approval",
+                    Description: "Hard approval gate. The node refuses to compile or run any script until the exact source has been reviewed and this is enabled."),
+                new("approvedSourceSha256", "Approved Source SHA-256", "text", "", Group: "Approval",
+                    Description: "64-character SHA-256 of the UTF-8 script source. Approval is bound to these exact bytes; editing the source invalidates it. #r/#load/#line remain forbidden even after approval."),
                 new("timeoutMs", "Timeout (ms)", "number", 250, 10, 10_000, 10, Unit: "ms", Group: "Limits",
                     Description: "Wall-clock budget checked at injected loop/function ticks. InProcess cannot interrupt native or BCL calls that do not yield. WorkerProcess also has a separate IPC timeout that can terminate the worker."),
                 new("maxTicks", "Maximum Ticks", "number", 1_000_000, 100, 100_000_000, 1_000, Group: "Limits",

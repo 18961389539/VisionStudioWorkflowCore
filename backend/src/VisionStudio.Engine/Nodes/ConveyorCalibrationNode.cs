@@ -35,6 +35,46 @@ public sealed class ConveyorCalibrationNode : IVisionNodeExecutor
         if (!double.IsFinite(counts) || Math.Abs(counts) > 1e15)
             throw new InvalidOperationException("calibration.conveyor encoder count must be finite.");
 
+        var maxEncoderAgeMs = node.GetDouble("maxEncoderAgeMs", 0);
+        if (!double.IsFinite(maxEncoderAgeMs) || maxEncoderAgeMs is < 0 or > 60000)
+            throw new InvalidOperationException("calibration.conveyor maxEncoderAgeMs must be finite within 0..60000 (0 disables).");
+        var encoderSampleId = context.TryGetValue("encoderSampleId", out var sampleInput)
+            ? sampleInput.Require<long>("encoderSampleId")
+            : node.GetInt("encoderSampleId", 0);
+        var previousEncoderSampleId = context.TryGetValue("previousEncoderSampleId", out var previousInput)
+            ? previousInput.Require<long>("previousEncoderSampleId")
+            : node.GetInt("previousEncoderSampleId", 0);
+        if (encoderSampleId < 0 || previousEncoderSampleId < 0)
+            throw new InvalidOperationException("calibration.conveyor encoder sample ids must be >= 0.");
+        if (encoderSampleId > 0 && previousEncoderSampleId > 0 && encoderSampleId <= previousEncoderSampleId)
+            throw new InvalidOperationException($"calibration.conveyor encoderSampleId {encoderSampleId} is not newer than previousEncoderSampleId {previousEncoderSampleId}; re-latch the encoder.");
+        var latchedAtText = context.TryGetValue("encoderLatchedAt", out var latchedInput)
+            ? latchedInput.Require<string>("encoderLatchedAt")
+            : node.GetString("encoderLatchedAt", "");
+        var triggeredAtText = context.TryGetValue("triggeredAt", out var triggeredInput)
+            ? triggeredInput.Require<string>("triggeredAt")
+            : node.GetString("triggeredAt", "");
+        DateTimeOffset? latchedAt = null;
+        DateTimeOffset? triggeredAt = null;
+        if (!string.IsNullOrWhiteSpace(latchedAtText))
+        {
+            if (!DateTimeOffset.TryParse(latchedAtText, out var parsed)) throw new InvalidOperationException("calibration.conveyor encoderLatchedAt must be an ISO-8601 timestamp.");
+            latchedAt = parsed;
+        }
+        if (!string.IsNullOrWhiteSpace(triggeredAtText))
+        {
+            if (!DateTimeOffset.TryParse(triggeredAtText, out var parsed)) throw new InvalidOperationException("calibration.conveyor triggeredAt must be an ISO-8601 timestamp.");
+            triggeredAt = parsed;
+        }
+        double? encoderAgeMs = latchedAt is { } latch && triggeredAt is { } trigger ? (trigger - latch).TotalMilliseconds : null;
+        if (maxEncoderAgeMs > 0)
+        {
+            if (encoderAgeMs is not { } latchAge)
+                throw new InvalidOperationException("calibration.conveyor maxEncoderAgeMs requires both encoderLatchedAt and triggeredAt.");
+            if (latchAge < 0 || latchAge > maxEncoderAgeMs)
+                throw new InvalidOperationException($"calibration.conveyor encoder latch age {latchAge:0.###} ms is outside 0..maxEncoderAgeMs={maxEncoderAgeMs:0.###}; re-latch the encoder.");
+        }
+
         var countsPerUnit = node.GetDouble("countsPerUnit", 1000);
         if (!double.IsFinite(countsPerUnit) || countsPerUnit <= 0)
             throw new InvalidOperationException(
@@ -56,31 +96,77 @@ public sealed class ConveyorCalibrationNode : IVisionNodeExecutor
         if (sign is not ("add" or "subtract"))
             throw new InvalidOperationException("calibration.conveyor compensationSign must be add or subtract.");
 
+        var configuredDirection = Choice(node, "lineDirection", "unconfirmed", "unconfirmed", "forward", "reverse");
+        var observedDirection = context.TryGetValue("speedDirection", out var directionInput)
+            ? directionInput.Require<string>("speedDirection").Trim().ToLowerInvariant()
+            : node.GetString("speedDirection", "unknown").Trim().ToLowerInvariant();
+        if (observedDirection is not ("unknown" or "forward" or "reverse"))
+            throw new InvalidOperationException("calibration.conveyor speedDirection must be unknown, forward or reverse.");
+        var motionState = context.TryGetValue("motionState", out var stateInput)
+            ? stateInput.Require<string>("motionState").Trim().ToLowerInvariant()
+            : node.GetString("motionState", "unknown").Trim().ToLowerInvariant();
+        if (motionState is not ("unknown" or "steady" or "decelerating" or "reversing" or "stopped"))
+            throw new InvalidOperationException("calibration.conveyor motionState must be unknown, steady, decelerating, reversing or stopped.");
+
         var position = counts / countsPerUnit;
         var triggerOffset = lineSpeed * triggerDelayMs / 1000.0;
+        var expectedSign = configuredDirection == "forward" ? "add" : "subtract";
+        var directionConfirmed = configuredDirection != "unconfirmed" && observedDirection == configuredDirection;
+        var motionAllowed = motionState == "steady" || motionState == "stopped" && lineSpeed == 0;
+        var signAllowed = configuredDirection != "unconfirmed" && sign == expectedSign;
+        var targetAllowed = directionConfirmed && motionAllowed && signAllowed;
+        var reason = targetAllowed ? "ok"
+            : configuredDirection == "unconfirmed" ? "line direction is not confirmed"
+            : observedDirection != configuredDirection ? "observed speed direction conflicts with configured line direction"
+            : !motionAllowed ? "robot target blocked while conveyor is decelerating, reversing or motion state is unknown"
+            : "compensationSign conflicts with configured line direction";
         var compensated = sign == "add" ? position + triggerOffset : position - triggerOffset;
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("unit", unit), ("counts", counts), ("countsPerUnit", countsPerUnit),
-            ("position", position), ("triggerOffset", triggerOffset), ("compensatedPosition", compensated),
-            ("lineSpeed", lineSpeed), ("triggerDelayMs", triggerDelayMs), ("sign", sign));
+            ("encoderSampleId", encoderSampleId), ("previousEncoderSampleId", previousEncoderSampleId),
+            ("encoderLatchedAt", latchedAt?.ToString("O")), ("triggeredAt", triggeredAt?.ToString("O")),
+            ("encoderAgeMs", encoderAgeMs), ("maxEncoderAgeMs", maxEncoderAgeMs),
+            ("position", position), ("triggerOffset", triggerOffset),
+            ("lineSpeed", lineSpeed), ("triggerDelayMs", triggerDelayMs), ("sign", sign),
+            ("lineDirection", configuredDirection), ("speedDirection", observedDirection),
+            ("motionState", motionState), ("targetAllowed", targetAllowed), ("reason", reason));
 
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["position"] = VisionValue.Double(position),
-                ["triggerOffset"] = VisionValue.Double(triggerOffset),
-                ["compensatedPosition"] = VisionValue.Double(compensated),
-                ["unit"] = VisionValue.String(unit),
-                ["diagnostics"] = VisionValue.String(diagnostics)
-            },
-            new Dictionary<string, object?>
-            {
-                ["unit"] = unit, ["counts"] = counts, ["countsPerUnit"] = countsPerUnit,
-                ["position"] = position, ["triggerOffset"] = triggerOffset,
-                ["compensatedPosition"] = compensated, ["lineSpeed"] = lineSpeed,
-                ["triggerDelayMs"] = triggerDelayMs, ["sign"] = sign,
-                ["diagnostics"] = diagnostics
-            }));
+        var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["position"] = VisionValue.Double(position),
+            ["triggerOffset"] = VisionValue.Double(triggerOffset),
+            ["targetAllowed"] = VisionValue.Boolean(targetAllowed),
+            ["unit"] = VisionValue.String(unit),
+            ["encoderAgeMs"] = encoderAgeMs is { } age ? VisionValue.Double(age) : new VisionValue(VisionDataType.Double, null),
+            ["encoderSampleId"] = VisionValue.Integer(encoderSampleId),
+            ["diagnostics"] = VisionValue.String(diagnostics)
+        };
+        var summary = new Dictionary<string, object?>
+        {
+            ["unit"] = unit, ["counts"] = counts, ["countsPerUnit"] = countsPerUnit,
+            ["encoderSampleId"] = encoderSampleId, ["previousEncoderSampleId"] = previousEncoderSampleId,
+            ["encoderLatchedAt"] = latchedAt?.ToString("O"), ["triggeredAt"] = triggeredAt?.ToString("O"),
+            ["encoderAgeMs"] = encoderAgeMs, ["maxEncoderAgeMs"] = maxEncoderAgeMs,
+            ["position"] = position, ["triggerOffset"] = triggerOffset,
+            ["lineSpeed"] = lineSpeed, ["triggerDelayMs"] = triggerDelayMs, ["sign"] = sign,
+            ["lineDirection"] = configuredDirection, ["speedDirection"] = observedDirection,
+            ["motionState"] = motionState, ["targetAllowed"] = targetAllowed, ["reason"] = reason,
+            ["diagnostics"] = diagnostics
+        };
+        if (targetAllowed)
+        {
+            outputs["compensatedPosition"] = VisionValue.Double(compensated);
+            summary["compensatedPosition"] = compensated;
+        }
+
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
+    }
+
+    private static string Choice(NodeDefinition node, string name, string fallback, params string[] choices)
+    {
+        var value = node.GetString(name, fallback).Trim().ToLowerInvariant();
+        return choices.FirstOrDefault(choice => choice == value)
+            ?? throw new InvalidOperationException($"calibration.conveyor {name} must be {string.Join(", ", choices)}.");
     }
 }

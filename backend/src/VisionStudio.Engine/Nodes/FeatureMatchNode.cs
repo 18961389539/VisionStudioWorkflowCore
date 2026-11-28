@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -48,8 +51,15 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitio
         // 场景与模板都统一转成 8 位单通道：SIFT/ORB 只接受 8 位图，16 位按 1/257 线性压到 8 位
         // （与 image.threshold / measure.caliper 的 16 位处理口径保持一致，不做隐式截断）。
         using var sceneGray = ToGray8(scene.Mat, "scene");
-        var (template, templateSource, templateAssetId, templateAssetVersion) = AcquireTemplateGray(context, node);
+        var (template, templateSource, templateAssetId, templateAssetVersion, templateWidth, templateHeight, templateFingerprint) = AcquireTemplateGray(context, node);
         using var templateGray = template;
+        var expectedWidth = node.GetInt("templateAssetWidth", 0);
+        var expectedHeight = node.GetInt("templateAssetHeight", 0);
+        if (expectedWidth < 0 || expectedHeight < 0 || expectedWidth > 16384 || expectedHeight > 16384)
+            throw new InvalidOperationException("match.feature templateAssetWidth/templateAssetHeight must be within 0..16384 (0 disables the check).");
+        if (expectedWidth > 0 && expectedWidth != templateWidth || expectedHeight > 0 && expectedHeight != templateHeight)
+            throw new InvalidOperationException(
+                $"match.feature template size {templateWidth}x{templateHeight} does not match pinned {expectedWidth}x{expectedHeight}; refresh the template metadata or clear the size pins.");
 
         using var detector = CreateDetector(options);
         using var sceneMask = options.SceneRoi?.BuildMask(sceneGray.Size(), cancellationToken);
@@ -63,8 +73,31 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitio
         cancellationToken.ThrowIfCancellationRequested();
 
         if (templateDescriptors.Empty())
-            throw new InvalidOperationException(
-                "match.feature found no template descriptors; lower contrastThreshold, raise maxFeatures, or pick a textured template region.");
+        {
+            var noFeatureImage = VisionImage.Own(scene.Mat.Clone());
+            return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(
+                noFeatureImage, () =>
+            {
+                var diagnostics = CoordinateValidation.Diagnostics(Type,
+                    ("templateSource", templateSource), ("templateAssetId", templateAssetId),
+                    ("templateAssetVersion", templateAssetVersion), ("found", false),
+                    ("reason", "feature-insufficient:no-template-keypoints"),
+                    ("templateFingerprint", templateFingerprint));
+                return new NodeExecutorResult(new Dictionary<string, VisionValue>
+                {
+                    ["image"] = VisionValue.Image(noFeatureImage),
+                    ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0),
+                    ["matchCount"] = VisionValue.Integer(0), ["inlierCount"] = VisionValue.Integer(0),
+                    ["inlierRatio"] = VisionValue.Double(0), ["reprojErrorPx"] = VisionValue.Double(0),
+                    ["templateKeypoints"] = VisionValue.Integer(0), ["sceneKeypoints"] = VisionValue.Integer(sceneKeypoints.Length),
+                    ["diagnostics"] = VisionValue.String(diagnostics)
+                }, new Dictionary<string, object?>
+                {
+                    ["found"] = false, ["reason"] = "feature-insufficient:no-template-keypoints",
+                    ["templateFingerprint"] = templateFingerprint, ["diagnostics"] = diagnostics
+                });
+            }, cancellationToken));
+        }
 
         var outcome = Match(options, sceneGray, templateGray, sceneDescriptors, templateDescriptors,
             sceneKeypoints, templateKeypoints, cancellationToken);
@@ -82,6 +115,10 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 ("templateSource", templateSource),
                 ("templateAssetId", templateAssetId),
                 ("templateAssetVersion", templateAssetVersion),
+                ("templateWidth", templateWidth), ("templateHeight", templateHeight),
+                ("templateFingerprint", templateFingerprint),
+                ("templatePriority", "input-port>templateAssetId>templatePath"),
+                ("acceptanceGate", $"inliers>={options.MinInliers};ratio>={options.MinInlierRatio};rms<={options.MaxReprojErrorPx}"),
                 ("transformType", options.TransformType),
                 ("found", outcome.Found),
                 ("reason", outcome.Reason),
@@ -130,7 +167,12 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitio
                         new[] { outcome.Matrix[6], outcome.Matrix[7], outcome.Matrix[8] }
                     },
                     scaleX = outcome.ScaleX,
-                    scaleY = outcome.ScaleY
+                    scaleY = outcome.ScaleY,
+                    templateAssetId = templateAssetId,
+                    templateAssetVersion = templateAssetVersion,
+                    templateWidth = templateWidth,
+                    templateHeight = templateHeight,
+                    templateFingerprint = templateFingerprint
                 }));
                 outputs["inlierPoints"] = VisionValue.PointList(outcome.InlierScenePoints);
                 outputs["detections"] = VisionValue.Detections(BuildDetections(outcome));
@@ -142,6 +184,10 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 ["templateSource"] = templateSource,
                 ["templateAssetId"] = templateAssetId,
                 ["templateAssetVersion"] = templateAssetVersion,
+                ["templateWidth"] = templateWidth, ["templateHeight"] = templateHeight,
+                ["templateFingerprint"] = templateFingerprint,
+                ["templatePriority"] = "input-port>templateAssetId>templatePath",
+                ["acceptanceGate"] = $"inliers>={options.MinInliers};ratio>={options.MinInlierRatio};rms<={options.MaxReprojErrorPx}",
                 ["transformType"] = options.TransformType,
                 ["found"] = outcome.Found,
                 ["reason"] = outcome.Reason,
@@ -202,6 +248,10 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitio
         if (!double.IsFinite(minInlierRatio) || minInlierRatio is < 0 or > 1)
             throw new InvalidOperationException("match.feature minInlierRatio must be finite and within 0..1.");
 
+        var maxReprojErrorPx = node.GetDouble("maxReprojErrorPx", 5);
+        if (!double.IsFinite(maxReprojErrorPx) || maxReprojErrorPx is < 0 or > 100)
+            throw new InvalidOperationException("match.feature maxReprojErrorPx must be finite and within 0..100 (0 disables the RMS gate).");
+
         var angleRangeDeg = node.GetDouble("angleRangeDeg", 180);
         if (!double.IsFinite(angleRangeDeg) || angleRangeDeg is < 0 or > 180)
             throw new InvalidOperationException("match.feature angleRangeDeg must be finite and within 0..180; 180 disables the gate.");
@@ -222,7 +272,7 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitio
         var templateRoi = node.GetRoi("templateRoi");
 
         return new Options(detector, maxFeatures, contrastThreshold, matchRatio, transformType,
-            ransacReprojThresholdPx, minMatches, minInliers, minInlierRatio, angleRangeDeg,
+            ransacReprojThresholdPx, minMatches, minInliers, minInlierRatio, maxReprojErrorPx, angleRangeDeg,
             scaleMinPercent, scaleMaxPercent, sceneRoi, templateRoi);
     }
 
@@ -242,31 +292,46 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor, IVisionNodeDefinitio
         return version;
     }
 
-    private static (Mat Image, string Source, string? AssetId, int? AssetVersion) AcquireTemplateGray(NodeExecutionContext context, NodeDefinition node)
+    private static (Mat Image, string Source, string? AssetId, int? AssetVersion, int Width, int Height, string Fingerprint) AcquireTemplateGray(NodeExecutionContext context, NodeDefinition node)
     {
+        Mat gray;
+        string source;
+        string? assetId = null;
+        int? assetVersion = null;
         if (context.TryGetValue("template", out _))
         {
             // RequireImage 同时兼容引擎自有 VisionImage 与插件传入的 IVisionImage（借出 Mat）。
             var template = context.RequireImage("template");
-            return (ToGray8(template.Mat, "template"), "input-port", null, null);
+            gray = ToGray8(template.Mat, "template");
+            source = "input-port";
         }
-
-        var assetId = node.GetString("templateAssetId", "").Trim();
-        if (assetId.Length != 0)
+        else if (!string.IsNullOrWhiteSpace(node.GetString("templateAssetId", "")))
         {
-            var version = ReadPinnedTemplateVersion(node);
-            using var assetImage = MatchingTemplateAsset.Load(context, node, assetId, version, ImreadModes.Unchanged);
-            return (ToGray8(assetImage, "template"), "asset", assetId, version);
+            assetId = node.GetString("templateAssetId", "").Trim();
+            assetVersion = ReadPinnedTemplateVersion(node);
+            using var assetImage = MatchingTemplateAsset.Load(context, node, assetId, assetVersion.Value, ImreadModes.Unchanged);
+            gray = ToGray8(assetImage, "template");
+            source = "asset";
+        }
+        else
+        {
+            var path = node.GetString("templatePath", string.Empty).Trim();
+            if (path.Length == 0)
+                throw new InvalidOperationException("match.feature requires a connected template image or templatePath.");
+            using var fileImage = Cv2.ImRead(System.IO.Path.GetFullPath(path), ImreadModes.Grayscale);
+            if (fileImage.Empty())
+                throw new InvalidOperationException($"match.feature could not read templatePath '{path}'.");
+            gray = ToGray8(fileImage, "template");
+            source = "file";
         }
 
-        var path = node.GetString("templatePath", string.Empty).Trim();
-        if (path.Length == 0)
-            throw new InvalidOperationException("match.feature requires a connected template image or templatePath.");
-
-        using var fileImage = Cv2.ImRead(System.IO.Path.GetFullPath(path), ImreadModes.Grayscale);
-        if (fileImage.Empty())
-            throw new InvalidOperationException($"match.feature could not read templatePath '{path}'.");
-        return (ToGray8(fileImage, "template"), "file", null, null);
+        var width = gray.Width;
+        var height = gray.Height;
+        var bytes = new byte[checked((int)(gray.Total() * gray.ElemSize()))];
+        Marshal.Copy(gray.Data, bytes, 0, bytes.Length);
+        var identity = source == "asset" ? $"{source}:{assetId}:v{assetVersion}:{width}x{height}" : $"{source}:{width}x{height}";
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity + ":" + Convert.ToHexString(SHA256.HashData(bytes)))));
+        return (gray, source, assetId, assetVersion, width, height, fingerprint);
     }
 
     // ---------------------------------------------------------------- 匹配

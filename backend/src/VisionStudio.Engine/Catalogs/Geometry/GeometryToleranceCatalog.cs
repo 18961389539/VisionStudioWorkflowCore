@@ -11,24 +11,27 @@ public static class GeometryToleranceCatalog
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
         new("contour.fromPoints", "Contour from Points", "Contour", [new("exec", VisionDataType.Control, Required: false), new("pointsJson", VisionDataType.String, Required: false), new("pointList", VisionDataType.PointList, Required: false)],
-            [new("contours", VisionDataType.Contour), Found, new("count", VisionDataType.Integer), Samples, new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), Next],
+            [new("contours", VisionDataType.Contour), Found, new("count", VisionDataType.Integer), Samples, new("sourceIndicesJson", VisionDataType.String), new("inputSource", VisionDataType.String), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), Next],
             [new("pointsJson", "Contour Points JSON", "textarea", "[[100,100],[200,100],[200,200],[100,200]]", Description: "Fallback [x,y] pairs when neither pointList nor pointsJson input is connected. Max 2 MiB / 20000 points."),
              new("closed", "Closed Contour", "boolean", true, Description: "Treat the polyline as closed (repeat first point for length/area).")],
-            "Create one subpixel contour from [x,y] pairs, preserving point order. Wire pointList (from contour.toPoints or collection.detectionPoints) to skip the JSON step entirely; pointsJson input overrides the parameter. Empty or singleton input returns found=false. Limits: 2 MiB JSON, 20000 points, finite coordinates within +/-100000000 px. Consecutive duplicates, and repeated endpoints for closed contours, are removed.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
+            "Create one subpixel contour from [x,y] pairs. Source priority is pointList port, then pointsJson port, then pointsJson parameter; diagnostics record the selected source. Empty/singleton input returns found=false, malformed/non-finite input fails. sourceIndicesJson maps cleaned output points to original input indices and warningCount is the number removed. Limits: 2 MiB JSON, 20000 points, finite coordinates within +/-100000000 px.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
         new("measure.wallThickness", "Circular Wall Thickness", "Measurement", [Exec, new("inner", VisionDataType.Circle), new("outer", VisionDataType.Circle)],
             [Found, new("contained", VisionDataType.Boolean), Samples, new("centerDistance", VisionDataType.Double), new("samplesJson", VisionDataType.String),
              new("minThickness", VisionDataType.Double, Required: false), new("maxThickness", VisionDataType.Double, Required: false), new("meanThickness", VisionDataType.Double, Required: false),
              new("stdDev", VisionDataType.Double, Required: false), new("variation", VisionDataType.Double, Required: false),
              new("cv", VisionDataType.Double, Required: false), new("uniformity", VisionDataType.Double, Required: false),
-             new("withinTolerance", VisionDataType.Boolean, Required: false), new("diagnostics", VisionDataType.String), Next],
+             new("withinTolerance", VisionDataType.Boolean, Required: false), new("toleranceEnabled", VisionDataType.Boolean),
+             new("diagnostics", VisionDataType.String), Next],
             [new("sampleCount", "Wall Samples", "number", 360, 8, 4096, 1, Description: "Number of radial rays from the inner centre (8..4096). Analytic min/max still use the closed-form extrema."),
              new("startAngleDeg", "Wall Start Angle", "number", 0, -3600, 3600, .1, Unit: "deg", Description: "Angle of the first sample ray in degrees (CCW from +X). Remaining rays are spaced evenly over 360°."),
              new("nominalThickness", "Nominal Thickness (0=off)", "number", 0, 0, 1e9, 0.1, Unit: "px", Description: "Expected mean wall thickness. 0 disables the withinTolerance gate."),
              new("tolerance", "Tolerance", "number", 0, 0, 1e9, 0.1, Unit: "px", Description: "Allowed absolute deviation of meanThickness from nominalThickness when the gate is enabled; must be >0 when nominal is set."),
+             new("minThicknessLimit", "Minimum Wall Thickness (0=off)", "number", 0, 0, 1e9, 0.1, Unit: "px", Group: "Limits", Description: "Independent gate on the analytic minimum wall thickness; mean tolerance cannot override a thin local wall."),
+             new("maxThicknessLimit", "Maximum Wall Thickness (0=off)", "number", 0, 0, 1e9, 0.1, Unit: "px", Group: "Limits", Description: "Optional independent gate on the analytic maximum wall thickness."),
                 ],
             "Circular wall thickness from fitted inner/outer circles. Wire: inner + outer Circle → min/max/meanThickness/std/cv; optional nominal/tolerance gate. Key params: sampleCount, startAngleDeg, nominalThickness/tolerance. Inner disk must be contained by outer (else found=false, contained=false). Rejects non-positive outer radius or inner≥outer. Units: pixels. Non-circular walls: use measure.contourThickness.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
         new("measure.concentricity", "Circle Centre Offset", "Measurement", [Exec, new("circleA", VisionDataType.Circle), new("circleB", VisionDataType.Circle)],
-            [new("centerDistance", VisionDataType.Double), new("diametralOffset", VisionDataType.Double), new("centerOffset", VisionDataType.Point2D), new("withinTolerance", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next], [new("maxCenterDistance", "Max Centre Distance (0=off)", "number", 0, 0, 1000000, 0.1, Description: "Optional concentricity tolerance in px; withinTolerance reports centreDistance <= limit (always true when off)."),
+            [new("centerDistance", VisionDataType.Double), new("diametralOffset", VisionDataType.Double), new("centerOffset", VisionDataType.Point2D), new("withinTolerance", VisionDataType.Boolean), new("toleranceEnabled", VisionDataType.Boolean), new("evaluationState", VisionDataType.String), new("diagnostics", VisionDataType.String), Next], [new("maxCenterDistance", "Max Centre Distance (0=off)", "number", 0, 0, 1000000, 0.1, Description: "Optional concentricity tolerance in px; when disabled evaluationState=not-evaluated and withinTolerance must not be used as PASS."),
 
                 ],
             "Planar centre offset between two fitted circles. Wire: circleA + circleB → centerDistance/diametralOffset/centerOffset/withinTolerance. Key param: maxCenterDistance. Radii do not affect centre distance. Not 3D coaxility. A missing circle fails explicitly instead of inventing geometry. Units: pixels.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
@@ -135,7 +138,8 @@ public static class GeometryToleranceCatalog
              new("meanValue", VisionDataType.Double, Required: false), new("coverageDeg", VisionDataType.Double, Required: false),
              new("highPoint", VisionDataType.Point2D, Required: false), new("lowPoint", VisionDataType.Point2D, Required: false),
              new("highAngleDeg", VisionDataType.Double, Required: false), new("lowAngleDeg", VisionDataType.Double, Required: false),
-             new("withinTolerance", VisionDataType.Boolean, Required: false),
+             new("withinTolerance", VisionDataType.Boolean, Required: false), new("toleranceEnabled", VisionDataType.Boolean),
+             new("evaluationState", VisionDataType.String), new("samplingPlanValid", VisionDataType.Boolean),
              new("diagnostics", VisionDataType.String), Next],
             [
                 new("mode", "Runout Mode", "select", "radial", Group: "Measurement", Options:
@@ -145,11 +149,15 @@ public static class GeometryToleranceCatalog
                 ], Description: "Radial measures distance to the datum axis (cylindrical surface, circular runout). Axial measures the coordinate along the datum axis (face surface, total runout)."),
                 new("tolerance", "Runout Tolerance", "number", 0, 0, 1000000, 0.001, Group: "Limits",
                     Description: "Maximum allowed FIM (max reading minus min reading). 0 disables the gate."),
-                new("minCoverageDeg", "Minimum Angular Coverage", "number", 0, 0, 360, 1, Unit: "deg", Group: "Limits",
-                    Description: "Radial mode only: reject the result when the sampled arc covers less than this. Coverage is 360 deg minus the largest angular gap; 0 disables the check. A half-measured circle always looks better than it is."),
+                new("minCoverageDeg", "Minimum Angular Coverage", "number", 270, 0, 360, 1, Unit: "deg", Group: "Limits",
+                    Description: "Radial mode: reject unless 360 minus the largest angular gap reaches this coverage."),
+                new("minAxialSamples", "Minimum Axial Samples", "number", 8, 3, 20000, 1, Group: "Limits",
+                    Description: "Axial mode only: minimum sample count; concentrated sparse sampling cannot pass."),
+                new("minAxialSpan", "Minimum Axial Span", "number", 0, 0, 1000000, .001, Unit: "px", Group: "Limits",
+                    Description: "Axial mode only: minimum max(reading)-min(reading) span. 0 disables the span check."),
                 new("unit", "Unit Label", "text", "px", Group: "Reporting",
                     Description: "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are calibrated."),
             ],
-            "Circular or total runout as the full indicator movement (max minus min) of sampled surface points, measured in the datum frame from tolerance.datum. Wire: samples PointList + datum Pose2D (both required). radial mode evaluates distance to the datum axis; axial mode evaluates the coordinate along it. Outputs runout, min/max/mean reading, the high/low points (and their angles in radial mode) and coverageDeg. Fewer than 3 samples or insufficient angular coverage returns found=false. The datum axis is 2D: this is a planar projection of the real 3D runout, so spindle tilt and axis straightness are not modelled.", "builtin", new VisionToolCapabilities(EmitsOverlay: true), Actions: [])
+            "Circular or total runout as the full indicator movement (max minus min) of sampled surface points, measured in the datum frame from tolerance.datum. Wire: samples PointList + datum Pose2D (both required). radial mode evaluates distance to the datum axis; axial mode evaluates the coordinate along it. Outputs runout, min/max/mean reading, the high/low points (and their angles in radial mode) and coverageDeg (angular coverage in radial mode, axial reading span in axial mode). Radial sampling requires minCoverageDeg; axial sampling requires minAxialSamples and optional minAxialSpan. A disabled tolerance reports toleranceEnabled=false, evaluationState=not-evaluated and withinTolerance=false. Fewer than 3 samples or insufficient angular coverage returns found=false. The datum axis is 2D: this is a planar projection of the real 3D runout, so spindle tilt and axis straightness are not modelled.", "builtin", new VisionToolCapabilities(EmitsOverlay: true), Actions: [])
     ];
 }

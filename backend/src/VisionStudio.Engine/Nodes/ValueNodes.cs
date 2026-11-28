@@ -1,3 +1,4 @@
+using System.Globalization;
 using VisionStudio.Abstractions;
 namespace VisionStudio.Engine.Nodes;
 
@@ -26,6 +27,8 @@ var value = CoordinateValidation.RequireFinite(node.GetDouble("value", 0), "valu
         var min = node.GetDouble("min", 0); var max = node.GetDouble("max", 0);
         if (enforceBounds)
         {
+            if (node.Parameters is null || !node.Parameters.ContainsKey("min") || !node.Parameters.ContainsKey("max"))
+                throw new InvalidOperationException("value.number enforceBounds requires explicit min and max parameters.");
             if (!double.IsFinite(min) || !double.IsFinite(max) || min > max)
                 throw new InvalidOperationException("value.number enforceBounds requires finite min <= max.");
             if (value < min || value > max)
@@ -36,7 +39,9 @@ var value = CoordinateValidation.RequireFinite(node.GetDouble("value", 0), "valu
         var rounding = roundingText == "even" ? MidpointRounding.ToEven : MidpointRounding.AwayFromZero;
         var rounded = Math.Round(value, rounding);
         if (!double.IsFinite(rounded)) throw new InvalidOperationException("value.number rounding produced a non-finite value.");
-        var integer = (long)rounded; var isInteger = Math.Abs(value - rounded) < 1e-12;
+        if (rounded >= longUpperExclusive || rounded < -longUpperExclusive)
+            throw new InvalidOperationException($"value.number rounding produced {rounded}, outside the signed 64-bit integer range.");
+        var integer = (long)rounded; var isInteger = value == Math.Truncate(value);
         var diag = CoordinateValidation.Diagnostics(Type, ("value", value), ("integer", integer), ("isInteger", isInteger), ("enforceBounds", enforceBounds), ("min", min), ("max", max), ("rounding", roundingText));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["value"] = VisionValue.Double(value), ["integer"] = VisionValue.Integer(integer), ["isInteger"] = VisionValue.Boolean(isInteger), ["isFinite"] = VisionValue.Boolean(double.IsFinite(value)), ["isZero"] = VisionValue.Boolean(value == 0), ["sign"] = VisionValue.Integer(value > 0 ? 1 : value < 0 ? -1 : 0), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["value"] = value, ["diagnostics"] = diag }));
     }
@@ -52,10 +57,14 @@ public sealed class ValueArithmeticNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 
+        var operation = node.GetString("op", "add").Trim().ToLowerInvariant();
+        var onNonFinite = CoordinateValidation.RequireNonEmpty(node.GetString("onNonFinite", "fail"), "onNonFinite").ToLowerInvariant();
+        if (onNonFinite is not ("fail" or "zero"))
+            throw new InvalidOperationException("value.arithmetic onNonFinite must be fail or zero.");
+
         var a = context.RequireNumber("a");
         if (!double.IsFinite(a))
-            throw new InvalidOperationException("value.arithmetic requires finite numeric inputs.");
-        var operation = node.GetString("op", "add").Trim().ToLowerInvariant();
+            throw InvalidInput(operation, a, null, "input 'a' must be finite");
         var needsB = operation is "add" or "subtract" or "multiply" or "divide" or "pow" or "min" or "max";
         double? b = null;
         if (needsB)
@@ -64,46 +73,62 @@ public sealed class ValueArithmeticNode : IVisionNodeExecutor
                 throw new InvalidOperationException($"value.arithmetic operation '{operation}' requires input 'b'.");
             b = context.RequireNumber("b");
             if (!double.IsFinite(b.Value))
-                throw new InvalidOperationException("value.arithmetic requires finite numeric inputs.");
+                throw InvalidInput(operation, a, b, "input 'b' must be finite");
         }
         else if (operation is not ("sqrt" or "abs" or "clamp"))
             throw new InvalidOperationException($"value.arithmetic operation '{operation}' is not supported.");
+
+        // Domain errors are invalid measurements, not overflow: onNonFinite=zero must never hide them.
+        if (operation == "divide" && b!.Value == 0)
+            throw InvalidInput(operation, a, b, "input 'b' is 0 (divide by zero)");
+        if (operation == "sqrt" && a < 0)
+            throw InvalidInput(operation, a, b, "sqrt requires input 'a' >= 0");
+        if (operation == "pow" && ((a < 0 && b!.Value != Math.Truncate(b!.Value)) || (a == 0 && b!.Value < 0)))
+            throw InvalidInput(operation, a, b, "pow arguments are outside the real domain");
 
         var result = operation switch
         {
             "add" => a + b!.Value,
             "subtract" => a - b!.Value,
             "multiply" => a * b!.Value,
-            "divide" => b!.Value == 0
-                ? throw new InvalidOperationException("value.arithmetic divide by zero: input 'b' is 0.")
-                : a / b.Value,
+            "divide" => a / b!.Value,
             "pow" => Math.Pow(a, b!.Value),
-            "sqrt" => a < 0
-                ? throw new InvalidOperationException("value.arithmetic sqrt requires input 'a' to be greater than or equal to 0.")
-                : Math.Sqrt(a),
+            "sqrt" => Math.Sqrt(a),
             "abs" => Math.Abs(a),
             "min" => Math.Min(a, b!.Value),
             "max" => Math.Max(a, b!.Value),
             "clamp" => Clamp(node, a),
             _ => throw new InvalidOperationException($"value.arithmetic operation '{operation}' is not supported.")
         };
-        var onNonFinite = CoordinateValidation.RequireNonEmpty(node.GetString("onNonFinite", "fail"), "onNonFinite").ToLowerInvariant();
-        if (onNonFinite is not ("fail" or "zero"))
-            throw new InvalidOperationException("value.arithmetic onNonFinite must be fail or zero.");
         var isFinite = double.IsFinite(result);
+        string errorCode;
         if (!isFinite)
         {
+            errorCode = "resultOverflow";
+            var diagnostics = CoordinateValidation.Diagnostics(Type, ("a", a), ("b", b), ("op", operation), ("result", "non-finite"), ("failureStage", "result"), ("onNonFinite", onNonFinite), ("errorCode", errorCode));
             if (onNonFinite == "fail")
-                throw new InvalidOperationException("value.arithmetic result is not finite.");
+                throw new InvalidOperationException($"value.arithmetic errorCode={errorCode}: result is not finite. {diagnostics}");
             result = 0;
         }
-        var diag = CoordinateValidation.Diagnostics(Type, ("a", a), ("b", b), ("op", operation), ("result", result), ("isFinite", isFinite), ("onNonFinite", onNonFinite));
+        else
+        {
+            errorCode = "none";
+        }
+        var diag = CoordinateValidation.Diagnostics(Type, ("a", a), ("b", b), ("op", operation), ("result", result), ("isFinite", isFinite), ("onNonFinite", onNonFinite), ("errorCode", errorCode));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue> {
                 ["result"] = VisionValue.Double(result), ["isFinite"] = VisionValue.Boolean(isFinite),
+                ["errorCode"] = VisionValue.String(errorCode),
                 ["a"] = VisionValue.Double(a), ["b"] = VisionValue.Double(b ?? 0), ["op"] = VisionValue.String(operation),
                 ["diagnostics"] = VisionValue.String(diag) },
-            new Dictionary<string, object?> { ["op"] = operation, ["a"] = a, ["b"] = b, ["result"] = result, ["isFinite"] = isFinite, ["diagnostics"] = diag }));
+            new Dictionary<string, object?> { ["op"] = operation, ["a"] = a, ["b"] = b, ["result"] = result, ["isFinite"] = isFinite, ["errorCode"] = errorCode, ["diagnostics"] = diag }));
+    }
+
+    private InvalidOperationException InvalidInput(string operation, double a, double? b, string reason)
+    {
+        const string errorCode = "invalidInput";
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("a", a), ("b", b), ("op", operation), ("errorCode", errorCode), ("failureStage", "input"), ("reason", reason));
+        return new InvalidOperationException($"value.arithmetic errorCode={errorCode}: {reason}. {diagnostics}");
     }
 
     private static double Clamp(NodeDefinition node, double value)
@@ -111,9 +136,9 @@ public sealed class ValueArithmeticNode : IVisionNodeExecutor
         var minimum = node.GetDouble("clampMin", 0);
         var maximum = node.GetDouble("clampMax", 1);
         if (!double.IsFinite(minimum) || !double.IsFinite(maximum))
-            throw new InvalidOperationException("value.arithmetic clamp bounds must be finite.");
+            throw new InvalidOperationException($"value.arithmetic errorCode=invalidInput: clamp bounds must be finite; a={value}, clampMin={minimum}, clampMax={maximum}, failureStage=clampBounds.");
         if (minimum > maximum)
-            throw new InvalidOperationException($"value.arithmetic clamp minimum {minimum} is greater than maximum {maximum}.");
+            throw new InvalidOperationException($"value.arithmetic errorCode=invalidInput: clamp minimum {minimum} is greater than maximum {maximum}; a={value}, failureStage=clampBounds.");
         return Math.Clamp(value, minimum, maximum);
     }
 }
@@ -126,14 +151,24 @@ public sealed class ValueRangeNode : IVisionNodeExecutor
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-var value = CoordinateValidation.RequireFinite(context.RequireNumber("value"), "value");
+        var rawValue = context.RequireNumber("value");
+        if (!double.IsFinite(rawValue))
+            throw new InvalidOperationException($"value.range valid=false: input 'value' must be finite, but was {rawValue.ToString(CultureInfo.InvariantCulture)}.");
+        var value = rawValue;
         var min = CoordinateValidation.RequireFinite(node.GetDouble("min", 0), "min");
         var max = CoordinateValidation.RequireFinite(node.GetDouble("max", 100), "max");
         var invert = node.GetBool("invert", false);
         var boundPolicy = node.GetString("boundPolicy", "inclusive").Trim().ToLowerInvariant();
         if (boundPolicy is not ("inclusive" or "exclusive")) throw new InvalidOperationException("value.range boundPolicy must be inclusive or exclusive.");
+        var boundOrderPolicy = node.GetString("boundOrderPolicy", "fail").Trim().ToLowerInvariant();
+        if (boundOrderPolicy is not ("fail" or "swap")) throw new InvalidOperationException("value.range boundOrderPolicy must be fail or swap.");
+        var originalMin = min; var originalMax = max;
         if (min > max)
-            throw new InvalidOperationException($"value.range min {min} is greater than max {max}; swap them explicitly or fix the recipe instead of relying on silent reordering.");
+        {
+            if (boundOrderPolicy == "fail")
+                throw new InvalidOperationException($"value.range min {min} is greater than max {max}; set boundOrderPolicy=swap explicitly or fix the recipe.");
+            (min, max) = (max, min);
+        }
         var inside = boundPolicy == "exclusive"
             ? value > min && value < max
             : value >= min && value <= max;
@@ -142,8 +177,8 @@ var value = CoordinateValidation.RequireFinite(context.RequireNumber("value"), "
         CoordinateValidation.RequireFinite(margin, "range.margin");
         var deviation = value > max ? value - max : value < min ? value - min : 0d;
         var clamped = Math.Clamp(value, min, max);
-        var diag = CoordinateValidation.Diagnostics(Type, ("value", value), ("lower", min), ("upper", max), ("inside", inside), ("pass", pass), ("invert", invert), ("boundPolicy", boundPolicy), ("margin", margin), ("deviation", deviation), ("clamped", clamped));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["pass"] = VisionValue.Boolean(pass), ["inside"] = VisionValue.Boolean(inside), ["margin"] = VisionValue.Double(margin), ["deviation"] = VisionValue.Double(deviation), ["clamped"] = VisionValue.Double(clamped), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["value"] = value, ["min"] = min, ["max"] = max, ["invert"] = invert, ["boundPolicy"] = boundPolicy, ["pass"] = pass, ["deviation"] = deviation, ["clamped"] = clamped, ["diagnostics"] = diag }));
+        var diag = CoordinateValidation.Diagnostics(Type, ("value", value), ("lower", min), ("upper", max), ("originalMin", originalMin), ("originalMax", originalMax), ("boundOrderPolicy", boundOrderPolicy), ("inside", inside), ("pass", pass), ("invert", invert), ("boundPolicy", boundPolicy), ("margin", margin), ("deviation", deviation), ("clamped", clamped));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["pass"] = VisionValue.Boolean(pass), ["inside"] = VisionValue.Boolean(inside), ["valid"] = VisionValue.Boolean(true), ["margin"] = VisionValue.Double(margin), ["deviation"] = VisionValue.Double(deviation), ["clamped"] = VisionValue.Double(clamped), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["value"] = value, ["min"] = min, ["max"] = max, ["invert"] = invert, ["boundPolicy"] = boundPolicy, ["valid"] = true, ["pass"] = pass, ["deviation"] = deviation, ["clamped"] = clamped, ["diagnostics"] = diag }));
     }
 }
 public sealed class LogicBooleanNode : IVisionNodeExecutor
@@ -185,12 +220,13 @@ var a = context.Require<bool>("a");
 
         var invert = node.GetBool("invertResult", false);
         if (invert) result = !result;
-        var diag = CoordinateValidation.Diagnostics(Type, ("a", a), ("op", operation), ("result", result), ("usesB", usedB), ("invertResult", invert));
+        var operationApplied = invert ? $"NOT({operation})" : operation;
+        var diag = CoordinateValidation.Diagnostics(Type, ("a", a), ("b", operation == "not" ? "ignored" : b), ("op", operation), ("operationApplied", operationApplied), ("result", result), ("usesB", usedB), ("bIgnored", operation == "not"), ("invertResult", invert));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
                 ["result"] = VisionValue.Boolean(result),
-                ["operationApplied"] = VisionValue.String(operation),
+                ["operationApplied"] = VisionValue.String(operationApplied),
                 ["diagnostics"] = VisionValue.String(diag)
             },
             new Dictionary<string, object?> { ["op"] = operation, ["a"] = a, ["result"] = result, ["usesB"] = usedB, ["invertResult"] = invert, ["diagnostics"] = diag }));

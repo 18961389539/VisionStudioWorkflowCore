@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using VisionStudio.Abstractions;
@@ -42,6 +44,12 @@ public sealed class DefectClusterNode : IVisionNodeExecutor
         var maxDetections = node.GetInt("maxDetections", 5000);
         if (maxDetections is < 1 or > 50000)
             throw new InvalidOperationException("defect.cluster maxDetections must be within 1..50000.");
+        var maxMembers = node.GetInt("maxMembers", 0);
+        var maxSpan = node.GetDouble("maxSpanPx", 0);
+        var limitPolicy = (node.GetString("limitPolicy", "fail") ?? "fail").Trim().ToLowerInvariant();
+        if (maxMembers is < 0 or > 50000) throw new InvalidOperationException("defect.cluster maxMembers must be within 0..50000 (0 = unbounded).");
+        if (!double.IsFinite(maxSpan) || maxSpan is < 0 or > 1e9) throw new InvalidOperationException("defect.cluster maxSpanPx must be within 0..1e9 (0 = unbounded).");
+        if (limitPolicy is not ("fail" or "split")) throw new InvalidOperationException("defect.cluster limitPolicy must be fail or split.");
 
         var input = context.Require<IReadOnlyList<VisionDetection>>("detections");
         if (input.Count > maxDetections)
@@ -99,8 +107,42 @@ public sealed class DefectClusterNode : IVisionNodeExecutor
             list.Add(index);
         }
 
-        var merged = new List<VisionDetection>(groups.Count);
-        foreach (var members in groups.Values)
+        var splitCount = 0;
+        var boundedGroups = new List<List<int>>();
+        foreach (var group in groups.Values)
+        {
+            var groupMinX = group.Min(i => input[i].BoundingBox.X);
+            var groupMinY = group.Min(i => input[i].BoundingBox.Y);
+            var groupMaxX = group.Max(i => input[i].BoundingBox.X + input[i].BoundingBox.Width);
+            var groupMaxY = group.Max(i => input[i].BoundingBox.Y + input[i].BoundingBox.Height);
+            var oversized = maxMembers > 0 && group.Count > maxMembers
+                || maxSpan > 0 && Math.Max(groupMaxX - groupMinX, groupMaxY - groupMinY) > maxSpan;
+            if (!oversized) { boundedGroups.Add(group); continue; }
+            if (limitPolicy == "fail")
+                throw new InvalidOperationException($"defect.cluster cluster exceeds maxMembers={maxMembers} or maxSpanPx={maxSpan}; set limitPolicy=split to bound it.");
+            splitCount++;
+            var chunk = new List<int>();
+            void Flush() { if (chunk.Count > 0) { boundedGroups.Add(chunk.OrderBy(i => i).ToList()); chunk = []; } }
+            foreach (var member in group.OrderBy(i => input[i].BoundingBox.X).ThenBy(i => input[i].BoundingBox.Y).ThenBy(i => i))
+            {
+                if (maxSpan > 0 && Math.Max(input[member].Width, input[member].Height) > maxSpan)
+                    throw new InvalidOperationException($"defect.cluster detection {member} alone exceeds maxSpanPx={maxSpan}.");
+                chunk.Add(member);
+                var minX = chunk.Min(i => input[i].BoundingBox.X);
+                var minY = chunk.Min(i => input[i].BoundingBox.Y);
+                var maxX = chunk.Max(i => input[i].BoundingBox.X + input[i].BoundingBox.Width);
+                var maxY = chunk.Max(i => input[i].BoundingBox.Y + input[i].BoundingBox.Height);
+                if (maxMembers > 0 && chunk.Count > maxMembers || maxSpan > 0 && Math.Max(maxX - minX, maxY - minY) > maxSpan)
+                {
+                    chunk.RemoveAt(chunk.Count - 1); Flush(); chunk.Add(member);
+                }
+            }
+            Flush();
+        }
+
+        var merged = new List<VisionDetection>(boundedGroups.Count);
+        var clusterTrace = new List<object>();
+        foreach (var members in boundedGroups)
         {
             var first = input[members[0]];
             var minX = members.Min(i => input[i].BoundingBox.X);
@@ -124,12 +166,21 @@ public sealed class DefectClusterNode : IVisionNodeExecutor
                 new VisionRectangle2D(minX, minY, width, height),
                 hasConfidence ? confidence : null,
                 classId));
+            clusterTrace.Add(new
+            {
+                index = merged.Count - 1, memberIndices = members, memberClassIds = classIds,
+                mixedClass = classIds.Length > 1, classId,
+                boundingBox = new { x = minX, y = minY, width, height }
+            });
         }
 
         var largest = merged.Count == 0 ? 0d : merged.Max(d => d.Area);
+        var clustersJson = JsonSerializer.Serialize(clusterTrace, JsonText);
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("inputCount", input.Count), ("clusterCount", merged.Count),
-            ("linkDistancePx", linkDistance), ("largestArea", largest));
+            ("linkDistancePx", linkDistance), ("largestArea", largest),
+            ("maxMembers", maxMembers), ("maxSpanPx", maxSpan), ("limitPolicy", limitPolicy),
+            ("splitClusterCount", splitCount), ("clusters", clustersJson));
 
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -139,12 +190,15 @@ public sealed class DefectClusterNode : IVisionNodeExecutor
                 ["mergedCount"] = VisionValue.Integer(input.Count - merged.Count),
                 ["inputCount"] = VisionValue.Integer(input.Count),
                 ["largestArea"] = VisionValue.Double(largest),
+                ["clustersJson"] = VisionValue.String(clustersJson),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["inputCount"] = input.Count, ["clusterCount"] = merged.Count,
                 ["mergedCount"] = input.Count - merged.Count, ["linkDistancePx"] = linkDistance,
+                ["maxMembers"] = maxMembers, ["maxSpanPx"] = maxSpan, ["limitPolicy"] = limitPolicy,
+                ["splitClusterCount"] = splitCount, ["clustersJson"] = clustersJson,
                 ["diagnostics"] = diagnostics
             }));
     }
@@ -185,13 +239,16 @@ public sealed class DefectClassifyNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 
-        var rules = ParseRules(node.GetString("rulesJson", DefaultRules));
+        var rulesJson = node.GetString("rulesJson", DefaultRules) ?? DefaultRules;
+        var rules = ParseRules(rulesJson);
+        var rulesHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rulesJson))).ToLowerInvariant();
         var rejectUnclassified = node.GetBool("rejectUnclassified", true);
 
         var input = context.Require<IReadOnlyList<VisionDetection>>("detections");
         var classified = new List<VisionDetection>(input.Count);
         var counts = new Dictionary<int, (string Name, int Count)>();
         var unclassified = 0;
+        var detectionDiagnostics = new List<object>();
 
         for (var index = 0; index < input.Count; index++)
         {
@@ -202,17 +259,32 @@ public sealed class DefectClassifyNode : IVisionNodeExecutor
                 : double.PositiveInfinity;
 
             Rule? match = null;
-            foreach (var rule in rules)
+            var failedBoundaries = new List<object>();
+            var shadowedRules = new List<int>();
+            for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
             {
-                if (rule.MinArea > 0 && detection.Area < rule.MinArea) continue;
-                if (rule.MaxArea > 0 && detection.Area > rule.MaxArea) continue;
-                if (rule.MinAspect > 0 && aspect < rule.MinAspect) continue;
-                if (rule.MaxAspect > 0 && aspect > rule.MaxAspect) continue;
-                if (rule.MinCircularity > 0 && detection.Circularity < rule.MinCircularity) continue;
-                if (rule.MaxCircularity > 0 && detection.Circularity > rule.MaxCircularity) continue;
-                match = rule;
-                break;
+                var rule = rules[ruleIndex];
+                var failures = new List<string>();
+                void Boundary(string name, double actual, double bound, bool lower)
+                {
+                    if (lower && actual < bound || !lower && actual > bound)
+                        failures.Add($"{name}{(lower ? ">=" : "<=")}{bound:0.####} (actual={actual:0.####})");
+                }
+                if (rule.MinArea > 0) Boundary("minArea", detection.Area, rule.MinArea, true);
+                if (rule.MaxArea > 0) Boundary("maxArea", detection.Area, rule.MaxArea, false);
+                if (rule.MinAspect > 0) Boundary("minAspect", aspect, rule.MinAspect, true);
+                if (rule.MaxAspect > 0) Boundary("maxAspect", aspect, rule.MaxAspect, false);
+                if (rule.MinCircularity > 0) Boundary("minCircularity", detection.Circularity, rule.MinCircularity, true);
+                if (rule.MaxCircularity > 0) Boundary("maxCircularity", detection.Circularity, rule.MaxCircularity, false);
+                if (failures.Count > 0) { failedBoundaries.Add(new { ruleIndex, classId = rule.ClassId, failures }); continue; }
+                if (match is null) match = rule;
+                else shadowedRules.Add(ruleIndex);
             }
+            detectionDiagnostics.Add(new
+            {
+                detectionIndex = index, ruleIndex = match is null ? (int?)null : rules.IndexOf(match),
+                classId = match?.ClassId ?? 0, shadowedRules, failedBoundaries
+            });
 
             if (match is null)
             {
@@ -234,9 +306,11 @@ public sealed class DefectClassifyNode : IVisionNodeExecutor
                 .Append(new { classId = 0, name = "unclassified", count = unclassified }),
             JsonText);
 
+        var detectionDiagnosticsJson = JsonSerializer.Serialize(detectionDiagnostics, JsonText);
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("count", input.Count), ("classCount", counts.Count), ("unclassified", unclassified),
-            ("ngCount", ngCount), ("rejectUnclassified", rejectUnclassified));
+            ("ngCount", ngCount), ("rejectUnclassified", rejectUnclassified),
+            ("unclassifiedClassId", 0), ("rulesHash", rulesHash), ("detections", detectionDiagnosticsJson));
 
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -253,6 +327,7 @@ public sealed class DefectClassifyNode : IVisionNodeExecutor
             {
                 ["count"] = input.Count, ["classCount"] = counts.Count, ["unclassified"] = unclassified,
                 ["ngCount"] = ngCount, ["rejectUnclassified"] = rejectUnclassified,
+                ["rulesHash"] = rulesHash, ["detectionDiagnosticsJson"] = detectionDiagnosticsJson,
                 ["diagnostics"] = diagnostics
             }));
     }

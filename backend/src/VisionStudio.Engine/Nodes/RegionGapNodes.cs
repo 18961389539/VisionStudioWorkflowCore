@@ -14,7 +14,7 @@ namespace VisionStudio.Engine.Nodes;
 /// </summary>
 internal static class RegionGapMath
 {
-    public const int MaxPolygonPoints = 20000;
+    public const int MaxPolygonPoints = 1000;
 
     public static VisionRoiPoint[] PolygonPoints(string json)
     {
@@ -46,6 +46,23 @@ internal static class RegionGapMath
         if (radius < 1e-6) return points;
         var scale = Math.Max(.05, (radius + expand) / radius);
         return points.Select(p => new VisionRoiPoint(cx + (p.X - cx) * scale, cy + (p.Y - cy) * scale)).ToArray();
+    }
+
+    public static void ValidatePolygon(VisionRoiPoint[] points)
+    {
+        if (points.Length is < 3 or > MaxPolygonPoints)
+            throw new InvalidOperationException($"A polygon needs 3..{MaxPolygonPoints} points to match region.fromRoi's rasterization contract.");
+        double twiceArea = 0;
+        for (var i = 0; i < points.Length; i++)
+        {
+            var p = points[i];
+            if (!double.IsFinite(p.X) || !double.IsFinite(p.Y) || Math.Abs(p.X) > 1e8 || Math.Abs(p.Y) > 1e8)
+                throw new InvalidOperationException($"Polygon point {i} must be finite within +/-100000000 px.");
+            var q = points[(i + 1) % points.Length];
+            twiceArea += p.X * q.Y - q.X * p.Y;
+        }
+        if (!double.IsFinite(twiceArea) || Math.Abs(twiceArea) < 1e-6)
+            throw new InvalidOperationException("Polygon points must enclose a finite non-zero area.");
     }
 
     public static VisionRegion RegionFromMask(Mat binary, CancellationToken cancellationToken)
@@ -125,6 +142,14 @@ public sealed class RoiFromGeometryNode : IVisionNodeExecutor
             throw new InvalidOperationException($"roi.fromGeometry shape '{shape}' is not supported (rectangle | circle | polygon).");
         var expand = node.GetDouble("expand", 0);
         if (!double.IsFinite(expand) || expand is < -1000 or > 1000) throw new InvalidOperationException("roi.fromGeometry expand must be within -1000..1000 px.");
+        var geometryPorts = new[] { "rectangle", "circle", "pointList" }
+            .Where(port => context.TryGetValue(port, out _)).ToArray();
+        if (geometryPorts.Length > 1)
+            throw new InvalidOperationException($"roi.fromGeometry shape '{shape}' conflicts with connected geometry ports: {string.Join(", ", geometryPorts)}. Connect only the port matching shape.");
+        var expectedPort = shape == "rectangle" ? "rectangle" : shape == "circle" ? "circle" : "pointList";
+        if (geometryPorts.Length == 1 && geometryPorts[0] != expectedPort)
+            throw new InvalidOperationException($"roi.fromGeometry shape '{shape}' conflicts with port '{geometryPorts[0]}'; expected '{expectedPort}'.");
+        var source = geometryPorts.Length == 1 ? $"port:{geometryPorts[0]}" : shape == "polygon" ? "pointsJson" : "numeric-parameters";
 
         VisionRoi roi; double x; double y; double width; double height; double radius; long pointCount;
         switch (shape)
@@ -194,6 +219,7 @@ public sealed class RoiFromGeometryNode : IVisionNodeExecutor
                     points = list.Select(p => new VisionRoiPoint(p.X, p.Y)).ToArray();
                 }
                 else points = RegionGapMath.PolygonPoints(node.GetString("pointsJson", "[[20,20],[120,20],[120,120]]"));
+                RegionGapMath.ValidatePolygon(points);
                 points = RegionGapMath.ScalePolygon(points, expand);
                 roi = new VisionRoi(VisionRoiType.Polygon, Points: points);
                 thePolygonBounds(points, out x, out y, out width, out height);
@@ -202,7 +228,8 @@ public sealed class RoiFromGeometryNode : IVisionNodeExecutor
             }
         }
 
-        var diagnostics = CoordinateValidation.Diagnostics(Type, ("shape", shape), ("x", x), ("y", y),
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("shape", shape), ("geometrySource", source),
+            ("maxRasterizablePolygonPoints", RegionGapMath.MaxPolygonPoints), ("x", x), ("y", y),
             ("width", width), ("height", height), ("radius", radius), ("expand", expand), ("pointCount", pointCount));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
@@ -215,7 +242,7 @@ public sealed class RoiFromGeometryNode : IVisionNodeExecutor
             },
             new Dictionary<string, object?>
             {
-                ["shape"] = shape, ["x"] = x, ["y"] = y, ["width"] = width, ["height"] = height,
+                ["shape"] = shape, ["geometrySource"] = source, ["x"] = x, ["y"] = y, ["width"] = width, ["height"] = height,
                 ["radius"] = radius, ["expand"] = expand, ["pointCount"] = pointCount,
                 ["unit"] = "px", ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             }));
@@ -241,7 +268,9 @@ public sealed class RoiFromDetectionNode : IVisionNodeExecutor
 
         var detections = context.Require<IReadOnlyList<VisionDetection>>("detections");
         var index = node.GetInt("index", 0);
-        if (index < 0 || index > 1999) throw new InvalidOperationException("roi.fromDetection index must be 0..1999.");
+        if (index < 0 || index > 100000) throw new InvalidOperationException("roi.fromDetection index must be 0..100000.");
+        var emptyPolicy = node.GetString("emptyPolicy", "empty").Trim().ToLowerInvariant();
+        if (emptyPolicy is not ("empty" or "fail")) throw new InvalidOperationException("roi.fromDetection emptyPolicy must be empty or fail.");
         var shape = node.GetString("shape", "rectangle").Trim().ToLowerInvariant();
         if (shape is not ("rectangle" or "circle"))
             throw new InvalidOperationException($"roi.fromDetection shape '{shape}' is not supported (rectangle | circle).");
@@ -250,17 +279,21 @@ public sealed class RoiFromDetectionNode : IVisionNodeExecutor
 
         if (index >= detections.Count)
         {
-            var missing = CoordinateValidation.Diagnostics(Type, ("found", false), ("index", index), ("count", detections.Count));
+            var missing = CoordinateValidation.Diagnostics(Type, ("found", false), ("requestedIndex", index),
+                ("selectedIndex", -1), ("detectionCount", detections.Count), ("emptyPolicy", emptyPolicy));
+            if (emptyPolicy == "fail")
+                throw new InvalidOperationException($"roi.fromDetection found no ROI: requestedIndex={index}, detectionCount={detections.Count}, selectedIndex=-1.");
             return ValueTask.FromResult(new NodeExecutorResult(
                 new Dictionary<string, VisionValue>
                 {
-                    ["index"] = VisionValue.Integer(index), ["x"] = VisionValue.Double(0), ["y"] = VisionValue.Double(0),
+                    ["found"] = VisionValue.Boolean(false), ["index"] = VisionValue.Integer(index), ["x"] = VisionValue.Double(0), ["y"] = VisionValue.Double(0),
                     ["width"] = VisionValue.Double(0), ["height"] = VisionValue.Double(0), ["radius"] = VisionValue.Double(0),
                     ["diagnostics"] = VisionValue.String(missing)
                 },
                 new Dictionary<string, object?>
                 {
-                    ["found"] = false, ["index"] = index, ["count"] = detections.Count, ["diagnostics"] = missing
+                    ["found"] = false, ["requestedIndex"] = index, ["selectedIndex"] = -1,
+                    ["detectionCount"] = detections.Count, ["emptyPolicy"] = emptyPolicy, ["diagnostics"] = missing
                 }));
         }
 
@@ -284,19 +317,21 @@ public sealed class RoiFromDetectionNode : IVisionNodeExecutor
             roi = new VisionRoi(VisionRoiType.Circle, x, y, Radius: radius);
         }
 
-        var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("index", index), ("shape", shape),
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("requestedIndex", index),
+            ("selectedIndex", index), ("detectionCount", detections.Count), ("shape", shape),
             ("x", x), ("y", y), ("width", width), ("height", height), ("radius", radius), ("expand", expand));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
-                ["roi"] = VisionValue.Roi(roi), ["index"] = VisionValue.Integer(index),
+                ["roi"] = VisionValue.Roi(roi), ["found"] = VisionValue.Boolean(true), ["index"] = VisionValue.Integer(index),
                 ["x"] = VisionValue.Double(x), ["y"] = VisionValue.Double(y),
                 ["width"] = VisionValue.Double(width), ["height"] = VisionValue.Double(height),
                 ["radius"] = VisionValue.Double(radius), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
-                ["found"] = true, ["index"] = index, ["shape"] = shape, ["x"] = x, ["y"] = y,
+                ["found"] = true, ["requestedIndex"] = index, ["selectedIndex"] = index,
+                ["detectionCount"] = detections.Count, ["shape"] = shape, ["x"] = x, ["y"] = y,
                 ["width"] = width, ["height"] = height, ["radius"] = radius, ["expand"] = expand,
                 ["unit"] = "px", ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             }));
@@ -315,45 +350,64 @@ public sealed class RegionFromContourNode : IVisionNodeExecutor
 
         var contours = context.Require<IReadOnlyList<VisionContour>>("contours");
         var index = node.GetInt("index", 0);
-        if (index < 0 || index > 1999) throw new InvalidOperationException("region.fromContour index must be 0..1999.");
+        if (index < 0 || index > 100000) throw new InvalidOperationException("region.fromContour index must be 0..100000.");
         var all = node.GetBool("allContours", false);
+        var preserveHierarchy = node.GetBool("preserveHierarchy", false);
         var expand = node.GetInt("expand", 0);
         if (expand is < 0 or > 50) throw new InvalidOperationException("region.fromContour expand must be within 0..50 px.");
         var invert = node.GetBool("invert", false);
-
-        var selected = new List<VisionContour>();
-        if (all) selected.AddRange(contours.Where(contour => contour?.Points is { Count: >= 3 }));
-        else if (index < contours.Count && contours[index]?.Points is { Count: >= 3 }) selected.Add(contours[index]!);
-        if (selected.Count == 0)
+        if (contours.Count == 0)
+            throw new InvalidOperationException("region.fromContour received an empty contour list; there is no contour to rasterize.");
+        if (!all && index >= contours.Count)
+            throw new InvalidOperationException($"region.fromContour index {index} is out of range for {contours.Count} contours.");
+        for (var i = 0; i < contours.Count; i++)
         {
-            var missing = CoordinateValidation.Diagnostics(Type, ("found", false), ("index", index), ("count", contours.Count), ("reason", "no-closed-contour"));
-            return ValueTask.FromResult(new NodeExecutorResult(
-                new Dictionary<string, VisionValue>
-                {
-                    ["count"] = VisionValue.Integer(0), ["area"] = VisionValue.Integer(0), ["found"] = VisionValue.Boolean(false),
-                    ["diagnostics"] = VisionValue.String(missing)
-                },
-                new Dictionary<string, object?> { ["found"] = false, ["count"] = 0, ["area"] = 0, ["diagnostics"] = missing }));
+            var contour = contours[i];
+            if (!all && i != index) continue;
+            if (contour is null || contour.Points is null || contour.Points.Count < 3)
+                throw new InvalidOperationException($"region.fromContour contour {i} must contain at least three points.");
+            for (var p = 0; p < contour.Points.Count; p++)
+            {
+                var point = contour.Points[p];
+                if (!double.IsFinite(point.X) || !double.IsFinite(point.Y))
+                    throw new InvalidOperationException($"region.fromContour contour {i} point {p} is not finite.");
+            }
+            ValidateNoSelfIntersection(contour.Points, i);
         }
+
+        var selected = new List<(int SourceIndex, VisionContour Contour)>();
+        if (all)
+        {
+            for (var i = 0; i < contours.Count; i++)
+            {
+                // Hierarchy mode fills only exteriors; holes stay background. Flat mode fills every contour.
+                if (preserveHierarchy && contours[i].IsHole) continue;
+                selected.Add((i, contours[i]));
+            }
+        }
+        else selected.Add((index, contours[index]));
+        if (selected.Count == 0)
+            throw new InvalidOperationException("region.fromContour selected no fillable outer contours.");
 
         // 画布：优先用接入的图像尺寸（保证区域坐标与图像对齐），否则按轮廓包围盒外扩
         int width; int height;
+        var canvasSource = "contour-bounds";
         if (context.TryGetValue("image", out var imageValue) && imageValue.Type == VisionDataType.Image)
         {
             var image = imageValue.Require<IVisionImage>("image");
-            width = image.Width; height = image.Height;
+            width = image.Width; height = image.Height; canvasSource = "image";
         }
         else
         {
-            var maxX = selected.Max(c => c.Points.Max(p => p.X));
-            var maxY = selected.Max(c => c.Points.Max(p => p.Y));
+            var maxX = selected.Max(c => c.Contour.Points.Max(p => p.X));
+            var maxY = selected.Max(c => c.Contour.Points.Max(p => p.Y));
             if (!double.IsFinite(maxX) || !double.IsFinite(maxY) || maxX < 0 || maxY < 0 || maxX > 32000 || maxY > 32000)
                 throw new InvalidOperationException("region.fromContour needs an image port for contours that are negative or larger than 32000 px.");
             width = Math.Max(1, (int)Math.Ceiling(maxX) + 1);
             height = Math.Max(1, (int)Math.Ceiling(maxY) + 1);
         }
 
-        var mask = RegionRasterAlgorithms.FromContours(selected, width, height, expand, invert, cancellationToken);
+        var mask = RegionRasterAlgorithms.FromContours(selected.Select(item => item.Contour).ToArray(), width, height, expand, invert, cancellationToken);
         try
         {
             var region = RegionGapMath.RegionFromMask(mask, cancellationToken);
@@ -363,20 +417,32 @@ public sealed class RegionFromContourNode : IVisionNodeExecutor
             {
                 var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", region.Components.Count > 0),
                     ("count", region.Components.Count), ("area", area), ("width", width), ("height", height),
-                    ("allContours", all), ("expand", expand), ("invert", invert));
+                    ("canvasSource", canvasSource), ("selectedContourCount", selected.Count),
+                    ("selectedContourIndices", selected.Select(item => item.SourceIndex).ToArray()),
+                    ("allContours", all), ("allContoursOverridesIndex", all), ("preserveHierarchy", preserveHierarchy),
+                    ("expand", expand), ("invert", invert));
+                var sourceMappings = JsonSerializer.Serialize(new
+                {
+                    schemaVersion = 1,
+                    contours = selected.Select(item => new { sourceIndex = item.SourceIndex, isHole = item.Contour.IsHole, parentIndex = item.Contour.ParentIndex }).ToArray()
+                });
                 return new NodeExecutorResult(
                     new Dictionary<string, VisionValue>
                     {
                         ["region"] = VisionValue.Region(region), ["image"] = VisionValue.Image(image),
                         ["found"] = VisionValue.Boolean(region.Components.Count > 0),
                         ["count"] = VisionValue.Integer(region.Components.Count), ["area"] = VisionValue.Integer(area),
+                        ["sourceMappings"] = VisionValue.String(sourceMappings),
                         ["diagnostics"] = VisionValue.String(diagnostics)
                     },
                     new Dictionary<string, object?>
                     {
                         ["found"] = region.Components.Count > 0, ["count"] = region.Components.Count, ["area"] = area,
-                        ["width"] = width, ["height"] = height, ["allContours"] = all, ["expand"] = expand,
-                        ["invert"] = invert, ["unit"] = "px", ["algorithmBackend"] = "managed",
+                        ["width"] = width, ["height"] = height, ["canvasSource"] = canvasSource,
+                        ["selectedContourCount"] = selected.Count, ["allContours"] = all,
+                        ["preserveHierarchy"] = preserveHierarchy, ["expand"] = expand,
+                        ["invert"] = invert, ["sourceMappings"] = sourceMappings,
+                        ["unit"] = "px", ["algorithmBackend"] = "managed",
                         ["diagnostics"] = diagnostics
                     });
             }, cancellationToken));
@@ -385,6 +451,32 @@ public sealed class RegionFromContourNode : IVisionNodeExecutor
         {
             mask.Dispose();
         }
+    }
+
+    private static void ValidateNoSelfIntersection(IReadOnlyList<VisionPoint2D> points, int contourIndex)
+    {
+        // Adjacent edges share an endpoint by design. Reject all other crossings, including touches.
+        for (var i = 0; i < points.Count; i++)
+        {
+            var a = points[i]; var b = points[(i + 1) % points.Count];
+            for (var j = i + 1; j < points.Count; j++)
+            {
+                if (j == i || j == (i + 1) % points.Count || i == (j + 1) % points.Count) continue;
+                var c = points[j]; var d = points[(j + 1) % points.Count];
+                if (SegmentsIntersect(a, b, c, d))
+                    throw new InvalidOperationException($"region.fromContour contour {contourIndex} self-intersects at edges {i} and {j}.");
+            }
+        }
+    }
+
+    private static bool SegmentsIntersect(VisionPoint2D a, VisionPoint2D b, VisionPoint2D c, VisionPoint2D d)
+    {
+        static double Cross(VisionPoint2D p, VisionPoint2D q, VisionPoint2D r) => (q.X - p.X) * (r.Y - p.Y) - (q.Y - p.Y) * (r.X - p.X);
+        static bool OnSegment(VisionPoint2D p, VisionPoint2D q, VisionPoint2D r)
+            => Math.Abs(Cross(p, q, r)) < 1e-9 && r.X >= Math.Min(p.X, q.X) - 1e-9 && r.X <= Math.Max(p.X, q.X) + 1e-9
+                && r.Y >= Math.Min(p.Y, q.Y) - 1e-9 && r.Y <= Math.Max(p.Y, q.Y) + 1e-9;
+        var abC = Cross(a, b, c); var abD = Cross(a, b, d); var cdA = Cross(c, d, a); var cdB = Cross(c, d, b);
+        return (abC * abD < 0 && cdA * cdB < 0) || OnSegment(a, b, c) || OnSegment(a, b, d) || OnSegment(c, d, a) || OnSegment(c, d, b);
     }
 }
 
@@ -404,44 +496,66 @@ public sealed class RegionToMaskNode : IVisionNodeExecutor
         if (foreground is < 0 or > 255 || background is < 0 or > 255)
             throw new InvalidOperationException("region.toMask foreground and background must be within 0..255.");
         if (foreground == background) throw new InvalidOperationException("region.toMask foreground and background must differ.");
+        var emitLabels = node.GetBool("emitLabels", false);
+        var roundTripSafe = foreground > 0;
+        var warnings = new List<object>();
+        if (!roundTripSafe) warnings.Add(new { code = "nonzero-roundtrip-impossible", foreground, background, message = "region.fromMask uses a non-zero threshold, so foreground=0 cannot be recovered." });
 
         var mask = new Mat(region.Height, region.Width, MatType.CV_8UC1, Scalar.All(background));
+        var labels = emitLabels ? new Mat(region.Height, region.Width, MatType.CV_32SC1, Scalar.All(0)) : null;
         try
         {
             var step = (int)mask.Step();
             var buffer = new byte[step * region.Height];
             if (background != 0) Array.Fill(buffer, (byte)background);
+            var labelStep = labels is null ? 0 : (int)labels.Step();
+            var labelBuffer = labels is null ? Array.Empty<int>() : new int[labelStep / sizeof(int) * region.Height];
             long area = 0;
-            foreach (var component in region.Components)
+            for (var componentIndex = 0; componentIndex < region.Components.Count; componentIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                foreach (var run in component.Runs)
+                foreach (var run in region.Components[componentIndex].Runs)
                 {
                     var length = run.EndColumn - run.StartColumn + 1;
                     Array.Fill(buffer, (byte)foreground, run.Row * step + run.StartColumn, length);
+                    if (labels is not null) Array.Fill(labelBuffer, componentIndex + 1, run.Row * (labelStep / sizeof(int)) + run.StartColumn, length);
                     area += length;
                 }
             }
             Marshal.Copy(buffer, 0, mask.Data, buffer.Length);
+            if (labels is not null) Marshal.Copy(labelBuffer, 0, labels.Data, labelBuffer.Length);
             cancellationToken.ThrowIfCancellationRequested();
 
             var image = VisionImage.Own(mask);
             mask = null!;
+            var labelImage = labels is null ? null : VisionImage.Own(labels);
+            labels = null;
             return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
             {
+                var mappings = JsonSerializer.Serialize(new
+                {
+                    schemaVersion = 1,
+                    labelZero = "background",
+                    labels = region.Components.Select((component, index) => new { label = index + 1, objectIndex = index, area = component.Runs.Sum(r => (long)r.EndColumn - r.StartColumn + 1) }).ToArray()
+                });
                 var diagnostics = CoordinateValidation.Diagnostics(Type, ("width", region.Width), ("height", region.Height),
-                    ("count", region.Components.Count), ("area", area), ("foreground", foreground), ("background", background));
-                return new NodeExecutorResult(
-                    new Dictionary<string, VisionValue>
-                    {
-                        ["image"] = VisionValue.Image(image), ["width"] = VisionValue.Integer(region.Width),
-                        ["height"] = VisionValue.Integer(region.Height), ["area"] = VisionValue.Integer(area),
-                        ["count"] = VisionValue.Integer(region.Components.Count), ["diagnostics"] = VisionValue.String(diagnostics)
-                    },
+                    ("count", region.Components.Count), ("area", area), ("foreground", foreground), ("background", background),
+                    ("roundTripSafe", roundTripSafe), ("warningCount", warnings.Count), ("labelsEmitted", labelImage is not null));
+                var outputs = new Dictionary<string, VisionValue>
+                {
+                    ["image"] = VisionValue.Image(image), ["width"] = VisionValue.Integer(region.Width),
+                    ["height"] = VisionValue.Integer(region.Height), ["area"] = VisionValue.Integer(area),
+                    ["count"] = VisionValue.Integer(region.Components.Count), ["sourceMappings"] = VisionValue.String(mappings),
+                    ["warningCount"] = VisionValue.Integer(warnings.Count), ["diagnostics"] = VisionValue.String(diagnostics)
+                };
+                if (labelImage is not null) outputs["labelImage"] = VisionValue.Image(labelImage);
+                return new NodeExecutorResult(outputs,
                     new Dictionary<string, object?>
                     {
                         ["width"] = region.Width, ["height"] = region.Height, ["count"] = region.Components.Count,
                         ["area"] = area, ["foreground"] = foreground, ["background"] = background,
+                        ["roundTripSafe"] = roundTripSafe, ["warningCount"] = warnings.Count,
+                        ["labelsEmitted"] = labelImage is not null, ["sourceMappings"] = mappings,
                         ["unit"] = "px", ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
                     });
             }, cancellationToken));
@@ -449,6 +563,7 @@ public sealed class RegionToMaskNode : IVisionNodeExecutor
         finally
         {
             mask?.Dispose();
+            labels?.Dispose();
         }
     }
 }
@@ -464,11 +579,12 @@ public sealed class ContourConvexityNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
 
         var closed = node.GetBool("closed", true);
-        if (!closed) throw new InvalidOperationException("contour.convexity requires a closed contour: an open polyline has no interior.");
+        if (!closed) return ValueTask.FromResult(ToleranceGeometry.Missing(0, "open-contour-not-evaluated", new(){["closed"]=VisionValue.Boolean(false),["withinTolerance"]=VisionValue.Boolean(false),["evaluationState"]=VisionValue.String("not-evaluated-open-contour")},nodeType:Type));
         var minDepth = node.GetDouble("minDefectDepth", .5);
         if (!double.IsFinite(minDepth) || minDepth < 0) throw new InvalidOperationException("contour.convexity minDefectDepth must be finite and >= 0.");
         var maxDepth = node.GetDouble("maxDefectDepth", 0);
         if (!double.IsFinite(maxDepth) || maxDepth < 0) throw new InvalidOperationException("contour.convexity maxDefectDepth must be finite and >= 0 (0 disables the gate).");
+        if (maxDepth > 0 && maxDepth < minDepth) throw new InvalidOperationException($"contour.convexity maxDefectDepth ({maxDepth}) must be >= minDefectDepth ({minDepth}) when enabled.");
 
         var points = ToleranceGeometry.Select(context, node, closed: true);
         if (points.Length < 4) return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", nodeType: Type));
@@ -516,11 +632,12 @@ public sealed class ContourConvexityNode : IVisionNodeExecutor
         }));
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("pointCount", points.Length),
             ("hullPointCount", hull.Length), ("area", area), ("hullArea", hullArea), ("convexity", convexity),
-            ("maxDefectDepth", deepest), ("defectCount", defects.Count), ("withinTolerance", within));
+            ("maxDefectDepth", deepest), ("defectCount", defects.Count), ("withinTolerance", within),
+            ("closed",true),("minDefectDepth",minDepth),("maxDefectDepthConfigured",maxDepth),("maxDefectDepthEnabled",maxDepth>0),("maxDefectDepthEffective",maxDepth>0?maxDepth:double.PositiveInfinity));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
-                ["found"] = VisionValue.Boolean(true), ["pointCount"] = VisionValue.Integer(points.Length),
+                ["found"] = VisionValue.Boolean(true), ["closed"] = VisionValue.Boolean(true), ["pointCount"] = VisionValue.Integer(points.Length),
                 ["hullPointCount"] = VisionValue.Integer(hull.Length), ["area"] = VisionValue.Double(area),
                 ["hullArea"] = VisionValue.Double(hullArea), ["convexity"] = VisionValue.Double(convexity),
                 ["maxDefectDepth"] = VisionValue.Double(deepest), ["maxDefectPoint"] = VisionValue.Point(points[deepestIndex]),

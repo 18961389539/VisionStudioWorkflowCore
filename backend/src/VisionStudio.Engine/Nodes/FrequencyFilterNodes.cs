@@ -63,12 +63,16 @@ public sealed class CustomConvolutionNode : IVisionNodeExecutor
         var kernel = ParseKernel(node.GetString("kernelJson", DefaultKernel));
         var normalize = node.GetBool("normalize", true);
         var kernelSum = kernel.SelectMany(row => row).Sum();
+        var normalizeEpsilon = node.GetDouble("normalizeEpsilon", 1e-12);
+        if (!double.IsFinite(normalizeEpsilon) || normalizeEpsilon <= 0)
+            throw new InvalidOperationException("image.convolve normalizeEpsilon must be finite and > 0.");
         if (normalize)
         {
-            if (!double.IsFinite(kernelSum) || Math.Abs(kernelSum) < 1e-12)
+            if (!double.IsFinite(kernelSum) || Math.Abs(kernelSum) < normalizeEpsilon)
                 throw new InvalidOperationException(
-                    "image.convolve cannot normalize a kernel whose sum is zero (edge/difference kernels). Turn Normalize off.");
+                    $"image.convolve cannot normalize a kernel with a zero or near-zero sum {kernelSum:R} (below normalizeEpsilon={normalizeEpsilon:R}); turn Normalize off for edge/difference kernels.");
         }
+        var inputRange = PreprocessP1Diagnostics.Range(source.Mat);
 
         var delta = node.GetDouble("delta", 0);
         if (!double.IsFinite(delta) || Math.Abs(delta) > 100_000)
@@ -101,10 +105,17 @@ public sealed class CustomConvolutionNode : IVisionNodeExecutor
 
         return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
         {
+            (int Low, int High, double Ratio) saturation = source.Mat.Depth() == MatType.CV_8U
+                ? PreprocessP1Diagnostics.ByteSaturation(image.Mat, 255) : (0, 0, 0);
             var diagnostics = CoordinateValidation.Diagnostics(
                 Type,
                 ("kernelWidth", cols), ("kernelHeight", rows), ("kernelSum", kernelSum),
-                ("normalized", normalize), ("delta", delta), ("anchorX", anchorX), ("anchorY", anchorY),
+                ("normalized", normalize), ("normalizeEpsilon", normalizeEpsilon),
+                ("normalizationFactor", normalize ? kernelSum : 1d), ("delta", delta),
+                ("anchorX", anchor?.X ?? cols / 2), ("anchorY", anchor?.Y ?? rows / 2),
+                ("anchorMode", anchor is null ? "center" : "explicit"),
+                ("inputMin", inputRange.Min), ("inputMax", inputRange.Max),
+                ("saturatedLowPixels", saturation.Low), ("saturatedHighPixels", saturation.High), ("saturatedRatio", saturation.Ratio),
                 ("borderType", borderType), ("elapsedMs", timer.Elapsed.TotalMilliseconds));
             return new NodeExecutorResult(
                 new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -204,6 +215,29 @@ public sealed class FftFilterNode : IVisionNodeExecutor
         timer.Stop();
 
         var filter = options.Filter;
+        var channelMeans = Enumerable.Range(0, channels).Select(index =>
+        {
+            using var channel = new Mat();
+            Cv2.ExtractChannel(source.Mat, channel, index);
+            return Cv2.Mean(channel).Val0;
+        }).ToArray();
+        var channelMeansJson = System.Text.Json.JsonSerializer.Serialize(channelMeans);
+        var outputRange = PreprocessP1Diagnostics.Range(image.Mat);
+        var saturatedHigh = 0;
+        var saturatedLow = 0;
+        if (source.Mat.Depth() == MatType.CV_8U)
+        {
+            var saturation = PreprocessP1Diagnostics.ByteSaturation(image.Mat, 255);
+            saturatedLow = saturation.Low; saturatedHigh = saturation.High;
+        }
+        else if (source.Mat.Depth() == MatType.CV_16U)
+        {
+            using var low = new Mat(); using var high = new Mat();
+            Cv2.Compare(image.Mat, Scalar.All(0), low, CmpTypes.LE);
+            Cv2.Compare(image.Mat, Scalar.All(65535), high, CmpTypes.GE);
+            saturatedLow = Cv2.CountNonZero(low); saturatedHigh = Cv2.CountNonZero(high);
+        }
+        var saturationRatio = (double)(saturatedLow + saturatedHigh) / Math.Max(1L, (long)image.Mat.Total() * channels);
         return ValueTask.FromResult(NodeOutputContracts.CreateOwnedResult(image, () =>
         {
             var diagnostics = CoordinateValidation.Diagnostics(
@@ -212,8 +246,15 @@ public sealed class FftFilterNode : IVisionNodeExecutor
                 ("wavelengthMaxPx", options.WavelengthMaxPx), ("directionDeg", options.DirectionDeg),
                 ("directionWidthDeg", options.DirectionWidthDeg), ("maskBlurPx", options.MaskBlurPx),
                 ("keepDc", options.KeepDc), ("outputMode", options.OutputMode),
+                ("sourceWidth", source.Mat.Width), ("sourceHeight", source.Mat.Height),
                 ("paddedWidth", paddedWidth), ("paddedHeight", paddedHeight),
-                ("maskPassRatio", passRatio), ("channels", channels),
+                ("paddingPosition", "bottom-right; reflect101"), ("paddingContract", "zero-padded size with reflect101 extension; periodic wrap-around at padded border"),
+                ("frequencyUnit", "cycles/pixel"), ("directionBasis", "+x=0deg, +y=90deg, y-down"),
+                ("maskPassRatio", passRatio), ("nearEmptyMask", passRatio < 1e-6),
+                ("meanRestore", options.OutputMode == "removed" && source.Mat.Depth() != MatType.CV_32F ? "per-channel input mean" : "none (pure difference)"),
+                ("channelMeans", channelMeans), ("outputMin", outputRange.Min), ("outputMax", outputRange.Max),
+                ("saturatedLowPixels", saturatedLow), ("saturatedHighPixels", saturatedHigh), ("saturatedRatio", saturationRatio),
+                ("channels", channels),
                 ("elapsedMs", timer.Elapsed.TotalMilliseconds));
             return new NodeExecutorResult(
                 new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -225,6 +266,9 @@ public sealed class FftFilterNode : IVisionNodeExecutor
                     ["maskPassRatio"] = VisionValue.Double(passRatio),
                     ["paddedWidth"] = VisionValue.Integer(paddedWidth),
                     ["paddedHeight"] = VisionValue.Integer(paddedHeight),
+                    ["channelMeansJson"] = VisionValue.String(channelMeansJson),
+                    ["saturatedPixelCount"] = VisionValue.Integer(saturatedLow + saturatedHigh),
+                    ["saturatedRatio"] = VisionValue.Double(saturationRatio),
                     ["diagnostics"] = VisionValue.String(diagnostics)
                 },
                 new Dictionary<string, object?>
@@ -237,6 +281,8 @@ public sealed class FftFilterNode : IVisionNodeExecutor
                     ["maskPassRatio"] = passRatio,
                     ["paddedWidth"] = paddedWidth,
                     ["paddedHeight"] = paddedHeight,
+                    ["channelMeansJson"] = channelMeansJson,
+                    ["saturatedRatio"] = saturationRatio,
                     ["keepDc"] = options.KeepDc,
                     ["outputMode"] = options.OutputMode,
                     ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,

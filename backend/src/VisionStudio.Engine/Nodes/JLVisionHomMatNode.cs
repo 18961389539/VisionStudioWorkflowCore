@@ -65,6 +65,24 @@ public sealed class JLVisionHomMatNode : IVisionNodeExecutor
         var values = new Dictionary<string, double>(StringComparer.Ordinal) { ["value"] = result.Value };
         if (result.Extra is not null)
             foreach (var (name, value) in result.Extra) values[name] = value;
+        if (result.Matrix is not null)
+        {
+            ValidateMatrix(result.Matrix, key);
+            var determinant = HomMatDeterminant(result.Matrix);
+            if (key is "invert" or "compose" && Math.Abs(determinant) <= 1e-12)
+                throw new InvalidOperationException($"jlvision.homMat.singularMatrix:{key}: determinant={determinant:R}; no valid inverse/composition can be emitted.");
+            values["determinant"] = determinant;
+            var conditionNumber = ConditionNumber(result.Matrix);
+            if (double.IsFinite(conditionNumber)) values["conditionNumber"] = conditionNumber;
+        }
+        else if (key == "determinant" && Math.Abs(result.Value) <= 1e-12)
+        {
+            throw new InvalidOperationException($"jlvision.homMat.singularMatrix:{key}: determinant={result.Value:R}.");
+        }
+        var order = key == "compose"
+            ? "T(tx,ty) * R_local(phi); rotate about local origin, then translate"
+            : key.EndsWith("Local", StringComparison.Ordinal) ? "local-right-multiply" : "global-parameter-order";
+        var fixedPoint = key is "rotate" or "scale" ? $"({args.Px:R},{args.Py:R})" : "local-origin-(0,0)";
 
         var outputs = new Dictionary<string, VisionValue>
         {
@@ -74,7 +92,10 @@ public sealed class JLVisionHomMatNode : IVisionNodeExecutor
             ["overlay"] = VisionValue.Image(VisionImage.Own(CloneOverlay(result.Matrix))),
             ["points"] = VisionValue.Contours(new[] { PlotSamples(result.Matrix) }),
             ["diagnostics"] = VisionValue.String(JLVisionNodeSupport.Diagnostics(
-                node.Type, "standard", 0, ("operator", key), ("value", result.Value)))
+                node.Type, "standard", 0, ("operator", key), ("value", result.Value),
+                ("order", order), ("fixedPoint", fixedPoint), ("angleUnit", "rad"),
+                ("determinant", key == "determinant" ? result.Value : result.Matrix is null ? null : HomMatDeterminant(result.Matrix)),
+                ("conditionNumber", result.Matrix is null ? null : ConditionNumber(result.Matrix))))
         };
         if (result.Matrix is not null)
             outputs["transform"] = VisionValue.Transform(JlHomMatOperations.ToPlatform(result.Matrix, "image", "world"));
@@ -87,9 +108,46 @@ public sealed class JLVisionHomMatNode : IVisionNodeExecutor
             ["parametersUsed"] = op.Note,
             ["value"] = result.Value,
             ["matrix"] = result.Matrix is null ? null : (object)values,
-            ["values"] = values
+            ["values"] = values,
+            ["order"] = order,
+            ["fixedPoint"] = fixedPoint,
+            ["angleUnit"] = "rad"
         };
         return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
+    }
+
+    private static void ValidateMatrix(double[,] matrix, string operation)
+    {
+        if (matrix.GetLength(0) != 3 || matrix.GetLength(1) != 3)
+            throw new InvalidOperationException($"jlvision.homMat.invalidMatrix:{operation}: expected a 3x3 matrix; received {matrix.GetLength(0)}x{matrix.GetLength(1)}.");
+        for (var row = 0; row < 3; row++)
+        for (var column = 0; column < 3; column++)
+            if (!double.IsFinite(matrix[row, column]))
+                throw new InvalidOperationException($"jlvision.homMat.nonFiniteMatrix:{operation}: matrix[{row},{column}] is not finite.");
+    }
+
+    private static double HomMatDeterminant(double[,] m) =>
+        m[0, 0] * (m[1, 1] * m[2, 2] - m[1, 2] * m[2, 1]) -
+        m[0, 1] * (m[1, 0] * m[2, 2] - m[1, 2] * m[2, 0]) +
+        m[0, 2] * (m[1, 0] * m[2, 1] - m[1, 1] * m[2, 0]);
+
+    private static double ConditionNumber(double[,] matrix)
+    {
+        var determinant = HomMatDeterminant(matrix);
+        if (Math.Abs(determinant) <= 1e-12) return double.PositiveInfinity;
+        var norm = 0d;
+        for (var row = 0; row < 3; row++)
+            norm = Math.Max(norm, Math.Abs(matrix[row, 0]) + Math.Abs(matrix[row, 1]) + Math.Abs(matrix[row, 2]));
+        var inverseNorm = 0d;
+        for (var column = 0; column < 3; column++)
+        {
+            var row0 = matrix[1, 1] * matrix[2, 2] - matrix[1, 2] * matrix[2, 1];
+            var row1 = matrix[1, 2] * matrix[2, 0] - matrix[1, 0] * matrix[2, 2];
+            var row2 = matrix[1, 0] * matrix[2, 1] - matrix[1, 1] * matrix[2, 0];
+            var value = column switch { 0 => row0, 1 => row1, _ => row2 };
+            inverseNorm = Math.Max(inverseNorm, Math.Abs(value / determinant));
+        }
+        return norm * inverseNorm;
     }
 
     /// <summary>沿 x 轴采样的单位点经结果矩阵变换后的坐标（矩阵为空时返回恒等采样）。</summary>

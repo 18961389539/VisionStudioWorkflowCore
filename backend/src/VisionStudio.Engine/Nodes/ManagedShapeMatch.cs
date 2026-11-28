@@ -131,7 +131,8 @@ internal static class ManagedShapeMatch
                 ContinuousPoseRefine: continuousRefine,
                 XldContourSnap: xldSnap);
 
-            var hits = ChamferShapeMatching.Search(dist, model, options, edgeMask, gradX, gradY);
+            var suppressed = new List<ChamferShapeMatching.SuppressedHit>();
+            var hits = ChamferShapeMatching.Search(dist, model, options, edgeMask, gradX, gradY, suppressed);
 
             var outputs = new Dictionary<string, VisionValue>
             {
@@ -143,6 +144,8 @@ internal static class ManagedShapeMatch
                 ["scaleY"] = VisionValue.Double(hits.Count > 0 ? hits[0].Scale : 1),
                 ["count"] = VisionValue.Integer(hits.Count),
                 ["detections"] = VisionValue.Detections(hits.Select((hit, i) => Detection(i, hit, templateGray.Width, templateGray.Height)).ToArray()),
+                ["suppressedCount"] = VisionValue.Integer(suppressed.Count),
+                ["suppressionReasonsJson"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(suppressed)),
                 ["modelPointCount"] = VisionValue.Integer(model.Length),
                 ["orientedModelPointCount"] = VisionValue.Integer(orientedCount),
                 ["polarityMode"] = VisionValue.String(ignorePolarity ? "ignore_polarity" : "use_polarity"),
@@ -185,6 +188,9 @@ internal static class ManagedShapeMatch
             var summary = new Dictionary<string, object?>
             {
                 ["found"] = hits.Count > 0, ["accepted"] = hits.Count, ["algorithmBackend"] = "managed",
+                ["suppressedCount"] = suppressed.Count, ["suppressionReasons"] = suppressed,
+                ["overlapMetric"] = "center-distance in scene pixels; maxOverlap is native-only",
+                ["minCenterDistanceUnit"] = "scene-pixels",
                 ["score"] = hits.Count > 0 ? hits[0].Score : 0d, ["bestScore"] = hits.Count > 0 ? hits[0].Score : 0d,
                 ["modelPoints"] = model.Length, ["orientedModelPoints"] = orientedCount,
                 ["templateEdgePoints"] = rawPoints.Count,

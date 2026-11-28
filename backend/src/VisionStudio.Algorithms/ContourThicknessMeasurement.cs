@@ -39,13 +39,18 @@ internal static class ContourThicknessMeasurement
 
         var innerCount = mode == "innernormal" ? RequiredSamples(inner, step, budget) : 0;
         var outerCount = mode == "shortest" ? RequiredSamples(outer, step, budget) : 0;
-        if (innerCount > budget || outerCount > budget)
-            return new("sample-budget-exceeded", true, [], innerCount + outerCount, 0, 0, null);
-        var work = (long)innerCount * outer.Length + (long)outerCount * inner.Length;
+        // Normal mode adds a midpoint probe on every interval. This catches thin regions
+        // between coarse normals; refusing the extra probes would make coverage unknowable.
+        var adaptiveInnerCount = mode == "innernormal" ? innerCount * 2 : 0;
+        if (innerCount > budget || outerCount > budget || adaptiveInnerCount > budget)
+            return new("sample-budget-exceeded", true, [], Math.Max(innerCount + outerCount, adaptiveInnerCount), 0, 0, null);
+        var work = (long)adaptiveInnerCount * outer.Length + (long)outerCount * inner.Length;
         if (mode == "shortest") work += (long)(innerCount + outerCount) * (inner.Length + outer.Length);
-        if (mode == "innernormal") work += (long)innerCount * inner.Length;
-        if (work > MaximumWork) return new("geometry-work-budget-exceeded", true, [], innerCount + outerCount, 0, 0, null);
-        var innerQuery = mode == "innernormal" ? SampleBoundary(inner, step, innerArea, cancellationToken) : [];
+        if (mode == "innernormal") work += (long)adaptiveInnerCount * inner.Length;
+        if (work > MaximumWork) return new("geometry-work-budget-exceeded", true, [], Math.Max(innerCount + outerCount, adaptiveInnerCount), 0, 0, null);
+        var innerQuery = mode == "innernormal" ? SampleBoundaryAdaptive(inner, step, innerArea, cancellationToken) : [];
+        if (mode == "innernormal" && innerQuery.Length != adaptiveInnerCount)
+            return new("sampling-coverage-incomplete", true, [], innerCount, 0, 0, null);
         var samples = new List<Sample>(innerCount + outerCount);
         var invalid = 0;
         var visibilityBudget = MaximumWork - work;
@@ -56,6 +61,8 @@ internal static class ContourThicknessMeasurement
             AddShortest(SampleBoundary(outer, step, outerArea, cancellationToken), inner, innerCurve, "outer");
             if (visibilityBudget < 0) return new("geometry-work-budget-exceeded", true, [], innerCount + outerCount, 0, 0, null);
             if (invalid > 0) return new("shortest-pairing-failed", true, samples, innerCount + outerCount, invalid, 0, null);
+            if (samples.Count != outerCount)
+                return new("sampling-coverage-incomplete", true, [], outerCount, invalid, 0, null);
         }
         else
         {
@@ -71,12 +78,23 @@ internal static class ContourThicknessMeasurement
                 samples.Add(new("inner", i, query.Arc, query.Weight, query.Point, endpoint, outerHit));
             }
             if (invalid > 0) return new("normal-pairing-failed", true, samples, innerCount, invalid, 0, null);
-            var smallest = samples.MinBy(sample => sample.Thickness)!;
-            minimum = smallest.Thickness;
-            c1 = smallest.Inner.X; r1 = smallest.Inner.Y; c2 = smallest.Outer.X; r2 = smallest.Outer.Y;
+            if (samples.Count != adaptiveInnerCount)
+                return new("sampling-coverage-incomplete", true, [], innerCount, invalid, 0, null);
+            // Keep the exact global minimum and its endpoints from DistanceCcMinPoints;
+            // normal samples must never replace them with a larger sampled value.
+        }
+        if (visibilityBudget < 0) return new("geometry-work-budget-exceeded", true, [], innerCount + outerCount, 0, 0, null);
+        var minimumStart = new VisionPoint2D(c1, r1);
+        var minimumEnd = new VisionPoint2D(c2, r2);
+        if (!StaysInside(minimumStart, minimumEnd, outer, ref visibilityBudget, cancellationToken))
+        {
+            if (visibilityBudget < 0) return new("geometry-work-budget-exceeded", true, [], innerCount + outerCount, 0, 0, null);
+            invalid++;
+            return new(mode == "shortest" ? "shortest-pairing-failed" : "normal-pairing-failed",
+                true, samples, innerCount + outerCount, invalid, 0, null);
         }
         cancellationToken.ThrowIfCancellationRequested();
-        return new("ok", true, samples, innerCount + outerCount, invalid, minimum, new(new(c1, r1), new(c2, r2)));
+        return new("ok", true, samples, innerCount + outerCount, invalid, minimum, new(minimumStart, minimumEnd));
 
         void AddShortest(Query[] queries, VisionPoint2D[] target, JlXLDCont targetCurve, string boundary)
         {
@@ -114,6 +132,31 @@ internal static class ContourThicknessMeasurement
             if (count > budget) return budget + 1;
         }
         return (int)count;
+    }
+
+    private static Query[] SampleBoundaryAdaptive(VisionPoint2D[] points, double step, double area, CancellationToken cancellationToken)
+    {
+        var coarse = SampleBoundary(points, step, area, cancellationToken);
+        var refined = new List<Query>(checked(coarse.Length * 2));
+        var sign = Math.Sign(area);
+        for (var i = 0; i < coarse.Length; i++)
+        {
+            var query = coarse[i];
+            var next = coarse[(i + 1) % coarse.Length];
+            var dx = next.Point.X - query.Point.X;
+            var dy = next.Point.Y - query.Point.Y;
+            var length = MeasurementMath.Hypot(dx, dy);
+            if (length <= Epsilon) return [];
+            // The midpoint belongs to the outgoing edge. At a corner the vertex
+            // bisector is only valid at the vertex itself; translating along that
+            // bisector would move the probe off the boundary and corrupt thickness.
+            var midpoint = new VisionPoint2D(query.Point.X + dx / 2, query.Point.Y + dy / 2);
+            var midpointNormal = new VisionPoint2D(sign * dy / length, -sign * dx / length);
+            var half = query.Weight / 2;
+            refined.Add(query with { Weight = half });
+            refined.Add(new(midpoint, midpointNormal, query.Arc + half, half));
+        }
+        return refined.ToArray();
     }
 
     private static Query[] SampleBoundary(VisionPoint2D[] points, double step, double area, CancellationToken cancellationToken)

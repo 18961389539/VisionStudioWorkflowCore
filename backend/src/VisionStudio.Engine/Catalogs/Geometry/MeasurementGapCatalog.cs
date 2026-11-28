@@ -40,6 +40,7 @@ public static class MeasurementGapCatalog
             [Exec, new("contours", VisionDataType.Contour)],
             [new("pointList", VisionDataType.PointList), Found, new("pointCount", VisionDataType.Integer),
              new("length", VisionDataType.Double, Required: false), new("stepUsed", VisionDataType.Double, Required: false),
+             new("sourceClosed", VisionDataType.Boolean), new("closurePolicy", VisionDataType.String),
              Diagnostics, Next],
             [
                 Index,
@@ -56,7 +57,7 @@ public static class MeasurementGapCatalog
                     Description: "Hard budget. Exceeding it fails instead of silently truncating the profile."),
                 Closed,
             ],
-            "Converts one contour into a PointList so tolerance.profile / tolerance.runout / geometry.fitFromPoints stop being limited to detection centres. Wire: contours -> pointList. resample=arcLength emits equidistant samples at sampleStep; uniform thins the existing points by index; everyPoint copies them all. Budget overflow fails hard. Units: pixels.", "builtin",
+            "Converts one contour into a PointList. The explicit closed parameter overrides the source contour state. arcLength excludes the duplicate closing endpoint; everyPoint repeats the first point when closed; uniform preserves source indices. A pre-sampling budget check reports estimatedCount, maxPoints, length and suggestedStep before allocation. Units: pixels.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P0：圆弧拟合 ──────────────────────────────────────────────
@@ -76,7 +77,7 @@ public static class MeasurementGapCatalog
                 new("maxDeviation", "Max Radial Deviation (0=off)", "number", 0, 0, 1000000, 0.1, Unit: "px", Group: "Limits",
                     Description: "Optional form gate: withinTolerance reports (maxRadius-minRadius) <= limit. 0 disables the gate."),
             ],
-            "Fits a circular arc to one contour and reports it in arc terms: sweepDeg, arcLength, chordLength and the start/end angles — what a fillet or a radius callout needs, and what measure.fitCircle (whole-circle least squares) does not give. Wire: contours -> circle/radius/sweepDeg/arcLength. Coverage below minCoverageDeg returns found=false. Units: pixels, angles in degrees CCW.", "builtin",
+            "Fits a circular arc to one contour and reports it in arc terms: sweepDeg, arcLength, chordLength and the start/end angles — what a fillet or a radius callout needs, and what measure.fitCircle (whole-circle least squares) does not give. Wire: contours -> circle/radius/sweepDeg/arcLength. Input is canonically angle-ordered; separated arcs or discontinuous point groups return found=false. start/end angles and chordLength use the two points bounding the largest angular gap.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：最小区域 / 极限圆 ───────────────────────────────────────
@@ -110,13 +111,18 @@ public static class MeasurementGapCatalog
             [Found, new("sampleCount", VisionDataType.Integer), new("minRadius", VisionDataType.Double),
              new("minRadiusPoint", VisionDataType.Point2D), new("maxCurvature", VisionDataType.Double),
              new("meanCurvature", VisionDataType.Double), new("cornerCount", VisionDataType.Integer),
-             new("cornerJson", VisionDataType.String), new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
+             new("cornerJson", VisionDataType.String), new("withinTolerance", VisionDataType.Boolean),
+             new("toleranceEnabled", VisionDataType.Boolean, Required: false), new("evaluationState", VisionDataType.String, Required: false), Diagnostics, Next],
             [
                 Index,
                 new("fittingWindow", "Fitting Window", "number", 5, 1, 200, 1, Group: "Curvature",
                     Description: "Points on each side used for the local circle fit. Larger windows smooth noise and blur short fillets; smaller windows follow noise."),
                 new("cornerRadius", "Corner Radius Threshold (0=off)", "number", 0, 0, 1000000, .01, Unit: "px", Group: "Curvature",
                     Description: "Local minima of the radius below this value count as corners. 0 counts none, so cornerCount stays 0 while minRadius is still reported."),
+                new("minRadius", "Minimum Radius", "number", 0, 0, 1000000, .01, Unit: "px", Group: "Limits",
+                    Description: "Require global minimum radius >= this value. 0 disables; mutually exclusive with maxCurvature."),
+                new("maxCurvature", "Maximum Curvature", "number", 0, 0, 1000000, .0001, Unit: "1/px", Group: "Limits",
+                    Description: "Require global maximum curvature <= this value. 0 disables; mutually exclusive with minRadius."),
                 Closed,
             ],
             "Sliding local circle fit along one contour: radius series, global minimum radius and its location, plus corners wherever the radius dips below cornerRadius. Wire: contours -> minRadius/minRadiusPoint/cornerCount. This is how a fillet radius or a bend line is located; segmentContours only splits the contour and never reports radii. Units: pixels.", "builtin",
@@ -176,6 +182,7 @@ public static class MeasurementGapCatalog
             [Found, new("sampleCount", VisionDataType.Integer), new("distance", VisionDataType.Double),
              new("minDistance", VisionDataType.Double), new("maxDistance", VisionDataType.Double), new("meanDistance", VisionDataType.Double),
              new("closestPointA", VisionDataType.Point2D), new("closestPointB", VisionDataType.Point2D),
+             new("minSamplingErrorBoundPx", VisionDataType.Double), new("maxSamplingErrorBoundPx", VisionDataType.Double),
              new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 Index,
@@ -195,7 +202,7 @@ public static class MeasurementGapCatalog
                 new("closed", "Closed Contour", "boolean", true,
                     Description: "Treat both polylines as closed when sampling."),
             ],
-            "Nearest and farthest distance between two polylines, with the actual closest point pair. Wire: contours + referenceContours -> distance/closestPointA/closestPointB. Fills the gap between point-to-line (measure.pointLineDistance) and circle-to-circle (measure.circleSpacing): an arbitrary edge against an arbitrary edge. Samples are equidistant, so features between samples can be missed. Units: pixels.", "builtin",
+            "Nearest and farthest distance between two polylines, with the actual closest point pair. Wire: contours + referenceContours -> distance/closestPointA/closestPointB. Fills the gap between point-to-line (measure.pointLineDistance) and circle-to-circle (measure.circleSpacing): an arbitrary edge against an arbitrary edge. Distances use exact point-to-segment projection against every reference segment. min/maxSamplingErrorBoundPx bound source-sampling approximation; sampleStep controls accuracy, not geometry. Units: pixels.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：螺纹 ─────────────────────────────────────────────────
@@ -305,7 +312,7 @@ public static class MeasurementGapCatalog
             [Exec, new("line", VisionDataType.Line2D, Required: false), new("line2", VisionDataType.Line2D, Required: false),
              new("point", VisionDataType.Point2D, Required: false), new("circle", VisionDataType.Circle, Required: false)],
             [Found, new("line", VisionDataType.Line2D, Required: false), new("line2", VisionDataType.Line2D, Required: false),
-             new("angleDeg", VisionDataType.Double, Required: false), new("length", VisionDataType.Double, Required: false),
+             new("line2Valid", VisionDataType.Boolean), new("angleDeg", VisionDataType.Double, Required: false), new("length", VisionDataType.Double, Required: false),
              new("offset", VisionDataType.Double, Required: false), Diagnostics, Next],
             [
                 new("operation", "Operation", "select", "perpendicular", Group: "Construction", Options:
@@ -343,7 +350,7 @@ public static class MeasurementGapCatalog
                 new("rotationDeg", "Rotation", "number", 0, -3600, 3600, .01, Unit: "deg", Group: "Transform",
                     Description: "CCW rotation applied before translation."),
                 new("shear", "Shear", "number", 0, -100, 100, .0001, Group: "Transform",
-                    Description: "x' = x + shear*y applied before rotation. Use it for skewed axes; it keeps the determinant at scaleX*scaleY."),
+                    Description: "x' = x + shear*y applied before scale and rotation. Use it for skewed axes; it keeps the determinant at scaleX*scaleY."),
                 new("translateX", "Translate X", "number", 0, -1000000, 1000000, .001, Group: "Transform",
                     Description: "Translation along the source X axis, in target units."),
                 new("translateY", "Translate Y", "number", 0, -1000000, 1000000, .001, Group: "Transform",
@@ -357,7 +364,7 @@ public static class MeasurementGapCatalog
                 new("targetUnit", "Target Unit", "text", "mm", Group: "Frames",
                     Description: "Unit label of the target coordinates."),
             ],
-            "Affine (non-rigid) transform between named frames: scale, shear, rotation and translation, with the determinant exposed for downstream validation. coordinate.transformConstant is rigid-only and coordinate.transformCompose rejects non-rigid input, so anisotropic or skewed mapping had no entry point. Pixel-to-mm anisotropy is already covered by calibration.planar's homography; this node is for engineering-frame scaling and skew. A zero scale on either axis fails hard.", "builtin",
+            "Affine (non-rigid) transform between named frames. Column-vector convention: p'=R*S*[[1,shear],[0,1]]*p+t; translation is in the target frame. Connected scalar ports override constants independently and diagnostics record each final source/value plus the actual 2x3 matrix. Zero/non-finite values and empty frames fail.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: false), Actions: [])
     ];
 }

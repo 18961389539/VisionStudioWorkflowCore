@@ -41,6 +41,7 @@ public static class MeasurementAlignCatalog
                 new("inlierCount", VisionDataType.Integer),
                 new("pointCount", VisionDataType.Integer),
                 new("iterations", VisionDataType.Integer),
+                new("converged", VisionDataType.Boolean),
                 Found,
                 Diagnostics,
                 Next
@@ -64,7 +65,7 @@ public static class MeasurementAlignCatalog
                 new("closedReference", "Closed Reference", "boolean", true,
                     Group: "Data", Description: "Treat the reference polyline as a closed loop (last point connects back to the first). Turn off for open profiles such as a machined edge that does not wrap around.")
             ],
-            "Rigid (or similarity) best-fit alignment of a measured contour onto a reference contour, the step every GD&T node silently assumes. Trimmed ICP matches each measured point to the nearest segment of the reference polyline, drops the worst trimFraction, and solves the optimal 2D transform in closed form (Kabsch); no SVD and no randomness, so the same input always gives the same transform. Emits the transform, the aligned point list and the residual statistics BEFORE alignment is discarded — feed alignedPoints to tolerance.profile / measure.contourDeviation and the residual becomes the form error. Failure modes are explicit: fewer than 3 points, degenerate (collinear) point sets and non-convergence all return found=false with the reason in diagnostics. Budget: measured/reference are thinned to maxPoints, so a 20k-point contour is fitted on its envelope, not on every pixel.",
+            "Rigid (or similarity) best-fit alignment of a measured contour onto a reference contour, the step every GD&T node silently assumes. Trimmed ICP matches each measured point to the nearest segment of the reference polyline, drops the worst trimFraction, and solves the optimal 2D transform in closed form (Kabsch); no SVD and no randomness, so the same input always gives the same transform. Emits the transform, the aligned point list and the residual statistics BEFORE alignment is discarded — feed alignedPoints to tolerance.profile / measure.contourDeviation and the residual becomes the form error. rmsError is sqrt(mean(distance²)) over all sampled points. found requires converged=true and finite transform/residuals; non-converged or degenerate fits are rejected. Budget: measured/reference are thinned to maxPoints, so a 20k-point contour is fitted on its envelope, not on every pixel.",
             "builtin"),
 
         new("measure.fitCircleFixedRadius", "Fixed Radius Circle Fit", "Measurement",
@@ -78,6 +79,16 @@ public static class MeasurementAlignCatalog
                 new("maxError", VisionDataType.Double),
                 new("pointCount", VisionDataType.Integer),
                 new("iterations", VisionDataType.Integer),
+                new("converged", VisionDataType.Boolean),
+                new("withinTolerance", VisionDataType.Boolean),
+                new("tooCloseCount", VisionDataType.Integer),
+                new("tooFarCount", VisionDataType.Integer),
+                new("minSignedError", VisionDataType.Double),
+                new("maxSignedError", VisionDataType.Double),
+                new("arcCoverageDeg", VisionDataType.Double),
+                new("residualsJson", VisionDataType.String),
+                new("reason", VisionDataType.String),
+                new("evaluationState", VisionDataType.String),
                 Found,
                 Diagnostics,
                 Next
@@ -87,12 +98,14 @@ public static class MeasurementAlignCatalog
                     Description: "The radius that must not change (pin, probe tip, standard ball, circlip groove). Unlike measure.fitCircle this value is never re-estimated, so a weak arc cannot drag the centre."),
                 new("maxRmsError", "Max RMS Error", "number", 0, 0, 1000000, 0.001,
                     Description: "Optional quality gate: fail when the RMS radial residual exceeds this value. 0 disables the gate. Set it to roughly the expected edge noise."),
+                new("maxRadialError", "Max Radial Error", "number", 0, 0, 1000000, 0.001,
+                    Description: "Optional per-point gate: fail when any single |measured - known radius| exceeds this value. RMS alone dilutes one dented point across many good points. 0 disables."),
                 new("maxIterations", "Max Iterations", "number", 100, 1, 1000, 1,
                     Description: "Spath fixed-point iteration budget. Convergence is quadratic near the solution, so 100 is generous."),
                 new("tolerancePx", "Convergence Tolerance (px)", "number", 1e-6, 1e-12, 1, 1e-7,
                     Description: "Stop when the centre moves less than this between iterations.")
             ],
-            "Least-squares circle fit with a known, fixed radius: it solves for the centre only, so every input point is judged as 'too close' or 'too far' and the centre cannot drift to absorb a bad arc. This is the circle-fit counterpart of measure.mzCircle for hole/shaft limits: use it when the radius comes from the drawing or from a calibrated artefact. Points come from a PointList (contour.toPoints / feature outputs); fewer than 3 points or a degenerate arc returns found=false. Residuals are radial distances (measured minus known radius) in pixels; rmsError and maxError are reported in the same unit as the input.",
+            "Least-squares circle fit with a known, fixed radius: it solves for the centre only, so every input point is judged as 'too close' or 'too far' and the centre cannot drift to absorb a bad arc. This is the circle-fit counterpart of measure.mzCircle for hole/shaft limits: use it when the radius comes from the drawing or from a calibrated artefact. Points come from a PointList (contour.toPoints / feature outputs); fewer than 3 points or a degenerate arc returns found=false. Residuals are radial distances (measured minus known radius) in pixels; rmsError and maxError are reported in the same unit as the input. found also requires convergence and the optional maxRmsError/maxRadialError gates, with reason in {not-converged, rms-exceeded, radial-error-exceeded, ok}; tooCloseCount/tooFarCount split the offending points by sign and residualsJson keeps every signed residual for re-inspection.",
             "builtin")
     ];
 }

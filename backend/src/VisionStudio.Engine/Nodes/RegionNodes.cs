@@ -1,3 +1,4 @@
+using System.Text.Json;
 using JLVisionLib;
 using OpenCvSharp;
 using VisionStudio.Engine.Algorithms;
@@ -65,6 +66,97 @@ internal static class RegionNodeHelpers
             _ => throw new InvalidOperationException("Unsupported region boolean operation.")
         };
         return JLVisionRegions.FromNative(result, a.Width, a.Height, cancellationToken);
+    }
+
+    public static void ValidateCompatible(VisionRegion a, VisionRegion b, string operation)
+    {
+        if (a.Width != b.Width || a.Height != b.Height)
+            throw new InvalidOperationException($"{operation} canvas mismatch: A={a.Width}x{a.Height}, B={b.Width}x{b.Height}.");
+        if (a.CoordinateSystem != b.CoordinateSystem || a.SchemaVersion != b.SchemaVersion)
+            throw new InvalidOperationException($"{operation} coordinate contract mismatch: A={a.CoordinateSystem}/v{a.SchemaVersion}, B={b.CoordinateSystem}/v{b.SchemaVersion}.");
+    }
+
+    public static string SourceMappings(VisionRegion result, VisionRegion a, VisionRegion? b, string operation, CancellationToken token)
+    {
+        var aMap = MapContributors(result, a, token);
+        var bMap = b is null ? null : MapContributors(result, b, token);
+        var removedB = new HashSet<int>();
+        if (b is not null && operation == "difference")
+        {
+            var removed = SetOperation(a, result, "difference", token);
+            foreach (var index in MapContributors(removed, b, token).SelectMany(set => set)) removedB.Add(index);
+        }
+        var rows = new List<object>();
+        for (var i = 0; i < result.Components.Count; i++)
+        {
+            var aObjects = aMap[i].OrderBy(x => x).ToArray();
+            var bObjects = bMap?[i].OrderBy(x => x).ToArray() ?? [];
+            var ownership = operation switch
+            {
+                "difference" => "a-only",
+                "xor" => aObjects.Length > 0 && bObjects.Length == 0 ? "a-only" : bObjects.Length > 0 && aObjects.Length == 0 ? "b-only" : "invalid-overlap",
+                "intersection" => "intersection",
+                _ => aObjects.Length > 0 && bObjects.Length > 0 ? "a-and-b" : aObjects.Length > 0 ? "a-only" : "b-only"
+            };
+            rows.Add(new { outputIndex = i, aObjects, bObjects, ownership });
+        }
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1, operation, coordinateSystem = result.CoordinateSystem,
+            sourceRegionIdA = a.SourceRegionId, sourceRegionIdB = b?.SourceRegionId,
+            subtractedBObjects = operation == "difference" ? removedB.OrderBy(x => x).ToArray() : Array.Empty<int>(),
+            outputs = rows
+        });
+    }
+
+    private static List<HashSet<int>> MapContributors(VisionRegion result, VisionRegion source, CancellationToken token)
+    {
+        var rows = new Dictionary<int, List<(int ObjectIndex, VisionRegionRun Run)>>();
+        for (var objectIndex = 0; objectIndex < source.Components.Count; objectIndex++)
+        {
+            token.ThrowIfCancellationRequested();
+            foreach (var run in source.Components[objectIndex].Runs)
+            {
+                if (!rows.TryGetValue(run.Row, out var list)) rows[run.Row] = list = [];
+                list.Add((objectIndex, run));
+            }
+        }
+        foreach (var list in rows.Values) list.Sort((x, y) => x.Run.StartColumn.CompareTo(y.Run.StartColumn));
+        var maps = new List<HashSet<int>>();
+        foreach (var component in result.Components)
+        {
+            token.ThrowIfCancellationRequested();
+            var contributors = new HashSet<int>();
+            foreach (var outputRun in component.Runs)
+            {
+                if (!rows.TryGetValue(outputRun.Row, out var candidates)) continue;
+                foreach (var candidate in candidates)
+                {
+                    if (candidate.Run.EndColumn < outputRun.StartColumn) continue;
+                    if (candidate.Run.StartColumn > outputRun.EndColumn) break;
+                    contributors.Add(candidate.ObjectIndex);
+                }
+            }
+            maps.Add(contributors);
+        }
+        return maps;
+    }
+
+    public static List<int[]> BridgedPairs(string mappingsJson)
+    {
+        using var document = JsonDocument.Parse(mappingsJson);
+        var pairs = new HashSet<(int A, int B)>();
+        if (document.RootElement.TryGetProperty("outputs", out var outputs) && outputs.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var output in outputs.EnumerateArray())
+            {
+                if (!output.TryGetProperty("aObjects", out var objects) || objects.ValueKind != JsonValueKind.Array) continue;
+                var indices = objects.EnumerateArray().Select(v => v.GetInt32()).OrderBy(v => v).ToArray();
+                for (var i = 0; i < indices.Length; i++)
+                for (var j = i + 1; j < indices.Length; j++) pairs.Add((indices[i], indices[j]));
+            }
+        }
+        return pairs.Select(pair => new[] { pair.A, pair.B }).OrderBy(pair => pair[0]).ThenBy(pair => pair[1]).ToList();
     }
 
     public static NodeExecutorResult EnrichExtras(NodeExecutorResult result, string nodeType, params (string Key, object? Value)[] extra)
@@ -147,15 +239,25 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
             throw new InvalidOperationException("region.fromRange requires a non-empty image.");
         if (source.Width > 16384 || source.Height > 16384)
             throw new InvalidOperationException("region.fromRange image must be at most 16384 per axis.");
+        if (context.TryGetValue("region", out var regionValue))
+        {
+            var limitingRegion = regionValue.Require<VisionRegion>("region");
+            if (limitingRegion.Width != source.Width || limitingRegion.Height != source.Height)
+                throw new InvalidOperationException($"region.fromRange region size mismatch: source={source.Width}x{source.Height}, region={limitingRegion.Width}x{limitingRegion.Height}.");
+            if (limitingRegion.CoordinateSystem != VisionRegion.ImagePixelCenterContract)
+                throw new InvalidOperationException($"region.fromRange region coordinate contract '{limitingRegion.CoordinateSystem}' does not match image-pixel-center-v1.");
+        }
         var inner = mode == "gray"
             ? RegionFromThresholdCore.Execute(context, node, Type, cancellationToken)
             : RegionFromColorRangeCore.Execute(context, node, Type, cancellationToken);
         VisionImage? maskImage = inner.Outputs.TryGetValue("image", out var imageValue)
             ? imageValue.Require<VisionImage>("image")
             : null;
+        var innerSummary = inner.Summary;
         try
         {
             var region = inner.Outputs["region"].Require<VisionRegion>("region");
+            var preInvertArea = JLVisionRegions.PixelArea(region);
             var adjusted = ApplyRoiAndInvert(region, domain, node, source.Width, source.Height, cancellationToken);
             if (!ReferenceEquals(adjusted, region))
             {
@@ -172,14 +274,30 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
             if (!found && emptyPolicy == "fail")
                 throw new InvalidOperationException("region.fromRange produced an empty region and emptyPolicy=fail.");
             var blobCount = RegionNodeHelpers.CountBlobs(inner.Outputs["region"].Require<VisionRegion>("region"), cancellationToken);
+            var finalArea = JLVisionRegions.PixelArea(inner.Outputs["region"].Require<VisionRegion>("region"));
+            var graySource = context.TryGetValue("minGray", out _) || context.TryGetValue("maxGray", out _) ? "ports" : "parameters";
+            var colorMin = new[] { node.GetDouble("min1", 0), node.GetDouble("min2", 0), node.GetDouble("min3", .5) };
+            var colorMax = new[] { node.GetDouble("max1", 360), node.GetDouble("max2", 1), node.GetDouble("max3", 1) };
+            var hsvWrap = mode == "color" && node.GetString("space", "hsv").Equals("hsv", StringComparison.OrdinalIgnoreCase) && colorMin[0] > colorMax[0];
             var diag = CoordinateValidation.Diagnostics(Type, ("mode", mode), ("emptyPolicy", emptyPolicy), ("found", found),
                 ("width", source.Width), ("height", source.Height), ("hasDomain", domain is not null),
-                ("pixelType", inner.Summary.GetValueOrDefault("pixelType")), ("grayLowerLimit", inner.Summary.GetValueOrDefault("grayLowerLimit")), ("grayUpperLimit", inner.Summary.GetValueOrDefault("grayUpperLimit")),
-                ("invert", node.GetBool("invert", false)), ("hasRoi", node.GetRoi() is not null), ("blobCount", blobCount));
+                ("pixelType", innerSummary.GetValueOrDefault("pixelType")), ("grayLowerLimit", innerSummary.GetValueOrDefault("grayLowerLimit")), ("grayUpperLimit", innerSummary.GetValueOrDefault("grayUpperLimit")),
+                ("effectiveGrayMin", mode == "gray" ? innerSummary.GetValueOrDefault("minGray") : null),
+                ("effectiveGrayMax", mode == "gray" ? innerSummary.GetValueOrDefault("maxGray") : null),
+                ("grayRangeSource", mode == "gray" ? graySource : null),
+                ("colorSpace", mode == "color" ? node.GetString("space", "hsv") : null),
+                ("effectiveColorMin", mode == "color" ? colorMin : null), ("effectiveColorMax", mode == "color" ? colorMax : null),
+                ("hsvHueWrap", hsvWrap), ("invert", node.GetBool("invert", false)),
+                ("preInvertHitPixels", preInvertArea), ("postInvertHitPixels", finalArea), ("hasRoi", node.GetRoi() is not null), ("blobCount", blobCount));
             var outputs = new Dictionary<string, VisionValue>(inner.Outputs) { ["blobCount"] = VisionValue.Integer(blobCount), ["diagnostics"] = VisionValue.String(diag) };
-            var summary = new Dictionary<string, object?>(inner.Summary)
+            var summary = new Dictionary<string, object?>(innerSummary)
             {
                 ["mode"] = mode, ["emptyPolicy"] = emptyPolicy, ["blobCount"] = blobCount,
+                ["effectiveGrayMin"] = mode == "gray" ? innerSummary.GetValueOrDefault("minGray") : null,
+                ["effectiveGrayMax"] = mode == "gray" ? innerSummary.GetValueOrDefault("maxGray") : null,
+                ["grayRangeSource"] = mode == "gray" ? graySource : null,
+                ["effectiveColorMin"] = mode == "color" ? colorMin : null, ["effectiveColorMax"] = mode == "color" ? colorMax : null,
+                ["hsvHueWrap"] = hsvWrap, ["preInvertHitPixels"] = preInvertArea, ["postInvertHitPixels"] = finalArea,
                 ["invert"] = node.GetBool("invert", false), ["hasRoi"] = node.GetRoi() is not null, ["diagnostics"] = diag
             };
             return ValueTask.FromResult(inner with { Outputs = outputs, Summary = summary });
@@ -290,19 +408,43 @@ public sealed class RegionConnectedComponentsNode : IVisionNodeExecutor
         if (region.Width > 16384 || region.Height > 16384)
             throw new InvalidOperationException("region.connectedComponents canvas must be at most 16384 per axis.");
         if (region.Components.Count > 100_000) throw new InvalidOperationException("region.connectedComponents refuses more than 100000 input objects.");
-        using var native = JLVisionRegions.ToNative(region);
-        using var union = native.Union1();
-        using var connected = union.Connection();
-        var result = RegionNodeHelpers.Result(JLVisionRegions.FromNative(connected, region.Width, region.Height, cancellationToken), cancellationToken);
+        var connectivity = node.GetString("connectivity", "8").Trim().ToLowerInvariant();
+        if (connectivity is not ("4" or "8")) throw new InvalidOperationException("region.connectedComponents connectivity must be 4 or 8.");
+        VisionRegion connectedRegion;
+        if (connectivity == "4")
+        {
+            using var mask = JLVisionRegions.Mask(region);
+            var (components, _) = RegionFromMaskNode.BuildComponents(mask, cancellationToken, PixelConnectivity.Connectivity4);
+            connectedRegion = new VisionRegion(region.Width, region.Height, components, region.CoordinateSystem, region.SchemaVersion, region.SourceRegionId);
+        }
+        else
+        {
+            using var native = JLVisionRegions.ToNative(region);
+            using var union = native.Union1();
+            using var connected = union.Connection();
+            connectedRegion = JLVisionRegions.FromNative(connected, region.Width, region.Height, cancellationToken)
+                .WithMetadata(region.CoordinateSystem, region.SchemaVersion, region.SourceRegionId);
+        }
+        var result = RegionNodeHelpers.Result(connectedRegion, cancellationToken);
         return ValueTask.FromResult(RegionNodeHelpers.Complete(result, cancellationToken, () =>
         {
             var outCount = result.Summary.TryGetValue("count", out var cs) ? Convert.ToInt32(cs) : 0;
             if (outCount == 0 && emptyPolicy == "fail")
                 throw new InvalidOperationException("region.connectedComponents produced no components and emptyPolicy=fail.");
+            var mappings = RegionNodeHelpers.SourceMappings(connectedRegion, region, null, "connectedComponents", cancellationToken);
             var diag = CoordinateValidation.Diagnostics(Type, ("inputComponentCount", region.Components.Count), ("outputCount", outCount),
-                ("width", region.Width), ("height", region.Height), ("emptyPolicy", emptyPolicy));
-            var outputs = new Dictionary<string, VisionValue>(result.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
-            var summary = new Dictionary<string, object?>(result.Summary) { ["inputComponentCount"] = region.Components.Count, ["diagnostics"] = diag, ["emptyPolicy"] = emptyPolicy };
+                ("width", region.Width), ("height", region.Height), ("emptyPolicy", emptyPolicy),
+                ("connectivity", int.Parse(connectivity)), ("coordinateSystem", region.CoordinateSystem));
+            var outputs = new Dictionary<string, VisionValue>(result.Outputs)
+            {
+                ["diagnostics"] = VisionValue.String(diag), ["sourceMappings"] = VisionValue.String(mappings),
+                ["connectivity"] = VisionValue.Integer(int.Parse(connectivity))
+            };
+            var summary = new Dictionary<string, object?>(result.Summary)
+            {
+                ["inputComponentCount"] = region.Components.Count, ["diagnostics"] = diag, ["emptyPolicy"] = emptyPolicy,
+                ["connectivity"] = int.Parse(connectivity), ["sourceMappings"] = mappings
+            };
             return result with { Outputs = outputs, Summary = summary };
         }));
     }
@@ -323,11 +465,53 @@ public sealed class RegionFilterNode : IVisionNodeExecutor
         var feature = node.GetString("feature", "area").Trim().ToLowerInvariant();
         if (feature is not ("area" or "circularity" or "width" or "height" or "rectangularity" or "anisometry")) throw new InvalidOperationException("Unsupported region feature.");
         var minimum = node.GetDouble("min", 0); var maximum = node.GetDouble("max", 99999999);
-        if (!double.IsFinite(minimum) || !double.IsFinite(maximum) || minimum < 0 || minimum > maximum) throw new InvalidOperationException("Invalid region filter range.");
+        if (!double.IsFinite(minimum) || !double.IsFinite(maximum) || minimum < 0 || minimum > maximum)
+            throw new InvalidOperationException($"region.filter feature '{feature}' has an invalid closed interval [{minimum}, {maximum}].");
+        if (feature is "circularity" or "rectangularity" && maximum > 1)
+            throw new InvalidOperationException($"region.filter feature '{feature}' uses the closed unit interval 0..1.");
+        if (feature == "anisometry" && minimum < 1)
+            throw new InvalidOperationException("region.filter feature 'anisometry' uses the closed interval 1..infinity (major/minor axis ratio).");
+        var measurements = RegionMeasurements.Read(region, cancellationToken);
         using var native = JLVisionRegions.ToNative(region);
+        var anisometry = new Dictionary<int, double>();
+        if (feature == "anisometry")
+        {
+            for (var i = 0; i < measurements.Count; i++)
+            {
+                using var item = native.SelectObj(i + 1);
+                var ra = item.EllipticAxis(out double rb, out _);
+                anisometry[i] = ra > 1e-12 && rb > 1e-12 ? Math.Max(ra, rb) / Math.Min(ra, rb) : 0;
+            }
+        }
+        double FeatureValue(RegionObjectProperties p) => feature switch
+        {
+            "area" => p.Area, "width" => p.Rectangle.Width, "height" => p.Rectangle.Height,
+            "circularity" => p.Circularity, "rectangularity" => p.Rectangularity,
+            "anisometry" => anisometry.TryGetValue(p.Index, out var value) ? value : 0,
+            _ => throw new InvalidOperationException("Unsupported region feature.")
+        };
+        var details = measurements.Select(p =>
+        {
+            var value = FeatureValue(p);
+            var reason = value < minimum ? "below-min" : value > maximum ? "above-max" : "accepted";
+            return new { sourceIndex = p.Index, sourceRegionId = p.SourceRegionId, feature, value, min = minimum, max = maximum, accepted = reason == "accepted", reason };
+        }).ToArray();
         using var selected = native.SelectShape(feature, "and", minimum, maximum);
         var baseResult = RegionNodeHelpers.Result(JLVisionRegions.FromNative(selected, region.Width, region.Height, cancellationToken), cancellationToken);
-        return ValueTask.FromResult(RegionNodeHelpers.EnrichExtras(baseResult, Type, ("feature", feature), ("min", minimum), ("max", maximum), ("inputComponentCount", region.Components.Count)));
+        var detailsJson = JsonSerializer.Serialize(details);
+        var definition = feature switch
+        {
+            "area" => "pixel count", "width" => "bounding-box width in pixels", "height" => "bounding-box height in pixels",
+            "circularity" => "native circularity, normalized 0..1", "rectangularity" => "native rectangularity, normalized 0..1",
+            _ => "equivalent-ellipse major/minor axis ratio, >=1"
+        };
+        var unit = feature is "circularity" or "rectangularity" or "anisometry" ? "ratio" : "px";
+        var enriched = RegionNodeHelpers.EnrichExtras(baseResult, Type,
+            ("feature", feature), ("featureDefinition", definition), ("unit", unit),
+            ("min", minimum), ("max", maximum), ("inputComponentCount", region.Components.Count),
+            ("filterDetails", details), ("acceptedCount", details.Count(item => item.accepted)));
+        var outputs = new Dictionary<string, VisionValue>(enriched.Outputs) { ["filterDetails"] = VisionValue.String(detailsJson) };
+        return ValueTask.FromResult(enriched with { Outputs = outputs });
     }
 }
 
@@ -343,12 +527,21 @@ public sealed class RegionBooleanNode : IVisionNodeExecutor
         var a = context.Require<VisionRegion>("a"); var b = context.Require<VisionRegion>("b");
         if (a.Width < 1 || a.Height < 1 || b.Width < 1 || b.Height < 1)
             throw new InvalidOperationException("region.boolean requires positive canvas dimensions.");
-        if (a.Width != b.Width || a.Height != b.Height) throw new InvalidOperationException("Region dimensions must match.");
+        RegionNodeHelpers.ValidateCompatible(a, b, "region.boolean");
         if (a.Components is null || b.Components is null) throw new InvalidOperationException("region.boolean Components must be non-null.");
         var op = node.GetString("operation", "union").Trim().ToLowerInvariant();
-        var result = RegionNodeHelpers.SetOperation(a, b, op, cancellationToken);
-        var baseResult = RegionNodeHelpers.Result(result, cancellationToken);
-        return ValueTask.FromResult(RegionNodeHelpers.EnrichExtras(baseResult, Type, ("operation", op), ("width", a.Width), ("height", a.Height)));
+        if (op is not ("union" or "intersection" or "difference" or "xor")) throw new InvalidOperationException("Unsupported region boolean operation.");
+        var outputRegion = RegionNodeHelpers.SetOperation(a, b, op, cancellationToken)
+            .WithMetadata(a.CoordinateSystem, a.SchemaVersion, a.SourceRegionId);
+        var mappings = RegionNodeHelpers.SourceMappings(outputRegion, a, b, op, cancellationToken);
+        var baseResult = RegionNodeHelpers.Result(outputRegion, cancellationToken);
+        var enriched = RegionNodeHelpers.EnrichExtras(baseResult, Type, ("operation", op), ("width", a.Width), ("height", a.Height),
+            ("aObjects", a.Components.Count), ("bObjects", b.Components.Count), ("aArea", JLVisionRegions.PixelArea(a)),
+            ("bArea", JLVisionRegions.PixelArea(b)), ("unionArea", JLVisionRegions.PixelArea(RegionNodeHelpers.SetOperation(a, b, "union", cancellationToken))),
+            ("coordinateSystemA", a.CoordinateSystem), ("coordinateSystemB", b.CoordinateSystem),
+            ("schemaVersionA", a.SchemaVersion), ("schemaVersionB", b.SchemaVersion));
+        var outputs = new Dictionary<string, VisionValue>(enriched.Outputs) { ["sourceMappings"] = VisionValue.String(mappings) };
+        return ValueTask.FromResult(enriched with { Outputs = outputs, Summary = new Dictionary<string, object?>(enriched.Summary) { ["sourceMappings"] = mappings } });
     }
 }
 
@@ -371,17 +564,32 @@ public sealed class RegionFillHolesNode : IVisionNodeExecutor
         if (region.Width > 16384 || region.Height > 16384)
             throw new InvalidOperationException("region.fillHoles canvas must be at most 16384 per axis.");
         if (region.Components.Count > 100_000) throw new InvalidOperationException("region.fillHoles refuses more than 100000 input objects.");
-        using var native = JLVisionRegions.ToNative(region); using var filled = native.FillUp();
-        var result = RegionNodeHelpers.Result(JLVisionRegions.FromNative(filled, region.Width, region.Height, cancellationToken), cancellationToken);
+        var maxHoleArea = node.GetInt("maxHoleArea", 0);
+        if (maxHoleArea is < 0 or > 100000000) throw new InvalidOperationException("region.fillHoles maxHoleArea must be 0 (unlimited) or 1..100000000.");
+        var (filledRegion, holes) = RegionHoleProcessing.Fill(region, maxHoleArea, cancellationToken);
+        var result = RegionNodeHelpers.Result(filledRegion, cancellationToken);
         return ValueTask.FromResult(RegionNodeHelpers.Complete(result, cancellationToken, () =>
         {
             var outCount = result.Summary.TryGetValue("count", out var cs) ? Convert.ToInt32(cs) : 0;
             if (outCount == 0 && emptyPolicy == "fail")
                 throw new InvalidOperationException("region.fillHoles produced an empty region and emptyPolicy=fail.");
+            var inputArea = JLVisionRegions.PixelArea(region);
+            var outputArea = JLVisionRegions.PixelArea(filledRegion);
+            var holesJson = JsonSerializer.Serialize(holes);
             var diag = CoordinateValidation.Diagnostics(Type, ("inputComponentCount", region.Components.Count), ("outputCount", outCount),
-                ("width", region.Width), ("height", region.Height), ("emptyPolicy", emptyPolicy));
-            var outputs = new Dictionary<string, VisionValue>(result.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
-            var summary = new Dictionary<string, object?>(result.Summary) { ["inputComponentCount"] = region.Components.Count, ["diagnostics"] = diag, ["emptyPolicy"] = emptyPolicy };
+                ("width", region.Width), ("height", region.Height), ("emptyPolicy", emptyPolicy),
+                ("maxHoleArea", maxHoleArea), ("inputArea", inputArea), ("outputArea", outputArea),
+                ("filledPixels", outputArea - inputArea), ("holes", holes));
+            var outputs = new Dictionary<string, VisionValue>(result.Outputs)
+            {
+                ["diagnostics"] = VisionValue.String(diag), ["holesJson"] = VisionValue.String(holesJson),
+                ["filledPixels"] = VisionValue.Integer(outputArea - inputArea)
+            };
+            var summary = new Dictionary<string, object?>(result.Summary)
+            {
+                ["inputComponentCount"] = region.Components.Count, ["diagnostics"] = diag, ["emptyPolicy"] = emptyPolicy,
+                ["maxHoleArea"] = maxHoleArea, ["holes"] = holes, ["filledPixels"] = outputArea - inputArea
+            };
             return result with { Outputs = outputs, Summary = summary };
         }));
     }
@@ -396,14 +604,25 @@ public sealed class ReduceDomainNode : IVisionNodeExecutor
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-var (source, existing) = RegionNodeHelpers.Source(context);
-        var region = context.Require<VisionRegion>("region");
-        if (source.Width != region.Width || source.Height != region.Height) throw new InvalidOperationException("Domain/image dimensions must match.");
+        var (source, existing) = RegionNodeHelpers.Source(context);
+        var requested = context.Require<VisionRegion>("region");
+        if (source.Width != requested.Width || source.Height != requested.Height)
+            throw new InvalidOperationException($"image.reduceDomain region size mismatch: image={source.Width}x{source.Height}, region={requested.Width}x{requested.Height}.");
+        if (existing is not null && (source.Width != existing.Width || source.Height != existing.Height))
+            throw new InvalidOperationException($"image.reduceDomain domain size mismatch: image={source.Width}x{source.Height}, domain={existing.Width}x{existing.Height}.");
+        var requestedArea = JLVisionRegions.PixelArea(requested);
+        var existingArea = existing is null ? (double?)null : JLVisionRegions.PixelArea(existing);
+        var warnings = new List<object>();
+        if (existing is not null && existingArea == 0)
+            warnings.Add(new { code = "empty-input-domain", width = existing.Width, height = existing.Height, area = 0 });
+        var region = requested;
         if (existing is not null)
         {
-            using var a = JLVisionRegions.ToNative(existing); using var b = JLVisionRegions.ToNative(region);
+            using var a = JLVisionRegions.ToNative(existing); using var b = JLVisionRegions.ToNative(requested);
             using var ua = a.Union1(); using var ub = b.Union1(); using var intersection = ua.Intersection(ub);
             region = JLVisionRegions.FromNative(intersection, source.Width, source.Height, cancellationToken);
+            if (requestedArea > 0 && existingArea > 0 && JLVisionRegions.PixelArea(region) == 0)
+                warnings.Add(new { code = "disjoint-request-and-domain", requestedArea, existingArea, intersectionArea = 0, width = source.Width, height = source.Height });
         }
         cancellationToken.ThrowIfCancellationRequested();
         var emptyPolicy = CoordinateValidation.RequireNonEmpty(node.GetString("emptyPolicy", "fail"), "emptyPolicy").ToLowerInvariant();
@@ -411,16 +630,82 @@ var (source, existing) = RegionNodeHelpers.Source(context);
             throw new InvalidOperationException("image.reduceDomain emptyPolicy must be fail or passthrough.");
         var area = JLVisionRegions.PixelArea(region);
         var found = area > 0;
+        if (!found)
+            warnings.Add(new { code = "empty-effective-domain", requestedArea, existingArea, intersectionArea = area, width = source.Width, height = source.Height });
         if (!found && emptyPolicy == "fail")
             throw new InvalidOperationException("image.reduceDomain received an empty region and emptyPolicy=fail.");
+        var warningsJson = JsonSerializer.Serialize(warnings);
         var diag = CoordinateValidation.Diagnostics(Type, ("found", found), ("area", area),
+            ("requestedArea", requestedArea), ("existingArea", existingArea), ("effectiveArea", area),
             ("width", source.Width), ("height", source.Height), ("emptyPolicy", emptyPolicy),
-            ("regionObjects", region.Components.Count), ("intersectedPriorDomain", existing is not null));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+            ("regionObjects", region.Components.Count), ("intersectedPriorDomain", existing is not null),
+            ("warningCount", warnings.Count), ("warnings", warnings));
+        var outputs = new Dictionary<string, VisionValue>
         {
             ["domainImage"] = VisionValue.DomainImage(new VisionDomainImage(source.CloneOwned(), region)),
-            ["region"] = VisionValue.Region(region), ["area"] = VisionValue.Double(area),
-            ["found"] = VisionValue.Boolean(found), ["diagnostics"] = VisionValue.String(diag)
-        }, new Dictionary<string, object?> { ["found"] = found, ["area"] = area, ["width"] = source.Width, ["height"] = source.Height, ["emptyPolicy"] = emptyPolicy, ["diagnostics"] = diag }));
+            ["region"] = VisionValue.Region(region), ["requestedRegion"] = VisionValue.Region(requested),
+            ["area"] = VisionValue.Double(area), ["found"] = VisionValue.Boolean(found),
+            ["requestedArea"] = VisionValue.Double(requestedArea), ["effectiveArea"] = VisionValue.Double(area),
+            ["diagnostics"] = VisionValue.String(diag), ["warningsJson"] = VisionValue.String(warningsJson),
+            ["warningCount"] = VisionValue.Integer(warnings.Count)
+        };
+        if (existing is not null)
+        {
+            outputs["existingRegion"] = VisionValue.Region(existing);
+            outputs["existingArea"] = VisionValue.Double(existingArea ?? 0);
+        }
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?>
+        {
+            ["found"] = found, ["area"] = area, ["requestedArea"] = requestedArea, ["existingArea"] = existingArea,
+            ["effectiveArea"] = area, ["width"] = source.Width, ["height"] = source.Height,
+            ["emptyPolicy"] = emptyPolicy, ["warningCount"] = warnings.Count, ["warnings"] = warnings, ["diagnostics"] = diag
+        }));
+    }
+}
+
+internal static class RegionHoleProcessing
+{
+    public static (VisionRegion Region, List<object> Holes) Fill(VisionRegion source, int maxHoleArea, CancellationToken token)
+    {
+        using var mask = JLVisionRegions.Mask(source);
+        using var background = new Mat();
+        Cv2.BitwiseNot(mask, background);
+        using var labels = new Mat();
+        var labelCount = Cv2.ConnectedComponents(background, labels, PixelConnectivity.Connectivity8, MatType.CV_32S);
+        var borderLabels = new HashSet<int>();
+        void MarkBorder(int y, int x) { var label = labels.At<int>(y, x); if (label > 0) borderLabels.Add(label); }
+        for (var x = 0; x < source.Width; x++) { MarkBorder(0, x); MarkBorder(source.Height - 1, x); }
+        for (var y = 0; y < source.Height; y++) { MarkBorder(y, 0); MarkBorder(y, source.Width - 1); }
+        var areas = new long[labelCount]; var sumX = new long[labelCount]; var sumY = new long[labelCount];
+        for (var y = 0; y < source.Height; y++)
+        {
+            if ((y & 31) == 0) token.ThrowIfCancellationRequested();
+            for (var x = 0; x < source.Width; x++)
+            {
+                var label = labels.At<int>(y, x);
+                if (label <= 0) continue;
+                areas[label]++; sumX[label] += x; sumY[label] += y;
+            }
+        }
+        var holes = new List<object>(); long filledPixels = 0;
+        for (var label = 1; label < labelCount; label++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (areas[label] == 0) continue;
+            var open = borderLabels.Contains(label);
+            var allowed = !open && (maxHoleArea == 0 || areas[label] <= maxHoleArea);
+            var reason = open ? "open-to-canvas" : allowed ? "filled" : "above-max-hole-area";
+            if (allowed)
+            {
+                using var holeMask = new Mat();
+                Cv2.Compare(labels, label, holeMask, CmpTypes.EQ);
+                mask.SetTo(Scalar.All(255), holeMask);
+                filledPixels += areas[label];
+            }
+            holes.Add(new { holeIndex = holes.Count, label, area = areas[label], x = sumX[label] / (double)areas[label], y = sumY[label] / (double)areas[label], open, filled = allowed, reason });
+        }
+        if (filledPixels == 0 && source.Components.Count == 0) return (source.WithMetadata(), holes);
+        var (components, _) = RegionFromMaskNode.BuildComponents(mask, token);
+        return (new VisionRegion(source.Width, source.Height, components, source.CoordinateSystem, source.SchemaVersion, source.SourceRegionId), holes);
     }
 }

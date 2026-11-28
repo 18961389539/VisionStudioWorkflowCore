@@ -12,11 +12,66 @@ namespace VisionStudio.Engine.Nodes;
 /// 私有协议报文收发的公共部分：编码、终止符、按模式读取应答、正则校验。
 /// 三个传输节点（TCP / UDP / 串口）共用同一套语义，避免"同一个终止符在三个节点里三种解释"。
 /// </summary>
+internal sealed class ProtocolIncompleteResponseException(string message) : InvalidOperationException(message);
+
 internal static class ProtocolFraming
 {
     public const int MaxRequestBytes = 65536;
     public const int MaxResponseCeiling = 1048576;
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
+    private static long _nextSequence;
+
+    public static uint NextSequence() => unchecked((uint)Interlocked.Increment(ref _nextSequence));
+
+    public static byte[] ApplySequence(string payload, string encoding, string format, uint sequence, out byte[] echo)
+    {
+        echo = format.ToLowerInvariant() switch
+        {
+            "binary2" => [(byte)(sequence & 0xFF), (byte)((sequence >> 8) & 0xFF)],
+            "binary4" => [(byte)(sequence & 0xFF), (byte)((sequence >> 8) & 0xFF), (byte)((sequence >> 16) & 0xFF), (byte)((sequence >> 24) & 0xFF)],
+            _ => []
+        };
+        if (format.Equals("none", StringComparison.OrdinalIgnoreCase)) return EncodePayload(payload, encoding);
+        var token = format.ToLowerInvariant() switch
+        {
+            "ascii" => sequence.ToString(CultureInfo.InvariantCulture),
+            "hex" => sequence.ToString("X8", CultureInfo.InvariantCulture),
+            _ => string.Empty
+        };
+        if (token.Length > 0)
+        {
+            const string placeholder = "{sequence}";
+            payload = payload.Contains(placeholder, StringComparison.Ordinal)
+                ? payload.Replace(placeholder, token, StringComparison.Ordinal)
+                : payload + token;
+            return EncodePayload(payload, encoding);
+        }
+        return EncodePayload(payload, encoding).Concat(echo).ToArray();
+    }
+
+    public static bool HasSequenceEcho(ReadOnlySpan<byte> response, string format, uint sequence)
+    {
+        if (format.Equals("none", StringComparison.OrdinalIgnoreCase)) return true;
+        if (format.Equals("ascii", StringComparison.OrdinalIgnoreCase))
+            return response.IndexOf(Encoding.ASCII.GetBytes(sequence.ToString(CultureInfo.InvariantCulture))) >= 0;
+        if (format.Equals("hex", StringComparison.OrdinalIgnoreCase))
+            return response.IndexOf(Encoding.ASCII.GetBytes(sequence.ToString("X8", CultureInfo.InvariantCulture))) >= 0;
+        var echo = format.Equals("binary2", StringComparison.OrdinalIgnoreCase)
+            ? new byte[] { (byte)(sequence & 0xFF), (byte)((sequence >> 8) & 0xFF) }
+            : new byte[] { (byte)(sequence & 0xFF), (byte)((sequence >> 8) & 0xFF), (byte)((sequence >> 16) & 0xFF), (byte)((sequence >> 24) & 0xFF) };
+        return response.IndexOf(echo) >= 0;
+    }
+
+    public static InvalidOperationException Failure(
+        string type, string deviceId, string endpoint, string requestId, string stage,
+        bool sent, string detail, Exception? inner = null)
+    {
+        var state = sent ? stage == "readIncomplete" ? "sentIncomplete" : stage == "read" ? "sentUnconfirmed" : "sentOutcomeUnknown" : "notSent";
+        var retry = sent ? "forbidden until device state is reconciled" : "allowed only for a pre-send failure";
+        return new InvalidOperationException(
+            $"{type} '{deviceId}' failed at {endpoint}; stage={stage}; requestState={state}; requestId={requestId}; " +
+            $"automaticRetry={retry}. {detail}", inner);
+    }
 
     /// <summary>按 text（UTF-8）或 hex（"0D 0A" / "0D0A" 均可）把参数转换成发送字节。</summary>
     public static byte[] EncodePayload(string payload, string encoding)
@@ -65,7 +120,8 @@ internal static class ProtocolFraming
         byte[] readTerminator,
         int readLength,
         int maxResponseBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? interByteTimeoutMs = null)
     {
         if (readMode.Equals("none", StringComparison.OrdinalIgnoreCase)) return [];
 
@@ -78,7 +134,26 @@ internal static class ProtocolFraming
             var want = readMode.Equals("fixedLength", StringComparison.OrdinalIgnoreCase)
                 ? Math.Min(buffer.Length, readLength - (int)collected.Length)
                 : buffer.Length;
-            var read = await stream.ReadAsync(buffer.AsMemory(0, want), cancellationToken).ConfigureAwait(false);
+            int read;
+            if (interByteTimeoutMs is > 0)
+            {
+                using var interByte = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                interByte.CancelAfter(interByteTimeoutMs.Value);
+                try
+                {
+                    read = await stream.ReadAsync(buffer.AsMemory(0, want), interByte.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new ProtocolIncompleteResponseException(collected.Length == 0
+                        ? $"no response byte arrived within interByteTimeoutMs={interByteTimeoutMs.Value}."
+                        : $"response stalled for interByteTimeoutMs={interByteTimeoutMs.Value} after {collected.Length} byte(s); the frame is incomplete.");
+                }
+            }
+            else
+            {
+                read = await stream.ReadAsync(buffer.AsMemory(0, want), cancellationToken).ConfigureAwait(false);
+            }
             if (read == 0) break;
             collected.Write(buffer, 0, read);
 
@@ -96,12 +171,31 @@ internal static class ProtocolFraming
         if (readMode.Equals("untilTerminator", StringComparison.OrdinalIgnoreCase) && readTerminator.Length > 0)
         {
             if (!result.AsSpan().EndsWith(readTerminator))
-                throw new InvalidOperationException($"protocol response did not end with the configured terminator ({ToHex(readTerminator)}) before the connection closed; got {result.Length} bytes.");
+                throw new ProtocolIncompleteResponseException($"protocol response did not end with the configured terminator ({ToHex(readTerminator)}) before the connection closed; got {result.Length} bytes.");
             result = result[..^readTerminator.Length];
         }
         if (readMode.Equals("fixedLength", StringComparison.OrdinalIgnoreCase) && result.Length < readLength)
-            throw new InvalidOperationException($"protocol response returned {result.Length} bytes but readLength={readLength} was requested.");
+            throw new ProtocolIncompleteResponseException($"protocol response returned {result.Length} bytes but readLength={readLength} was requested.");
         return result;
+    }
+
+    public static void ValidateNoReplyMatch(string type, string readMode, string expectPattern, bool requireMatch)
+    {
+        if (readMode.Equals("none", StringComparison.OrdinalIgnoreCase)
+            && (!string.IsNullOrWhiteSpace(expectPattern) || requireMatch))
+            throw new InvalidOperationException($"{type} readMode=none cannot evaluate expectPattern/requireMatch; disable response matching or select a reply read mode.");
+    }
+
+    public static bool MatchesResponse(ReadOnlySpan<byte> response, string matchOn, string pattern, bool ignoreCase, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return true;
+        var text = matchOn.ToLowerInvariant() switch
+        {
+            "hex" => ToHex(response),
+            "binary" => Encoding.Latin1.GetString(response),
+            _ => Encoding.UTF8.GetString(response)
+        };
+        return Matches(text, pattern, ignoreCase, cancellationToken);
     }
 
     /// <summary>可选正则校验；返回是否匹配。pattern 为空视为不校验（matched=true）。</summary>
@@ -133,13 +227,25 @@ internal static class ProtocolFraming
         byte[] response,
         bool matched,
         double elapsedMs,
-        Dictionary<string, object?> detail)
+        Dictionary<string, object?> detail,
+        string requestId,
+        string requestState,
+        uint sequence,
+        string sequenceFormat,
+        bool matchEvaluated = true,
+        double? connectMs = null,
+        double? sendMs = null,
+        double? readMs = null,
+        string? matchOn = null)
     {
         var text = Encoding.UTF8.GetString(response);
         var diagnostics = CoordinateValidation.Diagnostics(
             type,
             [("deviceId", deviceId), ("endpoint", endpoint), ("transport", transport),
-             ("bytesRead", response.Length), ("matched", matched), ("elapsedMs", elapsedMs),
+             ("bytesRead", response.Length), ("matched", matched), ("matchEvaluated", matchEvaluated), ("matchOn", matchOn),
+             ("elapsedMs", elapsedMs), ("connectMs", connectMs), ("sendMs", sendMs), ("readMs", readMs),
+             ("requestId", requestId), ("requestState", requestState), ("sequence", sequence),
+             ("sequenceFormat", sequenceFormat), ("automaticRetry", false),
              ("responseHex", ToHex(response.AsSpan(0, Math.Min(response.Length, 256))))]);
         var summary = new Dictionary<string, object?>(detail)
         {
@@ -148,7 +254,17 @@ internal static class ProtocolFraming
             ["transport"] = transport,
             ["bytesRead"] = response.Length,
             ["matched"] = matched,
+            ["matchEvaluated"] = matchEvaluated,
+            ["matchOn"] = matchOn,
             ["elapsedMs"] = elapsedMs,
+            ["connectMs"] = connectMs,
+            ["sendMs"] = sendMs,
+            ["readMs"] = readMs,
+            ["requestId"] = requestId,
+            ["requestState"] = requestState,
+            ["sequence"] = sequence,
+            ["sequenceFormat"] = sequenceFormat,
+            ["automaticRetry"] = false,
             ["response"] = text.Length <= 200 ? text : text[..200] + "…",
             ["diagnostics"] = diagnostics
         };
@@ -159,7 +275,18 @@ internal static class ProtocolFraming
                 ["responseHex"] = VisionValue.String(ToHex(response)),
                 ["bytesRead"] = VisionValue.Integer(response.Length),
                 ["matched"] = VisionValue.Boolean(matched),
+                ["matchEvaluated"] = VisionValue.Boolean(matchEvaluated),
+                ["matchOn"] = VisionValue.String(matchOn ?? "text"),
+                ["endpoint"] = VisionValue.String(endpoint),
+                ["connectMs"] = VisionValue.Double(connectMs ?? 0),
+                ["sendMs"] = VisionValue.Double(sendMs ?? 0),
+                ["readMs"] = VisionValue.Double(readMs ?? 0),
                 ["elapsedMs"] = VisionValue.Double(elapsedMs),
+                ["requestId"] = VisionValue.String(requestId),
+                ["requestState"] = VisionValue.String(requestState),
+                ["sequence"] = VisionValue.Integer(sequence),
+                ["sequenceFormat"] = VisionValue.String(sequenceFormat),
+                ["automaticRetry"] = VisionValue.Boolean(false),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             summary);
@@ -193,6 +320,10 @@ public sealed class TcpRequestNode(IDeviceCommandOwnershipGate? ownershipGate = 
         var timeoutMs = ProtocolFraming.RequireRange(node.GetInt("timeoutMs", 1000), 50, 60000, "device.tcpRequest timeoutMs");
         var maxResponse = ProtocolFraming.RequireRange(node.GetInt("maxResponseBytes", 4096), 16, ProtocolFraming.MaxResponseCeiling, "device.tcpRequest maxResponseBytes");
         var readMode = ReadMode(node);
+        var expectPattern = node.GetString("expectPattern", string.Empty);
+        var requireMatch = node.GetBool("requireMatch", false);
+        ProtocolFraming.ValidateNoReplyMatch(Type, readMode, expectPattern, requireMatch);
+        var interByteTimeoutMs = ProtocolFraming.RequireRange(node.GetInt("interByteTimeoutMs", Math.Min(1000, timeoutMs)), 10, timeoutMs, "device.tcpRequest interByteTimeoutMs");
         var readTerminator = ProtocolFraming.Terminator(node.GetString("readTerminator", "crlf"));
         var readLength = ProtocolFraming.RequireRange(node.GetInt("readLength", 0), 0, 65535, "device.tcpRequest readLength");
         if (readMode == "fixedLength" && readLength == 0)
@@ -201,9 +332,13 @@ public sealed class TcpRequestNode(IDeviceCommandOwnershipGate? ownershipGate = 
         var payload = context.TryGetValue("payload", out var connected)
             ? connected.Require<string>("payload")
             : node.GetString("payload", string.Empty);
-        var request = ProtocolFraming.EncodePayload(payload, node.GetString("payloadEncoding", "text"));
+        var requestId = Guid.NewGuid().ToString("N");
+        var sequence = ProtocolFraming.NextSequence();
+        var sequenceFormat = node.GetString("sequenceFormat", "none").Trim().ToLowerInvariant();
+        if (sequenceFormat is not ("none" or "ascii" or "hex" or "binary2" or "binary4"))
+            throw new InvalidOperationException("device.tcpRequest sequenceFormat must be none, ascii, hex, binary2 or binary4.");
         var terminator = ProtocolFraming.Terminator(node.GetString("sendTerminator", "none"));
-        var frame = request.Concat(terminator).ToArray();
+        var frame = ProtocolFraming.ApplySequence(payload, node.GetString("payloadEncoding", "text"), sequenceFormat, sequence, out _).Concat(terminator).ToArray();
         if (frame.Length > ProtocolFraming.MaxRequestBytes)
             throw new InvalidOperationException($"device.tcpRequest request is {frame.Length} bytes; the limit is {ProtocolFraming.MaxRequestBytes}.");
         if (readMode != "none" && frame.Length == 0)
@@ -216,53 +351,73 @@ public sealed class TcpRequestNode(IDeviceCommandOwnershipGate? ownershipGate = 
         byte[] response;
         bool matched;
         var transmissionAttempted = false;
+        var stage = "connect";
+        double connectMs = 0, sendMs = 0, readMs = 0;
         // 派发边界：所有权失效（租约被释放/换代）时闸门抛错，请求根本不会发出。
         using var permit = (ownershipGate ?? AllowAllDeviceCommandOwnershipGate.Instance)
             .AcquireCommandPermit(DeviceCommandResourceKinds.Device, deviceId);
         try
         {
             using var client = new TcpClient { NoDelay = true };
+            var connectWatch = Stopwatch.StartNew();
             await client.ConnectAsync(host, port, timeout.Token).ConfigureAwait(false);
+            connectWatch.Stop(); connectMs = connectWatch.Elapsed.TotalMilliseconds;
             var stream = client.GetStream();
             if (frame.Length > 0)
             {
+                stage = "send";
                 transmissionAttempted = true;
+                var sendWatch = Stopwatch.StartNew();
                 await stream.WriteAsync(frame, timeout.Token).ConfigureAwait(false);
+                await stream.FlushAsync(timeout.Token).ConfigureAwait(false);
+                sendWatch.Stop(); sendMs = sendWatch.Elapsed.TotalMilliseconds;
             }
-            await stream.FlushAsync(timeout.Token).ConfigureAwait(false);
-            response = await ProtocolFraming.ReadResponseAsync(stream, readMode, readTerminator, readLength, maxResponse, timeout.Token).ConfigureAwait(false);
+            stage = "read";
+            var readWatch = Stopwatch.StartNew();
+            response = await ProtocolFraming.ReadResponseAsync(stream, readMode, readTerminator, readLength, maxResponse, timeout.Token, interByteTimeoutMs).ConfigureAwait(false);
+            readWatch.Stop(); readMs = readWatch.Elapsed.TotalMilliseconds;
+            stage = "validate";
+            if (readMode != "none" && !ProtocolFraming.HasSequenceEcho(response, sequenceFormat, sequence))
+                throw new InvalidOperationException($"response did not echo sequence {sequence} in {sequenceFormat} format.");
             stopwatch.Stop();
             var text = Encoding.UTF8.GetString(response);
-            matched = ProtocolFraming.Matches(text, node.GetString("expectPattern", string.Empty), node.GetBool("ignoreCase", false), cancellationToken);
+            matched = readMode == "none" ? false : ProtocolFraming.Matches(text, expectPattern, node.GetBool("ignoreCase", false), cancellationToken);
             if (!matched && node.GetBool("requireMatch", false))
                 throw new InvalidOperationException(
                     $"device.tcpRequest '{deviceId}' response from {endpoint} did not match expectPattern '{node.GetString("expectPattern", string.Empty)}'; got '{Clip(text)}'.");
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException(
-                $"device.tcpRequest '{deviceId}' timed out after {timeoutMs} ms talking to {endpoint}. " +
-                "The request may already have reached the peer; verify device state before retrying.");
+            var detail = transmissionAttempted
+                ? $"timed out after {timeoutMs} ms talking to {endpoint}. The request may already have reached the peer; verify device state before retrying."
+                : $"timed out after {timeoutMs} ms connecting to {endpoint}; request was not sent.";
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, transmissionAttempted, detail, ex);
         }
         catch (SocketException ex)
         {
             var warning = transmissionAttempted ? " The request may already have reached the peer; verify device state before retrying." : string.Empty;
-            throw new InvalidOperationException($"device.tcpRequest '{deviceId}' failed talking to {endpoint}: {ex.SocketErrorCode} {ex.Message}{warning}", ex);
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, transmissionAttempted,
+                $"failed talking to {endpoint}: {ex.SocketErrorCode} {ex.Message}{warning}", ex);
         }
-        catch (IOException ex) when (transmissionAttempted)
+        catch (IOException ex)
         {
-            throw new InvalidOperationException(
-                $"device.tcpRequest '{deviceId}' failed talking to {endpoint}: {ex.Message} " +
-                "The request may already have reached the peer; verify device state before retrying.", ex);
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, transmissionAttempted,
+                $"failed talking to {endpoint}: {ex.Message}" + (transmissionAttempted ? " The request may already have reached the peer; verify device state before retrying." : " The request was not sent."), ex);
+        }
+        catch (ProtocolIncompleteResponseException ex) when (transmissionAttempted)
+        {
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, "readIncomplete", true,
+                $"{ex.Message} The request may already have reached the peer; verify device state before retrying.", ex);
         }
         catch (InvalidOperationException ex) when (transmissionAttempted)
         {
-            throw new InvalidOperationException(
-                $"device.tcpRequest '{deviceId}' failed talking to {endpoint}: {ex.Message} " +
-                "The request may already have reached the peer; verify device state before retrying.", ex);
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, true,
+                $"{ex.Message} The request may already have reached the peer; verify device state before retrying.", ex);
         }
         return ProtocolFraming.Result(Type, deviceId, endpoint, "tcp", response, matched, stopwatch.Elapsed.TotalMilliseconds,
-            new Dictionary<string, object?> { ["requestBytes"] = frame.Length, ["readMode"] = readMode });
+            new Dictionary<string, object?> { ["requestBytes"] = frame.Length, ["readMode"] = readMode, ["interByteTimeoutMs"] = interByteTimeoutMs },
+            requestId, readMode == "none" ? "sentNoReply" : "responseConfirmed", sequence, sequenceFormat,
+            matchEvaluated: readMode != "none", connectMs: connectMs, sendMs: sendMs, readMs: readMs);
     }
 
     internal static string ReadMode(NodeDefinition node)
@@ -301,49 +456,85 @@ public sealed class UdpMessageNode(IDeviceCommandOwnershipGate? ownershipGate = 
         var payload = context.TryGetValue("payload", out var connected)
             ? connected.Require<string>("payload")
             : node.GetString("payload", string.Empty);
-        var frame = ProtocolFraming.EncodePayload(payload, node.GetString("payloadEncoding", "text"));
+        var requestId = Guid.NewGuid().ToString("N");
+        var sequence = ProtocolFraming.NextSequence();
         var terminator = ProtocolFraming.Terminator(node.GetString("sendTerminator", "none"));
-        var datagram = frame.Concat(terminator).ToArray();
+        var sequenceFormat = node.GetString("sequenceFormat", "none").Trim().ToLowerInvariant();
+        if (sequenceFormat is not ("none" or "ascii" or "hex" or "binary2" or "binary4"))
+            throw new InvalidOperationException("device.udpMessage sequenceFormat must be none, ascii, hex, binary2 or binary4.");
+        var datagram = ProtocolFraming.ApplySequence(payload, node.GetString("payloadEncoding", "text"), sequenceFormat, sequence, out _)
+            .Concat(terminator).ToArray();
         if (datagram.Length > ProtocolFraming.MaxRequestBytes)
             throw new InvalidOperationException($"device.udpMessage payload is {datagram.Length} bytes; the limit is {ProtocolFraming.MaxRequestBytes}.");
 
         var expectsReply = node.GetBool("expectReply", true);
+        var expectPattern = node.GetString("expectPattern", string.Empty);
+        var requireMatch = node.GetBool("requireMatch", false);
+        if (!expectsReply && (!string.IsNullOrWhiteSpace(expectPattern) || requireMatch))
+            throw new InvalidOperationException("device.udpMessage expectReply=false cannot evaluate expectPattern/requireMatch; disable response matching or enable replies.");
+        var maxResponse = ProtocolFraming.RequireRange(node.GetInt("maxResponseBytes", 4096), 16, ProtocolFraming.MaxResponseCeiling, "device.udpMessage maxResponseBytes");
         var endpoint = $"{host}:{port}";
         var stopwatch = Stopwatch.StartNew();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
         byte[] response = [];
+        var sent = false;
+        var stage = "resolve";
         using var permit = (ownershipGate ?? AllowAllDeviceCommandOwnershipGate.Instance)
             .AcquireCommandPermit(DeviceCommandResourceKinds.Device, deviceId);
         try
         {
             using var client = new UdpClient();
-            await client.SendAsync(datagram, new System.Net.IPEndPoint(System.Net.IPAddress.Parse(await ResolveAsync(host, timeout.Token)), port), timeout.Token).ConfigureAwait(false);
+            var remote = new System.Net.IPEndPoint(System.Net.IPAddress.Parse(await ResolveAsync(host, timeout.Token)), port);
+            client.Connect(remote); // filters every datagram not from the expected endpoint
+            stage = "send";
+            await client.SendAsync(datagram, timeout.Token).ConfigureAwait(false);
+            sent = true;
             if (expectsReply)
             {
-                var received = await client.ReceiveAsync(timeout.Token).ConfigureAwait(false);
-                response = received.Buffer;
-                if (response.Length > ProtocolFraming.MaxResponseCeiling)
-                    throw new InvalidOperationException($"device.udpMessage reply exceeded {ProtocolFraming.MaxResponseCeiling} bytes.");
+                stage = "read";
+                while (true)
+                {
+                    var received = await client.ReceiveAsync(timeout.Token).ConfigureAwait(false);
+                    if (received.Buffer.Length > maxResponse)
+                        throw new InvalidOperationException($"device.udpMessage reply is {received.Buffer.Length} bytes which exceeds maxResponseBytes={maxResponse}; the datagram was rejected without truncation.");
+                    // A missing/mismatched echo is an old or unrelated datagram: discard it and
+                    // keep waiting within the original budget rather than accepting stale data.
+                    if (ProtocolFraming.HasSequenceEcho(received.Buffer, sequenceFormat, sequence))
+                    {
+                        response = received.Buffer;
+                        break;
+                    }
+                }
             }
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException($"device.udpMessage '{deviceId}' timed out after {timeoutMs} ms waiting for a reply from {endpoint}.");
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, sent,
+                sent ? $"timed out after {timeoutMs} ms waiting for a correlated reply from {endpoint}; the datagram may already have been executed and must not be blindly resent."
+                     : $"timed out after {timeoutMs} ms before sending to {endpoint}; request was not sent.", ex);
         }
         catch (SocketException ex)
         {
-            throw new InvalidOperationException($"device.udpMessage '{deviceId}' failed talking to {endpoint}: {ex.SocketErrorCode} {ex.Message}", ex);
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, sent,
+                $"failed talking to {endpoint}: {ex.SocketErrorCode} {ex.Message}" + (sent ? "; the datagram may already have been executed." : "; request was not sent."), ex);
+        }
+        catch (InvalidOperationException ex) when (sent)
+        {
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, true, ex.Message, ex);
         }
         stopwatch.Stop();
 
         var text = Encoding.UTF8.GetString(response);
-        var matched = ProtocolFraming.Matches(text, node.GetString("expectPattern", string.Empty), node.GetBool("ignoreCase", false), cancellationToken);
-        if (!matched && node.GetBool("requireMatch", false))
-            throw new InvalidOperationException($"device.udpMessage '{deviceId}' reply from {endpoint} did not match expectPattern; got '{TcpRequestNode.Clip(text)}'.");
+        var matched = expectsReply && ProtocolFraming.Matches(text, expectPattern, node.GetBool("ignoreCase", false), cancellationToken);
+        if (expectsReply && !matched && requireMatch)
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, "validate", true,
+                $"reply from {endpoint} did not match expectPattern; got '{TcpRequestNode.Clip(text)}'.");
 
         return ProtocolFraming.Result(Type, deviceId, endpoint, "udp", response, matched, stopwatch.Elapsed.TotalMilliseconds,
-            new Dictionary<string, object?> { ["sentBytes"] = datagram.Length, ["expectReply"] = expectsReply });
+            new Dictionary<string, object?> { ["sentBytes"] = datagram.Length, ["expectReply"] = expectsReply, ["maxResponseBytes"] = maxResponse },
+            requestId, expectsReply ? "responseConfirmed" : "sentNoReply", sequence, sequenceFormat,
+            matchEvaluated: expectsReply);
     }
 
     private static async Task<string> ResolveAsync(string host, CancellationToken cancellationToken)
@@ -397,6 +588,13 @@ public sealed class SerialRequestNode(IDeviceCommandOwnershipGate? ownershipGate
             _ => throw new InvalidOperationException("device.serialPort stopBits must be one, onePointFive or two.")
         };
         var readMode = TcpRequestNode.ReadMode(node);
+        var expectPattern = node.GetString("expectPattern", string.Empty);
+        var requireMatch = node.GetBool("requireMatch", false);
+        ProtocolFraming.ValidateNoReplyMatch(Type, readMode, expectPattern, requireMatch);
+        var interByteTimeoutMs = ProtocolFraming.RequireRange(node.GetInt("interByteTimeoutMs", Math.Min(1000, timeoutMs)), 10, timeoutMs, "device.serialPort interByteTimeoutMs");
+        var matchOn = node.GetString("matchOn", "text").Trim().ToLowerInvariant();
+        if (matchOn is not ("text" or "binary" or "hex"))
+            throw new InvalidOperationException("device.serialPort matchOn must be text, binary or hex.");
         var readTerminator = ProtocolFraming.Terminator(node.GetString("readTerminator", "crlf"));
         var readLength = ProtocolFraming.RequireRange(node.GetInt("readLength", 0), 0, 65535, "device.serialPort readLength");
         if (readMode == "fixedLength" && readLength == 0)
@@ -405,7 +603,12 @@ public sealed class SerialRequestNode(IDeviceCommandOwnershipGate? ownershipGate
         var payload = context.TryGetValue("payload", out var connected)
             ? connected.Require<string>("payload")
             : node.GetString("payload", string.Empty);
-        var frame = ProtocolFraming.EncodePayload(payload, node.GetString("payloadEncoding", "text"))
+        var requestId = Guid.NewGuid().ToString("N");
+        var sequence = ProtocolFraming.NextSequence();
+        var sequenceFormat = node.GetString("sequenceFormat", "none").Trim().ToLowerInvariant();
+        if (sequenceFormat is not ("none" or "ascii" or "hex" or "binary2" or "binary4"))
+            throw new InvalidOperationException("device.serialPort sequenceFormat must be none, ascii, hex, binary2 or binary4.");
+        var frame = ProtocolFraming.ApplySequence(payload, node.GetString("payloadEncoding", "text"), sequenceFormat, sequence, out _)
             .Concat(ProtocolFraming.Terminator(node.GetString("sendTerminator", "crlf"))).ToArray();
         if (frame.Length == 0) throw new InvalidOperationException("device.serialPort requires a non-empty payload.");
         if (frame.Length > ProtocolFraming.MaxRequestBytes)
@@ -416,6 +619,8 @@ public sealed class SerialRequestNode(IDeviceCommandOwnershipGate? ownershipGate
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
         byte[] response;
+        var sent = false;
+        var stage = "open";
         using var permit = (ownershipGate ?? AllowAllDeviceCommandOwnershipGate.Instance)
             .AcquireCommandPermit(DeviceCommandResourceKinds.Device, deviceId);
         try
@@ -425,40 +630,65 @@ public sealed class SerialRequestNode(IDeviceCommandOwnershipGate? ownershipGate
                 Handshake = Handshake.None,
                 DtrEnable = node.GetBool("dtrEnable", false),
                 RtsEnable = node.GetBool("rtsEnable", false),
-                ReadTimeout = timeoutMs,
+                ReadTimeout = interByteTimeoutMs,
                 WriteTimeout = timeoutMs
             };
             port.Open();
+            port.DiscardInBuffer(); // never let a previous frame satisfy this request
+            stage = "send";
+            sent = true; // a failed write still has an unknown device outcome
             port.Write(frame, 0, frame.Length);
             // 串口读不支持可靠的异步取消（Windows 上 BaseStream.ReadAsync 无视 CancellationToken），
             // 因此用同步 Read + ReadTimeout 逐字节读，并在每字节之间检查取消，避免超时后仍挂住。
+            stage = "read";
             response = await Task.Run(() => ReadSerial(port, readMode, readTerminator, readLength, maxResponse, timeout.Token), timeout.Token).ConfigureAwait(false);
+            stage = "validate";
+            if (readMode != "none" && !ProtocolFraming.HasSequenceEcho(response, sequenceFormat, sequence))
+                throw new InvalidOperationException($"response did not echo sequence {sequence} in {sequenceFormat} format.");
         }
-        catch (TimeoutException)
+        catch (TimeoutException ex)
         {
-            throw new InvalidOperationException($"device.serialPort '{deviceId}' timed out after {timeoutMs} ms on {portName}. The command may already have reached the device; verify state before retrying.");
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, sent,
+                $"timed out after {timeoutMs} ms during {stage}. The command may already have reached the device; verify state before retrying.", ex);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException($"device.serialPort '{deviceId}' timed out after {timeoutMs} ms on {portName}. Verify device state before retrying.");
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, sent,
+                sent ? $"timed out after {timeoutMs} ms during {stage}. Verify device state before retrying."
+                     : $"timed out after {timeoutMs} ms during {stage}; request was not sent.", ex);
         }
         catch (UnauthorizedAccessException ex)
         {
-            throw new InvalidOperationException($"device.serialPort '{deviceId}' cannot open {portName}: {ex.Message}. Another program may hold the port.", ex);
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, "open", false,
+                $"cannot open {portName}: {ex.Message}. Another program may hold the port.", ex);
         }
         catch (IOException ex)
         {
-            throw new InvalidOperationException($"device.serialPort '{deviceId}' failed on {portName}: {ex.Message}", ex);
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, sent,
+                $"failed during {stage} on {portName}: {ex.Message}" + (sent ? "; the command may already have reached the device." : "; request was not sent."), ex);
+        }
+        catch (ProtocolIncompleteResponseException ex) when (sent)
+        {
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, "readIncomplete", true,
+                $"{ex.Message} The command may already have reached the device; verify state before retrying.", ex);
+        }
+        catch (InvalidOperationException ex) when (sent)
+        {
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, stage, true,
+                $"{ex.Message} The command may already have reached the device; verify state before retrying.", ex);
         }
         stopwatch.Stop();
 
         var text = Encoding.UTF8.GetString(response);
-        var matched = ProtocolFraming.Matches(text, node.GetString("expectPattern", string.Empty), node.GetBool("ignoreCase", false), cancellationToken);
-        if (!matched && node.GetBool("requireMatch", false))
-            throw new InvalidOperationException($"device.serialPort '{deviceId}' response from {portName} did not match expectPattern; got '{TcpRequestNode.Clip(text)}'.");
+        var matched = readMode == "none" ? false : ProtocolFraming.MatchesResponse(response, matchOn, expectPattern, node.GetBool("ignoreCase", false), cancellationToken);
+        if (readMode != "none" && !matched && requireMatch)
+            throw ProtocolFraming.Failure(Type, deviceId, endpoint, requestId, "validate", true,
+                $"response from {portName} did not match expectPattern using matchOn={matchOn}; got '{TcpRequestNode.Clip(text)}'.");
 
         return ProtocolFraming.Result(Type, deviceId, endpoint, "serial", response, matched, stopwatch.Elapsed.TotalMilliseconds,
-            new Dictionary<string, object?> { ["requestBytes"] = frame.Length, ["readMode"] = readMode });
+            new Dictionary<string, object?> { ["requestBytes"] = frame.Length, ["readMode"] = readMode, ["interByteTimeoutMs"] = interByteTimeoutMs, ["inputBufferDiscarded"] = true },
+            requestId, readMode == "none" ? "sentNoReply" : "responseConfirmed", sequence, sequenceFormat,
+            matchEvaluated: readMode != "none", matchOn: matchOn);
     }
 
     /// <summary>同步读取串口应答：ReadTimeout 由端口配置承担，逐字节读取以便每字节检查取消。</summary>
@@ -478,11 +708,13 @@ public sealed class SerialRequestNode(IDeviceCommandOwnershipGate? ownershipGate
             }
             catch (TimeoutException)
             {
+                if (collected.Length == 0)
+                    throw new ProtocolIncompleteResponseException($"no response byte arrived within interByteTimeoutMs={port.ReadTimeout} ms.");
                 // 固定长度模式读到部分数据、或直到终止符模式没等到终止符：都要明确报错，不能静默返回半包。
                 if (readMode.Equals("untilTerminator", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"protocol response did not end with the configured terminator within the timeout; got {collected.Length} bytes.");
+                    throw new ProtocolIncompleteResponseException($"protocol response stalled before the configured terminator after {collected.Length} byte(s); interByteTimeoutMs={port.ReadTimeout} ms.");
                 if (readMode.Equals("fixedLength", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"protocol response returned {collected.Length} bytes but readLength={readLength} was requested.");
+                    throw new ProtocolIncompleteResponseException($"protocol response stalled after {collected.Length} byte(s) but readLength={readLength} was requested; interByteTimeoutMs={port.ReadTimeout} ms.");
                 throw;
             }
             if (read <= 0) break;
@@ -503,7 +735,7 @@ public sealed class SerialRequestNode(IDeviceCommandOwnershipGate? ownershipGate
             result = result[..^readTerminator.Length];
         }
         if (readMode.Equals("fixedLength", StringComparison.OrdinalIgnoreCase) && result.Length < readLength)
-            throw new InvalidOperationException($"protocol response returned {result.Length} bytes but readLength={readLength} was requested.");
+            throw new ProtocolIncompleteResponseException($"protocol response returned {result.Length} bytes but readLength={readLength} was requested.");
         return result;
     }
 }

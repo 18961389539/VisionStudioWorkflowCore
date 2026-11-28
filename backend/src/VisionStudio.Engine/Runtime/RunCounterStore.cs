@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace VisionStudio.Engine.Runtime;
 
@@ -8,13 +11,33 @@ public interface IDurableRunCounterStore
         DurableCounterEvent input, bool preview, CancellationToken cancellationToken = default);
 }
 
-public sealed record DurableCounterEvent(string WorkflowId, string CounterId, string EventId, long Step, bool? Pass, bool Reset);
+public sealed record DurableCounterEvent(
+    string WorkflowId, string CounterId, string EventId, long Step, bool? Pass, bool Reset,
+    bool ResetOnPass = false, bool ResetOnFail = false, double ConfiguredStep = double.NaN,
+    string ResetScope = "streak")
+{
+    /// <summary>Canonical operation identity; reset policy is included even when it did not trigger this time.</summary>
+    public string OperationFingerprint
+    {
+        get
+        {
+            var step = double.IsFinite(ConfiguredStep) ? ConfiguredStep.ToString(CultureInfo.InvariantCulture) : Step.ToString(CultureInfo.InvariantCulture);
+            var resetScope = string.Equals(ResetScope, "all", StringComparison.OrdinalIgnoreCase) ? "\nall" : string.Empty;
+            var payload = string.Create(CultureInfo.InvariantCulture,
+                $"{step}\n{(Pass.HasValue ? (Pass.Value ? "1" : "0") : "-")}\n{(Reset ? "1" : "0")}\n{(ResetOnPass ? "1" : "0")}\n{(ResetOnFail ? "1" : "0")}{resetScope}");
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
+        }
+    }
+}
 
 public readonly record struct RunCounterReading(long Count, long Total, long Pass, long Fail)
 {
     public RunCounterReading Apply(long step, bool? pass, bool reset)
+        => Apply(step, pass, reset, resetAll: false);
+
+    public RunCounterReading Apply(long step, bool? pass, bool reset, bool resetAll)
     {
-        var current = reset ? default : this;
+        var current = reset ? (resetAll ? default : this with { Count = 0 }) : this;
         return checked(new RunCounterReading(current.Count + step, current.Total + (pass.HasValue ? 1 : 0),
             current.Pass + (pass == true ? 1 : 0), current.Fail + (pass == false ? 1 : 0)));
     }
@@ -32,6 +55,12 @@ public readonly record struct RunCounterReading(long Count, long Total, long Pas
 ///
 /// 线程安全：并行分支可能同时触发同一个计数器，所有读写都在实例锁内完成。
 /// </summary>
+public interface IRunCounterSnapshotFlusher
+{
+    /// <summary>Flushes the current counter snapshot and returns the last durably written count.</summary>
+    Task<long> FlushAsync(string scope, string counterId, CancellationToken cancellationToken = default);
+}
+
 public interface IRunCounterStore
 {
     /// <summary>取出（或创建）指定作用域下的计数器状态；返回的对象只在锁内可变。</summary>
@@ -60,6 +89,9 @@ public sealed class CounterState
     public long Total { get; set; }
     public long Pass { get; set; }
     public long Fail { get; set; }
+
+    /// <summary>Count confirmed by the most recent successful snapshot flush.</summary>
+    public long LastSnapshotCount { get; set; }
 
     /// <summary>
     /// 最近一次被节点访问的时间（UTC），由 <see cref="IRunCounterStore.GetOrAdd"/> 刷新。
