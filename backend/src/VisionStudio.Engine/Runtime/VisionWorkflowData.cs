@@ -299,11 +299,51 @@ public sealed class VisionWorkflowData : IDisposable
             Interlocked.CompareExchange(ref _fault, null, fault);
     }
 
+    /// <summary>
+    /// Starts one run of a Parallel region: fresh branch execution ids, cleared terminal states and a
+    /// cleared Join cache, then records the control-flow decision for the report timeline.
+    /// </summary>
     public void MarkParallelBranches(string nodeId)
-        => _controlFlowDecisions[nodeId] = new ControlFlowDecision(
+    {
+        BeginParallelRegion(nodeId);
+        _controlFlowDecisions[nodeId] = new ControlFlowDecision(
             nodeId,
             "flow.parallel",
             ["branch1", "branch2"]);
+    }
+
+    /// <summary>
+    /// Starts a new run of a Parallel region. Called by the flow.parallel marker, and by the fanout
+    /// node itself for implicit parallels (which have no marker), so a loop iteration never reads
+    /// the previous iteration's branch states or Join cache.
+    /// </summary>
+    public string BeginParallelRegion(string regionId) => ParallelDispositions.BeginRegionRun(regionId);
+
+    /// <summary>True when the node is the fanout point of a Parallel region (explicit or implicit).</summary>
+    public bool IsParallelRegionEntry(string nodeId) => ParallelDispositions.RegionById(nodeId) is not null;
+
+    /// <summary>Branch labels/timeout published by flow.parallel; consumed by the branch scheduler.</summary>
+    public void ConfigureParallelBranches(string nodeId, IReadOnlyList<string> labels, int timeoutMs)
+    {
+        if (labels.Count > 0) ParallelDispositions.ConfigureBranches(nodeId, labels);
+        if (timeoutMs > 0) _parallelBranchTimeouts[nodeId] = timeoutMs;
+    }
+
+    public int ParallelBranchTimeoutMs(string regionId)
+        => _parallelBranchTimeouts.TryGetValue(regionId, out var timeout) ? timeout : 0;
+
+    public void MarkBranchRunning(string regionId, string branchName) => ParallelDispositions.MarkBranchRunning(regionId, branchName);
+    public void CompleteBranch(string regionId, string branchName, double elapsedMs) => ParallelDispositions.CompleteBranch(regionId, branchName, elapsedMs);
+    public void FailBranch(string regionId, string branchName, double elapsedMs, string error) => ParallelDispositions.FailBranch(regionId, branchName, elapsedMs, error);
+    public void CancelBranch(string regionId, string branchName, double elapsedMs, string reason) => ParallelDispositions.CancelBranch(regionId, branchName, elapsedMs, reason);
+    public void RequestBranchCancellation(string regionId, string branchName, string reason) => ParallelDispositions.RequestBranchCancellation(regionId, branchName, reason);
+    public void RegisterBranchCanceller(string regionId, string branchName, Action cancel) => ParallelDispositions.RegisterBranchCanceller(regionId, branchName, cancel);
+    public void UnregisterBranchCanceller(string regionId, string branchName) => ParallelDispositions.UnregisterBranchCanceller(regionId, branchName);
+
+    /// <summary>Stops every sibling branch of the region that owns <paramref name="nodeId"/>.</summary>
+    public IReadOnlyList<string> CancelSiblingBranches(string nodeId, string reason)
+        => ParallelDispositions.CancelSiblings(nodeId, reason);
+    public string? CancellationReasonForNode(string nodeId) => ParallelDispositions.CancellationReasonForNode(nodeId);
 
     public IReadOnlyList<ControlFlowDecision> SnapshotControlFlowDecisions()
         => _controlFlowDecisions.Values.OrderBy(x => x.NodeId, StringComparer.OrdinalIgnoreCase).ToArray();
@@ -330,6 +370,7 @@ public sealed class VisionWorkflowData : IDisposable
     public ParallelDispositionTracker ParallelDispositions { get; private set; } = ParallelDispositionTracker.Empty;
     private HashSet<string> _forEachBodyNodeIds = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string> _forEachBodyLoops = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _parallelBranchTimeouts = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _stickyScopes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Configures Parallel branch scoping and ForEach any-NG aggregation from structured regions.</summary>
@@ -388,13 +429,64 @@ public sealed class VisionWorkflowData : IDisposable
     /// any-NG semantics; nested joins already propagated into their parent branch slot.
     /// </summary>
     public ParallelJoinAggregation? ApplyParallelJoin(string joinNodeId)
+        => ApplyParallelJoin(joinNodeId, ParallelMergePolicies.AnyNg, 0);
+
+    /// <summary>
+    /// Applies a Parallel join aggregation. Top-level joins merge into the run disposition with
+    /// any-NG semantics; nested joins already propagated into their parent branch slot.
+    /// Branch states produced by the concurrent scheduler are kept; branches executed by the
+    /// sequential fallback are derived from their node reports so the report is still complete.
+    /// </summary>
+    public ParallelJoinAggregation? ApplyParallelJoin(string joinNodeId, string? policy, int quorum)
     {
-        var aggregation = ParallelDispositions.AggregateJoin(joinNodeId);
-        if (aggregation is { Aggregate: { } aggregate, PropagatedToRegionId: null })
+        if (ParallelDispositions.TryGetCachedJoin(joinNodeId, out var cached)) return cached with { Duplicate = true };
+        var view = ParallelDispositions.RegionForJoin(joinNodeId);
+        if (view is null) return null;
+
+        var normalized = ParallelMergePolicies.Normalize(policy);
+        var executions = new Dictionary<string, ParallelBranchExecution>(StringComparer.OrdinalIgnoreCase);
+        foreach (var branchName in view.BranchNames)
+            executions[branchName] = ResolveBranchExecution(view, branchName);
+
+        var dispositions = ParallelDispositions.BranchDispositions(view.RegionId);
+        var (aggregate, satisfied) = ParallelDispositionTracker.Evaluate(view, dispositions, quorum, normalized);
+        if (aggregate is not null && view.ParentRegionId is not null && view.ParentBranchName is not null)
+            ParallelDispositions.ContributeBranchDisposition(view.ParentRegionId, view.ParentBranchName, aggregate);
+        if (aggregate is not null && view.ParentRegionId is null)
             QualityDisposition = QualityDisposition is null
                 ? aggregate
                 : ParallelDispositionTracker.Combine(QualityDisposition, aggregate);
+
+        var aggregation = new ParallelJoinAggregation(view.RegionId, dispositions, aggregate, view.ParentRegionId,
+            executions, normalized, satisfied);
+        ParallelDispositions.CacheJoin(joinNodeId, aggregation);
         return aggregation;
+    }
+
+    /// <summary>
+    /// Resolves one branch's final state. Concurrent runs already recorded a terminal state; the
+    /// sequential fallback leaves it Pending/Running, so the node reports and the run fault decide.
+    /// </summary>
+    private ParallelBranchExecution ResolveBranchExecution(ParallelRegionView view, string branchName)
+    {
+        var recorded = ParallelDispositions.GetBranchExecution(view.RegionId, branchName);
+        if (recorded is { IsTerminal: true }) return recorded;
+        var executionId = recorded?.ExecutionId ?? $"{view.RegionId}/{branchName}";
+        var label = view.BranchLabels.GetValueOrDefault(branchName, branchName);
+
+        var reported = SnapshotReports().Where(report => view.ContainsBranchNode(branchName, report.NodeId)).ToArray();
+        var fault = Fault;
+        if (fault is not null && view.ContainsBranchNode(branchName, fault.NodeId))
+            return new ParallelBranchExecution(view.RegionId, branchName, executionId, label,
+                ParallelBranchStatus.Failed, recorded?.ElapsedMs ?? 0, fault.Error);
+        if (reported.Length == 0)
+            return new ParallelBranchExecution(view.RegionId, branchName, executionId, label, ParallelBranchStatus.Missing);
+        var failed = reported.FirstOrDefault(report => !report.Success);
+        if (failed is not null)
+            return new ParallelBranchExecution(view.RegionId, branchName, executionId, label,
+                ParallelBranchStatus.Failed, recorded?.ElapsedMs ?? 0, failed.Error);
+        return new ParallelBranchExecution(view.RegionId, branchName, executionId, label,
+            ParallelBranchStatus.Completed, reported.Max(report => report.EndOffsetMs) - reported.Min(report => report.StartOffsetMs));
     }
 
     public DebugRunMode DebugMode { get; private set; } = DebugRunMode.Full;

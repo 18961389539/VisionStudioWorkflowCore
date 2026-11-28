@@ -516,7 +516,9 @@ internal sealed class StructuredWorkflowIrBuilder
              (right.Contains(e.SourceNodeId) && left.Contains(e.TargetNodeId))));
         if (cross is not null)
             throw new InvalidOperationException(
-                $"Branches under '{ownerId}' must be data-independent until their paired Join. Cross-branch data edge: '{cross.Id}'.");
+                $"Branches under '{ownerId}' must be data-independent until their paired Join. " +
+                $"Cross-branch data edge '{cross.Id}': '{cross.SourceNodeId}.{cross.SourcePort}' -> '{cross.TargetNodeId}.{cross.TargetPort}'. " +
+                "The two branches run concurrently and never share a data context, so the read would be order-dependent; route the value across the Join instead.");
     }
 
     private static EdgeDefinition SinglePort(IReadOnlyList<EdgeDefinition> edges, string port, string nodeId)

@@ -1,3 +1,5 @@
+using VisionStudio.Engine.Runtime;
+
 namespace VisionStudio.Engine.Nodes;
 public sealed class IfConditionNode : IVisionNodeExecutor, IVisionNodeDefinitionValidator
 {
@@ -127,35 +129,84 @@ public sealed class IfConditionNode : IVisionNodeExecutor, IVisionNodeDefinition
 public sealed class ParallelMarkerNode : IVisionNodeExecutor
 {
     public string Type => "flow.parallel";
+
+    public const int BranchCount = 2;
+    public const int MaxLabelLength = 32;
+    public const int MaxTimeoutMs = 600_000;
+
+    /// <summary>
+    /// 解析分支标签与分支超时。标签用于把"哪条分支超时/被取消"写进报告，
+    /// 因此必须成对给出——只有一个标签时两条分支无法区分。
+    /// </summary>
+    public static (IReadOnlyList<string> Labels, int TimeoutMs) ReadConfiguration(NodeDefinition node)
+    {
+        var raw = node.GetString("branchLabels", string.Empty).Trim();
+        string[] labels = [];
+        if (raw.Length > 0)
+        {
+            labels = raw.Split(',', StringSplitOptions.TrimEntries);
+            if (labels.Length != BranchCount)
+                throw new InvalidOperationException($"flow.parallel branchLabels must list exactly {BranchCount} comma-separated labels; got {labels.Length}.");
+            foreach (var label in labels)
+            {
+                if (label.Length is 0 or > MaxLabelLength)
+                    throw new InvalidOperationException($"flow.parallel branch labels must be 1..{MaxLabelLength} characters; got '{label}'.");
+                if (label.Contains('|') || label.Contains(';'))
+                    throw new InvalidOperationException($"flow.parallel branch label '{label}' must not contain '|' or ';'.");
+            }
+        }
+
+        var timeoutMs = node.GetInt("branchTimeoutMs", 0);
+        if (timeoutMs is < 0 or > MaxTimeoutMs)
+            throw new InvalidOperationException($"flow.parallel branchTimeoutMs must be within 0..{MaxTimeoutMs} (0 disables the branch timeout).");
+        return (labels, timeoutMs);
+    }
+
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-        cancellationToken.ThrowIfCancellationRequested();
-        if (context is null) throw new ArgumentNullException(nameof(context));
-
-if (node is null) throw new InvalidOperationException("flow.parallel requires a node definition.");
         if (string.IsNullOrWhiteSpace(node.Id)) throw new InvalidOperationException("flow.parallel requires a non-empty node id.");
         if (node.Id.Length > 128) throw new InvalidOperationException("flow.parallel node id must be at most 128 characters.");
-        const int branches = 2;
+
+        var (labels, timeoutMs) = ReadConfiguration(node);
         var id = node.Id.Trim();
-        var diag = CoordinateValidation.Diagnostics(Type, ("branches", branches), ("marker", "parallel"), ("boundary", "parallel"), ("nodeId", id));
+        var label1 = labels.Count > 0 ? labels[0] : "branch1";
+        var label2 = labels.Count > 1 ? labels[1] : "branch2";
+        var diag = CoordinateValidation.Diagnostics(Type,
+            ("branches", BranchCount), ("marker", "parallel"), ("boundary", "parallel"), ("nodeId", id),
+            ("branchLabel1", label1), ("branchLabel2", label2), ("branchTimeoutMs", timeoutMs));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
-                ["branches"] = VisionValue.Integer(branches),
+                ["branches"] = VisionValue.Integer(BranchCount),
                 ["nodeId"] = VisionValue.String(id),
                 ["marker"] = VisionValue.String("parallel"),
+                ["branchLabel1"] = VisionValue.String(label1),
+                ["branchLabel2"] = VisionValue.String(label2),
+                ["branchTimeoutMs"] = VisionValue.Integer(timeoutMs),
+                ["elapsedMs"] = VisionValue.Double(0),
                 ["diagnostics"] = VisionValue.String(diag)
             },
-            new Dictionary<string, object?> { ["branches"] = branches, ["nodeId"] = id, ["boundary"] = "parallel", ["diagnostics"] = diag }));
+            new Dictionary<string, object?>
+            {
+                ["branches"] = BranchCount, ["nodeId"] = id, ["boundary"] = "parallel",
+                ["branchLabel1"] = label1, ["branchLabel2"] = label2, ["branchTimeoutMs"] = timeoutMs,
+                ["diagnostics"] = diag
+            }));
     }
 }
+
 public sealed class JoinNode : IVisionNodeExecutor
 {
     public string Type => "flow.join";
+
+    /// <summary>
+    /// Join 只做形状校验；分支状态集合与合并结果由运行时补齐（它持有 Parallel 区域与各分支执行记录）。
+    /// 这里先给出可预测的空值，避免下游读到"端口不存在"而不是"没有分支"。
+    /// </summary>
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -165,16 +216,41 @@ public sealed class JoinNode : IVisionNodeExecutor
         if (string.IsNullOrWhiteSpace(node.Id)) throw new InvalidOperationException("flow.join requires a non-empty node id.");
         if (node.Id.Length > 128) throw new InvalidOperationException("flow.join node id must be at most 128 characters.");
         var id = node.Id.Trim();
-        var diag = CoordinateValidation.Diagnostics(Type, ("joined", true), ("marker", "join"), ("boundary", "join"), ("nodeId", id));
+        var policy = ResultFileWriter.Choice(node, "mergePolicy", ParallelMergePolicies.AnyNg, ParallelMergePolicies.All);
+        var quorum = node.GetInt("quorum", 0);
+        if (quorum is < 0 or > 64)
+            throw new InvalidOperationException("flow.join quorum must be within 0..64 (0 = all branches).");
+        var diag = CoordinateValidation.Diagnostics(Type, ("joined", true), ("marker", "join"), ("boundary", "join"),
+            ("nodeId", id), ("mergePolicy", policy), ("quorum", quorum));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
                 ["joined"] = VisionValue.Boolean(true),
                 ["nodeId"] = VisionValue.String(id),
                 ["marker"] = VisionValue.String("join"),
+                ["branchCount"] = VisionValue.Integer(0),
+                ["completedBranches"] = VisionValue.StringList([]),
+                ["failedBranches"] = VisionValue.StringList([]),
+                ["cancelledBranches"] = VisionValue.StringList([]),
+                ["missingBranches"] = VisionValue.StringList([]),
+                ["completedCount"] = VisionValue.Integer(0),
+                ["failedCount"] = VisionValue.Integer(0),
+                ["cancelledCount"] = VisionValue.Integer(0),
+                ["missingCount"] = VisionValue.Integer(0),
+                ["mergePolicy"] = VisionValue.String(policy),
+                ["policySatisfied"] = VisionValue.Boolean(false),
+                ["duplicateToken"] = VisionValue.Boolean(false),
+                ["branchDispositionsJson"] = VisionValue.String("{}"),
+                ["branchStatesJson"] = VisionValue.String("[]"),
+                ["parallelElapsedMs"] = VisionValue.Double(0),
+                ["warningCount"] = VisionValue.Integer(0),
                 ["diagnostics"] = VisionValue.String(diag)
             },
-            new Dictionary<string, object?> { ["joined"] = true, ["nodeId"] = id, ["boundary"] = "join", ["diagnostics"] = diag }));
+            new Dictionary<string, object?>
+            {
+                ["joined"] = true, ["nodeId"] = id, ["boundary"] = "join",
+                ["mergePolicy"] = policy, ["quorum"] = quorum, ["warningCount"] = 0, ["diagnostics"] = diag
+            }));
     }
 }
 public sealed class ResultDispositionNode : IVisionNodeExecutor

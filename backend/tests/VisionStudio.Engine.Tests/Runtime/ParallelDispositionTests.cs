@@ -57,12 +57,14 @@ public sealed class ParallelDispositionTests
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
-    public async Task ParallelFault_KeepsFirstFailureCoherent_AndRecordsSiblingOutcome(bool failSecond, bool firstTimeout)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ParallelFault_KeepsFirstFailureCoherent_AndCancelsSibling(bool firstTimeout)
     {
-        var executor = new CoordinatedFaultExecutor(failSecond, firstTimeout);
+        // 兄弟分支不再"跑完再说"：另一条分支在下一个节点边界前就被取消，
+        // 所以这里不再构造"两条分支同时失败"——那种场景下谁先抛是竞态，
+        // 并发故障的归因由 ConcurrentFaults_PublishOneWholeSnapshot_AndKeepTheWinner 覆盖。
+        var executor = new CoordinatedFaultExecutor(firstTimeout);
         var observer = new FaultObserver();
         await using var provider = BuildProvider(executor, observer);
         var workflow = new WorkflowDefinition("parallel-fault", "Parallel Fault",
@@ -85,9 +87,13 @@ public sealed class ParallelDispositionTests
         Assert.Equal("b1", observed.Context.NodeId);
         Assert.Same(executor.FirstFailure, observed.Exception);
         Assert.False(Report(result, "b1").Success);
-        Assert.Equal(!failSecond, Report(result, "b2").Success);
-        Assert.DoesNotContain(result.NodeReports, x => x.NodeId is "after1" or "j");
-        Assert.Equal(!failSecond, result.NodeReports.Any(x => x.NodeId == "after2"));
+        var sibling = Report(result, "b2");
+        Assert.False(sibling.Success);
+        Assert.Equal(true, sibling.Summary[NodeSummaryKeys.SchedulerCancelled]);
+        Assert.Equal(ParallelCancellationReasons.SiblingFailed, sibling.Summary[NodeSummaryKeys.CancellationReason]);
+        Assert.Equal($"cancelled by {ParallelCancellationReasons.SiblingFailed}", sibling.Error);
+        // 取消必须发生在下一个节点之前：after1/after2/join 都不应留下报告。
+        Assert.DoesNotContain(result.NodeReports, x => x.NodeId is "after1" or "after2" or "j");
         foreach (var report in result.NodeReports.Where(x => x.NodeId != "p"))
         {
             Assert.Equal("p", report.Summary["parallelRegionId"]);
@@ -381,9 +387,10 @@ public sealed class ParallelDispositionTests
         public void OnRunException(VisionRunExceptionContext context, Exception exception) => Calls.Add((context, exception));
     }
 
-    private sealed class CoordinatedFaultExecutor(bool failSecond, bool firstTimeout) : IVisionNodeExecutor
+    private sealed class CoordinatedFaultExecutor(bool firstTimeout) : IVisionNodeExecutor
     {
         private readonly TaskCompletionSource _bothEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondBranchWaiting = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _entered;
         public string Type => "test.parallel-fault";
         public Exception FirstFailure { get; } = firstTimeout
@@ -402,9 +409,15 @@ public sealed class ParallelDispositionTests
             {
                 if (Interlocked.Increment(ref _entered) == 2) _bothEntered.TrySetResult();
                 await _bothEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                if (node.Id == "b2")
+                {
+                    // 先告诉 b1「我已经进入可取消的等待」，b1 才允许失败：
+                    // 否则 b2 可能还没进等待就被取消，或反过来抢在取消前完成——两种情况都不是本用例要证明的行为。
+                    _secondBranchWaiting.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                await _secondBranchWaiting.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
                 if (node.Id == "b1") throw FirstFailure;
-                await FirstReported.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-                if (failSecond) throw new ArgumentException("second branch failure");
             }
             return new NodeExecutorResult(new Dictionary<string, VisionValue>(), new Dictionary<string, object?>());
         }

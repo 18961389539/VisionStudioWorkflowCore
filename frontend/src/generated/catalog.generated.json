@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "3acaeb3d4cecfe522722e3db0469ff1a2bb537c108a4e6043e2203cfc4f36386",
+  "hash": "171c95b361e9b634f3d8ef2f21f4ef314e0b09b42b01eb365b362fa2c8025d82",
   "items": [
     {
       "type": "image.acquire",
@@ -16806,6 +16806,86 @@
           "required": true
         },
         {
+          "name": "branchCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "completedBranches",
+          "dataType": "StringList",
+          "required": true
+        },
+        {
+          "name": "failedBranches",
+          "dataType": "StringList",
+          "required": true
+        },
+        {
+          "name": "cancelledBranches",
+          "dataType": "StringList",
+          "required": true
+        },
+        {
+          "name": "missingBranches",
+          "dataType": "StringList",
+          "required": true
+        },
+        {
+          "name": "completedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "failedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "cancelledCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "missingCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "mergePolicy",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "policySatisfied",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "duplicateToken",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "parallelDisposition",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "branchDispositionsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "branchStatesJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "parallelElapsedMs",
+          "dataType": "Double",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -16816,8 +16896,46 @@
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
+      "parameters": [
+        {
+          "name": "mergePolicy",
+          "label": "Merge Policy",
+          "type": "select",
+          "defaultValue": "anyNg",
+          "options": [
+            {
+              "label": "Any NG (default)",
+              "value": "anyNg"
+            },
+            {
+              "label": "All Pass",
+              "value": "allPass"
+            },
+            {
+              "label": "Any Pass",
+              "value": "anyPass"
+            },
+            {
+              "label": "Quorum",
+              "value": "quorum"
+            }
+          ],
+          "group": "Merge",
+          "description": "anyNg = NG if any branch is NG. allPass = OK only when every branch reported OK. anyPass = OK when at least one branch reported OK (redundant inspection). quorum = OK when at least quorum branches reported OK."
+        },
+        {
+          "name": "quorum",
+          "label": "Quorum (0=all)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 64,
+          "step": 1,
+          "group": "Merge",
+          "description": "Only used when Merge Policy = Quorum; 0 means all branches must report OK."
+        }
+      ],
+      "description": "Structured branch join and barrier. Merges Parallel branch dispositions into the run disposition (any-NG by default) and publishes the branch ledger: completed/failed/cancelled/missing sets, per-branch execution ids and the policy verdict. A branch token replayed for the same Join returns the cached aggregation with duplicateToken=true, so next cannot run twice for the same region run. A Join whose region has no surviving branch still completes: it never waits for a branch that was cancelled or never started.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -17035,6 +17153,21 @@
           "required": true
         },
         {
+          "name": "branchLabel1",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "branchLabel2",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "branchTimeoutMs",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -17045,8 +17178,29 @@
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
+      "parameters": [
+        {
+          "name": "branchLabels",
+          "label": "Branch Labels",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Branches",
+          "description": "Optional pair of comma-separated labels (e.g. \"camera1,camera2\"). Labels identify which branch timed out or was cancelled in the report; give both or neither."
+        },
+        {
+          "name": "branchTimeoutMs",
+          "label": "Branch Timeout (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 600000,
+          "step": 100,
+          "unit": "ms",
+          "group": "Branches",
+          "description": "Optional wall-clock budget per branch. A branch that exceeds it is cancelled with cancellationReason=timeout, its siblings are cancelled, and the run fails with a node_timeout error naming the branch label."
+        }
+      ],
+      "description": "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling, cancellation and disposition merging are handled by the structured runtime. When one branch throws, the sibling is cancelled before it can start another node (no device command is issued after a failure) and the Join reports which branches completed, failed, were cancelled or never ran. Data edges between branches are rejected at compile time because the two branches never share a data context.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

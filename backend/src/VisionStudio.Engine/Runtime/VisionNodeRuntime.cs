@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Text.Json;
 using VisionStudio.Engine.Algorithms;
+using VisionStudio.Engine.Nodes;
 
 namespace VisionStudio.Engine.Runtime;
 
@@ -97,7 +99,16 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
                 data.SetSwitchSelection(node.Id, selectedBranch);
 
             if (FlowSemantics.IsParallel(node.Type))
+            {
+                var (branchLabels, branchTimeoutMs) = ParallelMarkerNode.ReadConfiguration(node);
+                data.ConfigureParallelBranches(node.Id, branchLabels, branchTimeoutMs);
                 data.MarkParallelBranches(node.Id);
+            }
+            else if (data.IsParallelRegionEntry(node.Id))
+            {
+                // 隐式并行没有 flow.parallel 标记节点：扇出节点自己开启新一轮区域运行。
+                data.BeginParallelRegion(node.Id);
+            }
 
             // 通用循环：循环节点自身作为入口标记执行一次，在这里初始化跨迭代状态。
             // while 的预算是参数；repeat 的总次数由执行器解析（端口优先）后随 total 输出回传。
@@ -137,14 +148,65 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
 
             if (FlowSemantics.IsJoin(node.Type))
             {
-                var aggregation = data.ApplyParallelJoin(node.Id);
-                if (aggregation?.Aggregate is { } parallelDisposition)
+                var mergePolicy = ResultFileWriter.Choice(node, "mergePolicy", ParallelMergePolicies.AnyNg, ParallelMergePolicies.All);
+                var quorum = node.GetInt("quorum", 0);
+                if (quorum is < 0 or > 64)
+                    throw new InvalidOperationException($"flow.join '{node.Id}' quorum must be within 0..64 (0 = all branches).");
+                var aggregation = data.ApplyParallelJoin(node.Id, mergePolicy, quorum);
+                if (aggregation is not null)
                 {
-                    reportSummary = new Dictionary<string, object?>(reportSummary)
+                    var completed = aggregation.BranchNames(ParallelBranchStatus.Completed);
+                    var failed = aggregation.BranchNames(ParallelBranchStatus.Failed);
+                    var cancelled = aggregation.BranchNames(ParallelBranchStatus.Cancelled);
+                    var missing = aggregation.BranchNames(ParallelBranchStatus.Missing);
+                    var branchElapsed = aggregation.BranchExecutions.Values.Select(x => x.ElapsedMs).DefaultIfEmpty(0).Max();
+
+                    // 分支状态必须能被下游看到（不只是报告）：合并策略与缺失分支会改变流程走向。
+                    var merged = new Dictionary<string, VisionValue>(result.Outputs, StringComparer.OrdinalIgnoreCase)
                     {
-                        [NodeSummaryKeys.ParallelDisposition] = parallelDisposition,
-                        [NodeSummaryKeys.BranchDispositions] = aggregation.BranchDispositions
+                        ["branchCount"] = VisionValue.Integer(aggregation.BranchExecutions.Count),
+                        ["completedBranches"] = VisionValue.StringList(completed),
+                        ["failedBranches"] = VisionValue.StringList(failed),
+                        ["cancelledBranches"] = VisionValue.StringList(cancelled),
+                        ["missingBranches"] = VisionValue.StringList(missing),
+                        ["completedCount"] = VisionValue.Integer(completed.Count),
+                        ["failedCount"] = VisionValue.Integer(failed.Count),
+                        ["cancelledCount"] = VisionValue.Integer(cancelled.Count),
+                        ["missingCount"] = VisionValue.Integer(missing.Count),
+                        ["mergePolicy"] = VisionValue.String(aggregation.Policy),
+                        ["policySatisfied"] = VisionValue.Boolean(aggregation.PolicySatisfied),
+                        ["duplicateToken"] = VisionValue.Boolean(aggregation.Duplicate),
+                        ["branchDispositionsJson"] = VisionValue.String(JsonSerializer.Serialize(aggregation.BranchDispositions)),
+                        ["branchStatesJson"] = VisionValue.String(JsonSerializer.Serialize(
+                            aggregation.BranchExecutions.Values
+                                .OrderBy(x => x.BranchName, StringComparer.OrdinalIgnoreCase)
+                                .Select(x => new
+                                {
+                                    branch = x.BranchName, x.Label, x.ExecutionId, status = x.Status.ToString().ToLowerInvariant(),
+                                    x.ElapsedMs, x.Error, cancellationReason = x.CancellationReason
+                                }))),
+                        ["parallelElapsedMs"] = VisionValue.Double(branchElapsed)
                     };
+                    if (aggregation.Aggregate is { } parallelDisposition)
+                        merged["parallelDisposition"] = VisionValue.String(parallelDisposition);
+                    result = result with { Outputs = merged };
+                    data.OutputsByNode[node.Id] = merged;
+
+                    var joinSummary = new Dictionary<string, object?>(reportSummary)
+                    {
+                        [NodeSummaryKeys.BranchDispositions] = aggregation.BranchDispositions,
+                        [NodeSummaryKeys.BranchCompleted] = completed,
+                        [NodeSummaryKeys.BranchFailed] = failed,
+                        [NodeSummaryKeys.BranchCancelled] = cancelled,
+                        [NodeSummaryKeys.BranchMissing] = missing,
+                        [NodeSummaryKeys.MergePolicy] = aggregation.Policy,
+                        [NodeSummaryKeys.MergeSatisfied] = aggregation.PolicySatisfied,
+                        [NodeSummaryKeys.ParallelElapsedMs] = branchElapsed,
+                        [NodeSummaryKeys.JoinDuplicate] = aggregation.Duplicate
+                    };
+                    // 无分支处置时不要写 parallelDisposition：null 键与"没有处置"是两件事。
+                    if (aggregation.Aggregate is { } aggregate) joinSummary[NodeSummaryKeys.ParallelDisposition] = aggregate;
+                    reportSummary = joinSummary;
                 }
             }
 
@@ -167,16 +229,30 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
         catch (Exception ex)
         {
             sw.Stop();
+            // 并行调度层主动取消（兄弟分支失败/本分支超时）不是程序缺陷：根因已由抛出方记录，
+            // 这里再记一次会抢走错误码（超时分支会退化成 node_failure）。
+            var schedulerCancellation = ex is OperationCanceledException ? data.CancellationReasonForNode(node.Id) : null;
+            // 先停兄弟分支，再对外报故障：否则观察者一收到失败回调，兄弟分支可能已经
+            // 抢在取消之前又发出一条设备命令。
+            if (schedulerCancellation is null && ex is not OperationCanceledException)
+                data.CancelSiblingBranches(node.Id, ParallelCancellationReasons.SiblingFailed);
+            if (schedulerCancellation is null) data.RecordFault(node.Id, ex);
+            var failureSummary = FailureSummary(data, ex, cancellationToken);
+            if (schedulerCancellation is not null)
+                failureSummary = new Dictionary<string, object?>(failureSummary)
+                {
+                    [NodeSummaryKeys.SchedulerCancelled] = true,
+                    [NodeSummaryKeys.CancellationReason] = schedulerCancellation
+                };
             // R10/F08：保留原始异常供统一结束阶段向观察者报告——本异常会被 WorkflowCore 捕获
             // 并转为结果返回，运行器的 catch 边界不会经过，不能只依赖那里记录异常链。
-            data.RecordFault(node.Id, ex);
             data.AddReport(new NodeRunReport(
                 node.Id,
                 node.Type,
                 false,
                 sw.Elapsed.TotalMilliseconds,
-                FailureSummary(data, ex, cancellationToken),
-                ex.Message,
+                failureSummary,
+                schedulerCancellation is null ? ex.Message : $"cancelled by {schedulerCancellation}",
                 phase,
                 SnapshotValues(inputs),
                 new Dictionary<string, VisionValueSnapshot>(),

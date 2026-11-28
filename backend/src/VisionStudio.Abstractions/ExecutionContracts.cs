@@ -31,6 +31,16 @@ public static class NodeSummaryKeys
     public const string DispositionSetBy = "dispositionSetBy";
     public const string DispositionPrevious = "dispositionPrevious";
     public const string DispositionReset = "dispositionReset";
+    public const string BranchCompleted = "branchCompleted";
+    public const string BranchFailed = "branchFailed";
+    public const string BranchCancelled = "branchCancelled";
+    public const string BranchMissing = "branchMissing";
+    public const string MergePolicy = "mergePolicy";
+    public const string MergeSatisfied = "mergeSatisfied";
+    public const string ParallelElapsedMs = "parallelElapsedMs";
+    public const string JoinDuplicate = "joinDuplicate";
+    public const string SchedulerCancelled = "schedulerCancelled";
+    public const string CancellationReason = "cancellationReason";
 }
 
 public sealed record NodeExecutorResult(
