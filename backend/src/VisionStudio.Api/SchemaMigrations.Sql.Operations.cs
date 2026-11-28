@@ -185,6 +185,18 @@ ON result_records(dataset, idempotency_key);
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    private static async Task ApplyResultRecordDigestAsync(SqliteConnection connection, SqliteTransaction tx, CancellationToken ct)
+    {
+        await EnsureColumnAsync(connection, tx, "result_records", "payload_sha256", "TEXT NULL", ct);
+        await EnsureColumnAsync(connection, tx, "result_records", "record_key_normalization_version", "TEXT NOT NULL DEFAULT 'v1-trim'", ct);
+    }
+
+    private static async Task ApplyDurableCounterOperationFingerprintAsync(SqliteConnection connection, SqliteTransaction tx, CancellationToken ct)
+    {
+        // Legacy events have no provable operation identity: keep their results, but retries conflict safely.
+        await EnsureColumnAsync(connection, tx, "durable_counter_events", "operation_fingerprint", "TEXT NOT NULL DEFAULT ''", ct);
+    }
+
     private const string DurableCounterSchemaSql = """
 CREATE TABLE IF NOT EXISTS durable_counter_events (
     seq INTEGER PRIMARY KEY,

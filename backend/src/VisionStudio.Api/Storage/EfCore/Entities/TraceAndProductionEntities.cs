@@ -123,6 +123,8 @@ public sealed class ResultRecordEntity
     public string NodeId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
     public string? IdempotencyKey { get; set; }
+    public string? PayloadSha256 { get; set; }
+    public string RecordKeyNormalizationVersion { get; set; } = "v1-trim";
 }
 
 public sealed class DurableCounterEventEntity
@@ -131,6 +133,7 @@ public sealed class DurableCounterEventEntity
     public string WorkflowId { get; set; } = string.Empty;
     public string CounterId { get; set; } = string.Empty;
     public string EventId { get; set; } = string.Empty;
+    public string OperationFingerprint { get; set; } = string.Empty;
     public long CountValue { get; set; }
     public long Total { get; set; }
     public long PassCount { get; set; }

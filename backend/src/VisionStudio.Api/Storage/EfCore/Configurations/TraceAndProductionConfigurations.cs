@@ -218,6 +218,8 @@ internal sealed class ResultRecordConfiguration : IEntityTypeConfiguration<Resul
         b.Property(x => x.NodeId).HasColumnName("node_id");
         b.Property(x => x.CreatedAt).HasColumnName("created_at");
         b.Property(x => x.IdempotencyKey).HasColumnName("idempotency_key");
+        b.Property(x => x.PayloadSha256).HasColumnName("payload_sha256");
+        b.Property(x => x.RecordKeyNormalizationVersion).HasColumnName("record_key_normalization_version").HasMaxLength(32).HasDefaultValue("v1-trim").IsRequired();
 
         b.HasIndex(x => new { x.Dataset, x.CreatedAt }).HasDatabaseName("ix_result_records_dataset_created").IsDescending(false, true);
         b.HasIndex(x => x.RecordKey).HasDatabaseName("ix_result_records_key");
@@ -239,6 +241,7 @@ internal sealed class DurableCounterEventConfiguration : IEntityTypeConfiguratio
         b.Property(x => x.WorkflowId).HasColumnName("workflow_id");
         b.Property(x => x.CounterId).HasColumnName("counter_id");
         b.Property(x => x.EventId).HasColumnName("event_id");
+        b.Property(x => x.OperationFingerprint).HasColumnName("operation_fingerprint").HasMaxLength(64).HasDefaultValue("").IsRequired();
         b.Property(x => x.CountValue).HasColumnName("count_value");
         b.Property(x => x.Total).HasColumnName("total");
         b.Property(x => x.PassCount).HasColumnName("pass_count");

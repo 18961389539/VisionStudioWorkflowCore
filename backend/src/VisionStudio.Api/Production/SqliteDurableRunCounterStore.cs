@@ -20,10 +20,18 @@ public sealed class SqliteDurableRunCounterStore(IVisionStudioDbFactory dbFactor
 
         var existing = await db.DurableCounterEvents
             .Where(x => x.WorkflowId == input.WorkflowId && x.CounterId == input.CounterId && x.EventId == input.EventId)
-            .Select(x => new RunCounterReading(x.CountValue, x.Total, x.PassCount, x.FailCount))
+            .Select(x => new
+            {
+                x.CountValue, x.Total, x.PassCount, x.FailCount, x.OperationFingerprint
+            })
             .FirstOrDefaultAsync(cancellationToken);
-        if (existing is { } reused && await db.DurableCounterEvents.AnyAsync(x => x.WorkflowId == input.WorkflowId && x.CounterId == input.CounterId && x.EventId == input.EventId, cancellationToken))
-            return (reused, true);
+        if (existing is not null)
+        {
+            if (!string.Equals(existing.OperationFingerprint, input.OperationFingerprint, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"value.counter errorCode=eventConflict: eventId '{input.EventId}' was already committed with a different operation fingerprint.");
+            return (new RunCounterReading(existing.CountValue, existing.Total, existing.PassCount, existing.FailCount), true);
+        }
 
         var hasPrev = await db.DurableCounterEvents
             .AnyAsync(x => x.WorkflowId == input.WorkflowId && x.CounterId == input.CounterId, cancellationToken);
@@ -34,7 +42,8 @@ public sealed class SqliteDurableRunCounterStore(IVisionStudioDbFactory dbFactor
                 .Select(x => new RunCounterReading(x.CountValue, x.Total, x.PassCount, x.FailCount))
                 .FirstOrDefaultAsync(cancellationToken)
             : null;
-        var next = (previous ?? default).Apply(input.Step, input.Pass, input.Reset);
+        var next = (previous ?? default).Apply(input.Step, input.Pass, input.Reset,
+            string.Equals(input.ResetScope, "all", StringComparison.OrdinalIgnoreCase));
         if (preview) return (next, false);
 
         db.DurableCounterEvents.Add(new DurableCounterEventEntity
@@ -42,6 +51,7 @@ public sealed class SqliteDurableRunCounterStore(IVisionStudioDbFactory dbFactor
             WorkflowId = input.WorkflowId,
             CounterId = input.CounterId,
             EventId = input.EventId,
+            OperationFingerprint = input.OperationFingerprint,
             CountValue = next.Count,
             Total = next.Total,
             PassCount = next.Pass,

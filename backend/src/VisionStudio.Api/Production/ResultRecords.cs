@@ -75,7 +75,9 @@ public sealed class SqliteResultRecordStore(IVisionStudioDbFactory dbFactory) : 
             WorkflowScope = record.WorkflowScope,
             NodeId = record.NodeId,
             CreatedAt = record.CreatedAt,
-            IdempotencyKey = idempotencyKey
+            IdempotencyKey = idempotencyKey,
+            PayloadSha256 = record.PayloadSha256,
+            RecordKeyNormalizationVersion = record.RecordKeyNormalizationVersion
         });
         try
         {
@@ -101,7 +103,8 @@ public sealed class SqliteResultRecordStore(IVisionStudioDbFactory dbFactory) : 
             .OrderByDescending(x => x.CreatedAt)
             .ThenByDescending(x => x.Id)
             .Take(limit)
-            .Select(x => new ResultRecord(x.Id, x.Dataset, x.RecordKey, x.PayloadJson, x.RunId, x.WorkflowScope, x.NodeId, x.CreatedAt))
+            .Select(x => new ResultRecord(x.Id, x.Dataset, x.RecordKey, x.PayloadJson, x.RunId, x.WorkflowScope, x.NodeId, x.CreatedAt,
+                x.PayloadSha256, x.RecordKeyNormalizationVersion))
             .ToListAsync(cancellationToken);
     }
 
@@ -117,7 +120,8 @@ public sealed class SqliteResultRecordStore(IVisionStudioDbFactory dbFactory) : 
             .OrderByDescending(x => x.CreatedAt)
             .ThenByDescending(x => x.Id)
             .Take(limit)
-            .Select(x => new ResultRecord(x.Id, x.Dataset, x.RecordKey, x.PayloadJson, x.RunId, x.WorkflowScope, x.NodeId, x.CreatedAt))
+            .Select(x => new ResultRecord(x.Id, x.Dataset, x.RecordKey, x.PayloadJson, x.RunId, x.WorkflowScope, x.NodeId, x.CreatedAt,
+                x.PayloadSha256, x.RecordKeyNormalizationVersion))
             .ToListAsync(cancellationToken);
     }
 }

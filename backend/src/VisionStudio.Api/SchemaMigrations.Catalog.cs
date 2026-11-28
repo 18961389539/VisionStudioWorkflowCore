@@ -75,19 +75,25 @@ public sealed partial class SqliteSchemaMigrationRunner
         new(36, "Durable per-workflow counter events", DurableCounterSchemaSql),
         new(37, "Latest station rollout and retained NG preview lookup", ProductionWorkstationLookupSchemaSql),
         new(38, "Searchable media library index", MediaIndexSchemaSql),
-        new(39, "Media provenance and integrity evidence", MediaProvenanceSchemaSql)
+        new(39, "Media provenance and integrity evidence", MediaProvenanceSchemaSql, ApplyMediaProvenanceColumnsAsync,
+            executeSql: false),
+        new(40, "Durable counter operation fingerprints", "", ApplyDurableCounterOperationFingerprintAsync,
+            "durable_counter_events.operation_fingerprint"),
+        new(41, "Result record payload digests and key normalization version", "", ApplyResultRecordDigestAsync,
+            "result_records.payload_sha256 + result_records.record_key_normalization_version")
     ];
 
     private sealed class Migration
     {
         private readonly string? _legacyWindowsChecksum;
 
-        public Migration(int version, string name, string sql, Func<SqliteConnection, SqliteTransaction, CancellationToken, Task>? customApply = null, string? checksumSeed = null)
+        public Migration(int version, string name, string sql, Func<SqliteConnection, SqliteTransaction, CancellationToken, Task>? customApply = null, string? checksumSeed = null, bool executeSql = true)
         {
             Version = version;
             Name = name;
             Sql = sql;
             CustomApply = customApply;
+            ExecuteSql = executeSql;
             var canonicalSql = sql.Trim().ReplaceLineEndings("\n");
             var canonicalSeed = (checksumSeed ?? string.Empty).ReplaceLineEndings("\n");
             Checksum = ComputeChecksum(version, name, canonicalSql, canonicalSeed);
@@ -105,6 +111,7 @@ public sealed partial class SqliteSchemaMigrationRunner
         public int Version { get; }
         public string Name { get; }
         public string Sql { get; }
+        public bool ExecuteSql { get; }
         public Func<SqliteConnection, SqliteTransaction, CancellationToken, Task>? CustomApply { get; }
         public string Checksum { get; }
     }

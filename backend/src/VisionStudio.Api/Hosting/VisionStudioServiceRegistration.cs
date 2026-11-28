@@ -294,6 +294,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<InMemoryRunCounterStore>();
         services.AddSingleton<IRunCounterStore>(provider => provider.GetRequiredService<InMemoryRunCounterStore>());
         services.AddSingleton<IDurableRunCounterStore>(sp => new SqliteDurableRunCounterStore(sp.GetRequiredService<IVisionStudioDbFactory>()));
+        services.AddSingleton<IRunCounterSnapshotFlusher, RunCounterSnapshotFlusher>();
         services.AddSingleton<LegacyStorageMigrationService>(sp => new LegacyStorageMigrationService(
             sp.GetRequiredService<IVisionStudioDbFactory>(),
             sp.GetRequiredService<IWebHostEnvironment>(),

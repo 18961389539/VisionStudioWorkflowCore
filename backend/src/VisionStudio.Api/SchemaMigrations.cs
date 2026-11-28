@@ -23,26 +23,60 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed partial class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 39;
+    public const int CurrentVersion = 41;
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
     {
         await EnsureInfrastructureAsync(connection, ct);
-        var current = await ReadCurrentVersionAsync(connection, ct);
-        if (current > CurrentVersion)
-            throw new InvalidOperationException($"Database schema v{current} is newer than this host supports (v{CurrentVersion}).");
+        // Serialize the version read, baseline and DDL across connections/processes. Without
+        // this lock two hosts can both observe the same version and race to insert its history.
+        await using var tx = connection.BeginTransaction(deferred: false);
+        try
+        {
+            var current = await ReadCurrentVersionAsync(connection, ct);
+            if (current > CurrentVersion)
+                throw new InvalidOperationException($"Database schema v{current} is newer than this host supports (v{CurrentVersion}).");
 
-        // Existing V0.20-V0.27 installations predate migration_history. Baseline already-applied
-        // versions without replaying DDL, then continue normally from the next version.
-        if (current > 0)
-            await BaselineHistoryAsync(connection, current, ct);
+            // schema_info and history are written in the same transaction for every migration.
+            // Higher history rows prove those migrations committed, but a missing lower row may
+            // represent a deliberately replayed repair (for example a dropped v37 table). Apply
+            // only missing versions; never replay versions that still have committed history.
+            var historyVersion = await ReadHistoryVersionAsync(connection, ct);
+            if (historyVersion > CurrentVersion)
+                throw new InvalidOperationException($"Database schema v{historyVersion} is newer than this host supports (v{CurrentVersion}).");
 
-        foreach (var migration in Migrations.Where(x => x.Version > current).OrderBy(x => x.Version))
-            await ApplyAsync(connection, migration, ct);
+            // Existing V0.20-V0.27 installations predate migration_history. Baseline already-applied
+            // versions without replaying DDL, then continue normally from the next version.
+            if (current > 0)
+                await BaselineHistoryAsync(connection, current, ct);
 
-        await VerifyHistoryChecksumsAsync(connection, ct);
-        var finalVersion = await ReadCurrentVersionAsync(connection, ct);
-        return new SchemaMigrationStatus(finalVersion, CurrentVersion, finalVersion == CurrentVersion, await ReadHistoryAsync(connection, ct));
+            foreach (var migration in Migrations.Where(x => x.Version > current).OrderBy(x => x.Version))
+            {
+                if (await HistoryContainsAsync(connection, migration.Version, ct))
+                    continue;
+                await ApplyAsync(connection, tx, migration, ct);
+            }
+
+            await VerifyHistoryChecksumsAsync(connection, ct);
+            var finalVersion = await ReadCurrentVersionAsync(connection, ct);
+            if (historyVersion > finalVersion)
+            {
+                await using var reconcile = connection.CreateCommand();
+                reconcile.Transaction = tx;
+                reconcile.CommandText = "UPDATE schema_info SET version=$version WHERE id=1;";
+                reconcile.Parameters.AddWithValue("$version", historyVersion);
+                await reconcile.ExecuteNonQueryAsync(ct);
+                finalVersion = historyVersion;
+            }
+            var history = await ReadHistoryAsync(connection, ct);
+            await tx.CommitAsync(ct);
+            return new SchemaMigrationStatus(finalVersion, CurrentVersion, finalVersion == CurrentVersion, history);
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task<SchemaMigrationStatus> GetStatusAsync(SqliteConnection connection, CancellationToken ct = default)
@@ -81,6 +115,21 @@ CREATE TABLE IF NOT EXISTS schema_migration_history (
         return Convert.ToInt32(await command.ExecuteScalarAsync(ct));
     }
 
+    private static async Task<int> ReadHistoryVersionAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(version),0) FROM schema_migration_history;";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(ct));
+    }
+
+    private static async Task<bool> HistoryContainsAsync(SqliteConnection connection, int version, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM schema_migration_history WHERE version=$version);";
+        command.Parameters.AddWithValue("$version", version);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(ct)) != 0;
+    }
+
     private static async Task BaselineHistoryAsync(SqliteConnection connection, int current, CancellationToken ct)
     {
         foreach (var migration in Migrations.Where(x => x.Version <= current))
@@ -109,53 +158,42 @@ VALUES($version,$name,$checksum,$at,0,1);
         }
     }
 
-    private static async Task ApplyAsync(SqliteConnection connection, Migration migration, CancellationToken ct)
+    private static async Task ApplyAsync(SqliteConnection connection, SqliteTransaction tx, Migration migration, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
-        await using var tx = connection.BeginTransaction(deferred: false);
-        try
+        if (migration.ExecuteSql && !string.IsNullOrWhiteSpace(migration.Sql))
         {
-            if (!string.IsNullOrWhiteSpace(migration.Sql))
-            {
-                await using var command = connection.CreateCommand();
-                command.Transaction = tx;
-                command.CommandText = migration.Sql;
-                await command.ExecuteNonQueryAsync(ct);
-            }
+            await using var command = connection.CreateCommand();
+            command.Transaction = tx;
+            command.CommandText = migration.Sql;
+            await command.ExecuteNonQueryAsync(ct);
+        }
 
-            if (migration.CustomApply is not null)
-                await migration.CustomApply(connection, tx, ct);
+        if (migration.CustomApply is not null)
+            await migration.CustomApply(connection, tx, ct);
 
-            await using (var version = connection.CreateCommand())
-            {
-                version.Transaction = tx;
-                version.CommandText = "UPDATE schema_info SET version=$version WHERE id=1;";
-                version.Parameters.AddWithValue("$version", migration.Version);
-                await version.ExecuteNonQueryAsync(ct);
-            }
+        await using (var version = connection.CreateCommand())
+        {
+            version.Transaction = tx;
+            version.CommandText = "UPDATE schema_info SET version=$version WHERE id=1;";
+            version.Parameters.AddWithValue("$version", migration.Version);
+            await version.ExecuteNonQueryAsync(ct);
+        }
 
-            sw.Stop();
-            await using (var history = connection.CreateCommand())
-            {
-                history.Transaction = tx;
-                history.CommandText = """
+        sw.Stop();
+        await using (var history = connection.CreateCommand())
+        {
+            history.Transaction = tx;
+            history.CommandText = """
 INSERT INTO schema_migration_history(version,name,checksum,applied_at,duration_ms,baselined)
 VALUES($version,$name,$checksum,$at,$duration,0);
 """;
-                history.Parameters.AddWithValue("$version", migration.Version);
-                history.Parameters.AddWithValue("$name", migration.Name);
-                history.Parameters.AddWithValue("$checksum", migration.Checksum);
-                history.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-                history.Parameters.AddWithValue("$duration", sw.ElapsedMilliseconds);
-                await history.ExecuteNonQueryAsync(ct);
-            }
-
-            await tx.CommitAsync(ct);
-        }
-        catch
-        {
-            await tx.RollbackAsync(CancellationToken.None);
-            throw;
+            history.Parameters.AddWithValue("$version", migration.Version);
+            history.Parameters.AddWithValue("$name", migration.Name);
+            history.Parameters.AddWithValue("$checksum", migration.Checksum);
+            history.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            history.Parameters.AddWithValue("$duration", sw.ElapsedMilliseconds);
+            await history.ExecuteNonQueryAsync(ct);
         }
     }
 

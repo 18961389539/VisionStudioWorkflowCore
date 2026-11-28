@@ -458,3 +458,16 @@ public sealed class RunCounterPersistence : BackgroundService
     /// <summary>测试与诊断用：当前生效的保留期。</summary>
     public TimeSpan Retention => _retention;
 }
+
+/// <summary>Adapts the host snapshot writer to the engine's explicit flush contract.</summary>
+public sealed class RunCounterSnapshotFlusher(RunCounterPersistence persistence, IRunCounterStore store) : IRunCounterSnapshotFlusher
+{
+    public async Task<long> FlushAsync(string scope, string counterId, CancellationToken cancellationToken = default)
+    {
+        await persistence.FlushAsync(cancellationToken).ConfigureAwait(false);
+        var snapshot = store.Snapshot().FirstOrDefault(item =>
+            string.Equals(item.Scope, scope, StringComparison.Ordinal) &&
+            string.Equals(item.CounterId, counterId, StringComparison.Ordinal));
+        return snapshot?.Count ?? 0;
+    }
+}

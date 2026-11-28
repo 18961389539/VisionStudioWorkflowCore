@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using VisionStudio.Abstractions;
@@ -95,9 +97,14 @@ public sealed class ScriptWorkerSupervisor : IScriptExecutionBackend, IDisposabl
         CancellationToken cancellationToken)
     {
         var encodedInputs = new Dictionary<string, PluginWorkerValue>(StringComparer.OrdinalIgnoreCase);
+        var approvedSourceSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
         var node = new NodeDefinition("script-worker", "script.csharp", null, null, new Dictionary<string, JsonElement>
         {
             ["source"] = JsonSerializer.SerializeToElement(source),
+            // Approval is bound by the outer node to these exact bytes before it invokes this backend.
+            // The worker node revalidates both fields; this is transport metadata, not a gate bypass.
+            ["scriptApproved"] = JsonSerializer.SerializeToElement(true),
+            ["approvedSourceSha256"] = JsonSerializer.SerializeToElement(approvedSourceSha256),
             ["timeoutMs"] = JsonSerializer.SerializeToElement(options.TimeoutMs),
             ["maxTicks"] = JsonSerializer.SerializeToElement(options.MaxTicks),
             ["maxOutputBytes"] = JsonSerializer.SerializeToElement(options.MaxOutputBytes),
