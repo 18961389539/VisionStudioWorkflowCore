@@ -207,6 +207,14 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
     public string Type => "roi.transform";
     private const double MaxRoiCoordinate = 10_000_000;
 
+    /// <summary>ROI 基线版本：同一份 ROI 参数得到稳定的短哈希，用于发现“新图配旧 ROI”。</summary>
+    private static string StableRoiVersion(VisionRoi roi)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(roi);
+        var digest = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json));
+        return Convert.ToHexString(digest)[..16].ToLowerInvariant();
+    }
+
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -219,13 +227,37 @@ var debugImage = context.TryGetValue("debugImage", out _)
 
         var basePose = new VisionPose2D(node.GetDouble("baseX", 0), node.GetDouble("baseY", 0), node.GetDouble("baseThetaDeg", 0));
         var currentPose = new VisionPose2D(node.GetDouble("currentX", 0), node.GetDouble("currentY", 0), node.GetDouble("currentThetaDeg", 0));
-        if (context.TryGetValue("currentPose", out var poseValue))
-            currentPose = poseValue.Require<VisionPose2D>("currentPose");
+        var poseConnected = context.TryGetValue("currentPose", out var poseValue);
+        var poseSource = poseConnected ? "port" : "parameters";
+        if (poseConnected)
+        {
+            try { currentPose = poseValue.Require<VisionPose2D>("currentPose"); }
+            catch (Exception ex)
+            {
+                // 端口优先且失败即报错：绝不静默回退到参数里的零位姿。
+                throw new InvalidOperationException(
+                    "roi.transform.invalid-current-pose-port: currentPose is connected but could not be read as a finite Pose2D.", ex);
+            }
+        }
         if (new[] { basePose.X, basePose.Y, basePose.ThetaDeg, currentPose.X, currentPose.Y, currentPose.ThetaDeg }.Any(v => !double.IsFinite(v)))
-            throw new InvalidOperationException("Base/current pose components must be finite (non-finite pose received).");
+            throw new InvalidOperationException($"roi.transform.non-finite-pose: base/current pose components must be finite (source={poseSource}).");
         if (Math.Abs(basePose.X) > MaxRoiCoordinate || Math.Abs(basePose.Y) > MaxRoiCoordinate
             || Math.Abs(currentPose.X) > MaxRoiCoordinate || Math.Abs(currentPose.Y) > MaxRoiCoordinate)
             throw new InvalidOperationException($"Base/current pose coordinates must be within ±{MaxRoiCoordinate:0} px.");
+        var maxPoseAngleDeg = node.GetDouble("maxPoseAngleDeg", 0);
+        if (!double.IsFinite(maxPoseAngleDeg) || maxPoseAngleDeg < 0 || maxPoseAngleDeg > 1e6)
+            throw new InvalidOperationException("roi.transform maxPoseAngleDeg must be within 0..1000000 (0 disables).");
+        // 有限大角度先按 AnglePeriod 归一化再相减；只有显式配置门限时才拒绝超大角度。
+        if (maxPoseAngleDeg > 0 &&
+            (Math.Abs(basePose.ThetaDeg) > maxPoseAngleDeg || Math.Abs(currentPose.ThetaDeg) > maxPoseAngleDeg))
+            throw new InvalidOperationException($"roi.transform.pose-angle-out-of-range: |theta| must be <= {maxPoseAngleDeg:0.#} deg (source={poseSource}).");
+        double? poseQuality = null;
+        if (context.TryGetValue("poseQuality", out var qualityValue)) poseQuality = qualityValue.Require<double>("poseQuality");
+        var minPoseQuality = node.GetDouble("minPoseQuality", 0);
+        if (!double.IsFinite(minPoseQuality) || minPoseQuality is < 0 or > 1)
+            throw new InvalidOperationException("roi.transform minPoseQuality must be within 0..1 (0 disables).");
+        if (poseQuality is { } quality && (!double.IsFinite(quality) || quality < minPoseQuality))
+            throw new InvalidOperationException($"roi.transform.pose-quality-insufficient: poseQuality={quality}, minPoseQuality={minPoseQuality}.");
 
         // A single node execution freezes pixels and the actual connected pose together.
         // This also works before any ROI exists, without fabricating a correction result.
@@ -234,20 +266,41 @@ var debugImage = context.TryGetValue("debugImage", out _)
             if (debugImage is null || debugImage.Mat.Empty())
                 throw new InvalidOperationException("Connect a non-empty debugImage before capturing the reference.");
             Cv2.ImEncode(".png", debugImage.Mat, out var bytes);
+            // 原子捕获：图像字节、尺寸、哈希、base pose、ROI 版本和捕获时间在同一次结果里一起交付；
+            // 任何一项校验失败都在写入前抛错，节点参数不会被部分更新，上一套完整参考保持不变。
+            var referenceHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+            var captureRoi = context.TryGetValue("roi", out var roiForCapture)
+                ? roiForCapture.Require<VisionRoi>("roi")
+                : node.GetRoi();
+            var referenceRoiVersion = captureRoi is null ? "none" : StableRoiVersion(captureRoi);
+            var capturedAtUtc = DateTimeOffset.UtcNow.ToString("O");
             var captureDiag = CoordinateValidation.Diagnostics(Type,
                 ("mode", "captureReference"), ("referenceWidth", debugImage.Width), ("referenceHeight", debugImage.Height),
-                ("referenceX", currentPose.X), ("referenceY", currentPose.Y), ("referenceThetaDeg", currentPose.ThetaDeg));
+                ("referenceHash", referenceHash), ("referenceRoiVersion", referenceRoiVersion), ("capturedAtUtc", capturedAtUtc),
+                ("baseX", basePose.X), ("baseY", basePose.Y), ("baseThetaDeg", basePose.ThetaDeg),
+                ("referenceX", currentPose.X), ("referenceY", currentPose.Y), ("referenceThetaDeg", currentPose.ThetaDeg),
+                ("poseSource", poseSource));
             return ValueTask.FromResult(new NodeExecutorResult(
                 new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(debugImage.CloneOwned()),
                     ["pose"] = VisionValue.Pose(currentPose),
+                    ["referenceHash"] = VisionValue.String(referenceHash),
+                    ["referenceBasePose"] = VisionValue.Pose(basePose),
+                    ["referenceRoiVersion"] = VisionValue.String(referenceRoiVersion),
+                    ["capturedAtUtc"] = VisionValue.String(capturedAtUtc),
+                    ["poseSource"] = VisionValue.String(poseSource),
+                    ["poseValid"] = VisionValue.Boolean(true),
+                    ["referenceComplete"] = VisionValue.Boolean(true),
                     ["diagnostics"] = VisionValue.String(captureDiag)
                 },
                 new Dictionary<string, object?>
                 {
                     ["referenceCaptured"] = true, ["referenceImage"] = Convert.ToBase64String(bytes),
                     ["referenceWidth"] = debugImage.Width, ["referenceHeight"] = debugImage.Height,
+                    ["referenceHash"] = referenceHash, ["baseX"] = basePose.X, ["baseY"] = basePose.Y,
+                    ["baseThetaDeg"] = basePose.ThetaDeg, ["referenceRoiVersion"] = referenceRoiVersion,
+                    ["capturedAtUtc"] = capturedAtUtc, ["poseSource"] = poseSource,
                     ["referenceX"] = currentPose.X, ["referenceY"] = currentPose.Y, ["referenceThetaDeg"] = currentPose.ThetaDeg,
                     ["diagnostics"] = captureDiag
                 }, []));
@@ -489,6 +542,12 @@ var debugImage = context.TryGetValue("debugImage", out _)
             -sin, cos, currentPose.Y - (-sin * basePose.X + cos * basePose.Y),
             0, 0, 1);
 
+        var storedReferenceImage = node.GetString("referenceImage", "");
+        var referenceIntegrity = storedReferenceImage.Length == 0 ? "not-configured" : "complete";
+        if (storedReferenceImage.Length > 0 && (node.GetInt("referenceWidth", 0) <= 0 || node.GetInt("referenceHeight", 0) <= 0))
+            throw new InvalidOperationException(
+                "roi.transform.partial-reference: the saved reference lacks image dimensions. The previous complete reference is retained; capture the reference again.");
+
         var outputs = new Dictionary<string, VisionValue>
         {
             ["roi"] = VisionValue.Roi(transformed),
@@ -496,8 +555,15 @@ var debugImage = context.TryGetValue("debugImage", out _)
             ["circle"] = VisionValue.Circle(circle),
             ["center"] = VisionValue.Point(center),
             ["pose"] = VisionValue.Pose(currentPose),
-            ["transform"] = VisionValue.Transform(transform)
+            ["transform"] = VisionValue.Transform(transform),
+            ["poseSource"] = VisionValue.String(poseSource),
+            ["poseValid"] = VisionValue.Boolean(true),
+            ["poseThetaDeg"] = VisionValue.Double(currentPose.ThetaDeg),
+            ["deltaThetaDeg"] = VisionValue.Double(thetaDeg),
+            ["referenceIntegrity"] = VisionValue.String(referenceIntegrity),
+            ["basePose"] = VisionValue.Pose(basePose)
         };
+        if (poseQuality is { } qualityOut) outputs["poseQuality"] = VisionValue.Double(qualityOut);
         var overlays = new List<VisionOverlay>();
         if (debugImage is not null)
         {

@@ -43,35 +43,91 @@ public sealed class JLVisionMeasure1dNode : IVisionNodeExecutor
 
         CoordinateValidation.RequireFinite(sigma, "sigma");
         CoordinateValidation.RequireFinite(threshold, "threshold");
-        CoordinateValidation.RequireFinite(node.GetDouble("measureLength1", 40), "measureLength1");
-        CoordinateValidation.RequireFinite(node.GetDouble("measureLength2", 2), "measureLength2");
-        CoordinateValidation.RequireFinite(node.GetDouble("row", source.Height / 2d), "row");
-        CoordinateValidation.RequireFinite(node.GetDouble("column", source.Width / 2d), "column");
-        CoordinateValidation.RequireFinite(node.GetDouble("radius", 40), "radius");
-        CoordinateValidation.RequireFinite(node.GetDouble("annulusRadius", 10), "annulusRadius");
+        var measureLength1 = node.GetDouble("measureLength1", 40);
+        var measureLength2 = node.GetDouble("measureLength2", 2);
+        var centerRow = node.GetDouble("row", source.Height / 2d);
+        var centerColumn = node.GetDouble("column", source.Width / 2d);
+        var radius = node.GetDouble("radius", 40);
+        var annulusRadius = node.GetDouble("annulusRadius", 10);
+        var angleStart = node.GetDouble("angleStart", -180);
+        var angleExtent = node.GetDouble("angleExtent", 360);
+        var phi = node.GetDouble("phi", 0);
+        foreach (var (name, value) in new[]
+                 {
+                     ("measureLength1", measureLength1), ("measureLength2", measureLength2),
+                     ("row", centerRow), ("column", centerColumn), ("radius", radius),
+                     ("annulusRadius", annulusRadius), ("angleStart", angleStart),
+                     ("angleExtent", angleExtent), ("phi", phi)
+                 })
+            CoordinateValidation.RequireFinite(value, name);
+
+        NodeExecutorResult GeometryFailure(string reason) => new(
+            new Dictionary<string, VisionValue>
+            {
+                ["found"] = VisionValue.Boolean(false), ["measurementValid"] = VisionValue.Boolean(false),
+                ["reason"] = VisionValue.String(reason), ["edges"] = VisionValue.String("[]"),
+                ["count"] = VisionValue.Integer(0), ["invalidCount"] = VisionValue.Integer(0),
+                ["diagnostics"] = VisionValue.String(JLVisionNodeSupport.Diagnostics(
+                    node.Type, "invalid-geometry", 1, ("found", false), ("reason", reason),
+                    ("shape", shape), ("method", method.ToString())))
+            },
+            new Dictionary<string, object?>
+            {
+                ["found"] = false, ["measurementValid"] = false, ["reason"] = reason,
+                ["algorithmBackend"] = "jlvision", ["shape"] = shape, ["method"] = method.ToString()
+            });
+
+        // 原生 measure 对象对退化几何会返回空结果：先验证完整参数与剖面-图像交集，
+        // 否则“rows.Count > 0”既不能证明剖面有效，也不能区分越界与真的没找到边缘。
+        if (measureLength1 <= 0 || measureLength1 > 1_000_000 || measureLength2 <= 0 || measureLength2 > 1_000_000)
+            return ValueTask.FromResult(GeometryFailure("invalid-measure-length"));
+        if (centerRow < 0 || centerRow > source.Height - 1 || centerColumn < 0 || centerColumn > source.Width - 1)
+            return ValueTask.FromResult(GeometryFailure("center-outside-image"));
+
+        double effectiveProfileLength;
+        if (shape == "arc")
+        {
+            if (radius <= 0 || radius > 1_000_000 || annulusRadius < 0 || annulusRadius >= radius)
+                return ValueTask.FromResult(GeometryFailure("invalid-annulus-radius"));
+            if (Math.Abs(angleExtent) < 1e-6 || Math.Abs(angleExtent) > 360)
+                return ValueTask.FromResult(GeometryFailure("zero-arc-extent"));
+            effectiveProfileLength = radius * Math.Abs(angleExtent) * Math.PI / 180;
+        }
+        else
+        {
+            var radians = phi * Math.PI / 180;
+            var footprintWidth = Math.Abs(Math.Cos(radians)) * measureLength1 + Math.Abs(Math.Sin(radians)) * measureLength2;
+            var footprintHeight = Math.Abs(Math.Sin(radians)) * measureLength1 + Math.Abs(Math.Cos(radians)) * measureLength2;
+            var clippedWidth = Math.Min(centerColumn + footprintWidth / 2, source.Width - 1)
+                               - Math.Max(centerColumn - footprintWidth / 2, 0);
+            var clippedHeight = Math.Min(centerRow + footprintHeight / 2, source.Height - 1)
+                                - Math.Max(centerRow - footprintHeight / 2, 0);
+            if (clippedWidth <= 0 || clippedHeight <= 0)
+                return ValueTask.FromResult(GeometryFailure("profile-outside-image"));
+            effectiveProfileLength = Math.Min(
+                measureLength1 * clippedWidth / footprintWidth,
+                measureLength1 * clippedHeight / footprintHeight);
+        }
+        if (effectiveProfileLength < 8)
+            return ValueTask.FromResult(GeometryFailure("insufficient-profile-samples"));
 
         var gray = PreprocessImageHelpers.ToGray8(source.Mat, out _, out var ownedGray);
         using (ownedGray)
         using (var image = JLVisionImages.FromMat(gray))
         using (var measure = new JlMeasure())
         {
-            var half = node.GetDouble("measureLength1", 40);
             switch (shape)
             {
                 case "arc":
                     measure.GenMeasureArc(
-                        node.GetDouble("row", source.Height / 2d), node.GetDouble("column", source.Width / 2d),
-                        node.GetDouble("radius", 40),
-                        node.GetDouble("angleStart", -180) * Math.PI / 180d, node.GetDouble("angleExtent", 360) * Math.PI / 180d,
-                        node.GetDouble("annulusRadius", 10), source.Width, source.Height, "bilinear");
+                        centerRow, centerColumn, radius,
+                        angleStart * Math.PI / 180d, angleExtent * Math.PI / 180d,
+                        annulusRadius, source.Width, source.Height, "bilinear");
                     break;
                 default:
-                    if (node.GetDouble("measureLength2", 2) <= 0)
-                        throw new InvalidOperationException("jlvision.measure1d requires a positive measureLength2.");
                     measure.GenMeasureRectangle2(
-                        node.GetDouble("row", source.Height / 2d), node.GetDouble("column", source.Width / 2d),
-                        node.GetDouble("phi", 0) * Math.PI / 180d,
-                        half, node.GetDouble("measureLength2", 2),
+                        centerRow, centerColumn, phi * Math.PI / 180d,
+                        measureLength1, measureLength2,
                         source.Width, source.Height, "bilinear");
                     break;
             }
@@ -159,6 +215,8 @@ public sealed class JLVisionMeasure1dNode : IVisionNodeExecutor
                 ["count"] = VisionValue.Integer(validRows.Count),
                 ["found"] = VisionValue.Boolean(validRows.Count > 0 && invalidReasons.Count == 0),
                 ["measurementValid"] = VisionValue.Boolean(validRows.Count > 0 && invalidReasons.Count == 0),
+                ["reason"] = VisionValue.String(payload.measurementValid ? "ok" : invalidReasons.Count > 0 ? "invalid-measurement-row" : "no-edges"),
+                ["effectiveProfileLength"] = VisionValue.Double(effectiveProfileLength),
                 ["invalidCount"] = VisionValue.Integer(invalidReasons.Count),
                 ["diagnostics"] = VisionValue.String(JLVisionNodeSupport.Diagnostics(
                     node.Type, payload.measurementValid ? "standard" : "invalid-measurement-row", invalidReasons.Count,

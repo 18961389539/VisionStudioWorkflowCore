@@ -58,6 +58,7 @@ public sealed class ProfileToleranceNode : IVisionNodeExecutor
                 "tolerance.profile requires exactly one nominal: nominalLine or nominalCircle.");
 
         var deviations = new double[samples.Count];
+        var nominalRadius = 0d;
         if (hasLine)
         {
             var line = context.Require<VisionLine2D>("nominalLine");
@@ -78,6 +79,7 @@ public sealed class ProfileToleranceNode : IVisionNodeExecutor
             GdtMath.Finite(circle.X, circle.Y, circle.Radius);
             if (circle.Radius <= 0)
                 throw new InvalidOperationException("tolerance.profile nominalCircle radius must be positive.");
+            nominalRadius = circle.Radius;
             for (var index = 0; index < samples.Count; index++)
             {
                 var point = samples[index];
@@ -123,14 +125,59 @@ public sealed class ProfileToleranceNode : IVisionNodeExecutor
                 break;
         }
 
-        var within = tolerance <= 0 || (profile <= tolerance + epsilon && crossed == 0);
-        var worstPoint = mode == "unilateralinside" ? samples[minIndex] : samples[maxIndex];
+        var coverageLength = 0d;
+        var maxAdjacentPointDistance = 0d;
+        for (var index = 1; index < samples.Count; index++)
+        {
+            var spacing = MeasurementMath.Hypot(
+                samples[index].X - samples[index - 1].X, samples[index].Y - samples[index - 1].Y);
+            coverageLength += spacing;
+            maxAdjacentPointDistance = Math.Max(maxAdjacentPointDistance, spacing);
+        }
+        var meanSampleSpacing = samples.Count > 1 ? coverageLength / (samples.Count - 1) : 0;
+
+        var firstCrossedIndex = -1;
+        if (crossed > 0)
+        {
+            for (var index = 0; index < deviations.Length; index++)
+            {
+                var wrongSide = mode == "unilateraloutside" ? deviations[index] < -epsilon : deviations[index] > epsilon;
+                if (wrongSide) { firstCrossedIndex = index; break; }
+            }
+        }
+
+        var worstPointIndex = mode == "unilateralinside" ? minIndex : maxIndex;
+        var worstSignedDeviation = deviations[worstPointIndex];
+        var gateEnabled = tolerance > 0;
+        var within = !gateEnabled || (profile <= tolerance + epsilon && crossed == 0);
+
+        // 稀疏采样会漏掉两点之间的窄高点：贴着公差上限时要求加密复测，而不是直接放行。
+        // 圆基准用弦高 s²/(8R) 作误差上界；直线基准没有曲率可依，取保守的半个采样间距。
+        var samplingErrorBoundPx = hasCircle && nominalRadius > 1e-12
+            ? maxAdjacentPointDistance * maxAdjacentPointDistance / (8 * nominalRadius)
+            : maxAdjacentPointDistance / 2;
+        var samplingDensitySufficient = !gateEnabled || samplingErrorBoundPx <= tolerance / 4 + epsilon;
+        var denseResampleRequired = !samplingDensitySufficient && within && profile > tolerance * 0.8;
+        if (denseResampleRequired) within = false;
+
+        var reason = !gateEnabled ? "tolerance-disabled"
+            : crossed > 0 ? "crossed-material-side"
+            : profile > tolerance + epsilon ? "profile-exceeded"
+            : denseResampleRequired ? "dense-resample-required"
+            : "ok";
+        var worstPoint = samples[worstPointIndex];
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("mode", mode), ("sampleCount", samples.Count), ("tolerance", tolerance),
             ("profile", profile), ("maxDeviation", maxDeviation), ("minDeviation", minDeviation),
             ("meanDeviation", mean), ("rmsDeviation", rms), ("crossedSampleCount", crossed),
-            ("nominal", hasLine ? "line" : "circle"), ("withinTolerance", within));
+            ("firstCrossedIndex", firstCrossedIndex), ("worstPointIndex", worstPointIndex),
+            ("worstSignedDeviation", worstSignedDeviation),
+            ("nominal", hasLine ? "line" : "circle"), ("nominalType", hasLine ? "line" : "circle"),
+            ("meanSampleSpacing", meanSampleSpacing), ("maxAdjacentPointDistance", maxAdjacentPointDistance),
+            ("samplingErrorBoundPx", samplingErrorBoundPx),
+            ("coverageLength", coverageLength), ("samplingDensitySufficient", samplingDensitySufficient),
+            ("reason", reason), ("withinTolerance", within));
 
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
@@ -143,7 +190,17 @@ public sealed class ProfileToleranceNode : IVisionNodeExecutor
                 ["meanDeviation"] = VisionValue.Double(mean),
                 ["rmsDeviation"] = VisionValue.Double(rms),
                 ["crossedSampleCount"] = VisionValue.Integer(crossed),
+                ["firstCrossedIndex"] = VisionValue.Integer(firstCrossedIndex),
+                ["worstPointIndex"] = VisionValue.Integer(worstPointIndex),
+                ["worstSignedDeviation"] = VisionValue.Double(worstSignedDeviation),
                 ["worstPoint"] = VisionValue.Point(worstPoint),
+                ["nominalType"] = VisionValue.String(hasLine ? "line" : "circle"),
+                ["meanSampleSpacing"] = VisionValue.Double(meanSampleSpacing),
+                ["maxAdjacentPointDistance"] = VisionValue.Double(maxAdjacentPointDistance),
+                ["samplingErrorBoundPx"] = VisionValue.Double(samplingErrorBoundPx),
+                ["coverageLength"] = VisionValue.Double(coverageLength),
+                ["samplingDensitySufficient"] = VisionValue.Boolean(samplingDensitySufficient),
+                ["reason"] = VisionValue.String(reason),
                 ["withinTolerance"] = VisionValue.Boolean(within),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
@@ -152,7 +209,13 @@ public sealed class ProfileToleranceNode : IVisionNodeExecutor
                 ["mode"] = mode, ["sampleCount"] = samples.Count, ["tolerance"] = tolerance,
                 ["profile"] = profile, ["maxDeviation"] = maxDeviation, ["minDeviation"] = minDeviation,
                 ["meanDeviation"] = mean, ["rmsDeviation"] = rms, ["crossedSampleCount"] = crossed,
-                ["nominal"] = hasLine ? "line" : "circle", ["withinTolerance"] = within,
+                ["firstCrossedIndex"] = firstCrossedIndex, ["worstPointIndex"] = worstPointIndex,
+                ["worstSignedDeviation"] = worstSignedDeviation,
+                ["meanSampleSpacing"] = meanSampleSpacing, ["maxAdjacentPointDistance"] = maxAdjacentPointDistance,
+                ["samplingErrorBoundPx"] = samplingErrorBoundPx, ["coverageLength"] = coverageLength,
+                ["samplingDensitySufficient"] = samplingDensitySufficient,
+                ["nominal"] = hasLine ? "line" : "circle", ["nominalType"] = hasLine ? "line" : "circle",
+                ["reason"] = reason, ["withinTolerance"] = within,
                 ["diagnostics"] = diagnostics
             }));
     }

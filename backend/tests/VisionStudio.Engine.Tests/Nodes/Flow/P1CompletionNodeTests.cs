@@ -389,9 +389,18 @@ public sealed class P1CompletionNodeTests
             ["nominalCircle"] = VisionValue.Circle(new VisionCircle(0, 0, 10))
         };
         var result = await Run(new ProfileToleranceNode(), "tolerance.profile", inputs,
-            """{"tolerance":1.2}""");
+            """{"tolerance":1.5}""");
         Assert.Equal(1d, result.Outputs["profile"].Require<double>("profile"), 6);
         Assert.True(result.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.True(result.Outputs["samplingDensitySufficient"].Require<bool>("samplingDensitySufficient"));
+        Assert.InRange(result.Outputs["samplingErrorBoundPx"].Require<double>("samplingErrorBoundPx"), 0.34, 0.35);
+
+        // 12 点圆、5px 采样间距对 1.2px 公差不够密：偏差虽合格也必须要求加密复测。
+        var sparse = await Run(new ProfileToleranceNode(), "tolerance.profile", inputs,
+            """{"tolerance":1.2}""");
+        Assert.False(sparse.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.False(sparse.Outputs["samplingDensitySufficient"].Require<bool>("samplingDensitySufficient"));
+        Assert.Equal("dense-resample-required", sparse.Outputs["reason"].Require<string>("reason"));
 
         var both = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             Run(new ProfileToleranceNode(), "tolerance.profile", new Dictionary<string, VisionValue>

@@ -386,17 +386,95 @@ public sealed class JLVisionFitRectangleNode : IVisionNodeExecutor
         var input = context.Require<IReadOnlyList<VisionContour>>("contours");
         var outputs = new Dictionary<string, VisionValue>();
         var rectangles = new List<VisionRectangle2D>();
+        // 原生矩形拟合至少需要 5 个点：在调用前校验，避免运行到 native 才报“配置无效”。
+        const int minimumFitPoints = 5;
+        var requestedMaxPoints = AdvancedJl.Integer(node, "maxPoints", -1, -1, 1000000);
+        if (requestedMaxPoints > 0 && requestedMaxPoints < minimumFitPoints)
+            throw new InvalidOperationException(
+                $"measure.fitRectangle.maxPointsTooSmall: requested maxPoints={requestedMaxPoints}, but the native rectangle fit needs at least {minimumFitPoints} points. Use 0 or a value >= {minimumFitPoints}.");
+        var usableContourCount = input.Count(contour => contour.Points.Count >= minimumFitPoints);
+        if (input.Count > 0 && usableContourCount == 0)
+        {
+            var largest = input.Max(contour => contour.Points.Count);
+            throw new InvalidOperationException(
+                $"measure.fitRectangle.insufficientPoints: {input.Count} contour(s) supplied but none has at least {minimumFitPoints} points (largest={largest}).");
+        }
         if (input.Count > 0)
         {
             using var contours = JlContourCodec.ToNative(input);
-            contours.FitRectangle2ContourXld(node.GetString("algorithm", "tukey"), AdvancedJl.Integer(node, "maxPoints", -1, -1, 1000000),
+            contours.FitRectangle2ContourXld(node.GetString("algorithm", "tukey"), requestedMaxPoints,
                 AdvancedJl.Number(node, "maxClosureDistance", 0, 0), AdvancedJl.Integer(node, "clipEndPoints", 0), AdvancedJl.Integer(node, "iterations", 5, 1, 1000),
                 AdvancedJl.Number(node, "clippingFactor", 2, .01, 100), out JlTuple rows, out var columns, out var angles, out var lengths1, out var lengths2, out var orders);
             using (rows) using (columns) using (angles) using (lengths1) using (lengths2) using (orders)
                 for (var i = 0; i < rows.Length; i++) rectangles.Add(new(columns[i].D, rows[i].D, 2 * lengths1[i].D, 2 * lengths2[i].D, -angles[i].D * 180 / Math.PI));
         }
         var index = AdvancedJl.Integer(node, "index", 0);
+        var minEdgeCoverage = AdvancedJl.Number(node, "minEdgeCoverage", .5, 0, 1);
+        var minInlierRatio = AdvancedJl.Number(node, "minInlierRatio", .5, 0, 1);
+        var residualTolerance = AdvancedJl.Number(node, "residualTolerance", 2, 0, 1000000);
         outputs["found"] = VisionValue.Boolean(index < rectangles.Count); outputs["count"] = VisionValue.Integer(rectangles.Count); outputs["rectangles"] = VisionValue.String(AdvancedJl.Json(rectangles));
+        outputs["requestedMaxPoints"] = VisionValue.Integer(requestedMaxPoints);
+        outputs["minRequiredPoints"] = VisionValue.Integer(minimumFitPoints);
+        outputs["inputContourCount"] = VisionValue.Integer(input.Count);
+        outputs["usableContourCount"] = VisionValue.Integer(usableContourCount);
+
+        var edgeCoverage = new Dictionary<string, double> { ["left"] = 0, ["right"] = 0, ["top"] = 0, ["bottom"] = 0 };
+        var minimumCoverage = 0d;
+        var residualRms = 0d;
+        var residualMax = 0d;
+        var inlierRatio = 0d;
+        var evaluatedPointCount = 0;
+        var usableForDimension = false;
+        if (index < rectangles.Count && index < input.Count)
+        {
+            var rectangle = rectangles[index];
+            var points = input[index].Points;
+            var angle = rectangle.AngleDeg * Math.PI / 180;
+            var cos = Math.Cos(angle); var sin = Math.Sin(angle);
+            var halfWidth = rectangle.Width / 2; var halfHeight = rectangle.Height / 2;
+            var coverageMin = new Dictionary<string, double> { ["left"] = double.MaxValue, ["right"] = double.MaxValue, ["top"] = double.MaxValue, ["bottom"] = double.MaxValue };
+            var coverageMax = new Dictionary<string, double> { ["left"] = double.MinValue, ["right"] = double.MinValue, ["top"] = double.MinValue, ["bottom"] = double.MinValue };
+            var assigned = new Dictionary<string, int> { ["left"] = 0, ["right"] = 0, ["top"] = 0, ["bottom"] = 0 };
+            var sumSquares = 0d; var inliers = 0;
+            foreach (var point in points)
+            {
+                var dx = point.X - rectangle.X; var dy = point.Y - rectangle.Y;
+                var localX = cos * dx + sin * dy;
+                var localY = -sin * dx + cos * dy;
+                var toLeft = Math.Abs(localX + halfWidth); var toRight = Math.Abs(localX - halfWidth);
+                var toTop = Math.Abs(localY + halfHeight); var toBottom = Math.Abs(localY - halfHeight);
+                var residual = Math.Min(Math.Min(toLeft, toRight), Math.Min(toTop, toBottom));
+                var edge = residual == toLeft ? "left" : residual == toRight ? "right" : residual == toTop ? "top" : "bottom";
+                var along = edge is "left" or "right" ? localY : localX;
+                coverageMin[edge] = Math.Min(coverageMin[edge], along);
+                coverageMax[edge] = Math.Max(coverageMax[edge], along);
+                assigned[edge]++;
+                sumSquares += residual * residual;
+                residualMax = Math.Max(residualMax, residual);
+                if (residual <= residualTolerance + 1e-9) inliers++;
+            }
+            evaluatedPointCount = points.Count;
+            foreach (var edge in edgeCoverage.Keys.ToArray())
+            {
+                var extent = edge is "left" or "right" ? rectangle.Height : rectangle.Width;
+                edgeCoverage[edge] = assigned[edge] == 0 || extent <= 1e-12
+                    ? 0
+                    : Math.Clamp((coverageMax[edge] - coverageMin[edge]) / extent, 0, 1);
+            }
+            minimumCoverage = edgeCoverage.Values.Min();
+            residualRms = points.Count > 0 ? Math.Sqrt(sumSquares / points.Count) : 0;
+            inlierRatio = points.Count > 0 ? inliers / (double)points.Count : 0;
+            usableForDimension = minimumCoverage >= minEdgeCoverage - 1e-9 && inlierRatio >= minInlierRatio - 1e-9;
+        }
+
+        outputs["edgeCoverageJson"] = VisionValue.String(AdvancedJl.Json(edgeCoverage));
+        outputs["minEdgeCoverage"] = VisionValue.Double(minimumCoverage);
+        outputs["residualRms"] = VisionValue.Double(residualRms);
+        outputs["residualMax"] = VisionValue.Double(residualMax);
+        outputs["inlierRatio"] = VisionValue.Double(inlierRatio);
+        outputs["residualTolerancePx"] = VisionValue.Double(residualTolerance);
+        outputs["evaluatedPointCount"] = VisionValue.Integer(evaluatedPointCount);
+        outputs["usableForDimension"] = VisionValue.Boolean(usableForDimension);
         if (index < rectangles.Count)
         {
             var rectangle = rectangles[index]; outputs["rectangle"] = VisionValue.Rectangle(rectangle); outputs["center"] = VisionValue.Point(new(rectangle.X, rectangle.Y)); outputs["pose"] = VisionValue.Pose(new(rectangle.X, rectangle.Y, rectangle.AngleDeg));

@@ -27,8 +27,14 @@ public static class MeasurementGapCatalog
     // contour-wide measurement nodes above, its executor fallback has always been false.
     private static readonly ParameterDescriptor OpenProfile = new("closed", "Closed Contour", "boolean", false,
         Description: "Treat the polyline as closed when sampling (repeats the first point implicitly).");
-    private static readonly ParameterDescriptor MaxInputGap = new("maxInputGap", "Maximum Input Gap (0=off)", "number", 0, 0, 1000000, .1,
-        Unit: "px", Group: "Filter", Description: "Reject a profile when adjacent projected input points are farther apart than this distance. 0 disables the check.");
+    private static readonly ParameterDescriptor MaxInputGap = new("maxInputGap", "Maximum Input Gap (0=auto 3 steps)", "number", 0, 0, 1000000, .1,
+        Unit: "px", Group: "Filter", Description: "Reject a profile when adjacent projected input points are farther apart than this. 0 now means 'auto': three sample steps, because bridging a larger hole fabricates waviness. Set an explicit larger value to allow crossing a known gap.");
+    private static readonly ParameterDescriptor MinUsableLength = new("minUsableLength", "Min Usable Length (0=off)", "number", 0, 0, 1000000, .1,
+        Unit: "px", Group: "Filter", Description: "Reject the result when the retained (fully supported) span is shorter than this.");
+    private static readonly ParameterDescriptor MinRetainedPoints = new("minRetainedPoints", "Min Retained Points (0=off)", "number", 0, 0, 10000000, 1,
+        Group: "Filter", Description: "Reject the result when fewer samples survive the end handling.");
+    private static readonly ParameterDescriptor AllowTruncatedKernel = new("allowTruncatedKernel", "Allow Truncated Kernel", "boolean", false,
+        Group: "Filter", Description: "Discard mode only: permit an edge-depleted Gaussian kernel. Off by default, because a truncated kernel means the end support is insufficient.");
     private static readonly ParameterDescriptor ProfileEndEffect = new("endEffect", "End Handling", "select", "reflect", Group: "Filter",
         Options: [new("Reflect ends", "reflect"), new("Discard ends", "discard")],
         Description: "Reflect keeps the full profile using mirrored samples at the ends. Discard uses only samples with full Gaussian kernel support.");
@@ -69,15 +75,21 @@ public static class MeasurementGapCatalog
              new("arcLength", VisionDataType.Double), new("chordLength", VisionDataType.Double),
              new("minRadius", VisionDataType.Double, Required: false), new("maxRadius", VisionDataType.Double, Required: false),
              new("deviation", VisionDataType.Double, Required: false), new("rms", VisionDataType.Double, Required: false),
+             new("conditionNumber", VisionDataType.Double, Required: false), new("radiusUncertainty", VisionDataType.Double, Required: false),
+             new("observabilityOk", VisionDataType.Boolean, Required: false),
              new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 Index,
                 new("minCoverageDeg", "Minimum Arc Coverage", "number", 20, 0, 359, 1, Unit: "deg", Group: "Arc",
                     Description: "Reject arcs spanning less than this. Coverage is the angular span of the sampled points; below it returns found=false because the radius is not observable."),
+                new("maxConditionNumber", "Max Condition Number (0=off)", "number", 0, 0, 1e9, 1, Group: "Arc",
+                    Description: "Upper bound on 1/(1-cos(sweep/2)). Short arcs make the radius ill-conditioned: exceeding the bound returns found=false / reason=arc-observability-weak instead of a numerically stable but meaningless radius."),
+                new("maxRadiusUncertainty", "Max Radius Uncertainty (0=off)", "number", 0, 0, 1e9, 0.001, Unit: "px", Group: "Arc",
+                    Description: "Upper bound on rms/(1-cos(sweep/2)), i.e. how much the fitted radius is amplified by the short arc. 0 disables this bound."),
                 new("maxDeviation", "Max Radial Deviation (0=off)", "number", 0, 0, 1000000, 0.1, Unit: "px", Group: "Limits",
                     Description: "Optional form gate: withinTolerance reports (maxRadius-minRadius) <= limit. 0 disables the gate."),
             ],
-            "Fits a circular arc to one contour and reports it in arc terms: sweepDeg, arcLength, chordLength and the start/end angles — what a fillet or a radius callout needs, and what measure.fitCircle (whole-circle least squares) does not give. Wire: contours -> circle/radius/sweepDeg/arcLength. Input is canonically angle-ordered; separated arcs or discontinuous point groups return found=false. start/end angles and chordLength use the two points bounding the largest angular gap.", "builtin",
+            "Fits a circular arc to one contour and reports it in arc terms: sweepDeg, arcLength, chordLength and the start/end angles — what a fillet or a radius callout needs, and what measure.fitCircle (whole-circle least squares) does not give. conditionNumber = 1/(1-cos(sweep/2)) and radiusUncertainty = rms/(1-cos(sweep/2)) expose how strongly a short arc amplifies noise into the radius; exceeding either configured bound returns found=false / reason=arc-observability-weak. Input is canonically angle-ordered; separated arcs or discontinuous point groups return found=false. start/end angles and chordLength use the two points bounding the largest angular gap.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：最小区域 / 极限圆 ───────────────────────────────────────
@@ -120,11 +132,16 @@ public static class MeasurementGapCatalog
              new("minRadiusPoint", VisionDataType.Point2D), new("maxCurvature", VisionDataType.Double),
              new("meanCurvature", VisionDataType.Double), new("cornerCount", VisionDataType.Integer),
              new("cornerJson", VisionDataType.String), new("withinTolerance", VisionDataType.Boolean),
+             new("windowMode", VisionDataType.String, Required: false), new("windowLength", VisionDataType.Double, Required: false),
+             new("actualWindowLength", VisionDataType.Double, Required: false), new("windowLengthCv", VisionDataType.Double, Required: false),
+             new("windowUniformityOk", VisionDataType.Boolean, Required: false),
              new("toleranceEnabled", VisionDataType.Boolean, Required: false), new("evaluationState", VisionDataType.String, Required: false), Diagnostics, Next],
             [
                 Index,
                 new("fittingWindow", "Fitting Window", "number", 5, 1, 200, 1, Group: "Curvature",
                     Description: "Points on each side used for the local circle fit. Larger windows smooth noise and blur short fillets; smaller windows follow noise."),
+                new("windowLength", "Arc-Length Window (0=off)", "number", 0, 0, 1000000, .01, Unit: "px", Group: "Curvature",
+                    Description: "When set, the contour is first resampled so 2*fittingWindow+1 points span exactly this arc length. Use it when point density is non-uniform and the same point count would mean different physical spans."),
                 new("cornerRadius", "Corner Radius Threshold (0=off)", "number", 0, 0, 1000000, .01, Unit: "px", Group: "Curvature",
                     Description: "Local minima of the radius below this value count as corners. 0 counts none, so cornerCount stays 0 while minRadius is still reported."),
                 new("minRadius", "Minimum Radius", "number", 0, 0, 1000000, .01, Unit: "px", Group: "Limits",
@@ -145,6 +162,8 @@ public static class MeasurementGapCatalog
              new("residualRms", VisionDataType.Double, Required: false),
              new("actualSampleStep", VisionDataType.Double, Required: false), new("maxObservedInputGap", VisionDataType.Double, Required: false),
              new("usableLength", VisionDataType.Double, Required: false), new("kernelTruncated", VisionDataType.Boolean, Required: false),
+             new("retainedPointCount", VisionDataType.Integer, Required: false), new("droppedHeadLength", VisionDataType.Double, Required: false),
+             new("droppedTailLength", VisionDataType.Double, Required: false), new("usableLengthRatio", VisionDataType.Double, Required: false),
              new("length", VisionDataType.Double), new("removedPointCount", VisionDataType.Integer), Diagnostics, Next],
             [
                 Index,
@@ -153,9 +172,10 @@ public static class MeasurementGapCatalog
                 new("sampleStep", "Sample Step", "number", 1, .01, 10000, .1, Unit: "px", Group: "Filter",
                     Description: "Maximum axial spacing for the uniform resampling grid. The actual spacing is reported in actualSampleStep."),
                 MaxInputGap, ProfileEndEffect,
+                MinUsableLength, MinRetainedPoints, AllowTruncatedKernel,
                 OpenProfile,
             ],
-            "Splits a nominally straight sampled edge into waviness and residual using a Gaussian filter on an axial grid. Reports the usable pixel span, actual sample spacing, largest input gap and whether the kernel had to be shortened. Discard mode requires full support at the retained points.", "builtin",
+            "Splits a nominally straight sampled edge into waviness and residual using a Gaussian filter on an axial grid. maxInputGap=0 is an automatic 3-step limit, not 'off': larger holes are rejected with the gap indices so a linear bridge cannot fabricate waviness. Discard mode rejects a truncated kernel unless allowTruncatedKernel=true, and minUsableLength/minRetainedPoints guard against a result whose ends carry no support. Reports retainedPointCount, droppedHeadLength, droppedTailLength and usableLengthRatio alongside the usable pixel span, actual sample spacing and largest input gap.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         new("measure.roughness", "Profile Roughness", "Measurement",
@@ -166,6 +186,12 @@ public static class MeasurementGapCatalog
              new("rmax", VisionDataType.Double), new("zeroCrossings", VisionDataType.Integer),
              new("actualSampleStep", VisionDataType.Double, Required: false), new("maxObservedInputGap", VisionDataType.Double, Required: false),
              new("rzSamplingLengths", VisionDataType.Integer, Required: false), new("kernelTruncated", VisionDataType.Boolean, Required: false),
+             new("rzWholeWindow", VisionDataType.Double, Required: false), new("rzValidForRating", VisionDataType.Boolean, Required: false),
+             new("evaluationStartIndex", VisionDataType.Integer, Required: false), new("evaluationEndIndex", VisionDataType.Integer, Required: false),
+             new("evaluationStartU", VisionDataType.Double, Required: false), new("evaluationEndU", VisionDataType.Double, Required: false),
+             new("availableStartU", VisionDataType.Double, Required: false), new("evaluationStartRequestedPx", VisionDataType.Double, Required: false),
+             new("evaluationStartTruncated", VisionDataType.Boolean, Required: false), new("evaluationSpanRequested", VisionDataType.Double, Required: false),
+             new("reason", VisionDataType.String, Required: false),
              new("gateEnabled", VisionDataType.Boolean, Required: false), new("unit", VisionDataType.String, Required: false),
              new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
@@ -174,14 +200,18 @@ public static class MeasurementGapCatalog
                 new("cutoffWavelength", "Cutoff Wavelength (0=auto)", "number", 0, 0, 1000000, .1, Unit: "px", Group: "Filter",
                     Description: "Gaussian cutoff separating roughness from waviness. 0 derives length/5."),
                 new("evaluationLength", "Evaluation Length (0=all)", "number", 0, 0, 1000000, .1, Unit: "px", Group: "Filter",
-                    Description: "Maximum length of the trailing evaluation window. 0 uses the full usable span. The result reports the span between the first and last evaluated samples."),
+                    Description: "Maximum length of the evaluation window. 0 uses the full usable span."),
+                new("evaluationStartPx", "Fixed Evaluation Start (-1=trailing)", "number", -1, -1, 1000000, .1, Unit: "px", Group: "Filter",
+                    Description: "Axial coordinate of the first evaluated sample. -1 keeps the existing trailing window. Use a fixed value to compare several windows from the same origin."),
                 new("sampleStep", "Sample Step", "number", 1, .01, 10000, .1, Unit: "px", Group: "Filter",
                     Description: "Maximum axial spacing for uniform resampling before filtering."),
                 MaxInputGap, ProfileEndEffect,
                 new("maxRa", "Max Ra (0=off)", "number", 0, 0, 1000000, .001, Unit: "px", Group: "Limits",
                     Description: "Optional gate: withinTolerance reports ra <= limit. 0 disables it."),
+                new("maxRz", "Max Rz (0=off)", "number", 0, 0, 1000000, .001, Unit: "px", Group: "Limits",
+                    Description: "Optional gate on the multi-sampling-length Rz. When fewer than three sampling lengths are available, rzValidForRating=false and the gate refuses to pass.")
             ],
-            "Estimates roughness trends in pixels from a nominally straight sampled image edge. This image-based estimate does not replace a calibrated contact profilometer or a certified roughness measurement. Reports the evaluated sample span and Gaussian end handling. Rz averages five segments when enough samples are available. In a shorter window it reports the whole-window range with rzSamplingLengths=0.", "builtin",
+            "Estimates roughness trends in pixels from a nominally straight sampled image edge. This image-based estimate does not replace a calibrated contact profilometer or a certified roughness measurement. rz is the average of the sampling lengths only when rzValidForRating=true; otherwise rzWholeWindow carries the whole-window peak-to-valley range and an Rz gate refuses to pass. evaluationStartPx fixes the window origin, and evaluationStartIndex/evaluationEndIndex/evaluationStartU/evaluationEndU report exactly which samples were evaluated so several windows can be compared.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：轮廓间距 ──────────────────────────────────────────────
@@ -190,6 +220,9 @@ public static class MeasurementGapCatalog
             [Found, new("sampleCount", VisionDataType.Integer), new("distance", VisionDataType.Double),
              new("minDistance", VisionDataType.Double), new("maxDistance", VisionDataType.Double), new("meanDistance", VisionDataType.Double),
              new("closestPointA", VisionDataType.Point2D), new("closestPointB", VisionDataType.Point2D),
+             new("direction", VisionDataType.String, Required: false), new("directedAToB", VisionDataType.Double, Required: false),
+             new("directedBToA", VisionDataType.Double, Required: false), new("symmetricDistance", VisionDataType.Double, Required: false),
+             new("symmetricGap", VisionDataType.Double, Required: false),
              new("minSamplingErrorBoundPx", VisionDataType.Double), new("maxSamplingErrorBoundPx", VisionDataType.Double),
              new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
@@ -200,7 +233,13 @@ public static class MeasurementGapCatalog
                 [
                     new("Gap (nearest distance)", "gap"),
                     new("Deviation (farthest distance)", "deviation")
-                ], Description: "gap reports the closest approach (a slit width); deviation reports the farthest stray (a form error). min/max/mean are always emitted regardless of mode."),
+                ], Description: "gap reports the closest approach (a slit width); deviation reports the farthest stray (a form error). min/max/mean follow the selected direction; both directions are always emitted."),
+                new("direction", "Comparison Direction", "select", "aToB", Group: "Distance", Options:
+                [
+                    new("A → B (contours to reference)", "aToB"),
+                    new("B → A (reference to contours)", "bToA"),
+                    new("Symmetric (worst of both)", "symmetric")
+                ], Description: "Which sampling direction decides distance/min/max/mean. A one-way comparison ignores features that exist only on the reference side; directedAToB/directedBToA/symmetricDistance/symmetricGap are always reported so the asymmetry stays visible."),
                 new("sampleStep", "Sample Step", "number", 2, .01, 10000, .1, Unit: "px", Group: "Distance",
                     Description: "Arc-length spacing of the samples compared. Both polylines are resampled with it."),
                 new("maxSamples", "Maximum Samples", "number", 1500, 2, 4000, 1, Group: "Distance",
@@ -210,7 +249,7 @@ public static class MeasurementGapCatalog
                 new("closed", "Closed Contour", "boolean", true,
                     Description: "Treat both polylines as closed when sampling."),
             ],
-            "Nearest and farthest distance between two polylines, with the actual closest point pair. Wire: contours + referenceContours -> distance/closestPointA/closestPointB. Fills the gap between point-to-line (measure.pointLineDistance) and circle-to-circle (measure.circleSpacing): an arbitrary edge against an arbitrary edge. Distances use exact point-to-segment projection against every reference segment. min/maxSamplingErrorBoundPx bound source-sampling approximation; sampleStep controls accuracy, not geometry. Units: pixels.", "builtin",
+            "Nearest and farthest distance between two polylines, with the actual closest point pair. Wire: contours + referenceContours -> distance/closestPointA/closestPointB. direction selects A→B, B→A or the symmetric worst case; directedAToB, directedBToA, symmetricDistance and symmetricGap are always emitted, because a one-way sweep silently ignores features that exist only on the reference contour. Distances use exact point-to-segment projection against every reference segment. min/maxSamplingErrorBoundPx bound source-sampling approximation; sampleStep controls accuracy, not geometry. Units: pixels.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：螺纹 ─────────────────────────────────────────────────
@@ -219,6 +258,12 @@ public static class MeasurementGapCatalog
             [Found, new("crestCount", VisionDataType.Integer), new("sampleCount", VisionDataType.Integer),
              new("pitch", VisionDataType.Double), new("majorDiameter", VisionDataType.Double), new("minorDiameter", VisionDataType.Double),
              new("pitchDiameter", VisionDataType.Double), new("pitchDiameterMethod", VisionDataType.String, Required: false),
+             new("pitchDiameterEstimate", VisionDataType.Double, Required: false), new("pitchDiameterIsEstimate", VisionDataType.Boolean, Required: false),
+             new("certifiedUseAllowed", VisionDataType.Boolean, Required: false),
+             new("crestPositionsJson", VisionDataType.String, Required: false), new("pitchIntervalsJson", VisionDataType.String, Required: false),
+             new("maxPitchDeviation", VisionDataType.Double, Required: false), new("validIntervalCount", VisionDataType.Integer, Required: false),
+             new("crestValleyAlternation", VisionDataType.Double, Required: false), new("peakValleySalience", VisionDataType.Double, Required: false),
+             new("threadAnglePlausible", VisionDataType.Boolean, Required: false), new("polarityConfidence", VisionDataType.Double, Required: false),
              new("threadAngleDeg", VisionDataType.Double), new("threadDepth", VisionDataType.Double),
              new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
@@ -232,8 +277,18 @@ public static class MeasurementGapCatalog
                     Description: "Fewer detected crests than this returns found=false: two crests give one pitch, which is not a measurement."),
                 new("sampleStep", "Sample Step", "number", 1, .01, 10000, .1, Unit: "px", Group: "Thread",
                     Description: "Arc-length resampling along the profile before crest detection."),
+                new("minValidIntervals", "Min Valid Pitch Intervals (0=auto)", "number", 0, 0, 500, 1, Group: "Limits",
+                    Description: "Minimum number of adjacent crest-to-crest intervals. Defaults to max(2, minCrests-1); fewer intervals returns found=false / reason=insufficient-pitch-intervals."),
+                new("expectedThreadAngleDeg", "Expected Thread Angle", "number", 60, 1, 120, 1, Unit: "deg", Group: "Limits",
+                    Description: "Nominal included flank angle used for the plausibility part of polarity confidence."),
+                new("threadAngleToleranceDeg", "Thread Angle Tolerance (0=off)", "number", 0, 0, 120, 1, Unit: "deg", Group: "Limits",
+                    Description: "Allowed deviation from expectedThreadAngleDeg. 0 disables the angle check."),
+                new("minPolarityConfidence", "Min Polarity Confidence (0=off)", "number", 0, 0, 1, .05, Group: "Limits",
+                    Description: "Minimum confidence from crest/valley alternation, peak-valley salience and flank-angle plausibility. Exceeding it rejects an incomplete thread pattern instead of trusting the overlay."),
+                new("certifyPitchDiameter", "Certify Pitch Diameter", "boolean", false, Group: "Limits",
+                    Description: "Explicit opt-in for using pitchDiameter as a certified result. Off by default because the silhouette only yields an arithmetic estimate.")
             ],
-            "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. The silhouette does not measure the pitch diameter directly: pitchDiameter is an estimate in pixels, and pitchDiameterMethod identifies the arithmetic mean of the major and minor diameters. It must not be used as a certified pitch-diameter measurement. The tolerance flag applies only to pitch consistency.", "builtin",
+            "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. The silhouette does not measure the pitch diameter directly: pitchDiameterEstimate/pitchDiameterIsEstimate mark the arithmetic mean, certifiedUseAllowed stays false until certifyPitchDiameter is explicitly enabled with a plausible pattern. crestPositionsJson and pitchIntervalsJson expose every crest and adjacent pitch, maxPitchDeviation locates a single bad interval, and polarityConfidence combines crest/valley alternation, salience and flank-angle plausibility. pitchTolerance applies only to pitch consistency. The tolerance flag is not a thread-gauge acceptance decision.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P2：齿轮（纯算量） ─────────────────────────────────────────
@@ -243,7 +298,10 @@ public static class MeasurementGapCatalog
              new("outsideDiameter", VisionDataType.Double), new("rootDiameter", VisionDataType.Double),
              new("circularPitch", VisionDataType.Double), new("spanTeeth", VisionDataType.Integer),
              new("spanLength", VisionDataType.Double), new("pinDiameter", VisionDataType.Double),
-             new("measurementOverPins", VisionDataType.Double), new("baseToothThickness", VisionDataType.Double), Diagnostics, Next],
+             new("measurementOverPins", VisionDataType.Double), new("baseToothThickness", VisionDataType.Double),
+             new("autoPinDiameter", VisionDataType.Double, Required: false), new("pinDiameterSource", VisionDataType.String, Required: false),
+             new("unit", VisionDataType.String, Required: false), new("dimensionalUseAllowed", VisionDataType.Boolean, Required: false),
+             Diagnostics, Next],
             [
                 new("module", "Module", "number", 1, .001, 1000, .001, Unit: "mm",
                     Description: "Gear module m. All diameters come out in the same unit."),
@@ -255,8 +313,10 @@ public static class MeasurementGapCatalog
                     Description: "x coefficient for corrected gears. 0 is an uncorrected gear; it shifts outside/root diameters and the span length."),
                 new("pinDiameter", "Pin Diameter (0=auto)", "number", 0, 0, 1000, .001, Unit: "mm", Group: "Gear",
                     Description: "Measuring pin diameter. 0 derives the usual 1.728*m. Only used for measurement over pins."),
+                new("unit", "Unit Label", "text", "mm", Group: "Reporting",
+                    Description: "One unit contract for module and pinDiameter; no conversion is applied. unit=px sets dimensionalUseAllowed=false."),
             ],
-            "Closed-form spur-gear geometry from module, tooth count and pressure angle: pitch/base/outside/root diameters, circular pitch, span length W_k with its k, and measurement over pins. This is arithmetic, not vision — no input ports, deterministic output, so it can drive a recipe or a report row directly. Helical gears are out of scope (helix angle assumed 0). All lengths in the module's unit.", "builtin",
+            "Closed-form spur-gear geometry from module, tooth count and pressure angle: pitch/base/outside/root diameters, circular pitch, span length W_k with its k, and measurement over pins. Combinations are validated before evaluation (tip/root relation, span teeth, involute domain and derived pin diameter); unusable combinations return found=false / reason=invalid-gear-combination with the offending values. module and pinDiameter share the unit label echoed on the result. This is arithmetic, not vision — no input ports, deterministic output. Helical gears are out of scope (helix angle assumed 0).", "builtin",
             new VisionToolCapabilities(EmitsOverlay: false), Actions: []),
 
         // ── P1：公差叠加 ─────────────────────────────────────────────
@@ -270,6 +330,9 @@ public static class MeasurementGapCatalog
              new("margin", VisionDataType.Double), new("utilization", VisionDataType.Double),
              new("gateMode", VisionDataType.String), new("gateEnabled", VisionDataType.Boolean),
              new("evaluatedDeviation", VisionDataType.Double), new("limitModel", VisionDataType.String), new("unit", VisionDataType.String),
+             new("assumptionsDeclared", VisionDataType.Boolean), new("nominalSource", VisionDataType.String),
+             new("connectionMask", VisionDataType.String), new("contributorSigmasJson", VisionDataType.String),
+             new("evaluationState", VisionDataType.String), new("reason", VisionDataType.String),
              new("contributionsJson", VisionDataType.String), new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 new("contributionsJson", "Contributions JSON", "textarea",
@@ -290,8 +353,12 @@ public static class MeasurementGapCatalog
                     Description: "Allowed absolute deviation from the target in the chain's unit. 0 disables the gate."),
                 new("unit", "Unit Label", "text", "mm", Group: "Reporting",
                     Description: "Report the unit used by the inputs. Up to 16 characters. Values are used as supplied."),
+                new("assumeIndependent", "Assume Independent (RSS)", "boolean", false, Group: "Statistical",
+                    Description: "Declares that the contributors are statistically independent. Required for an RSS result to be usable for release."),
+                new("assumeSixSigma", "Assume Six Sigma (RSS)", "boolean", false, Group: "Statistical",
+                    Description: "Declares that each full tolerance width equals six sigma (three per side). Required for an RSS result to be usable for release."),
             ],
-            "Combines a one-dimensional tolerance chain using worst-case or RSS limits. Reports the limit model, which values were checked against the target, the resulting margin and the input unit. Optional inputs a through f replace the first six nominal values.", "builtin",
+            "Combines a one-dimensional tolerance chain using worst-case or RSS limits. Reports the limit model, which values were checked against the target, the resulting margin and the input unit. Optional inputs a through f replace the first six nominal values; nominalSource (json|ports|mixed) and connectionMask record where each nominal came from, and contributorSigmasJson publishes the per-contributor sigma conversion. RSS treats every full width as six sigma and assumes independent contributors: unless assumeIndependent and assumeSixSigma are both declared, withinTolerance stays false with evaluationState=not-evaluated and reason=assumptions-undeclared, so the numbers are reported but never silently released.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: false), Actions: []),
 
         // ── P2：多基准基准系 ─────────────────────────────────────────
@@ -301,18 +368,24 @@ public static class MeasurementGapCatalog
             [Found, new("pose", VisionDataType.Pose2D), new("origin", VisionDataType.Point2D),
              new("primaryAngleDeg", VisionDataType.Double), new("secondaryAngleDeg", VisionDataType.Double),
              new("orthogonalityErrorDeg", VisionDataType.Double), new("originOffset", VisionDataType.Double, Required: false),
+             new("conditionNumber", VisionDataType.Double, Required: false), new("intersectionDistanceToSegments", VisionDataType.Double, Required: false),
+             new("originUnreliable", VisionDataType.Boolean, Required: false), new("datumValid", VisionDataType.Boolean, Required: false),
              new("datumJson", VisionDataType.String), new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 new("datumName", "Datum Name", "text", "A|B", Group: "Datum",
                     Description: "Label written into datumJson and the overlay, e.g. A|B or A-B."),
                 new("maxOrthogonalityErrorDeg", "Max Orthogonality Error (0=off)", "number", 0, 0, 90, .001, Unit: "deg", Group: "Limits",
                     Description: "Gate on how far the secondary datum is from 90 deg to the primary. 0 disables the gate."),
+                new("maxConditionNumber", "Max Condition Number (0=off)", "number", 0, 0, 1e6, .1, Group: "Limits",
+                    Description: "Condition number of the A|B intersection (1/|sin theta|). Near-parallel datums amplify direction noise into the origin; exceeding the limit sets originUnreliable=true and datumValid=false."),
+                new("maxIntersectionDistance", "Max Intersection Distance (0=off)", "number", 0, 0, 1e6, .1, Unit: "px", Group: "Limits",
+                    Description: "Allowed distance from the computed intersection to the nearest measured datum segment. Exceeding it means the origin is an extrapolation and sets originUnreliable=true."),
                 new("flipAxis", "Flip Axis", "boolean", false, Group: "Datum",
                     Description: "Reverse the +X direction. Fitted lines carry no polarity; set this when the drawing's X points the other way."),
                 new("unit", "Unit Label", "text", "px", Group: "Reporting",
                     Description: "Label only, no conversion (1..16 chars)."),
             ],
-            "Two-datum reference frame: the origin is the A|B intersection (not a projected point), X follows datum A, and the orthogonality error of B is reported as the datum's own contribution. Wire: primary + secondary (secondary optional) -> pose/origin/orthogonalityErrorDeg. tolerance.datum stays the single-datum case; use this when the drawing names two datums and the origin has to be their intersection. Image-plane (2D) only.", "builtin",
+            "Two-datum reference frame: the origin is the A|B intersection (not a projected point), X follows datum A, and the orthogonality error of B is reported as the datum's own contribution. conditionNumber and intersectionDistanceToSegments expose how far the intersection is extrapolated; either limit sets originUnreliable=true. datumValid = withinTolerance && !originUnreliable, so a geometrically constructible but unusable datum is visible to downstream tolerance nodes instead of looking like a pass. Image-plane (2D) only.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P1：几何构造族 ───────────────────────────────────────────

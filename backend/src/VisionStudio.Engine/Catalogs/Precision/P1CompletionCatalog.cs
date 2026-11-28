@@ -142,6 +142,12 @@ internal static class P1CompletionCatalog
                 new("profile", VisionDataType.Double), new("maxDeviation", VisionDataType.Double),
                 new("minDeviation", VisionDataType.Double), new("meanDeviation", VisionDataType.Double),
                 new("rmsDeviation", VisionDataType.Double), new("crossedSampleCount", VisionDataType.Integer),
+                new("firstCrossedIndex", VisionDataType.Integer, Required: false), new("worstPointIndex", VisionDataType.Integer, Required: false),
+                new("worstSignedDeviation", VisionDataType.Double, Required: false), new("nominalType", VisionDataType.String, Required: false),
+                new("meanSampleSpacing", VisionDataType.Double, Required: false), new("maxAdjacentPointDistance", VisionDataType.Double, Required: false),
+                new("samplingErrorBoundPx", VisionDataType.Double, Required: false),
+                new("coverageLength", VisionDataType.Double, Required: false), new("samplingDensitySufficient", VisionDataType.Boolean, Required: false),
+                new("reason", VisionDataType.String, Required: false),
                 new("worstPoint", VisionDataType.Point2D), new("withinTolerance", VisionDataType.Boolean),
                 new("diagnostics", VisionDataType.String), Next
             ],
@@ -155,7 +161,7 @@ internal static class P1CompletionCatalog
                 new("tolerance", "Profile Tolerance", "number", 0, 0, 1000000, 0.001, Group: "Limits",
                     Description: "Total width of the profile zone (the value in the feature control frame). 0 disables the gate; utilization is not reported, compare profile directly."),
             ],
-            "Profile of a line against a theoretical nominal: signed normal distance from every sample point to the nominal line or circle. Wire: samples PointList + exactly one of nominalLine/nominalCircle -> profile/max/min/mean/rms/crossedSampleCount. Positive deviation means the +90 degree side of the line (below a left-to-right line) or outside the circle. Bilateral profile is max-min; unilateral modes report the allowed side only and count samples that crossed over. Fewer than 3 samples returns found=false. Units follow the input coordinates; the nominal must be theoretical, not a golden-part fit.",
+            "Profile of a line against a theoretical nominal: signed normal distance from every sample point to the nominal line or circle. Wire: samples PointList + exactly one of nominalLine/nominalCircle -> profile/max/min/mean/rms/crossedSampleCount, plus firstCrossedIndex/worstPointIndex/worstSignedDeviation for direct troubleshooting. nominalType states whether a line or a circle was used. Positive deviation means the +90 degree side of the line (below a left-to-right line) or outside the circle. Bilateral profile is max-min; unilateral modes report the allowed side only and count samples that crossed over. meanSampleSpacing/maxAdjacentPointDistance/coverageLength expose the sampling grid: when a sparse grid would miss a narrow high point within 20% of the limit, withinTolerance turns false with reason=dense-resample-required instead of passing. Fewer than 3 samples returns found=false. Units follow the input coordinates; the nominal must be theoretical, not a golden-part fit.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
             Actions: [])
     ];

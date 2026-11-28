@@ -79,17 +79,36 @@ public sealed class MetrologyResultNodeTests
     }
 
     [Fact]
-    public async Task DuplicateNames_ThrowClearError()
+    public async Task DuplicateNames_ReportAllConflictsWithoutPickingFirst()
     {
         VisionMetrologyResult[] duplicate =
         [
             new(0, "same", "circle", true, Center: new VisionPoint2D(1, 1), Circle: new VisionCircle(1, 1, 1)),
             new(1, "same", "circle", true, Center: new VisionPoint2D(2, 2), Circle: new VisionCircle(2, 2, 1))
         ];
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await new MetrologyResultNode().ExecuteAsync(
-                Ctx(duplicate), Def("""{"name":"same"}"""), CancellationToken.None));
-        Assert.Contains("not unique", error.Message);
+        var result = await new MetrologyResultNode().ExecuteAsync(
+            Ctx(duplicate), Def("""{"name":"same"}"""), CancellationToken.None);
+        Assert.False(result.Outputs["found"].Require<bool>("found"));
+        Assert.Equal("name-conflict", result.Outputs["status"].Require<string>("status"));
+        Assert.Equal("authored-name-conflict", result.Outputs["reason"].Require<string>("reason"));
+        Assert.False(result.Outputs["geometryValid"].Require<bool>("geometryValid"));
+        Assert.False(result.Outputs.ContainsKey("circle"));
+        var conflicts = result.Outputs["conflictsJson"].Require<string>("conflictsJson");
+        Assert.Contains("duplicate-name", conflicts);
+        Assert.Contains("ambiguous-selection", conflicts);
+    }
+
+    [Fact]
+    public async Task BlankName_IsReportedAsConflict()
+    {
+        VisionMetrologyResult[] blank =
+        [
+            new(0, "  ", "circle", true, Center: new VisionPoint2D(1, 1), Circle: new VisionCircle(1, 1, 1))
+        ];
+        var result = await new MetrologyResultNode().ExecuteAsync(
+            Ctx(blank), Def("""{"name":"anything"}"""), CancellationToken.None);
+        Assert.False(result.Outputs["found"].Require<bool>("found"));
+        Assert.Contains("blank-name", result.Outputs["conflictsJson"].Require<string>("conflictsJson"));
     }
 
     [Theory]

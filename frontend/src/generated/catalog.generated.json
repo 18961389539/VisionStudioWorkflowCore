@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "171c95b361e9b634f3d8ef2f21f4ef314e0b09b42b01eb365b362fa2c8025d82",
+  "hash": "8f9cc447bece0e824e1b195ad009bcf96ad81dc078585aedbce1ea7cd166b2cd",
   "items": [
     {
       "type": "image.acquire",
@@ -27380,6 +27380,16 @@
           "required": true
         },
         {
+          "name": "reason",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "effectiveProfileLength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -27706,7 +27716,7 @@
           "advanced": true
         }
       ],
-      "description": "JLVision native 1D measure object: builds a rectangle2 or arc measure, then runs MeasurePos, MeasurePairs, MeasureThresh or MeasureProjection. Edges use schemaVersion=1 with method-specific payloads: {schemaVersion,method,shape,unit,coordinateOrder,edges,invalidCount,invalidReasons,measurementValid}. Position/threshold edges contain position:{x,y}, amplitude and distance; pair edges contain first/second points, amplitudes, width and widthValid; projection edges contain a native-order gray projection sample. Coordinates are x=column,y=row in pixels. Missing pair endpoints or invalid width invalidate the measurement instead of silently dropping columns. Unlike measure.caliper this node goes through the native measure object, which is what enables arc profiles and gray projection. Native quirks of JLVisionLib 1.0.0 honored here: output tuples have inconsistent lengths; pair width falls back to endpoint distance and is always emitted with widthValid, and TranslateMeasure / GetMeasureParam / ResetFuzzyMeasure corrupt or fail the measure handle, so translateRow/translateColumn are intentionally ignored.",
+      "description": "JLVision native 1D measure object: builds a rectangle2 or arc measure, then runs MeasurePos, MeasurePairs, MeasureThresh or MeasureProjection. Geometry is validated before the native call: measure lengths, radius/annulus, arc sweep and the profile-image intersection; degenerate or short profiles return found=false with a stable reason (invalid-measure-length, invalid-annulus-radius, zero-arc-extent, center-outside-image, profile-outside-image, insufficient-profile-samples) instead of relying on a non-empty row list. Edges use schemaVersion=1 with method-specific payloads: {schemaVersion,method,shape,unit,coordinateOrder,edges,invalidCount,invalidReasons,measurementValid}. Position/threshold edges contain position:{x,y}, amplitude and distance; pair edges contain first/second points, amplitudes, width and widthValid; projection edges contain a native-order gray projection sample. Coordinates are x=column,y=row in pixels. Missing pair endpoints or invalid width invalidate the measurement instead of silently dropping columns. Unlike measure.caliper this node goes through the native measure object, which is what enables arc profiles and gray projection. Native quirks of JLVisionLib 1.0.0 honored here: output tuples have inconsistent lengths; pair width falls back to endpoint distance and is always emitted with widthValid, and TranslateMeasure / GetMeasureParam / ResetFuzzyMeasure corrupt or fail the measure handle, so translateRow/translateColumn are intentionally ignored.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -27815,6 +27825,21 @@
           "required": false
         },
         {
+          "name": "conditionNumber",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "radiusUncertainty",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "observabilityOk",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
           "name": "withinTolerance",
           "dataType": "Boolean",
           "required": true
@@ -27854,6 +27879,29 @@
           "description": "Reject arcs spanning less than this. Coverage is the angular span of the sampled points; below it returns found=false because the radius is not observable."
         },
         {
+          "name": "maxConditionNumber",
+          "label": "Max Condition Number (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 1,
+          "group": "Arc",
+          "description": "Upper bound on 1/(1-cos(sweep/2)). Short arcs make the radius ill-conditioned: exceeding the bound returns found=false / reason=arc-observability-weak instead of a numerically stable but meaningless radius."
+        },
+        {
+          "name": "maxRadiusUncertainty",
+          "label": "Max Radius Uncertainty (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.001,
+          "unit": "px",
+          "group": "Arc",
+          "description": "Upper bound on rms/(1-cos(sweep/2)), i.e. how much the fitted radius is amplified by the short arc. 0 disables this bound."
+        },
+        {
           "name": "maxDeviation",
           "label": "Max Radial Deviation (0=off)",
           "type": "number",
@@ -27866,7 +27914,7 @@
           "description": "Optional form gate: withinTolerance reports (maxRadius-minRadius) <= limit. 0 disables the gate."
         }
       ],
-      "description": "Fits a circular arc to one contour and reports it in arc terms: sweepDeg, arcLength, chordLength and the start/end angles — what a fillet or a radius callout needs, and what measure.fitCircle (whole-circle least squares) does not give. Wire: contours -> circle/radius/sweepDeg/arcLength. Input is canonically angle-ordered; separated arcs or discontinuous point groups return found=false. start/end angles and chordLength use the two points bounding the largest angular gap.",
+      "description": "Fits a circular arc to one contour and reports it in arc terms: sweepDeg, arcLength, chordLength and the start/end angles — what a fillet or a radius callout needs, and what measure.fitCircle (whole-circle least squares) does not give. conditionNumber = 1/(1-cos(sweep/2)) and radiusUncertainty = rms/(1-cos(sweep/2)) expose how strongly a short arc amplifies noise into the radius; exceeding either configured bound returns found=false / reason=arc-observability-weak. Input is canonically angle-ordered; separated arcs or discontinuous point groups return found=false. start/end angles and chordLength use the two points bounding the largest angular gap.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -27936,6 +27984,31 @@
           "required": true
         },
         {
+          "name": "scaleDeviation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "scaleGateEnabled",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "scaleWithinTolerance",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "rigidScaleEnforced",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "rmsError",
           "dataType": "Double",
           "required": true
@@ -28003,7 +28076,40 @@
             }
           ],
           "group": "Fit",
-          "description": "rigid is the metrology default: the part cannot grow or shrink, so scale must stay 1. similarity also solves a uniform scale, useful for thermal drift and film/print inspection, but it hides true size errors."
+          "description": "rigid is the metrology default: the part cannot grow or shrink, so scale=1 is enforced and a violation fails. similarity also solves a uniform scale, useful for thermal drift and film/print inspection, but it hides true size errors unless scaleTolerance/minScale/maxScale are set."
+        },
+        {
+          "name": "scaleTolerance",
+          "label": "Scale Tolerance (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.001,
+          "group": "Fit",
+          "description": "Allowed |scale-1| in similarity mode. Independent of the residual gate, so a small RMS cannot mask a dimensionally significant zoom."
+        },
+        {
+          "name": "minScale",
+          "label": "Min Scale (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 0.001,
+          "group": "Fit",
+          "description": "Optional lower bound for the solved similarity scale."
+        },
+        {
+          "name": "maxScale",
+          "label": "Max Scale (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 0.001,
+          "group": "Fit",
+          "description": "Optional upper bound for the solved similarity scale."
         },
         {
           "name": "trimFraction",
@@ -28059,7 +28165,8 @@
           "step": 0.5,
           "unit": "deg",
           "group": "Initial Alignment",
-          "description": "Starting rotation applied before the first iteration. Needed when the part may be flipped or rotated far from the nominal, because ICP only converges to the nearest local minimum. Ignored when autoInitialRotation is on."
+          "description": "Starting rotation applied before the first iteration. Needed when the part may be flipped or rotated far from the nominal, because ICP only converges to the nearest local minimum. Ignored when autoInitialRotation is on.",
+          "advanced": true
         },
         {
           "name": "autoInitialRotation",
@@ -28067,7 +28174,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Initial Alignment",
-          "description": "Coarse-search a full turn in 30 deg steps before refining, and start the ICP from the best candidate. Costs one extra pass over a thinned point set and removes the most common failure: a valid part that aligns to the wrong pose because the caller did not know the angle."
+          "description": "Coarse-search a full turn in 30 deg steps before refining, and start the ICP from the best candidate. Costs one extra pass over a thinned point set and removes the most common failure: a valid part that aligns to the wrong pose because the caller did not know the angle.",
+          "advanced": true
         },
         {
           "name": "closedReference",
@@ -28075,10 +28183,11 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Data",
-          "description": "Treat the reference polyline as a closed loop (last point connects back to the first). Turn off for open profiles such as a machined edge that does not wrap around."
+          "description": "Treat the reference polyline as a closed loop (last point connects back to the first). Turn off for open profiles such as a machined edge that does not wrap around.",
+          "advanced": true
         }
       ],
-      "description": "Rigid (or similarity) best-fit alignment of a measured contour onto a reference contour, the step every GD&T node silently assumes. Trimmed ICP matches each measured point to the nearest segment of the reference polyline, drops the worst trimFraction, and solves the optimal 2D transform in closed form (Kabsch); no SVD and no randomness, so the same input always gives the same transform. Emits the transform, the aligned point list and the residual statistics BEFORE alignment is discarded — feed alignedPoints to tolerance.profile / measure.contourDeviation and the residual becomes the form error. rmsError is sqrt(mean(distance²)) over all sampled points. found requires converged=true and finite transform/residuals; non-converged or degenerate fits are rejected. Budget: measured/reference are thinned to maxPoints, so a 20k-point contour is fitted on its envelope, not on every pixel.",
+      "description": "Rigid scale=1 is enforced; similarity mode reports scaleDeviation and gates on scaleTolerance/minScale/maxScale so a good residual cannot hide a real size error. Rigid (or similarity) best-fit alignment of a measured contour onto a reference contour, the step every GD&T node silently assumes. Trimmed ICP matches each measured point to the nearest segment of the reference polyline, drops the worst trimFraction, and solves the optimal 2D transform in closed form (Kabsch); no SVD and no randomness, so the same input always gives the same transform. Emits the transform, the aligned point list and the residual statistics BEFORE alignment is discarded — feed alignedPoints to tolerance.profile / measure.contourDeviation and the residual becomes the form error. rmsError is sqrt(mean(distance²)) over all sampled points. found requires converged=true and finite transform/residuals; non-converged or degenerate fits are rejected. Budget: measured/reference are thinned to maxPoints, so a 20k-point contour is fitted on its envelope, not on every pixel.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -28693,6 +28802,31 @@
           "required": true
         },
         {
+          "name": "coverageDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxGapDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "minCoverageDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxAngularGapDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angularCoverageOk",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "sampleCount",
           "dataType": "Integer",
           "required": false
@@ -29026,6 +29160,32 @@
           ],
           "group": "Fit",
           "description": "Default all keeps real local defects in the quality gate even when robust fitting excludes them.",
+          "advanced": true
+        },
+        {
+          "name": "minCoverageDeg",
+          "label": "Minimum Angular Coverage (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Coverage",
+          "description": "Require the used spokes to cover this angular span (360 minus the largest gap). Count alone lets a few spokes bunched on a short arc drive the fit.",
+          "advanced": true
+        },
+        {
+          "name": "maxAngularGapDeg",
+          "label": "Max Angular Gap (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Coverage",
+          "description": "Reject the fit when the largest angular hole between used spokes exceeds this, even if total coverage passes.",
           "advanced": true
         },
         {
@@ -29497,6 +29657,21 @@
           "required": true
         },
         {
+          "name": "axialSpanUsed",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "axialCoverageRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "minAxialCoverageRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
           "name": "sampleCount",
           "dataType": "Integer",
           "required": false
@@ -29777,6 +29952,18 @@
           "advanced": true
         },
         {
+          "name": "minAxialCoverageRatio",
+          "label": "Min Axial Coverage (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "group": "Fit",
+          "description": "Require the used edge points to span at least this fraction of the caliper span. Count alone is not enough: three clustered points can fit a numerically stable line that says nothing about the measured edge.",
+          "advanced": true
+        },
+        {
           "name": "roi",
           "label": "ROI",
           "type": "roi",
@@ -29877,6 +30064,41 @@
         },
         {
           "name": "pairCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "continuousPairCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "continuousSegmentCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "longestContinuousSamples",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "maskBreakCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "maskBreakIndicesJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "continuityRejectedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "minEdgeSegmentSamples",
           "dataType": "Integer",
           "required": true
         },
@@ -30125,6 +30347,18 @@
           "advanced": true
         },
         {
+          "name": "minEdgeSegmentSamples",
+          "label": "Min Edge Segment Samples (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 1,
+          "group": "Validation",
+          "description": "Reject a pair when either edge sits in a continuous-sample segment shorter than this. Pairs spanning a mask break are always rejected.",
+          "advanced": true
+        },
+        {
           "name": "roi",
           "label": "ROI",
           "type": "roi",
@@ -30133,7 +30367,7 @@
           "internal": true
         }
       ],
-      "description": "Native subpixel edge-pair measurement of bright strips, dark gaps and line widths. Returns width along the search line, ordered endpoints and center; supports width filtering and nominal-width selection. Place the line perpendicular to the target boundaries for perpendicular width. Uses Gaussian sigma=1 and at least 8 contiguous profile samples. ROI holes split profiles and cannot be bridged. No qualifying pair returns found=false with no width or points. Supports rigid px-to-px localization transforms; outputs remain in image pixels.",
+      "description": "Native subpixel edge-pair measurement of bright strips, dark gaps and line widths. Returns width along the search line, ordered endpoints and center; supports width filtering and nominal-width selection. Place the line perpendicular to the target boundaries for perpendicular width. continuousSegmentCount/longestContinuousSamples/maskBreakIndicesJson expose how ROI holes split the profile, and pairs that would bridge a mask break are rejected (reason=edge-pair-spans-mask-break), because a width across a hole has no physical meaning. Uses Gaussian sigma=1 and at least 8 contiguous profile samples. No qualifying pair returns found=false with no width or points. Supports rigid px-to-px localization transforms; outputs remain in image pixels.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -30494,6 +30728,16 @@
           "name": "datum",
           "dataType": "Pose2D",
           "required": true
+        },
+        {
+          "name": "datumUnit",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "datumValid",
+          "dataType": "Boolean",
+          "required": false
         }
       ],
       "outputs": [
@@ -30550,6 +30794,26 @@
         {
           "name": "lowAngleDeg",
           "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "measurementKind",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "projectionPlane",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "datumAxisAngleDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "totalRunout3DSupported",
+          "dataType": "Boolean",
           "required": false
         },
         {
@@ -30657,7 +30921,7 @@
           "description": "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are calibrated."
         }
       ],
-      "description": "Circular or total runout as the full indicator movement (max minus min) of sampled surface points, measured in the datum frame from tolerance.datum. Wire: samples PointList + datum Pose2D (both required). radial mode evaluates distance to the datum axis; axial mode evaluates the coordinate along it. Outputs runout, min/max/mean reading, the high/low points (and their angles in radial mode) and coverageDeg (angular coverage in radial mode, axial reading span in axial mode). Radial sampling requires minCoverageDeg; axial sampling requires minAxialSamples and optional minAxialSpan. A disabled tolerance reports toleranceEnabled=false, evaluationState=not-evaluated and withinTolerance=false. Fewer than 3 samples or insufficient angular coverage returns found=false. The datum axis is 2D: this is a planar projection of the real 3D runout, so spindle tilt and axis straightness are not modelled.",
+      "description": "Circular or total runout as the full indicator movement (max minus min) of sampled surface points, measured in the datum frame from tolerance.datum. Wire: samples PointList + datum Pose2D (both required), plus datumUnit/datumValid from the datum node to reject unit mismatches and invalid datums. radial mode evaluates distance to the datum axis; axial mode evaluates the coordinate along it. Outputs runout, min/max/mean reading, the high/low points (and their angles in radial mode) and coverageDeg (angular coverage in radial mode, axial reading span in axial mode). measurementKind=planar-projection, projectionPlane=XY, datumAxisAngleDeg and totalRunout3DSupported=false state the 2D boundary explicitly: spindle tilt, axis straightness and true 3D total runout are not modelled. Radial sampling requires minCoverageDeg; axial sampling requires minAxialSamples and optional minAxialSpan. A disabled tolerance reports toleranceEnabled=false, evaluationState=not-evaluated and withinTolerance=false. Fewer than 3 samples or insufficient coverage returns found=false.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -30767,6 +31031,51 @@
           "required": true
         },
         {
+          "name": "reason",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "minMaxSource",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "integrationMethod",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "meanIsApproximate",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "angularStepDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "samplingPhaseDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "meanAnalytic",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "meanApproximationError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "samplingDensitySufficient",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -30844,9 +31153,21 @@
           "unit": "px",
           "group": "Limits",
           "description": "Optional independent gate on the analytic maximum wall thickness."
+        },
+        {
+          "name": "maxMeanApproximationError",
+          "label": "Max Mean Approximation Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.0001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Compare the sampled midpoint-rule mean against an 8x-denser integration; exceeding this limit sets samplingDensitySufficient=false and blocks the gate."
         }
       ],
-      "description": "Circular wall thickness from fitted inner/outer circles. Wire: inner + outer Circle → min/max/meanThickness/std/cv; optional nominal/tolerance gate. Key params: sampleCount, startAngleDeg, nominalThickness/tolerance. Inner disk must be contained by outer (else found=false, contained=false). Rejects non-positive outer radius or inner≥outer. Units: pixels. Non-circular walls: use measure.contourThickness.",
+      "description": "Circular wall thickness from fitted inner/outer circles. Wire: inner + outer Circle → min/max/meanThickness/std/cv; optional nominal/tolerance gate. minThickness/maxThickness are analytic closed-form extrema (minMaxSource=analytic-closed-form), while mean/std/uniformity come from midpoint integration over uniform angles (integrationMethod=midpoint-uniform-angle, meanIsApproximate=true). angularStepDeg, samplingPhaseDeg, meanAnalytic and meanApproximationError expose the sampling density; maxMeanApproximationError turns a coarse phase-biased window into an explicit refusal. Inner disk must be contained by outer (else found=false, contained=false). Units: pixels. Non-circular walls: use measure.contourThickness.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -31168,6 +31489,31 @@
           "required": true
         },
         {
+          "name": "windowMode",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "windowLength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "actualWindowLength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "windowLengthCv",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "windowUniformityOk",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
           "name": "toleranceEnabled",
           "dataType": "Boolean",
           "required": false
@@ -31209,6 +31555,18 @@
           "step": 1,
           "group": "Curvature",
           "description": "Points on each side used for the local circle fit. Larger windows smooth noise and blur short fillets; smaller windows follow noise."
+        },
+        {
+          "name": "windowLength",
+          "label": "Arc-Length Window (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.01,
+          "unit": "px",
+          "group": "Curvature",
+          "description": "When set, the contour is first resampled so 2*fittingWindow+1 points span exactly this arc length. Use it when point density is non-uniform and the same point count would mean different physical spans."
         },
         {
           "name": "cornerRadius",
@@ -31334,6 +31692,31 @@
           "required": true
         },
         {
+          "name": "direction",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "directedAToB",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "directedBToA",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "symmetricDistance",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "symmetricGap",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "minSamplingErrorBoundPx",
           "dataType": "Double",
           "required": true
@@ -31396,7 +31779,29 @@
             }
           ],
           "group": "Distance",
-          "description": "gap reports the closest approach (a slit width); deviation reports the farthest stray (a form error). min/max/mean are always emitted regardless of mode."
+          "description": "gap reports the closest approach (a slit width); deviation reports the farthest stray (a form error). min/max/mean follow the selected direction; both directions are always emitted."
+        },
+        {
+          "name": "direction",
+          "label": "Comparison Direction",
+          "type": "select",
+          "defaultValue": "aToB",
+          "options": [
+            {
+              "label": "A → B (contours to reference)",
+              "value": "aToB"
+            },
+            {
+              "label": "B → A (reference to contours)",
+              "value": "bToA"
+            },
+            {
+              "label": "Symmetric (worst of both)",
+              "value": "symmetric"
+            }
+          ],
+          "group": "Distance",
+          "description": "Which sampling direction decides distance/min/max/mean. A one-way comparison ignores features that exist only on the reference side; directedAToB/directedBToA/symmetricDistance/symmetricGap are always reported so the asymmetry stays visible."
         },
         {
           "name": "sampleStep",
@@ -31441,7 +31846,7 @@
           "description": "Treat both polylines as closed when sampling."
         }
       ],
-      "description": "Nearest and farthest distance between two polylines, with the actual closest point pair. Wire: contours + referenceContours -> distance/closestPointA/closestPointB. Fills the gap between point-to-line (measure.pointLineDistance) and circle-to-circle (measure.circleSpacing): an arbitrary edge against an arbitrary edge. Distances use exact point-to-segment projection against every reference segment. min/maxSamplingErrorBoundPx bound source-sampling approximation; sampleStep controls accuracy, not geometry. Units: pixels.",
+      "description": "Nearest and farthest distance between two polylines, with the actual closest point pair. Wire: contours + referenceContours -> distance/closestPointA/closestPointB. direction selects A→B, B→A or the symmetric worst case; directedAToB, directedBToA, symmetricDistance and symmetricGap are always emitted, because a one-way sweep silently ignores features that exist only on the reference contour. Distances use exact point-to-segment projection against every reference segment. min/maxSamplingErrorBoundPx bound source-sampling approximation; sampleStep controls accuracy, not geometry. Units: pixels.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -31487,9 +31892,34 @@
       ],
       "outputs": [
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "value",
           "dataType": "Double",
           "required": true
+        },
+        {
+          "name": "valueKind",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "areaFeature",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "values",
@@ -31940,11 +32370,21 @@
         },
         {
           "name": "mode",
-          "label": "Mode",
-          "type": "text",
-          "defaultValue": "",
+          "label": "Distance Mode",
+          "type": "select",
+          "defaultValue": "point_to_point",
+          "options": [
+            {
+              "label": "Point to point",
+              "value": "point_to_point"
+            },
+            {
+              "label": "Point to segment",
+              "value": "point_to_segment"
+            }
+          ],
           "group": "Geometry",
-          "description": "Distance mode for distanceCc (default point_to_point).",
+          "description": "distanceCc only. Unknown modes are rejected before the native call with found=false / reason=invalid-distance-mode.",
           "visibleWhen": {
             "parameter": "feature",
             "values": [
@@ -31960,7 +32400,7 @@
           }
         }
       ],
-      "description": "Computes one JLVision XLD contour feature for the explicitly selected input contour: area with centroid, circularity, compactness, convexity, rectangularity, orientation, eccentricity with bulkiness, elliptic axis, maximum-chord diameter, height/width ratio, second-order moments, point count, closed flag, and distances to a second contour, a point, a line or a segment. XLD features are computed on the contour itself (no region fill), so they stay valid for open or self-touching edges where region statistics would fail. Features that need a second contour validate the input before the native call.",
+      "description": "Computes one JLVision XLD contour feature for the explicitly selected input contour: area with centroid, circularity, compactness, convexity, rectangularity, orientation, eccentricity with bulkiness, elliptic axis, maximum-chord diameter, height/width ratio, second-order moments, point count, closed flag, and distances to a second contour, a point, a line or a segment. XLD features are computed on the contour itself (no region fill), so they stay valid for open or self-touching edges where region statistics would fail. areaCenter's primary value is a point count, not an area: valueKind/unit mark this and areaFeature names the explicit area feature to use for sizing. values always includes row, column and pointCount. Invalid distance modes and zero-length line/segment references are rejected before the native call with reason=invalid-distance-mode / zero-length-reference.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -32293,6 +32733,21 @@
           "required": false
         },
         {
+          "name": "absoluteOffset",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "side",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "datumJson",
           "dataType": "String",
           "required": true
@@ -32334,7 +32789,7 @@
           "description": "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are already calibrated, so reports and traces read correctly."
         }
       ],
-      "description": "Builds a 2D datum reference frame from a primary datum line (A) plus an optional secondary point (B). Origin is B projected onto A, or the line midpoint when B is absent; the X axis follows A and can be flipped. Wire: primary (and secondary) → pose/origin/axisAngleDeg, then into tolerance.position / tolerance.runout / coordinate.* which expect a Pose2D. secondaryOffset is the signed perpendicular distance of B from datum A, which is the form error the datum feature itself contributes. Units follow the input coordinates; no conversion is applied. Zero-length lines fail. Image-plane (2D) only.",
+      "description": "Builds a 2D datum reference frame from a primary datum line (A) plus an optional secondary point (B). Origin is B projected onto A, or the line midpoint when B is absent; the X axis follows A and can be flipped. Wire: primary (and secondary) → pose/origin/axisAngleDeg, then into tolerance.position / tolerance.runout / coordinate.* which expect a Pose2D; also wire unit into their datumUnit port so a px/mm mismatch is rejected. secondaryOffset is the signed perpendicular distance of B from the drawing axis (the unflipped A direction), positive on the +90° normal side; flipAxis changes the +X direction but not this sign. absoluteOffset/side report the same bias without sign and side ∈ {positive, negative}. datumJson records unit, both axes and the offset convention. Zero-length lines fail. Image-plane (2D) only.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -32414,6 +32869,26 @@
           "required": false
         },
         {
+          "name": "conditionNumber",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "intersectionDistanceToSegments",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "originUnreliable",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "datumValid",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
           "name": "datumJson",
           "dataType": "String",
           "required": true
@@ -32456,6 +32931,29 @@
           "description": "Gate on how far the secondary datum is from 90 deg to the primary. 0 disables the gate."
         },
         {
+          "name": "maxConditionNumber",
+          "label": "Max Condition Number (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "group": "Limits",
+          "description": "Condition number of the A|B intersection (1/|sin theta|). Near-parallel datums amplify direction noise into the origin; exceeding the limit sets originUnreliable=true and datumValid=false."
+        },
+        {
+          "name": "maxIntersectionDistance",
+          "label": "Max Intersection Distance (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Allowed distance from the computed intersection to the nearest measured datum segment. Exceeding it means the origin is an extrapolation and sets originUnreliable=true."
+        },
+        {
           "name": "flipAxis",
           "label": "Flip Axis",
           "type": "boolean",
@@ -32472,7 +32970,7 @@
           "description": "Label only, no conversion (1..16 chars)."
         }
       ],
-      "description": "Two-datum reference frame: the origin is the A|B intersection (not a projected point), X follows datum A, and the orthogonality error of B is reported as the datum's own contribution. Wire: primary + secondary (secondary optional) -> pose/origin/orthogonalityErrorDeg. tolerance.datum stays the single-datum case; use this when the drawing names two datums and the origin has to be their intersection. Image-plane (2D) only.",
+      "description": "Two-datum reference frame: the origin is the A|B intersection (not a projected point), X follows datum A, and the orthogonality error of B is reported as the datum's own contribution. conditionNumber and intersectionDistanceToSegments expose how far the intersection is extrapolated; either limit sets originUnreliable=true. datumValid = withinTolerance && !originUnreliable, so a geometrically constructible but unusable datum is visible to downstream tolerance nodes instead of looking like a pass. Image-plane (2D) only.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -33381,6 +33879,41 @@
           "required": true
         },
         {
+          "name": "bins",
+          "dataType": "NumberList",
+          "required": true
+        },
+        {
+          "name": "cdf",
+          "dataType": "NumberList",
+          "required": true
+        },
+        {
+          "name": "histogramSchemaVersion",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "binMin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "binMax",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "cdfLast",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "percentileMethod",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -33451,9 +33984,26 @@
           "max": 100,
           "step": 0.1,
           "description": "Upper percentile (0..100) reported as percentileHigh."
+        },
+        {
+          "name": "percentileMethod",
+          "label": "Percentile Method",
+          "type": "select",
+          "defaultValue": "nearestRank",
+          "options": [
+            {
+              "label": "Nearest rank",
+              "value": "nearestRank"
+            },
+            {
+              "label": "CDF linear interpolation",
+              "value": "linear"
+            }
+          ],
+          "description": "nearestRank returns the 8-bit bin that reaches the target count; linear interpolates inside the CDF and can express sub-gray percentiles. The chosen method is echoed on the result."
         }
       ],
-      "description": "Native 256-bin histogram over selected pixels ∩ image domain. Connect exactly one of image or domainImage; optional region restricts further. 8-bit color converts to gray. An empty domain emits found=false, pixelCount=0 and zero bins/CDF; scalar statistics are omitted.",
+      "description": "Native 256-bin histogram over selected pixels ∩ image domain. Connect exactly one of image or domainImage; optional region restricts further. bins/cdf are typed NumberList outputs with histogramSchemaVersion=1, fixed bin boundaries [0,255] and cdfLast=1 for a non-empty domain, so downstream code no longer has to parse or guess the JSON strings. 8-bit color converts to gray. An empty domain emits found=false, pixelCount=0 and zero bins/CDF; scalar statistics are omitted.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -33500,7 +34050,27 @@
         {
           "name": "deviation",
           "dataType": "Double",
-          "required": true
+          "required": false
+        },
+        {
+          "name": "orientationDeviation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "evaluationLength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "zoneWidth",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "zoneWidthBasis",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "measuredLength",
@@ -33510,6 +34080,11 @@
         {
           "name": "measuredAngleDeg",
           "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "toleranceEnabled",
+          "dataType": "Boolean",
           "required": true
         },
         {
@@ -33544,21 +34119,28 @@
               "value": "perpendicular"
             }
           ],
-          "description": "Which relation angleError is measured against: 0° (parallel) or 90° (perpendicular). Deviation follows the same choice: endpoint drift of B perpendicular to A for parallel, along A for perpendicular."
+          "description": "Which relation angleError is measured against: 0° (parallel) or 90° (perpendicular). Orientation deviation follows the same choice: endpoint drift of B perpendicular to A for parallel, along A for perpendicular."
         },
         {
           "name": "maxAngleErrorDeg",
-          "label": "Max Angle Error deg (0=off)",
+          "label": "Max Angle Error deg",
           "type": "number",
           "defaultValue": 0,
           "min": 0,
           "max": 90,
           "step": 0.1,
           "unit": "deg",
-          "description": "Optional tolerance; withinTolerance reports |angleError| <= limit."
+          "description": "Allowed |angleError|. Only enforced when toleranceEnabled=true; with toleranceEnabled=true and 0, any measurable non-zero error fails."
+        },
+        {
+          "name": "toleranceEnabled",
+          "label": "Tolerance Enabled",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Explicitly turns the angle gate on. Leaves 0 as a true zero tolerance instead of overloading it as 'off'; defaults to maxAngleErrorDeg > 0 for backward compatibility."
         }
       ],
-      "description": "Orientation quality of two fitted line segments, as parallelism (mode=parallel, error from 0°) or perpendicularity (mode=perpendicular, error from 90°). Wire: lines a + b → acute angleError, measured angle, endpoint drift of B, withinTolerance. Key params: mode, maxAngleErrorDeg. Drift scales with B length; reversing endpoints does not change results. Image-plane geometry only.",
+      "description": "Orientation quality of two fitted line segments, as parallelism (mode=parallel, error from 0°) or perpendicularity (mode=perpendicular, error from 90°). orientationDeviation is the endpoint drift of B measured perpendicular to A (parallel) or along A (perpendicular) over evaluationLength = B length; zoneWidth restates the same drift under zoneWidthBasis=endpointSpread and is NOT a form-inclusive GD&T tolerance zone. toleranceEnabled separates 'gate off' from a real zero tolerance. Reversing endpoints does not change angleError. Image-plane geometry only.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -34997,6 +35579,26 @@
           "required": false
         },
         {
+          "name": "retainedPointCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "droppedHeadLength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "droppedTailLength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "usableLengthRatio",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "length",
           "dataType": "Double",
           "required": true
@@ -35054,7 +35656,7 @@
         },
         {
           "name": "maxInputGap",
-          "label": "Maximum Input Gap (0=off)",
+          "label": "Maximum Input Gap (0=auto 3 steps)",
           "type": "number",
           "defaultValue": 0,
           "min": 0,
@@ -35062,7 +35664,7 @@
           "step": 0.1,
           "unit": "px",
           "group": "Filter",
-          "description": "Reject a profile when adjacent projected input points are farther apart than this distance. 0 disables the check."
+          "description": "Reject a profile when adjacent projected input points are farther apart than this. 0 now means 'auto': three sample steps, because bridging a larger hole fabricates waviness. Set an explicit larger value to allow crossing a known gap."
         },
         {
           "name": "endEffect",
@@ -35083,14 +35685,46 @@
           "description": "Reflect keeps the full profile using mirrored samples at the ends. Discard uses only samples with full Gaussian kernel support."
         },
         {
+          "name": "minUsableLength",
+          "label": "Min Usable Length (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "Reject the result when the retained (fully supported) span is shorter than this."
+        },
+        {
+          "name": "minRetainedPoints",
+          "label": "Min Retained Points (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000000,
+          "step": 1,
+          "group": "Filter",
+          "description": "Reject the result when fewer samples survive the end handling."
+        },
+        {
+          "name": "allowTruncatedKernel",
+          "label": "Allow Truncated Kernel",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Filter",
+          "description": "Discard mode only: permit an edge-depleted Gaussian kernel. Off by default, because a truncated kernel means the end support is insufficient."
+        },
+        {
           "name": "closed",
           "label": "Closed Contour",
           "type": "boolean",
           "defaultValue": false,
-          "description": "Treat the polyline as closed when sampling (repeats the first point implicitly)."
+          "description": "Treat the polyline as closed when sampling (repeats the first point implicitly).",
+          "advanced": true
         }
       ],
-      "description": "Splits a nominally straight sampled edge into waviness and residual using a Gaussian filter on an axial grid. Reports the usable pixel span, actual sample spacing, largest input gap and whether the kernel had to be shortened. Discard mode requires full support at the retained points.",
+      "description": "Splits a nominally straight sampled edge into waviness and residual using a Gaussian filter on an axial grid. maxInputGap=0 is an automatic 3-step limit, not 'off': larger holes are rejected with the gap indices so a linear bridge cannot fabricate waviness. Discard mode rejects a truncated kernel unless allowTruncatedKernel=true, and minUsableLength/minRetainedPoints guard against a result whose ends carry no support. Reports retainedPointCount, droppedHeadLength, droppedTailLength and usableLengthRatio alongside the usable pixel span, actual sample spacing and largest input gap.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -35176,6 +35810,56 @@
           "required": true
         },
         {
+          "name": "firstCrossedIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "worstPointIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "worstSignedDeviation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "nominalType",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "meanSampleSpacing",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "maxAdjacentPointDistance",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "samplingErrorBoundPx",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "coverageLength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "samplingDensitySufficient",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "worstPoint",
           "dataType": "Point2D",
           "required": true
@@ -35231,7 +35915,7 @@
           "description": "Total width of the profile zone (the value in the feature control frame). 0 disables the gate; utilization is not reported, compare profile directly."
         }
       ],
-      "description": "Profile of a line against a theoretical nominal: signed normal distance from every sample point to the nominal line or circle. Wire: samples PointList + exactly one of nominalLine/nominalCircle -> profile/max/min/mean/rms/crossedSampleCount. Positive deviation means the +90 degree side of the line (below a left-to-right line) or outside the circle. Bilateral profile is max-min; unilateral modes report the allowed side only and count samples that crossed over. Fewer than 3 samples returns found=false. Units follow the input coordinates; the nominal must be theoretical, not a golden-part fit.",
+      "description": "Profile of a line against a theoretical nominal: signed normal distance from every sample point to the nominal line or circle. Wire: samples PointList + exactly one of nominalLine/nominalCircle -> profile/max/min/mean/rms/crossedSampleCount, plus firstCrossedIndex/worstPointIndex/worstSignedDeviation for direct troubleshooting. nominalType states whether a line or a circle was used. Positive deviation means the +90 degree side of the line (below a left-to-right line) or outside the circle. Bilateral profile is max-min; unilateral modes report the allowed side only and count samples that crossed over. meanSampleSpacing/maxAdjacentPointDistance/coverageLength expose the sampling grid: when a sparse grid would miss a narrow high point within 20% of the limit, withinTolerance turns false with reason=dense-resample-required instead of passing. Fewer than 3 samples returns found=false. Units follow the input coordinates; the nominal must be theoretical, not a golden-part fit.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -35346,6 +36030,61 @@
           "required": false
         },
         {
+          "name": "rzWholeWindow",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rzValidForRating",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "evaluationStartIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "evaluationEndIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "evaluationStartU",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "evaluationEndU",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "availableStartU",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "evaluationStartRequestedPx",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "evaluationStartTruncated",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "evaluationSpanRequested",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "gateEnabled",
           "dataType": "Boolean",
           "required": false
@@ -35404,7 +36143,19 @@
           "step": 0.1,
           "unit": "px",
           "group": "Filter",
-          "description": "Maximum length of the trailing evaluation window. 0 uses the full usable span. The result reports the span between the first and last evaluated samples."
+          "description": "Maximum length of the evaluation window. 0 uses the full usable span."
+        },
+        {
+          "name": "evaluationStartPx",
+          "label": "Fixed Evaluation Start (-1=trailing)",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "Axial coordinate of the first evaluated sample. -1 keeps the existing trailing window. Use a fixed value to compare several windows from the same origin."
         },
         {
           "name": "sampleStep",
@@ -35420,7 +36171,7 @@
         },
         {
           "name": "maxInputGap",
-          "label": "Maximum Input Gap (0=off)",
+          "label": "Maximum Input Gap (0=auto 3 steps)",
           "type": "number",
           "defaultValue": 0,
           "min": 0,
@@ -35428,7 +36179,7 @@
           "step": 0.1,
           "unit": "px",
           "group": "Filter",
-          "description": "Reject a profile when adjacent projected input points are farther apart than this distance. 0 disables the check."
+          "description": "Reject a profile when adjacent projected input points are farther apart than this. 0 now means 'auto': three sample steps, because bridging a larger hole fabricates waviness. Set an explicit larger value to allow crossing a known gap."
         },
         {
           "name": "endEffect",
@@ -35459,9 +36210,22 @@
           "unit": "px",
           "group": "Limits",
           "description": "Optional gate: withinTolerance reports ra <= limit. 0 disables it."
+        },
+        {
+          "name": "maxRz",
+          "label": "Max Rz (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Optional gate on the multi-sampling-length Rz. When fewer than three sampling lengths are available, rzValidForRating=false and the gate refuses to pass.",
+          "advanced": true
         }
       ],
-      "description": "Estimates roughness trends in pixels from a nominally straight sampled image edge. This image-based estimate does not replace a calibrated contact profilometer or a certified roughness measurement. Reports the evaluated sample span and Gaussian end handling. Rz averages five segments when enough samples are available. In a shorter window it reports the whole-window range with rzSamplingLengths=0.",
+      "description": "Estimates roughness trends in pixels from a nominally straight sampled image edge. This image-based estimate does not replace a calibrated contact profilometer or a certified roughness measurement. rz is the average of the sampling lengths only when rzValidForRating=true; otherwise rzWholeWindow carries the whole-window peak-to-valley range and an Rz gate refuses to pass. evaluationStartPx fixes the window origin, and evaluationStartIndex/evaluationEndIndex/evaluationStartU/evaluationEndU report exactly which samples were evaluated so several windows can be compared.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -35527,6 +36291,66 @@
           "required": true
         },
         {
+          "name": "requestedMaxPoints",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "minRequiredPoints",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "inputContourCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "usableContourCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "edgeCoverageJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "minEdgeCoverage",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "residualRms",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "residualMax",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "inlierRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "residualTolerancePx",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "evaluatedPointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "usableForDimension",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -35569,7 +36393,7 @@
           "max": 1000000,
           "step": 1,
           "group": "Sampling",
-          "description": "-1 uses every contour point; other values must satisfy the native algorithm's minimum sample requirement."
+          "description": "-1 uses every contour point. Values 1..4 are rejected before the native call because the rectangle fit needs at least 5 points."
         },
         {
           "name": "maxClosureDistance",
@@ -35616,6 +36440,40 @@
           "description": "Outlier clipping factor for the robust fit."
         },
         {
+          "name": "minEdgeCoverage",
+          "label": "Min Edge Coverage",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.1,
+          "group": "Quality",
+          "description": "Each of the four rectangle edges must be covered by this fraction of its length before the result is usable for dimension."
+        },
+        {
+          "name": "minInlierRatio",
+          "label": "Min Inlier Ratio",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.1,
+          "group": "Quality",
+          "description": "Fraction of contour points that must lie within residualTolerance of an edge."
+        },
+        {
+          "name": "residualTolerance",
+          "label": "Residual Tolerance",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "group": "Quality",
+          "description": "Point-to-edge distance counted as an inlier, in pixels.",
+          "advanced": true
+        },
+        {
           "name": "index",
           "label": "Result Index",
           "type": "number",
@@ -35624,10 +36482,11 @@
           "max": 9999,
           "step": 1,
           "group": "Output",
-          "description": "Zero-based index selecting the primary rectangle; rectangles always contains every result."
+          "description": "Zero-based index selecting the primary rectangle; rectangles always contains every result.",
+          "advanced": true
         }
       ],
-      "description": "Fits each input contour with FitRectangle2ContourXld. Unlike the minimum-area rectangle, this fits edge geometry rather than bounding extent; the output position is the center, sizes are full width/height, and the angle follows the image coordinate system. Empty input returns found=false without error.",
+      "description": "Fits each input contour with FitRectangle2ContourXld. Unlike the minimum-area rectangle, this fits edge geometry rather than bounding extent; the output position is the center, sizes are full width/height, and the angle follows the image coordinate system. Robust success does not prove the four edges were supported, so edgeCoverageJson/minEdgeCoverage/residualRms/residualMax/inlierRatio are reported and usableForDimension turns false when any edge is under-covered or too few points are inliers. A successful robust fit on an arc or a heavily damaged contour can still be geometrically valid but meaningless for sizing. Empty input returns found=false without error.",
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,
@@ -35671,6 +36530,16 @@
       ],
       "outputs": [
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "value",
           "dataType": "Double",
           "required": true
@@ -35683,6 +36552,26 @@
         {
           "name": "region",
           "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "valuesSchemaVersion",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "imageWidth",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "imageHeight",
+          "dataType": "Integer",
           "required": true
         },
         {
@@ -36318,7 +37207,7 @@
           }
         }
       ],
-      "description": "Computes one JLVision JlRegion feature for the input region: geometry (area, circularity, compactness, convexity, rectangularity, Euler number, eccentricity, elliptic axis, roundness, height/width ratio, smallest circle/rectangle1/rectangle2, inner circle/rectangle, diameter, holes), moments (2nd/3rd order, central and invariant), run-length features, named regionFeatures queries, and image-driven statistics (grayFeatures, areaCenterGray, entropy, fuzzy entropy/perimeter, plane deviation, noise distribution, gray histograms/projections, text line orientation/slant, shape histograms). Value outputs the primary scalar; Values is a JSON object with every named component (for example row/column/radius). Features that need pixels validate the image input up front instead of failing inside the native call.",
+      "description": "Computes one JLVision JlRegion feature for the input region: geometry (area, circularity, compactness, convexity, rectangularity, Euler number, eccentricity, elliptic axis, roundness, height/width ratio, smallest circle/rectangle1/rectangle2, inner circle/rectangle, diameter, holes), moments (2nd/3rd order, central and invariant), run-length features, named regionFeatures queries, and image-driven statistics (grayFeatures, areaCenterGray, entropy, fuzzy entropy/perimeter, plane deviation, noise distribution, gray histograms/projections, text line orientation/slant, shape histograms). Value outputs the primary scalar; Values is schemaVersion=1 JSON with every named component plus feature, region/image dimensions and unit. Runtime contracts are checked before the native call: image-driven features require a non-empty image, point indices must be integers inside the canvas, grayHistoRange needs min < max and a legal bin count, and unknown regionFeatures/grayFeatures/shapeHisto component names fail explicitly instead of being silently omitted. Features that need pixels validate the image input up front instead of failing inside the native call.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -36352,6 +37241,11 @@
         {
           "name": "currentPose",
           "dataType": "Pose2D",
+          "required": false
+        },
+        {
+          "name": "poseQuality",
+          "dataType": "Double",
           "required": false
         },
         {
@@ -36394,6 +37288,66 @@
         {
           "name": "transform",
           "dataType": "Transform2D",
+          "required": false
+        },
+        {
+          "name": "poseSource",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "poseValid",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "poseQuality",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "poseThetaDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "deltaThetaDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "basePose",
+          "dataType": "Pose2D",
+          "required": false
+        },
+        {
+          "name": "referenceIntegrity",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "referenceHash",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "referenceBasePose",
+          "dataType": "Pose2D",
+          "required": false
+        },
+        {
+          "name": "referenceRoiVersion",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "capturedAtUtc",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "referenceComplete",
+          "dataType": "Boolean",
           "required": false
         },
         {
@@ -36493,6 +37447,30 @@
           "description": "Used only when the currentPose port is not connected."
         },
         {
+          "name": "maxPoseAngleDeg",
+          "label": "Max Pose Angle (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 10,
+          "unit": "deg",
+          "group": "Current Pose",
+          "description": "Optional cap on |theta| for a corrupted locator. Finite large angles are still normalized with AnglePeriod before subtraction; 0 keeps that behavior."
+        },
+        {
+          "name": "minPoseQuality",
+          "label": "Min Pose Quality (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "group": "Current Pose",
+          "description": "When poseQuality is wired, reject a pose below this quality (0..1). No silent fallback to the parameter pose is allowed.",
+          "advanced": true
+        },
+        {
           "name": "captureReference",
           "label": "Capture Reference",
           "type": "boolean",
@@ -36526,6 +37504,14 @@
           "internal": true
         },
         {
+          "name": "referenceHash",
+          "label": "Reference SHA-256",
+          "type": "text",
+          "group": "Reference Capture",
+          "description": "SHA-256 of the captured PNG bytes; written together with image/size/pose/ROI version/time in one atomic capture result.",
+          "internal": true
+        },
+        {
           "name": "debugImagePreviewOnly",
           "label": "Debug Preview Only",
           "type": "boolean",
@@ -36543,7 +37529,7 @@
           "internal": true
         }
       ],
-      "description": "Rigid ROI follow after locate: p' = R(dTheta)(p − base) + current. Capture reference image + pose before drawing the ROI. Wire: currentPose (or currentX/Y/Theta) from matching; roi → measurement ROI ports; transform → measurement transform; debugImage for capture/overlay. Output transform maps ReferenceImage→CurrentImage; compose with image.crop transform (A=this, B=crop) for CropImage coordinates. anglePeriodDeg 180 for half-turn-symmetric models, 360 when orientation is unique. Rotated rectangles become polygons. Do not transform already-corrected geometry twice.",
+      "description": "Rigid ROI follow after locate: p' = R(dTheta)(p − base) + current. Reference capture is atomic: image bytes, dimensions, SHA-256 hash, base/current pose, ROI version and UTC time are emitted together; a validation failure leaves the previous complete reference untouched. currentPose port wins over currentX/Y/Theta parameters and a bad port fails explicitly (poseSource reports which was used); poseQuality can gate on locator confidence. Wire: currentPose from matching; roi → measurement ROI ports; transform → measurement transform. Output transform maps ReferenceImage→CurrentImage. anglePeriodDeg 180 for half-turn-symmetric models, 360 when orientation is unique. Rotated rectangles become polygons. Do not transform already-corrected geometry twice.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -36644,6 +37630,36 @@
           "required": true
         },
         {
+          "name": "candidateCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "filteredCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "selectedIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "selectionRule",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "dimensionalUseAllowed",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -36665,7 +37681,15 @@
           "step": 10,
           "unit": "px²",
           "group": "Contour",
-          "description": "Minimum contour area in px^2; contours below it are ignored and no accepted contour fails deterministically."
+          "description": "Minimum contour area in px^2; contours below it are ignored. No accepted contour fails with distinct reasons: noContours vs allContoursBelowMinArea."
+        },
+        {
+          "name": "unit",
+          "label": "Unit Label",
+          "type": "text",
+          "defaultValue": "px",
+          "group": "Reporting",
+          "description": "Label only, no conversion. px sets dimensionalUseAllowed=false so downstream sizing cannot release a pixel value as a physical dimension."
         },
         {
           "name": "roi",
@@ -36676,7 +37700,7 @@
           "internal": true
         }
       ],
-      "description": "Minimum-area rotated rectangle around the largest accepted contour. Emits rectangle, centre, pose, angle, width/height, contour area, aspect ratio and JSON diagnostics; validates minArea and reports how many external contours were considered.",
+      "description": "Minimum-area rotated rectangle around the largest accepted contour. Emits rectangle, centre, pose, angle, width/height, contour area, aspect ratio, candidateCount/filteredCount/selectedIndex and JSON diagnostics. unit=px marks dimensionalUseAllowed=false; declare mm or another physical unit when the input is calibrated.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -36753,6 +37777,46 @@
         {
           "name": "reverseMax",
           "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "samplingErrorBoundPx",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "deviationUpperBoundPx",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "denseResampleRequired",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "maxAdjacentSampleDistancePx",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "phaseStartCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "phaseDeviationSpreadPx",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "screeningOnly",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
           "required": false
         },
         {
@@ -36846,7 +37910,7 @@
           "description": "Tolerance gate on max sampled distance; 0 disables. Sets withinTolerance."
         }
       ],
-      "description": "Compare already aligned polylines in the same pixel coordinates. Uniform arc-length samples are measured to reference segments with JLVision. deviation is the maximum sampled distance; mean/RMS pool both directions when symmetric=true. Sample budgets reject overflow rather than truncate. Missing/insufficient contours return found=false. Sampling can miss features between samples.",
+      "description": "Compare already aligned polylines in the same pixel coordinates. Uniform arc-length samples are measured to reference segments with JLVision. deviation is the maximum sampled distance; mean/RMS pool both directions when symmetric=true. samplingErrorBoundPx (half the largest sample spacing) and deviationUpperBoundPx make the sampling blind spot explicit: when the deviation fits but deviation + bound does not, withinTolerance turns false with reason=dense-resample-required. For closed contours the comparison is repeated at three start phases; phaseDeviationSpreadPx and screeningOnly report phase sensitivity. Sample budgets reject overflow rather than truncate. Missing/insufficient contours return found=false.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -36941,6 +38005,61 @@
           "required": false
         },
         {
+          "name": "maxGapDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "minSectorPointCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "emptySectorCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "meanAngularStepDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "samplingUniformityOk",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "robustCircle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "robustCenterShift",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "robustRadiusShift",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "robustSampleCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "robustAgreement",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "resultReleasable",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
           "name": "withinTolerance",
           "dataType": "Boolean",
           "required": false
@@ -36979,6 +38098,38 @@
           "description": "Minimum angular span of samples (degrees). Coverage is 360 minus the largest gap; below this returns found=false."
         },
         {
+          "name": "maxAngularGapDeg",
+          "label": "Max Angular Gap (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "description": "Reject sampling holes: exceeding this largest gap returns found=false / reason=uneven-angular-sampling even when total coverage passes."
+        },
+        {
+          "name": "minPointsPerSector",
+          "label": "Min Points per 45° Sector (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 1,
+          "description": "Require at least this many samples in each of the eight 45° sectors, so a few clustered points cannot dominate the radial residuals."
+        },
+        {
+          "name": "maxRobustShift",
+          "label": "Max Robust Shift (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "px",
+          "description": "Allowed max(center shift, radius shift) between the least-squares circle and a MAD-trimmed robust circle. Exceeding it marks the result not releasable."
+        },
+        {
           "name": "maxDeviation",
           "label": "Max Radial Range (0=off)",
           "type": "number",
@@ -36990,7 +38141,7 @@
           "description": "Optional roundness tolerance; withinTolerance reports (maxRadius-minRadius) <= limit. 0 disables the gate."
         }
       ],
-      "description": "Sampled roundness: JLVision geometric least-squares circle on one contour (≥6 distinct points). Wire: contours → found/circle/radius/deviation/rms/outOfRoundPct; index selects contour; minCoverageDeg gates angular span; optional maxDeviation. Coverage is 360° minus the largest sample gap. Collinear/ill-conditioned samples fail; insufficient coverage → found=false. Depends on contour sampling. Units: pixels.",
+      "description": "Sampled roundness: JLVision geometric least-squares circle on one contour (≥6 distinct points). Wire: contours → found/circle/radius/deviation/rms/outOfRoundPct. Coverage is 360° minus the largest sample gap; total coverage is not enough, so maxGapDeg and minPointsPerSector gate spatial uniformity across eight 45° sectors. A MAD-trimmed robust circle is fitted as a control; robustCenterShift/robustRadiusShift expose whether a single burr dragged the least-squares circle, and exceeding maxRobustShift sets robustAgreement=false and withinTolerance=false. resultReleasable combines the tolerance gate, sampling uniformity and robust agreement. Collinear/ill-conditioned samples fail; insufficient coverage → found=false. Units: pixels.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -37070,6 +38221,36 @@
           "required": false
         },
         {
+          "name": "fitMethod",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "lsDeviation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "minimumZoneDeviation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "closureGap",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "closedInput",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "suspectedDoubleEdge",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
           "name": "withinTolerance",
           "dataType": "Boolean",
           "required": false
@@ -37105,10 +38286,34 @@
           "max": 1000000,
           "step": 0.1,
           "unit": "px",
-          "description": "Optional straightness tolerance; withinTolerance reports residual peak-to-peak range <= limit. 0 disables the gate."
+          "description": "Optional straightness tolerance; withinTolerance compares the selected fitMethod deviation against this limit. 0 disables the gate."
+        },
+        {
+          "name": "evaluationMode",
+          "label": "Evaluation Mode",
+          "type": "select",
+          "defaultValue": "leastSquares",
+          "options": [
+            {
+              "label": "Least squares peak-to-peak",
+              "value": "leastSquares"
+            },
+            {
+              "label": "Minimum zone (minimum containing strip)",
+              "value": "minimumZone"
+            }
+          ],
+          "description": "leastSquares reports the signed residual peak-to-peak of the LS line; minimumZone reports the narrowest strip containing every point. They are different drawing definitions — choose the one the callout requires."
+        },
+        {
+          "name": "singleEdgeDeclared",
+          "label": "Single Edge Declared",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Set when the input intentionally contains only one edge of a thick band. Without it, closed input or a two-sided residual split returns found=false / reason=suspected-closed-or-double-edge."
         }
       ],
-      "description": "Sampled straightness: JLVision least-squares line fit on one contour (≥3 distinct points). Wire: contours → found/line/deviation/rms; index selects the contour; optional maxDeviation gate. deviation is peak-to-peak signed perpendicular residual range. Supply one measured edge, not a thick-band closed outline. Degenerate fits fail; too few points → found=false. Units: pixels.",
+      "description": "Sampled straightness: JLVision least-squares line fit on one contour (≥3 distinct points). fitMethod states which definition deviation follows; lsDeviation and minimumZoneDeviation are both reported so the LS peak-to-peak is never silently treated as a minimum zone. closureGap/closedInput and suspectedDoubleEdge detect a closed thick band or two edges entering the same point set, which returns found=false unless singleEdgeDeclared=true. Supply one measured edge. Degenerate fits fail; too few points → found=false. Units: pixels.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -37161,6 +38366,31 @@
           "name": "kind",
           "dataType": "String",
           "required": true
+        },
+        {
+          "name": "authoredId",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "status",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "geometryValid",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "conflictsJson",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "center",
@@ -37233,7 +38463,7 @@
           }
         }
       ],
-      "description": "Select one typed metrology result by name or authored index. Connect circle/line/center/pose directly to downstream measurements. Missing or failed objects return found=false and no geometry. Reject duplicate object indices, lists over 512 objects, and invalid geometry or residuals in a successful selected result. Diagnostics record the selector, matched index/kind and object count.",
+      "description": "Select one typed metrology result by name or authored index. Names are trimmed and validated on load: blank or duplicate names are listed in conflictsJson and the node returns found=false / status=name-conflict instead of silently taking the first match. Missing or failed objects return found=false, authoredId and status/reason, and geometryValid=false with no geometry ports assigned, so a downstream node cannot reuse stale cached geometry. Reject duplicate object indices, lists over 512 objects, and invalid geometry or residuals in a successful selected result.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -37318,6 +38548,26 @@
           "required": true
         },
         {
+          "name": "autoPinDiameter",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "pinDiameterSource",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "dimensionalUseAllowed",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -37386,9 +38636,17 @@
           "unit": "mm",
           "group": "Gear",
           "description": "Measuring pin diameter. 0 derives the usual 1.728*m. Only used for measurement over pins."
+        },
+        {
+          "name": "unit",
+          "label": "Unit Label",
+          "type": "text",
+          "defaultValue": "mm",
+          "group": "Reporting",
+          "description": "One unit contract for module and pinDiameter; no conversion is applied. unit=px sets dimensionalUseAllowed=false."
         }
       ],
-      "description": "Closed-form spur-gear geometry from module, tooth count and pressure angle: pitch/base/outside/root diameters, circular pitch, span length W_k with its k, and measurement over pins. This is arithmetic, not vision — no input ports, deterministic output, so it can drive a recipe or a report row directly. Helical gears are out of scope (helix angle assumed 0). All lengths in the module's unit.",
+      "description": "Closed-form spur-gear geometry from module, tooth count and pressure angle: pitch/base/outside/root diameters, circular pitch, span length W_k with its k, and measurement over pins. Combinations are validated before evaluation (tip/root relation, span teeth, involute domain and derived pin diameter); unusable combinations return found=false / reason=invalid-gear-combination with the offending values. module and pinDiameter share the unit label echoed on the result. This is arithmetic, not vision — no input ports, deterministic output. Helical gears are out of scope (helix angle assumed 0).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -37466,6 +38724,61 @@
         {
           "name": "pitchDiameterMethod",
           "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "pitchDiameterEstimate",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "pitchDiameterIsEstimate",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "certifiedUseAllowed",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "crestPositionsJson",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "pitchIntervalsJson",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "maxPitchDeviation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "validIntervalCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "crestValleyAlternation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "peakValleySalience",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "threadAnglePlausible",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "polarityConfidence",
+          "dataType": "Double",
           "required": false
         },
         {
@@ -37557,9 +38870,65 @@
           "unit": "px",
           "group": "Thread",
           "description": "Arc-length resampling along the profile before crest detection."
+        },
+        {
+          "name": "minValidIntervals",
+          "label": "Min Valid Pitch Intervals (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 500,
+          "step": 1,
+          "group": "Limits",
+          "description": "Minimum number of adjacent crest-to-crest intervals. Defaults to max(2, minCrests-1); fewer intervals returns found=false / reason=insufficient-pitch-intervals."
+        },
+        {
+          "name": "expectedThreadAngleDeg",
+          "label": "Expected Thread Angle",
+          "type": "number",
+          "defaultValue": 60,
+          "min": 1,
+          "max": 120,
+          "step": 1,
+          "unit": "deg",
+          "group": "Limits",
+          "description": "Nominal included flank angle used for the plausibility part of polarity confidence."
+        },
+        {
+          "name": "threadAngleToleranceDeg",
+          "label": "Thread Angle Tolerance (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 120,
+          "step": 1,
+          "unit": "deg",
+          "group": "Limits",
+          "description": "Allowed deviation from expectedThreadAngleDeg. 0 disables the angle check."
+        },
+        {
+          "name": "minPolarityConfidence",
+          "label": "Min Polarity Confidence (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "group": "Limits",
+          "description": "Minimum confidence from crest/valley alternation, peak-valley salience and flank-angle plausibility. Exceeding it rejects an incomplete thread pattern instead of trusting the overlay.",
+          "advanced": true
+        },
+        {
+          "name": "certifyPitchDiameter",
+          "label": "Certify Pitch Diameter",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Limits",
+          "description": "Explicit opt-in for using pitchDiameter as a certified result. Off by default because the silhouette only yields an arithmetic estimate.",
+          "advanced": true
         }
       ],
-      "description": "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. The silhouette does not measure the pitch diameter directly: pitchDiameter is an estimate in pixels, and pitchDiameterMethod identifies the arithmetic mean of the major and minor diameters. It must not be used as a certified pitch-diameter measurement. The tolerance flag applies only to pitch consistency.",
+      "description": "Measure thread pitch, major and minor diameters, flank angle and depth from a silhouette and a supplied axis. The silhouette does not measure the pitch diameter directly: pitchDiameterEstimate/pitchDiameterIsEstimate mark the arithmetic mean, certifiedUseAllowed stays false until certifyPitchDiameter is explicitly enabled with a plausible pattern. crestPositionsJson and pitchIntervalsJson expose every crest and adjacent pitch, maxPitchDeviation locates a single bad interval, and polarityConfidence combines crest/valley alternation, salience and flank-angle plausibility. pitchTolerance applies only to pitch consistency. The tolerance flag is not a thread-gauge acceptance decision.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -37695,6 +39064,36 @@
           "required": true
         },
         {
+          "name": "assumptionsDeclared",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "nominalSource",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "connectionMask",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "contributorSigmasJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "evaluationState",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "contributionsJson",
           "dataType": "String",
           "required": true
@@ -37789,9 +39188,25 @@
           "defaultValue": "mm",
           "group": "Reporting",
           "description": "Report the unit used by the inputs. Up to 16 characters. Values are used as supplied."
+        },
+        {
+          "name": "assumeIndependent",
+          "label": "Assume Independent (RSS)",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Statistical",
+          "description": "Declares that the contributors are statistically independent. Required for an RSS result to be usable for release."
+        },
+        {
+          "name": "assumeSixSigma",
+          "label": "Assume Six Sigma (RSS)",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Statistical",
+          "description": "Declares that each full tolerance width equals six sigma (three per side). Required for an RSS result to be usable for release."
         }
       ],
-      "description": "Combines a one-dimensional tolerance chain using worst-case or RSS limits. Reports the limit model, which values were checked against the target, the resulting margin and the input unit. Optional inputs a through f replace the first six nominal values.",
+      "description": "Combines a one-dimensional tolerance chain using worst-case or RSS limits. Reports the limit model, which values were checked against the target, the resulting margin and the input unit. Optional inputs a through f replace the first six nominal values; nominalSource (json|ports|mixed) and connectionMask record where each nominal came from, and contributorSigmasJson publishes the per-contributor sigma conversion. RSS treats every full width as six sigma and assumes independent contributors: unless assumeIndependent and assumeSixSigma are both declared, withinTolerance stays false with evaluationState=not-evaluated and reason=assumptions-undeclared, so the numbers are reported but never silently released.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -37837,6 +39252,16 @@
         {
           "name": "size",
           "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "datumUnit",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "datumValid",
+          "dataType": "Boolean",
           "required": false
         }
       ],
@@ -37890,6 +39315,36 @@
           "name": "utilization",
           "dataType": "Double",
           "required": true
+        },
+        {
+          "name": "gateEnabled",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "activeAxes",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "gateDisabledReason",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "datumSource",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "datumCalibrated",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "diagnostics",
@@ -38049,10 +39504,35 @@
           "type": "text",
           "defaultValue": "px",
           "group": "Reporting",
-          "description": "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are calibrated."
+          "description": "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are calibrated. Wire tolerance.datum.unit into datumUnit so a px/mm mismatch is rejected instead of comparing magnitudes."
+        },
+        {
+          "name": "measurementOnly",
+          "label": "Measurement Only",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Reporting",
+          "description": "Required when every tolerance axis is 0. Makes 'no gate' an explicit decision instead of an accidental pass; withinTolerance stays false."
+        },
+        {
+          "name": "requireDatum",
+          "label": "Require Datum",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Reporting",
+          "description": "Fail with found=false / reason=datum-required when no datum Pose2D is wired. Use for release and SPC flows."
+        },
+        {
+          "name": "requireCalibratedUnit",
+          "label": "Require Calibrated Unit",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Reporting",
+          "description": "Fail with found=false / reason=unit-not-calibrated when unit is px. Use when the result is a physical tolerance decision.",
+          "advanced": true
         }
       ],
-      "description": "True position (position tolerance) of a feature centre against basic dimensions in a datum frame. Wire exactly one of point or circle, plus an optional datum Pose2D from tolerance.datum (identity when absent); size overrides the circle diameter for MMC. Outputs deviationX/deviationY in datum coordinates, radialDeviation, diametralDeviation (2x radial, the value on the drawing), positionDeviation and utilization for SPC. MMC bonus requires a measured size and a positive mmcSize. 0 tolerance disables the gate (withinTolerance stays true). Both or neither of point/circle fails hard. Image-plane (2D) only; true 3D position needs a 3D datum.",
+      "description": "True position (position tolerance) of a feature centre against basic dimensions in a datum frame. Wire exactly one of point or circle, plus an optional datum Pose2D from tolerance.datum (identity when absent); size overrides the circle diameter for MMC. Outputs deviationX/deviationY in datum coordinates, radialDeviation, diametralDeviation (2x radial, the value on the drawing), positionDeviation and utilization for SPC. gateEnabled/activeAxes report which axes were actually checked; with every axis at 0 you must set measurementOnly=true or the node fails instead of silently passing. MMC bonus applies to a diametral zone only (rectangular + mmcBonus is a configuration error) and requires a measured size. datumSource=identity, datumCalibrated=false mark diagnostic-only runs; requireDatum and requireCalibratedUnit turn those into found=false refusals. Both or neither of point/circle fails hard. Image-plane (2D) only; true 3D position needs a 3D datum.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

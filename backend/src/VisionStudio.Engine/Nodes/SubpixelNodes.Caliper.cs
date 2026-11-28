@@ -61,6 +61,9 @@ var sourceImage = context.RequireImage("image");
         var fitOutlierThreshold = common.FitOutlierThreshold;
         var maxFitError = common.MaxFitError;
         var acceptanceMetric = SubpixelEdgeCore.ChoiceParameter(node, "acceptanceMetric", "all", "all", "robust");
+        var minAxialCoverageRatio = SubpixelEdgeCore.RequireFiniteParameter(node, "minAxialCoverageRatio", 0);
+        if (minAxialCoverageRatio is < 0 or > 1)
+            throw new InvalidOperationException("measure.caliperLine minAxialCoverageRatio must be within 0..1 (0 disables).");
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -129,7 +132,20 @@ var sourceImage = context.RequireImage("image");
                 var allMax = allResiduals.Length > 0 ? allResiduals.Max() : (double?)null;
                 var acceptanceError = acceptanceMetric == "all" ? allMax : fit?.Error;
                 var fitErrorExceedsLimit = acceptanceError is not null && maxFitError > 0 && acceptanceError > maxFitError;
-                var found = fit is not null && fit.UsedIndices.Length >= minValidCalipers && !fitErrorExceedsLimit;
+
+                // 数量够不代表空间覆盖够：3 个聚在一起的站点也能拟合出一条直线。
+                var usedStations = fit is not null ? fit.UsedIndices.Select(index => pointStations[index]).ToArray() : [];
+                var axialSpanUsed = 0d;
+                var axialCoverageRatio = 1d;
+                if (caliperCount >= 2 && usedStations.Length > 0)
+                {
+                    var offsets = usedStations.Select(station => (station / (double)(caliperCount - 1) - 0.5) * span).ToArray();
+                    axialSpanUsed = offsets.Max() - offsets.Min();
+                    axialCoverageRatio = span > 1e-12 ? Math.Clamp(axialSpanUsed / span, 0, 1) : 0;
+                }
+                var axialCoverageOk = minAxialCoverageRatio <= 0 || axialCoverageRatio >= minAxialCoverageRatio - 1e-9;
+                var geometryFound = fit is not null && fit.UsedIndices.Length >= minValidCalipers && !fitErrorExceedsLimit;
+                var found = geometryFound && axialCoverageOk;
                 var reportedSearchLine = baseIntersects ? new VisionLine2D(start, end) : search;
 
                 var outputs = new Dictionary<string, VisionValue>
@@ -139,7 +155,10 @@ var sourceImage = context.RequireImage("image");
                     ["searchLine"] = VisionValue.Line(reportedSearchLine),
                     ["sampleCount"] = VisionValue.Integer(fit?.UsedIndices.Length ?? points.Count),
                     ["ignoredCount"] = VisionValue.Integer(fit?.IgnoredIndices.Length ?? 0),
-                    ["acceptanceMetric"] = VisionValue.String(acceptanceMetric)
+                    ["acceptanceMetric"] = VisionValue.String(acceptanceMetric),
+                    ["axialSpanUsed"] = VisionValue.Double(axialSpanUsed),
+                    ["axialCoverageRatio"] = VisionValue.Double(axialCoverageRatio),
+                    ["minAxialCoverageRatio"] = VisionValue.Double(minAxialCoverageRatio)
                 };
 
                 if (fit is not null)
@@ -179,6 +198,7 @@ var sourceImage = context.RequireImage("image");
                 }
 
                 var reason = found ? "ok"
+                    : geometryFound && !axialCoverageOk ? "insufficient-axial-coverage"
                     : points.Count > 0 && points.Count < 3 ? "too-few-edge-points"
                     : points.Count >= 3 && (points.Count < minValidCalipers
                         || fit is not null && fit.UsedIndices.Length < minValidCalipers) ? "insufficient-valid-calipers"
@@ -214,6 +234,9 @@ var sourceImage = context.RequireImage("image");
                         ["fitOutlierThreshold"] = fitOutlierThreshold,
                         ["maxFitError"] = maxFitError,
                         ["acceptanceMetric"] = acceptanceMetric,
+                        ["axialSpanUsed"] = Math.Round(axialSpanUsed, 4),
+                        ["axialCoverageRatio"] = Math.Round(axialCoverageRatio, 4),
+                        ["minAxialCoverageRatio"] = minAxialCoverageRatio,
                         ["allRms"] = allRms, ["allMaxResidual"] = allMax,
                         ["robustRms"] = fit?.Error,
                         ["robustMaxResidual"] = fit is not null ? LineResiduals(fit.UsedIndices, points, fit.Line).Max() : null,
@@ -407,6 +430,10 @@ var sourceImage = context.RequireImage("image");
         var fitRadiusTolerance = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitRadiusTolerance", 0));
         var maxFitError = common.MaxFitError;
         var acceptanceMetric = SubpixelEdgeCore.ChoiceParameter(node, "acceptanceMetric", "all", "all", "robust");
+        var minCoverageDeg = SubpixelEdgeCore.RequireFiniteParameter(node, "minCoverageDeg", 0);
+        var maxAngularGapDeg = SubpixelEdgeCore.RequireFiniteParameter(node, "maxAngularGapDeg", 0);
+        if (minCoverageDeg is < 0 or > 360 || maxAngularGapDeg is < 0 or > 360)
+            throw new InvalidOperationException("measure.caliperCircle minCoverageDeg/maxAngularGapDeg must be within 0..360 (0 disables each).");
         var innerRadius = Math.Max(0, nominalRadius - band);
         var outerRadius = nominalRadius + band;
         var roi = ContourNodesHelper.ResolveRoi(context, node);
@@ -523,14 +550,27 @@ var sourceImage = context.RequireImage("image");
                 var hasMinimumCalipers = fit is not null
                     ? fit.UsedIndices.Length >= minValidCalipers
                     : edgePoints.Count >= minValidCalipers;
-                var found = fit is not null && hasMinimumCalipers && !radiusOutsideTolerance && !fitErrorExceedsLimit;
+                // 数量够不代表角度分布够：全部站点挤在一小段弧上，拟合半径同样“稳定”。
+                var usedAngles = fit is not null
+                    ? fit.UsedIndices.Select(index => angles[edgeSampleIndices[index]]).ToArray()
+                    : [];
+                var (coverageDeg, maxGapDeg) = AngularCoverage(usedAngles);
+                var angularCoverageOk =
+                    (minCoverageDeg <= 0 || coverageDeg >= minCoverageDeg - 1e-9) &&
+                    (maxAngularGapDeg <= 0 || maxGapDeg <= maxAngularGapDeg + 1e-9);
+                var found = fit is not null && hasMinimumCalipers && !radiusOutsideTolerance && !fitErrorExceedsLimit && angularCoverageOk;
                 var outputs = new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
                     ["found"] = VisionValue.Boolean(found),
                     ["sampleCount"] = VisionValue.Integer(fit?.UsedIndices.Length ?? edgePoints.Count),
                     ["ignoredCount"] = VisionValue.Integer(fit?.IgnoredIndices.Length ?? 0),
-                    ["acceptanceMetric"] = VisionValue.String(acceptanceMetric)
+                    ["acceptanceMetric"] = VisionValue.String(acceptanceMetric),
+                    ["coverageDeg"] = VisionValue.Double(coverageDeg),
+                    ["maxGapDeg"] = VisionValue.Double(maxGapDeg),
+                    ["minCoverageDeg"] = VisionValue.Double(minCoverageDeg),
+                    ["maxAngularGapDeg"] = VisionValue.Double(maxAngularGapDeg),
+                    ["angularCoverageOk"] = VisionValue.Boolean(angularCoverageOk)
                 };
                 var overlays = new List<VisionOverlay>
                 {
@@ -538,6 +578,7 @@ var sourceImage = context.RequireImage("image");
                 };
                 overlays.AddRange(spokeOverlays);
                 var reason = found ? "ok"
+                    : fit is not null && hasMinimumCalipers && !angularCoverageOk ? "insufficient-angular-coverage"
                     : edgePoints.Count >= 3 && !hasMinimumCalipers ? "insufficient-valid-calipers"
                     : radiusOutsideTolerance ? "fitted-radius-outside-tolerance"
                     : fitErrorExceedsLimit ? "fit-error-exceeds-tolerance"
@@ -576,6 +617,11 @@ var sourceImage = context.RequireImage("image");
                     ["samplingMode"] = samplingMode,
                     ["caliperCount"] = angles.Length,
                     ["angleStepDeg"] = effectiveStep,
+                    ["coverageDeg"] = Math.Round(coverageDeg, 3),
+                    ["maxGapDeg"] = Math.Round(maxGapDeg, 3),
+                    ["minCoverageDeg"] = minCoverageDeg,
+                    ["maxAngularGapDeg"] = maxAngularGapDeg,
+                    ["angularCoverageOk"] = angularCoverageOk,
                     ["radialBand"] = band,
                     ["radialSearchMinRadius"] = innerRadius,
                     ["radialSearchMaxRadius"] = outerRadius,
@@ -719,8 +765,18 @@ var sourceImage = context.RequireImage("image");
         catch (InvalidOperationException) { return null; }
     }
 
-    private static double[] AllResiduals(IReadOnlyList<VisionPoint2D> points, VisionCircle circle)
-        => Residuals(Enumerable.Range(0, points.Count).ToArray(), points, circle);
+    /// <summary>角度覆盖 = 360° − 相邻有效站点的最大缺口（与 measure.roundness 同口径）。</summary>
+    private static (double Coverage, double MaxGap) AngularCoverage(double[] angles)
+    {
+        if (angles.Length == 0) return (0, 360);
+        var normalized = angles.Select(angle => ((angle % 360) + 360) % 360).OrderBy(angle => angle).ToArray();
+        var maxGap = normalized[0] + 360 - normalized[^1];
+        for (var index = 1; index < normalized.Length; index++)
+            maxGap = Math.Max(maxGap, normalized[index] - normalized[index - 1]);
+        return (Math.Max(0, 360 - maxGap), maxGap);
+    }
+
+    private static double[] AllResiduals(IReadOnlyList<VisionPoint2D> points, VisionCircle circle)        => Residuals(Enumerable.Range(0, points.Count).ToArray(), points, circle);
 
     private static double[] Residuals(IReadOnlyList<int> indices, IReadOnlyList<VisionPoint2D> points, VisionCircle circle) =>
         indices.Select(i => Math.Abs(MeasurementMath.Hypot(points[i].X - circle.X, points[i].Y - circle.Y) - circle.Radius)).ToArray();

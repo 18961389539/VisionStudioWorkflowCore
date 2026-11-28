@@ -413,7 +413,7 @@ public sealed class MeasurementGapNodeTests
     [InlineData("interval", "rss", true, 0.025, "independentSymmetricThreeSigma")]
     public async Task Stackup_UsesSelectedAcceptanceBasis(string gateMode, string method, bool expected, double deviation, string model)
     {
-        var json = JsonSerializer.Serialize(new { contributionsJson = Chain, gateMode, method, targetNominal = -0.05, tolerance = 0.03, unit = "mm" });
+        var json = JsonSerializer.Serialize(new { contributionsJson = Chain, gateMode, method, targetNominal = -0.05, tolerance = 0.03, unit = "mm", assumeIndependent = true, assumeSixSigma = true });
         var result = await new ToleranceStackupNode().ExecuteAsync(Ctx(new()),
             Def("tolerance.stackup", json), CancellationToken.None);
 
@@ -423,6 +423,45 @@ public sealed class MeasurementGapNodeTests
         Assert.Equal(.03 - deviation, result.Outputs["margin"].Require<double>("margin"), 8);
         Assert.Equal(model, result.Outputs["limitModel"].Require<string>("limitModel"));
         Assert.Equal("mm", result.Outputs["unit"].Require<string>("unit"));
+        Assert.True(result.Outputs["assumptionsDeclared"].Require<bool>("assumptionsDeclared"));
+        Assert.Equal("json", result.Outputs["nominalSource"].Require<string>("nominalSource"));
+    }
+
+    [Fact]
+    public async Task Stackup_RssWithoutDeclaredAssumptions_ReportsButDoesNotRelease()
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            contributionsJson = Chain, gateMode = "interval", method = "rss",
+            targetNominal = -0.05, tolerance = 0.03, unit = "mm"
+        });
+        var result = await new ToleranceStackupNode().ExecuteAsync(Ctx(new()),
+            Def("tolerance.stackup", json), CancellationToken.None);
+
+        Assert.False(result.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.False(result.Outputs["assumptionsDeclared"].Require<bool>("assumptionsDeclared"));
+        Assert.Equal("not-evaluated", result.Outputs["evaluationState"].Require<string>("evaluationState"));
+        Assert.Equal("assumptions-undeclared", result.Outputs["reason"].Require<string>("reason"));
+        Assert.Equal(0.025, result.Outputs["evaluatedDeviation"].Require<double>("evaluatedDeviation"), 8);
+    }
+
+    [Fact]
+    public async Task Stackup_PortNominalsAndConnectionMask_AreReported()
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            contributionsJson = Chain, gateMode = "nominal", method = "worstCase",
+            targetNominal = 0, tolerance = 1, unit = "mm"
+        });
+        var result = await new ToleranceStackupNode().ExecuteAsync(
+            Ctx(new() { ["a"] = VisionValue.Double(10.0) }),
+            Def("tolerance.stackup", json), CancellationToken.None);
+
+        Assert.Equal("mixed", result.Outputs["nominalSource"].Require<string>("nominalSource"));
+        var mask = result.Outputs["connectionMask"].Require<string>("connectionMask");
+        Assert.Contains("a=port", mask);
+        Assert.Contains("b=json", mask);
+        Assert.Contains("\"sigma\"", result.Outputs["contributorSigmasJson"].Require<string>("contributorSigmasJson"));
     }
 
     [Fact]

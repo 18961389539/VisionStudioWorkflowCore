@@ -35,6 +35,7 @@ public sealed class CaliperWidthNode : IVisionNodeExecutor, IVisionNodeDefinitio
         var toleranceEnabled = lowerTolerance > 0 || upperTolerance > 0;
         var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "bright", "bright", "dark", "any");
         var direction = SubpixelEdgeCore.ChoiceParameter(node, "direction", "strongest", "strongest", "firstfromstart", "firstfromend", "closestwidth");
+        var minEdgeSegmentSamples = SubpixelEdgeCore.ClampedIntParameter(node, "minEdgeSegmentSamples", 0, 0, 100000);
         if (threshold is < 0 or > 255) throw new InvalidOperationException("Edge threshold must be within 0..255.");
         if (minimum < 0 || maximum < 0 || maximum > 0 && maximum < minimum)
             throw new InvalidOperationException("Width limits must satisfy 0 <= minWidth <= maxWidth; maxWidth=0 disables the upper limit.");
@@ -50,6 +51,7 @@ public sealed class CaliperWidthNode : IVisionNodeExecutor, IVisionNodeDefinitio
         {
             var (start, end, clamped, intersects) = SubpixelEdgeCore.ClampLine(search.Start, search.End, gray.Cols, gray.Rows);
             var line = intersects ? new VisionLine2D(start, end) : search;
+            double[]? profile = null;
             var measurement = !intersects
                 ? new JLVisionPairMeasurement.Result([], 0, "search-line-outside-image")
                 : MeasurementMath.Hypot(end.X - start.X, end.Y - start.Y) < 2
@@ -57,21 +59,61 @@ public sealed class CaliperWidthNode : IVisionNodeExecutor, IVisionNodeDefinitio
                     : Measure();
             JLVisionPairMeasurement.Result Measure()
             {
-                var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing, cancellationToken);
+                profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing, cancellationToken);
                 return JLVisionPairMeasurement.Find(profile, spacing, polarity, threshold, cancellationToken);
             }
 
+            // ROI 空洞会把剖面拆成多段：边缘对跨洞时“宽度”没有物理意义，必须拒绝。
+            var valid = profile?.Select(value => double.IsFinite(value)).ToArray() ?? [];
+            var segments = new List<(int Start, int End)>();
+            var maskBreaks = new List<int>();
+            for (var index = 0; index < valid.Length;)
+            {
+                if (!valid[index]) { maskBreaks.Add(index); index++; continue; }
+                var segmentStart = index;
+                while (index < valid.Length && valid[index]) index++;
+                segments.Add((segmentStart, index - 1));
+            }
+            var longestContinuousSamples = segments.Count == 0 ? 0 : segments.Max(segment => segment.End - segment.Start + 1);
+            var continuityRejected = 0;
             var qualified = measurement.Pairs.Where(pair => pair.Width >= minimum - 1e-9
                 && (maximum == 0 || pair.Width <= maximum + 1e-9)).ToArray();
-            var found = qualified.Length > 0;
+            var qualifiedPairs = qualified.Where(pair =>
+            {
+                if (maskBreaks.Count > 0)
+                {
+                    var low = (int)Math.Floor(Math.Min(pair.First, pair.Second));
+                    var high = (int)Math.Ceiling(Math.Max(pair.First, pair.Second));
+                    if (maskBreaks.Any(index => index >= low && index <= high)) { continuityRejected++; return false; }
+                }
+                if (minEdgeSegmentSamples > 0)
+                {
+                    if (SegmentLengthAt(pair.First) is not { } firstLength || firstLength < minEdgeSegmentSamples ||
+                        SegmentLengthAt(pair.Second) is not { } secondLength || secondLength < minEdgeSegmentSamples)
+                    { continuityRejected++; return false; }
+                }
+                return true;
+            }).ToArray();
+            var found = qualifiedPairs.Length > 0;
             var selected = !found ? default : direction switch
             {
-                "firstfromstart" => qualified[0],
-                "firstfromend" => qualified[^1],
-                "closestwidth" => qualified.OrderBy(pair => Math.Abs(pair.Width - nominal)).ThenByDescending(pair => pair.Strength).First(),
-                _ => qualified.OrderByDescending(pair => pair.Strength).ThenBy(pair => pair.First).First()
+                "firstfromstart" => qualifiedPairs[0],
+                "firstfromend" => qualifiedPairs[^1],
+                "closestwidth" => qualifiedPairs.OrderBy(pair => Math.Abs(pair.Width - nominal)).ThenByDescending(pair => pair.Strength).First(),
+                _ => qualifiedPairs.OrderByDescending(pair => pair.Strength).ThenBy(pair => pair.First).First()
             };
-            var reason = found ? "ok" : measurement.Pairs.Count > 0 ? "no-pair-within-width-range" : measurement.Reason;
+            var reason = found ? "ok"
+                : qualified.Length > 0 ? "edge-pair-spans-mask-break"
+                : measurement.Pairs.Count > 0 ? "no-pair-within-width-range"
+                : measurement.Reason;
+
+            int? SegmentLengthAt(double position)
+            {
+                var index = (int)Math.Round(position);
+                foreach (var segment in segments)
+                    if (index >= segment.Start && index <= segment.End) return segment.End - segment.Start + 1;
+                return null;
+            }
             var overlays = new List<VisionOverlay>();
             if (intersects) overlays.Add(VisionGeometryHelpers.OverlayLine("caliper-width-search", line, "#597ef7", 1.5));
             var outputs = new Dictionary<string, VisionValue>
@@ -80,6 +122,13 @@ public sealed class CaliperWidthNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 ["searchLine"] = VisionValue.Line(line),
                 ["sampleCount"] = VisionValue.Integer(measurement.SampleCount),
                 ["pairCount"] = VisionValue.Integer(qualified.Length),
+                ["continuousPairCount"] = VisionValue.Integer(qualifiedPairs.Length),
+                ["continuousSegmentCount"] = VisionValue.Integer(segments.Count),
+                ["longestContinuousSamples"] = VisionValue.Integer(longestContinuousSamples),
+                ["maskBreakCount"] = VisionValue.Integer(maskBreaks.Count),
+                ["maskBreakIndicesJson"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(maskBreaks)),
+                ["continuityRejectedCount"] = VisionValue.Integer(continuityRejected),
+                ["minEdgeSegmentSamples"] = VisionValue.Integer(minEdgeSegmentSamples),
                 ["toleranceEnabled"] = VisionValue.Boolean(toleranceEnabled)
             };
             var widthDeviation = 0d;
@@ -118,6 +167,9 @@ public sealed class CaliperWidthNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 ("sampleCount", measurement.SampleCount), ("polarity", polarity), ("direction", direction),
                 ("minWidth", minimum), ("maxWidth", maximum), ("nominalWidth", nominal),
                 ("lowerTolerance", lowerTolerance), ("upperTolerance", upperTolerance),
+                ("continuousSegmentCount", segments.Count), ("longestContinuousSamples", longestContinuousSamples),
+                ("maskBreakCount", maskBreaks.Count), ("continuityRejectedCount", continuityRejected),
+                ("minEdgeSegmentSamples", minEdgeSegmentSamples),
                 ("widthDeviation", found ? widthDeviation : null), ("toleranceEnabled", toleranceEnabled),
                 ("withinTolerance", withinTolerance), ("evaluationState", evaluationState),
                 ("roi", roi?.Type.ToString() ?? "FullImage"));
@@ -131,6 +183,10 @@ public sealed class CaliperWidthNode : IVisionNodeExecutor, IVisionNodeDefinitio
                 ["secondAmplitude"] = found ? selected.SecondAmplitude : null,
                 ["candidatePairCount"] = measurement.Pairs.Count, ["pairCount"] = qualified.Length,
                 ["rejectedByWidth"] = measurement.Pairs.Count - qualified.Length,
+                ["continuousPairCount"] = qualifiedPairs.Length,
+                ["continuousSegmentCount"] = segments.Count, ["longestContinuousSamples"] = longestContinuousSamples,
+                ["maskBreakCount"] = maskBreaks.Count, ["maskBreakIndices"] = maskBreaks,
+                ["continuityRejectedCount"] = continuityRejected, ["minEdgeSegmentSamples"] = minEdgeSegmentSamples,
                 ["sampleCount"] = measurement.SampleCount, ["sampleWidth"] = sampleWidth,
                 ["polarity"] = polarity, ["direction"] = direction, ["edgeThreshold"] = threshold,
                 ["minWidth"] = minimum, ["maxWidth"] = maximum, ["nominalWidth"] = nominal,

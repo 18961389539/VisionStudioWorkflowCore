@@ -108,12 +108,18 @@ public sealed class DatumFrameNode : IVisionNodeExecutor
         if (length < 1e-9)
             throw new InvalidOperationException("tolerance.datum primary datum line must have non-zero length.");
 
+        // 图纸轴（未翻转）与显示轴（可翻转）分开保存：翻转只改变 +X 指向，
+        // 不改变基准要素相对图纸轴的侧向符号，否则同一物理偏置会随 flipAxis 变号。
+        var ux0 = dx / length;
+        var uy0 = dy / length;
         var sign = flipAxis ? -1 : 1;
-        var ux = sign * dx / length;
-        var uy = sign * dy / length;
+        var ux = sign * ux0;
+        var uy = sign * uy0;
 
         VisionPoint2D origin;
         double? secondaryOffset = null;
+        double? absoluteOffset = null;
+        string? secondarySide = null;
         VisionPoint2D? secondaryPoint = null;
         if (context.TryGetValue("secondary", out var secondaryValue))
         {
@@ -123,9 +129,11 @@ public sealed class DatumFrameNode : IVisionNodeExecutor
             var ry = secondaryPoint.Value.Y - line.Start.Y;
             var along = rx * ux + ry * uy;
             origin = new VisionPoint2D(line.Start.X + along * ux, line.Start.Y + along * uy);
-            // 有符号垂距，正值 = 落在轴 +90° 法向一侧（右向轴时即图像下方，Y 向下）。
-            // 这是基准要素自身形状误差给下游公差带来的固定偏置，必须可追溯。
-            secondaryOffset = ry * ux - rx * uy;
+            // 有符号垂距相对“未翻转的图纸轴”定义，正值 = 落在轴 +90° 法向一侧
+            // （右向轴时即图像下方，Y 向下）。flipAxis 只翻转 +X 指向，不改变本符号。
+            secondaryOffset = ry * ux0 - rx * uy0;
+            absoluteOffset = Math.Abs(secondaryOffset.Value);
+            secondarySide = secondaryOffset.Value >= 0 ? "positive" : "negative";
         }
         else
         {
@@ -141,17 +149,24 @@ public sealed class DatumFrameNode : IVisionNodeExecutor
             unit,
             origin = new { x = origin.X, y = origin.Y },
             axis = new { x = ux, y = uy },
+            drawingAxis = new { x = ux0, y = uy0 },
             angleDeg,
             length,
+            offsetConvention = "signedDistanceFromDrawingAxis; positive=+90degNormalSide; independentOfFlipAxis",
             secondary = secondaryPoint is null
                 ? null
-                : new { x = secondaryPoint.Value.X, y = secondaryPoint.Value.Y, offset = secondaryOffset }
+                : new
+                {
+                    x = secondaryPoint.Value.X, y = secondaryPoint.Value.Y, offset = secondaryOffset,
+                    absoluteOffset, side = secondarySide
+                }
         });
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type,
             ("datum", datumName), ("unit", unit), ("originX", origin.X), ("originY", origin.Y),
-            ("angleDeg", angleDeg), ("length", length), ("secondaryOffset", secondaryOffset), ("flipAxis", flipAxis));
+            ("angleDeg", angleDeg), ("length", length), ("secondaryOffset", secondaryOffset),
+            ("absoluteOffset", absoluteOffset), ("side", secondarySide), ("flipAxis", flipAxis));
 
         var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
         {
@@ -160,10 +175,16 @@ public sealed class DatumFrameNode : IVisionNodeExecutor
             ["origin"] = VisionValue.Point(origin),
             ["axisAngleDeg"] = VisionValue.Double(angleDeg),
             ["length"] = VisionValue.Double(length),
+            ["unit"] = VisionValue.String(unit),
             ["datumJson"] = VisionValue.String(datumJson),
             ["diagnostics"] = VisionValue.String(diagnostics)
         };
-        if (secondaryOffset is { } offset) outputs["secondaryOffset"] = VisionValue.Double(offset);
+        if (secondaryOffset is { } offset)
+        {
+            outputs["secondaryOffset"] = VisionValue.Double(offset);
+            outputs["absoluteOffset"] = VisionValue.Double(absoluteOffset!.Value);
+            outputs["side"] = VisionValue.String(secondarySide!);
+        }
 
         var overlays = new List<VisionOverlay>
         {
@@ -180,6 +201,7 @@ public sealed class DatumFrameNode : IVisionNodeExecutor
             {
                 ["datum"] = datumName, ["unit"] = unit, ["originX"] = origin.X, ["originY"] = origin.Y,
                 ["angleDeg"] = angleDeg, ["length"] = length, ["secondaryOffset"] = secondaryOffset,
+                ["absoluteOffset"] = absoluteOffset, ["side"] = secondarySide,
                 ["flipAxis"] = flipAxis, ["diagnostics"] = diagnostics
             }, overlays));
     }
@@ -201,6 +223,9 @@ public sealed class PositionToleranceNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
 
         var unit = GdtMath.RequireUnit(node, Type);
+        var measurementOnly = node.GetBool("measurementOnly", false);
+        var requireDatum = node.GetBool("requireDatum", false);
+        var requireCalibratedUnit = node.GetBool("requireCalibratedUnit", false);
         var basicX = node.GetDouble("basicX", 0);
         var basicY = node.GetDouble("basicY", 0);
         GdtMath.Finite(basicX, basicY);
@@ -231,6 +256,42 @@ public sealed class PositionToleranceNode : IVisionNodeExecutor
             if (!double.IsFinite(mmcSize) || mmcSize <= 0)
                 throw new InvalidOperationException("tolerance.position mmcSize must be > 0 when MMC bonus is enabled.");
         }
+
+        // 圆形公差的 MMC 补偿是“直径方向”的量；直接加到矩形带半宽会放大公差带语义。
+        if (mmcBonus && zoneType == "rectangular")
+            throw new InvalidOperationException(
+                "tolerance.position MMC bonus applies to a diametral zone only; a rectangular zone needs separate X/Y bonus rules. Use zoneType=diameter or disable mmcBonus.");
+
+        var activeAxes = zoneType == "diameter"
+            ? diameterTolerance > 0 ? "diameter" : "none"
+            : toleranceX > 0 && toleranceY > 0 ? "xy" : toleranceX > 0 ? "x" : toleranceY > 0 ? "y" : "none";
+        var gateEnabled = activeAxes != "none";
+        var gateDisabledReason = gateEnabled
+            ? null
+            : zoneType == "diameter"
+                ? "diameterTolerance=0 disables the diametral gate"
+                : "toleranceX=0 and toleranceY=0 disable both rectangular axes";
+        // 全关判定必须有显式声明，避免“忘了填公差”被当成合格。
+        if (!gateEnabled && !measurementOnly)
+            throw new InvalidOperationException(
+                $"tolerance.position has no active tolerance axis ({gateDisabledReason}). Set measurementOnly=true for a measurement-only run.");
+
+        NodeExecutorResult Fail(string reason, string detail) => new(
+            new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["found"] = VisionValue.Boolean(false),
+                ["withinTolerance"] = VisionValue.Boolean(false),
+                ["gateEnabled"] = VisionValue.Boolean(false),
+                ["activeAxes"] = VisionValue.String("none"),
+                ["reason"] = VisionValue.String(reason),
+                ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(
+                    Type, ("found", false), ("reason", reason), ("detail", detail), ("unit", unit)))
+            },
+            new Dictionary<string, object?>
+            {
+                ["found"] = false, ["reason"] = reason, ["detail"] = detail,
+                ["withinTolerance"] = false, ["gateEnabled"] = false, ["activeAxes"] = "none"
+            });
 
         var hasPoint = context.TryGetValue("point", out var pointValue);
         var hasCircle = context.TryGetValue("circle", out var circleValue);
@@ -264,9 +325,27 @@ public sealed class PositionToleranceNode : IVisionNodeExecutor
             measuredSize = explicitSize; // 显式 size 端口优先于圆的直径（后者只是几何推论）
         }
 
-        var datum = context.TryGetValue("datum", out var datumValue)
-            ? GdtMath.ReadDatum(context, "datum", Type)
-            : new VisionPose2D(0, 0, 0);
+        var datumConnected = context.TryGetValue("datum", out _);
+        if (requireDatum && !datumConnected)
+            return ValueTask.FromResult(Fail("datum-required",
+                "requireDatum=true but no datum Pose2D is wired from tolerance.datum / tolerance.drf."));
+        // 未接基准时用单位位姿便于调机，但必须把来源明确报出去，避免被当成“已按基准判定”。
+        var datum = datumConnected ? GdtMath.ReadDatum(context, "datum", Type) : new VisionPose2D(0, 0, 0);
+        var datumSource = datumConnected ? "connected" : "identity";
+        if (context.TryGetValue("datumUnit", out var datumUnitValue))
+        {
+            var datumUnit = datumUnitValue.Require<string>("datumUnit").Trim();
+            if (!string.Equals(datumUnit, unit, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"tolerance.position unit '{unit}' does not match datum unit '{datumUnit}'. Wire tolerance.datum.unit into datumUnit or align both labels.");
+        }
+        if (context.TryGetValue("datumValid", out var datumValidValue) && !datumValidValue.Require<bool>("datumValid"))
+            return ValueTask.FromResult(Fail("invalid-datum",
+                "The upstream datum reports datumValid=false (out of tolerance or unreliable origin)."));
+        var datumCalibrated = !string.Equals(unit, "px", StringComparison.OrdinalIgnoreCase);
+        if (requireCalibratedUnit && !datumCalibrated)
+            return ValueTask.FromResult(Fail("unit-not-calibrated",
+                "requireCalibratedUnit=true but unit is 'px'; calibrate the coordinate source or set unit to a physical unit."));
 
         var measured = GdtMath.ToDatum(datum, feature);
         var deviationX = measured.X - basicX;
@@ -295,7 +374,7 @@ public sealed class PositionToleranceNode : IVisionNodeExecutor
             effectiveTolerance = diameterTolerance <= 0 ? 0 : diameterTolerance + bonus;
             positionDeviation = diametralDeviation;
             utilization = effectiveTolerance <= 0 ? 0 : positionDeviation / effectiveTolerance;
-            within = effectiveTolerance <= 0 || positionDeviation <= effectiveTolerance + 1e-9;
+            within = gateEnabled && positionDeviation <= effectiveTolerance + 1e-9;
         }
         else
         {
@@ -307,7 +386,8 @@ public sealed class PositionToleranceNode : IVisionNodeExecutor
             utilization = !useX && !useY
                 ? 0
                 : Math.Max(useX ? Math.Abs(deviationX) / effectiveX : 0, useY ? Math.Abs(deviationY) / effectiveY : 0);
-            within = (!useX || Math.Abs(deviationX) <= effectiveX + 1e-9)
+            within = gateEnabled
+                     && (!useX || Math.Abs(deviationX) <= effectiveX + 1e-9)
                      && (!useY || Math.Abs(deviationY) <= effectiveY + 1e-9);
             effectiveTolerance = useX && useY ? Math.Min(effectiveX, effectiveY) : Math.Max(effectiveX, effectiveY);
         }
@@ -320,7 +400,8 @@ public sealed class PositionToleranceNode : IVisionNodeExecutor
             ("radialDeviation", radialDeviation), ("diametralDeviation", diametralDeviation),
             ("positionDeviation", positionDeviation), ("effectiveTolerance", effectiveTolerance),
             ("bonus", bonus), ("utilization", utilization), ("measuredSize", measuredSize),
-            ("withinTolerance", within), ("datumApplied", context.TryGetValue("datum", out _)));
+            ("withinTolerance", within), ("datumApplied", datumConnected), ("datumSource", datumSource),
+            ("gateEnabled", gateEnabled), ("activeAxes", activeAxes), ("gateDisabledReason", gateDisabledReason));
 
         var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
         {
@@ -334,8 +415,14 @@ public sealed class PositionToleranceNode : IVisionNodeExecutor
             ["effectiveTolerance"] = VisionValue.Double(effectiveTolerance),
             ["bonus"] = VisionValue.Double(bonus),
             ["utilization"] = VisionValue.Double(utilization),
+            ["gateEnabled"] = VisionValue.Boolean(gateEnabled),
+            ["activeAxes"] = VisionValue.String(activeAxes),
+            ["datumSource"] = VisionValue.String(datumSource),
+            ["datumCalibrated"] = VisionValue.Boolean(datumCalibrated),
             ["diagnostics"] = VisionValue.String(diagnostics)
         };
+        if (gateDisabledReason is not null)
+            outputs["gateDisabledReason"] = VisionValue.String(gateDisabledReason);
 
         var overlays = new List<VisionOverlay>
         {
@@ -367,8 +454,9 @@ public sealed class PositionToleranceNode : IVisionNodeExecutor
                 ["radialDeviation"] = radialDeviation, ["diametralDeviation"] = diametralDeviation,
                 ["positionDeviation"] = positionDeviation, ["effectiveTolerance"] = effectiveTolerance,
                 ["bonus"] = bonus, ["utilization"] = utilization, ["measuredSize"] = measuredSize,
-                ["withinTolerance"] = within, ["datumApplied"] = context.TryGetValue("datum", out _),
-                ["diagnostics"] = diagnostics
+                ["withinTolerance"] = within, ["datumApplied"] = datumConnected, ["datumSource"] = datumSource,
+                ["datumCalibrated"] = datumCalibrated, ["gateEnabled"] = gateEnabled, ["activeAxes"] = activeAxes,
+                ["gateDisabledReason"] = gateDisabledReason, ["diagnostics"] = diagnostics
             }, overlays));
     }
 }
@@ -406,6 +494,15 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
             throw new InvalidOperationException("tolerance.runout axial sampling gates are invalid.");
 
         var datum = GdtMath.ReadDatum(context, "datum", Type);
+        if (context.TryGetValue("datumUnit", out var datumUnitValue))
+        {
+            var datumUnit = datumUnitValue.Require<string>("datumUnit").Trim();
+            if (!string.Equals(datumUnit, unit, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"tolerance.runout unit '{unit}' does not match datum unit '{datumUnit}'. Wire tolerance.datum.unit into datumUnit or align both labels.");
+        }
+        if (context.TryGetValue("datumValid", out var datumValidValue) && !datumValidValue.Require<bool>("datumValid"))
+            return ValueTask.FromResult(ToleranceGeometry.Missing(0, "invalid-datum", nodeType: Type));
         var samples = context.Require<IReadOnlyList<VisionPoint2D>>("samples");
         if (samples.Count > ToleranceGeometry.MaxPoints)
             throw new InvalidOperationException(
@@ -466,7 +563,8 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
             ("unit", unit), ("mode", mode), ("sampleCount", samples.Count),
             ("runout", runout), ("minValue", values[minIndex]), ("maxValue", values[maxIndex]),
             ("meanValue", mean), ("coverageDeg", coverageDeg), ("tolerance", tolerance),
-            ("withinTolerance", within));
+            ("measurementKind", "planar-projection"), ("datumAxisAngleDeg", datum.ThetaDeg),
+            ("totalRunout3DSupported", false), ("withinTolerance", within));
 
         var outputs = new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
         {
@@ -481,6 +579,11 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
             ["evaluationState"] = VisionValue.String(evaluationState),
             ["samplingPlanValid"] = VisionValue.Boolean(true),
             ["coverageDeg"] = VisionValue.Double(coverageDeg),
+            // 本节点只处理像平面内的投影轮廓，不能表征主轴倾斜/轴线直线度/真实三维全跳动。
+            ["measurementKind"] = VisionValue.String("planar-projection"),
+            ["projectionPlane"] = VisionValue.String("XY"),
+            ["datumAxisAngleDeg"] = VisionValue.Double(datum.ThetaDeg),
+            ["totalRunout3DSupported"] = VisionValue.Boolean(false),
             ["highPoint"] = VisionValue.Point(samples[maxIndex]),
             ["lowPoint"] = VisionValue.Point(samples[minIndex]),
             ["diagnostics"] = VisionValue.String(diagnostics)
@@ -513,6 +616,8 @@ public sealed class RunoutToleranceNode : IVisionNodeExecutor
                 ["meanValue"] = mean, ["coverageDeg"] = coverageDeg, ["tolerance"] = tolerance,
                 ["withinTolerance"] = within, ["toleranceEnabled"] = toleranceEnabled,
                 ["evaluationState"] = evaluationState, ["samplingPlanValid"] = true,
+                ["measurementKind"] = "planar-projection", ["projectionPlane"] = "XY",
+                ["datumAxisAngleDeg"] = datum.ThetaDeg, ["totalRunout3DSupported"] = false,
                 ["datumApplied"] = true, ["diagnostics"] = diagnostics
             }, pointOverlays));
     }

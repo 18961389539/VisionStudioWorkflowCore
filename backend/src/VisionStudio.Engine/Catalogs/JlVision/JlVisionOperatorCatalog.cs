@@ -42,7 +42,10 @@ internal static class JlVisionOperatorCatalog
 
         new("jlvision.regionFeature", "Region Feature Extraction", "Measurement",
             [new("exec", VisionDataType.Control), new("region", VisionDataType.Region), new("image", VisionDataType.Image, Required: false)],
-            [new("value", VisionDataType.Double), new("values", VisionDataType.String), new("region", VisionDataType.Region),
+            [new("found", VisionDataType.Boolean), new("reason", VisionDataType.String),
+                new("value", VisionDataType.Double), new("values", VisionDataType.String), new("region", VisionDataType.Region),
+                new("valuesSchemaVersion", VisionDataType.Integer), new("unit", VisionDataType.String),
+                new("imageWidth", VisionDataType.Integer), new("imageHeight", VisionDataType.Integer),
                 new("overlay", VisionDataType.Image), new("feature", VisionDataType.String),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
@@ -62,7 +65,8 @@ internal static class JlVisionOperatorCatalog
             "eccentricity, elliptic axis, roundness, height/width ratio, smallest circle/rectangle1/rectangle2, inner circle/rectangle, diameter, holes), " +
             "moments (2nd/3rd order, central and invariant), run-length features, named regionFeatures queries, and image-driven statistics " +
             "(grayFeatures, areaCenterGray, entropy, fuzzy entropy/perimeter, plane deviation, noise distribution, gray histograms/projections, text line orientation/slant, shape histograms). " +
-            "Value outputs the primary scalar; Values is a JSON object with every named component (for example row/column/radius). " +
+            "Value outputs the primary scalar; Values is schemaVersion=1 JSON with every named component plus feature, region/image dimensions and unit. " +
+            "Runtime contracts are checked before the native call: image-driven features require a non-empty image, point indices must be integers inside the canvas, grayHistoRange needs min < max and a legal bin count, and unknown regionFeatures/grayFeatures/shapeHisto component names fail explicitly instead of being silently omitted. " +
             "Features that need pixels validate the image input up front instead of failing inside the native call.",
             "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
@@ -254,7 +258,9 @@ internal static class JlVisionOperatorCatalog
 
         new("jlvision.contourFeature", "Contour Feature Extraction", "Measurement",
             [new("exec", VisionDataType.Control), new("contour", VisionDataType.Contour), new("contour2", VisionDataType.Contour, Required: false) { RequiredWhen = new("feature", JlContourFeatures.All.Where(p => p.Value.NeedsSecond).Select(p => p.Key).ToArray()) }],
-            [new("value", VisionDataType.Double), new("values", VisionDataType.String),
+            [new("found", VisionDataType.Boolean), new("reason", VisionDataType.String),
+                new("value", VisionDataType.Double), new("valueKind", VisionDataType.String, Required: false), new("unit", VisionDataType.String, Required: false),
+                new("areaFeature", VisionDataType.String, Required: false), new("values", VisionDataType.String),
                 new("contour", VisionDataType.Contour), new("overlay", VisionDataType.Image),
                 new("pointCount", VisionDataType.Integer), new("inputCount", VisionDataType.Integer), new("selectedIndex", VisionDataType.Integer), new("feature", VisionDataType.String),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
@@ -269,13 +275,16 @@ internal static class JlVisionOperatorCatalog
                 new("column", "Column", "number", 0, -1e9, 1e9, 0.5, Group: "Geometry", Description: "Point column for distancePc, line start column for distanceLc/distanceSc."),
                 new("row2", "Row 2", "number", 10, -1e9, 1e9, 0.5, Group: "Geometry", Description: "Line/segment end row."),
                 new("column2", "Column 2", "number", 10, -1e9, 1e9, 0.5, Group: "Geometry", Description: "Line/segment end column."),
-                new("mode", "Mode", "text", "", Group: "Geometry", Description: "Distance mode for distanceCc (default point_to_point).")
+                new("mode", "Distance Mode", "select", "point_to_point", Group: "Geometry",
+                    Options: [new("Point to point", "point_to_point"), new("Point to segment", "point_to_segment")],
+                    Description: "distanceCc only. Unknown modes are rejected before the native call with found=false / reason=invalid-distance-mode.")
             ],
             "Computes one JLVision XLD contour feature for the explicitly selected input contour: area with centroid, circularity, compactness, convexity, rectangularity, " +
             "orientation, eccentricity with bulkiness, elliptic axis, maximum-chord diameter, height/width ratio, second-order moments, point count, closed flag, " +
             "and distances to a second contour, a point, a line or a segment. " +
             "XLD features are computed on the contour itself (no region fill), so they stay valid for open or self-touching edges where region statistics would fail. " +
-            "Features that need a second contour validate the input before the native call.",
+            "areaCenter's primary value is a point count, not an area: valueKind/unit mark this and areaFeature names the explicit area feature to use for sizing. " +
+            "values always includes row, column and pointCount. Invalid distance modes and zero-length line/segment references are rejected before the native call with reason=invalid-distance-mode / zero-length-reference.",
             "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.measure1d", "1D Edge Measurement", "Measurement",
@@ -283,6 +292,7 @@ internal static class JlVisionOperatorCatalog
             [new("edges", VisionDataType.String), new("overlay", VisionDataType.Image), new("contours", VisionDataType.Contour),
                 new("count", VisionDataType.Integer), new("found", VisionDataType.Boolean),
                 new("measurementValid", VisionDataType.Boolean), new("invalidCount", VisionDataType.Integer),
+                new("reason", VisionDataType.String, Required: false), new("effectiveProfileLength", VisionDataType.Double, Required: false),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
                 new("shape", "Measure Shape", "select", "rectangle", Options:
@@ -317,6 +327,7 @@ internal static class JlVisionOperatorCatalog
                 ], Group: "Measure", VisibleWhen: new("method", ["measurePos", "measurePairs", "measureThresh"]), Description: "Which edges inside the profile participate.")
             ],
             "JLVision native 1D measure object: builds a rectangle2 or arc measure, then runs MeasurePos, MeasurePairs, MeasureThresh or MeasureProjection. " +
+            "Geometry is validated before the native call: measure lengths, radius/annulus, arc sweep and the profile-image intersection; degenerate or short profiles return found=false with a stable reason (invalid-measure-length, invalid-annulus-radius, zero-arc-extent, center-outside-image, profile-outside-image, insufficient-profile-samples) instead of relying on a non-empty row list. " +
             "Edges use schemaVersion=1 with method-specific payloads: {schemaVersion,method,shape,unit,coordinateOrder,edges,invalidCount,invalidReasons,measurementValid}. " +
             "Position/threshold edges contain position:{x,y}, amplitude and distance; pair edges contain first/second points, amplitudes, width and widthValid; projection edges contain a native-order gray projection sample. " +
             "Coordinates are x=column,y=row in pixels. Missing pair endpoints or invalid width invalidate the measurement instead of silently dropping columns. " +

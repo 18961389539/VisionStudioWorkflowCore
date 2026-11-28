@@ -263,6 +263,17 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
             throw new InvalidOperationException("measure.bestFitAlign fitMode must be rigid or similarity.");
         var allowScale = fitMode == "similarity";
 
+        // 相似拟合能解尺度，但“残差小”不能掩盖尺寸件被缩放：必须能独立给尺度公差/区间。
+        var scaleTolerance = node.GetDouble("scaleTolerance", 0);
+        var minScale = node.GetDouble("minScale", 0);
+        var maxScale = node.GetDouble("maxScale", 0);
+        if (!double.IsFinite(scaleTolerance) || scaleTolerance < 0 || scaleTolerance > 1 ||
+            !double.IsFinite(minScale) || minScale < 0 || minScale > 1000 ||
+            !double.IsFinite(maxScale) || maxScale < 0 || maxScale > 1000 ||
+            (maxScale > 0 && minScale > maxScale))
+            throw new InvalidOperationException(
+                "measure.bestFitAlign scaleTolerance must be 0..1 and minScale/maxScale must satisfy 0 <= minScale <= maxScale (0 disables).");
+
         var trim = node.GetDouble("trimFraction", 0.1);
         if (!double.IsFinite(trim) || trim is < 0 or > 0.45)
             throw new InvalidOperationException("measure.bestFitAlign trimFraction must be within 0..0.45.");
@@ -323,7 +334,14 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
         }
         var rms = measured.Length > 0 ? Math.Sqrt(residualSquares / measured.Length) : 0;
         var mean = measured.Length > 0 ? residualSum / measured.Length : 0;
-        var found = converged && double.IsFinite(rms) && double.IsFinite(residualMax)
+        var scaleDeviation = current.Scale - 1;
+        var scaleGateEnabled = !allowScale || scaleTolerance > 0 || minScale > 0 || maxScale > 0;
+        var scaleWithinTolerance = !allowScale
+            ? Math.Abs(scaleDeviation) <= 1e-9
+            : (scaleTolerance <= 0 || Math.Abs(scaleDeviation) <= scaleTolerance + 1e-12)
+              && (minScale <= 0 || current.Scale >= minScale - 1e-12)
+              && (maxScale <= 0 || current.Scale <= maxScale + 1e-12);
+        var found = converged && scaleWithinTolerance && double.IsFinite(rms) && double.IsFinite(residualMax)
             && double.IsFinite(current.A) && double.IsFinite(current.B) && double.IsFinite(current.C)
             && double.IsFinite(current.D) && double.IsFinite(current.Tx) && double.IsFinite(current.Ty);
 
@@ -344,11 +362,17 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
             ["maxPoints"] = maxPoints, ["initialRotationDeg"] = initialRotation,
             ["autoInitialRotation"] = autoRotation, ["closedReference"] = closed,
             ["rotationDeg"] = current.RotationDeg, ["deltaX"] = current.Tx, ["deltaY"] = current.Ty,
-            ["scale"] = current.Scale, ["rmsError"] = rms, ["maxError"] = residualMax, ["meanError"] = mean,
+            ["scale"] = current.Scale, ["scaleDeviation"] = scaleDeviation,
+            ["scaleGateEnabled"] = scaleGateEnabled, ["scaleWithinTolerance"] = scaleWithinTolerance,
+            ["rigidScaleEnforced"] = !allowScale, ["scaleTolerance"] = scaleTolerance,
+            ["minScale"] = minScale, ["maxScale"] = maxScale,
+            ["rmsError"] = rms, ["maxError"] = residualMax, ["meanError"] = mean,
             ["inlierCount"] = inliers, ["pointCount"] = measuredRaw.Count, ["iterations"] = iterations,
             ["converged"] = converged,
             ["found"] = found,
-            ["reason"] = found ? "ok" : "not-converged-or-non-finite",
+            ["reason"] = found ? "ok" : !scaleWithinTolerance
+                ? allowScale ? "scale-outside-tolerance" : "rigid-scale-violated"
+                : "not-converged-or-non-finite",
             ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
             ["algorithmBackend"] = "managed"
         };
@@ -357,7 +381,10 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
             ("fitMode", fitMode), ("trimFraction", trim), ("iterations", iterations), ("converged", converged),
             ("maxPoints", maxPoints), ("measuredPoints", measuredRaw.Count), ("referencePoints", referenceRaw.Count),
             ("rotationDeg", current.RotationDeg), ("deltaX", current.Tx), ("deltaY", current.Ty),
-            ("scale", current.Scale), ("rmsError", rms), ("maxError", residualMax), ("meanError", mean),
+            ("scale", current.Scale), ("scaleDeviation", scaleDeviation),
+            ("scaleGateEnabled", scaleGateEnabled), ("scaleWithinTolerance", scaleWithinTolerance),
+            ("scaleTolerance", scaleTolerance), ("minScale", minScale), ("maxScale", maxScale),
+            ("rmsError", rms), ("maxError", residualMax), ("meanError", mean),
             ("inlierCount", inliers), ("elapsedMs", timer.Elapsed.TotalMilliseconds));
         summary["diagnostics"] = diagnostics;
 
@@ -370,6 +397,13 @@ public sealed class BestFitAlignNode : IVisionNodeExecutor
                 ["deltaX"] = VisionValue.Double(current.Tx),
                 ["deltaY"] = VisionValue.Double(current.Ty),
                 ["scale"] = VisionValue.Double(current.Scale),
+                ["scaleDeviation"] = VisionValue.Double(scaleDeviation),
+                ["scaleGateEnabled"] = VisionValue.Boolean(scaleGateEnabled),
+                ["scaleWithinTolerance"] = VisionValue.Boolean(scaleWithinTolerance),
+                ["rigidScaleEnforced"] = VisionValue.Boolean(!allowScale),
+                ["reason"] = VisionValue.String(found ? "ok" : !scaleWithinTolerance
+                    ? allowScale ? "scale-outside-tolerance" : "rigid-scale-violated"
+                    : "not-converged-or-non-finite"),
                 ["rmsError"] = VisionValue.Double(rms),
                 ["maxError"] = VisionValue.Double(residualMax),
                 ["meanError"] = VisionValue.Double(mean),

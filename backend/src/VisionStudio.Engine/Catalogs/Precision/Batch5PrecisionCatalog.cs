@@ -245,6 +245,8 @@ public static class Batch5PrecisionCatalog
                 new("allRms", VisionDataType.Double, Required: false), new("allMaxResidual", VisionDataType.Double, Required: false),
                 new("robustRms", VisionDataType.Double, Required: false), new("robustMaxResidual", VisionDataType.Double, Required: false),
                 new("ignoredStationsJson", VisionDataType.String, Required: false), new("acceptanceMetric", VisionDataType.String),
+                new("axialSpanUsed", VisionDataType.Double), new("axialCoverageRatio", VisionDataType.Double),
+                new("minAxialCoverageRatio", VisionDataType.Double),
                 new("sampleCount", VisionDataType.Integer, Required: false),
                 new("ignoredCount", VisionDataType.Integer, Required: false),
                 new("searchLine", VisionDataType.Line2D),
@@ -288,7 +290,9 @@ public static class Batch5PrecisionCatalog
                     Description: "Return found=false when the selected acceptance residual exceeds this value; zero disables this quality gate."),
                 new("acceptanceMetric", "Acceptance Metric", "select", "all", Group: "Fit", Options:
                     [new("All points (maximum residual)", "all"), new("Robust inliers (RMS)", "robust")],
-                    Description: "Default all prevents outlier rejection from hiding defects. robust explicitly accepts the post-rejection RMS.")
+                    Description: "Default all prevents outlier rejection from hiding defects. robust explicitly accepts the post-rejection RMS."),
+                new("minAxialCoverageRatio", "Min Axial Coverage (0=off)", "number", 0, 0, 1, 0.05, Group: "Fit",
+                    Description: "Require the used edge points to span at least this fraction of the caliper span. Count alone is not enough: three clustered points can fit a numerically stable line that says nothing about the measured edge.")
             ,
                 ],
             "Caliper line measurement with orthogonal RMS fit error, bounded outlier rejection, and an optional maximum fit-error quality gate. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. The minimum valid caliper gate is checked after outlier rejection.",
@@ -318,6 +322,9 @@ public static class Batch5PrecisionCatalog
                 new("allRms", VisionDataType.Double, Required: false), new("allMaxResidual", VisionDataType.Double, Required: false),
                 new("robustRms", VisionDataType.Double, Required: false), new("robustMaxResidual", VisionDataType.Double, Required: false),
                 new("ignoredSamplesJson", VisionDataType.String, Required: false), new("acceptanceMetric", VisionDataType.String),
+                new("coverageDeg", VisionDataType.Double), new("maxGapDeg", VisionDataType.Double),
+                new("minCoverageDeg", VisionDataType.Double), new("maxAngularGapDeg", VisionDataType.Double),
+                new("angularCoverageOk", VisionDataType.Boolean),
                 new("sampleCount", VisionDataType.Integer, Required: false),
                 new("ignoredCount", VisionDataType.Integer, Required: false),
                 new("diagnostics", VisionDataType.String),
@@ -372,7 +379,11 @@ public static class Batch5PrecisionCatalog
                     Description: "Return found=false when the selected acceptance residual exceeds this value; zero disables this quality gate."),
                 new("acceptanceMetric", "Acceptance Metric", "select", "all", Group: "Fit", Options:
                     [new("All points (maximum residual)", "all"), new("Robust inliers (RMS)", "robust")],
-                    Description: "Default all keeps real local defects in the quality gate even when robust fitting excludes them.")
+                    Description: "Default all keeps real local defects in the quality gate even when robust fitting excludes them."),
+                new("minCoverageDeg", "Minimum Angular Coverage (0=off)", "number", 0, 0, 360, 1, Unit: "deg", Group: "Coverage",
+                    Description: "Require the used spokes to cover this angular span (360 minus the largest gap). Count alone lets a few spokes bunched on a short arc drive the fit."),
+                new("maxAngularGapDeg", "Max Angular Gap (0=off)", "number", 0, 0, 360, 1, Unit: "deg", Group: "Coverage",
+                    Description: "Reject the fit when the largest angular hole between used spokes exceeds this, even if total coverage passes.")
             ],
             "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and an optional maximum fit-error quality gate. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image. The minimum valid caliper gate is checked after outlier rejection.",
             "builtin",
@@ -574,6 +585,7 @@ public static class Batch5PrecisionCatalog
                 new("exec", VisionDataType.Control),
                 new("roi", VisionDataType.Roi, Required: false),
                 new("currentPose", VisionDataType.Pose2D, Required: false),
+                new("poseQuality", VisionDataType.Double, Required: false),
                 new("debugImage", VisionDataType.Image, Required: false)
             ],
             [
@@ -584,6 +596,16 @@ public static class Batch5PrecisionCatalog
                 new("center", VisionDataType.Point2D, Required: false),
                 new("pose", VisionDataType.Pose2D, Required: false),
                 new("transform", VisionDataType.Transform2D, Required: false),
+                new("poseSource", VisionDataType.String, Required: false), new("poseValid", VisionDataType.Boolean, Required: false),
+                new("poseQuality", VisionDataType.Double, Required: false),
+                new("poseThetaDeg", VisionDataType.Double, Required: false), new("deltaThetaDeg", VisionDataType.Double, Required: false),
+                new("basePose", VisionDataType.Pose2D, Required: false),
+                new("referenceIntegrity", VisionDataType.String, Required: false),
+                new("referenceHash", VisionDataType.String, Required: false),
+                new("referenceBasePose", VisionDataType.Pose2D, Required: false),
+                new("referenceRoiVersion", VisionDataType.String, Required: false),
+                new("capturedAtUtc", VisionDataType.String, Required: false),
+                new("referenceComplete", VisionDataType.Boolean, Required: false),
                 new("diagnostics", VisionDataType.String),
                 new("next", VisionDataType.Control)
             ],
@@ -602,6 +624,10 @@ public static class Batch5PrecisionCatalog
                     Description: "Used only when the currentPose port is not connected."),
                 new("currentThetaDeg", "Current Theta", "number", 0, -3600, 3600, 0.01, Unit: "deg", Group: "Current Pose",
                     Description: "Used only when the currentPose port is not connected."),
+                new("maxPoseAngleDeg", "Max Pose Angle (0=off)", "number", 0, 0, 1000000, 10, Unit: "deg", Group: "Current Pose",
+                    Description: "Optional cap on |theta| for a corrupted locator. Finite large angles are still normalized with AnglePeriod before subtraction; 0 keeps that behavior."),
+                new("minPoseQuality", "Min Pose Quality (0=off)", "number", 0, 0, 1, 0.05, Group: "Current Pose",
+                    Description: "When poseQuality is wired, reject a pose below this quality (0..1). No silent fallback to the parameter pose is allowed."),
                 // 基准图像资产与一次性动作由画布/宿主写入，不是可编辑表单字段；必须在目录中声明。
                 new("captureReference", "Capture Reference", "boolean", false, Group: "Reference Capture", Internal: true,
                     Description: "One-shot action written by the reference-capture command: freeze the connected debugImage and the current pose as the new baseline."),
@@ -611,12 +637,14 @@ public static class Batch5PrecisionCatalog
                     Description: "Width in pixels of the captured reference image asset; written by reference capture, not edited by hand."),
                 new("referenceHeight", "Reference Height", "number", null, Group: "Reference Capture", Internal: true,
                     Description: "Height in pixels of the captured reference image asset; written by reference capture, not edited by hand."),
+                new("referenceHash", "Reference SHA-256", "text", null, Group: "Reference Capture", Internal: true,
+                    Description: "SHA-256 of the captured PNG bytes; written together with image/size/pose/ROI version/time in one atomic capture result."),
                 new("debugImagePreviewOnly", "Debug Preview Only", "boolean", false, Group: "Reference Capture", Internal: true,
                     Description: "Validation-mode flag: return the debug image without requiring a ROI yet.")
             ,
 
                 ],
-            "Rigid ROI follow after locate: p' = R(dTheta)(p − base) + current. Capture reference image + pose before drawing the ROI. Wire: currentPose (or currentX/Y/Theta) from matching; roi → measurement ROI ports; transform → measurement transform; debugImage for capture/overlay. Output transform maps ReferenceImage→CurrentImage; compose with image.crop transform (A=this, B=crop) for CropImage coordinates. anglePeriodDeg 180 for half-turn-symmetric models, 360 when orientation is unique. Rotated rectangles become polygons. Do not transform already-corrected geometry twice.",
+            "Rigid ROI follow after locate: p' = R(dTheta)(p − base) + current. Reference capture is atomic: image bytes, dimensions, SHA-256 hash, base/current pose, ROI version and UTC time are emitted together; a validation failure leaves the previous complete reference untouched. currentPose port wins over currentX/Y/Theta parameters and a bad port fails explicitly (poseSource reports which was used); poseQuality can gate on locator confidence. Wire: currentPose from matching; roi → measurement ROI ports; transform → measurement transform. Output transform maps ReferenceImage→CurrentImage. anglePeriodDeg 180 for half-turn-symmetric models, 360 when orientation is unique. Rotated rectangles become polygons. Do not transform already-corrected geometry twice.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), Frames: [new(NodeImageFramePolicy.InputFrame, InputPort: "debugImage", FallbackFrame: "CurrentImage", Transform: NodeTransformFramePolicy.RoiReference)], OutputFrames: [new(NodeOutputFrameSource.ImageInput, OutputPort: "roi", InputPort: "debugImage")], RoiImageBindings: [new("roi", "debugImage")]),
         new("contour.fromMask", "Contour From Mask", "Contour", [new("exec", VisionDataType.Control), new("image", VisionDataType.Image)],

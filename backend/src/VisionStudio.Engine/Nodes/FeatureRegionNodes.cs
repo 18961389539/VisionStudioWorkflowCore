@@ -118,6 +118,9 @@ public sealed class GrayHistogramNode : IVisionNodeExecutor
 var low = node.GetDouble("lowPercent", 5); var high = node.GetDouble("highPercent", 95);
         if (!double.IsFinite(low) || !double.IsFinite(high) || low < 0 || high > 100 || low > high)
             throw new InvalidOperationException("Histogram percentiles must satisfy 0 <= lowPercent <= highPercent <= 100.");
+        var percentileMethod = (node.GetString("percentileMethod", "nearestRank") ?? "nearestRank").Trim().ToLowerInvariant();
+        if (percentileMethod is not ("nearestrank" or "linear"))
+            throw new InvalidOperationException("measure.grayHistogram percentileMethod must be nearestRank or linear.");
         var (source, scoped) = RegionNodeHelpers.Source(context);
         if (source.Width < 1 || source.Height < 1) throw new InvalidOperationException("measure.grayHistogram requires a non-empty image.");
         using var gray = ColorChannels.Gray(source);
@@ -139,9 +142,16 @@ var low = node.GetDouble("lowPercent", 5); var high = node.GetDouble("highPercen
         var outputs = new Dictionary<string, VisionValue>
         {
             ["found"] = VisionValue.Boolean(count > 0), ["pixelCount"] = VisionValue.Integer(count),
-            ["binsJson"] = VisionValue.String(JsonSerializer.Serialize(bins)), ["cdfJson"] = VisionValue.String(JsonSerializer.Serialize(cdf))
+            ["binsJson"] = VisionValue.String(JsonSerializer.Serialize(bins)), ["cdfJson"] = VisionValue.String(JsonSerializer.Serialize(cdf)),
+            // 强类型数组 + schema：下游不必再猜 JSON 是计数还是概率，bin 边界固定为 [0,255]。
+            ["bins"] = VisionValue.NumberList(bins.Select(value => (double)value).ToArray()),
+            ["cdf"] = VisionValue.NumberList(cdf),
+            ["histogramSchemaVersion"] = VisionValue.Integer(1),
+            ["binMin"] = VisionValue.Double(0), ["binMax"] = VisionValue.Double(255),
+            ["cdfLast"] = VisionValue.Double(cdf[^1]),
+            ["percentileMethod"] = VisionValue.String(percentileMethod == "linear" ? "linear" : "nearestRank")
         };
-        var summary = new Dictionary<string, object?> { ["found"] = count > 0, ["pixelCount"] = count, ["algorithmBackend"] = "jlvision" };
+        var summary = new Dictionary<string, object?> { ["found"] = count > 0, ["pixelCount"] = count, ["algorithmBackend"] = "jlvision", ["histogramSchemaVersion"] = 1, ["percentileMethod"] = percentileMethod };
         double? meanOut = null, stdOut = null, lowOut = null, highOut = null;
         if (count > 0)
         {
@@ -155,6 +165,8 @@ var low = node.GetDouble("lowPercent", 5); var high = node.GetDouble("highPercen
         }
         var diag = CoordinateValidation.Diagnostics(Type, ("found", count > 0), ("pixelCount", count), ("lowPercent", low), ("highPercent", high),
             ("mean", meanOut), ("stdDev", stdOut), ("percentileLow", lowOut), ("percentileHigh", highOut),
+            ("percentileMethod", percentileMethod), ("histogramSchemaVersion", 1),
+            ("binMin", 0), ("binMax", 255), ("cdfLast", cdf[^1]),
             ("width", source.Width), ("height", source.Height));
         outputs["diagnostics"] = VisionValue.String(diag);
         summary["diagnostics"] = diag;
@@ -163,9 +175,20 @@ var low = node.GetDouble("lowPercent", 5); var high = node.GetDouble("highPercen
 
         double Quantile(double percent)
         {
-            var target = Math.Max(1d, percent / 100 * count); long sum = 0;
-            for (var i = 0; i < bins.Length; i++) { sum += bins[i]; if (sum >= target) return i; }
-            throw new InvalidOperationException("Histogram percentile could not be resolved.");
+            if (count == 0) return 0;
+            var target = percentileMethod == "linear" ? percent / 100.0 * count : Math.Max(1d, percent / 100 * count);
+            long sum = 0;
+            for (var i = 0; i < bins.Length; i++)
+            {
+                var before = sum;
+                sum += bins[i];
+                if (sum < target) continue;
+                if (percentileMethod == "nearestrank" || sum == before) return i;
+                // CDF 线性插值：结果落在 (i-1, i] 区间，8 位灰度以下也能表达亚灰度分位。
+                var fraction = (target / count - before / (double)count) / (sum / (double)count - before / (double)count);
+                return Math.Clamp((i - 1) + fraction, 0, 255);
+            }
+            return 255;
         }
     }
 }

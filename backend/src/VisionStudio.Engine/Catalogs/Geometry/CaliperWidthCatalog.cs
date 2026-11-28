@@ -12,6 +12,10 @@ internal static class CaliperWidthCatalog
                 new("width", VisionDataType.Double, Required: false), new("point1", VisionDataType.Point2D, Required: false),
                 new("point2", VisionDataType.Point2D, Required: false), new("center", VisionDataType.Point2D, Required: false),
                 new("strength", VisionDataType.Double, Required: false), new("pairCount", VisionDataType.Integer),
+                new("continuousPairCount", VisionDataType.Integer), new("continuousSegmentCount", VisionDataType.Integer),
+                new("longestContinuousSamples", VisionDataType.Integer), new("maskBreakCount", VisionDataType.Integer),
+                new("maskBreakIndicesJson", VisionDataType.String), new("continuityRejectedCount", VisionDataType.Integer),
+                new("minEdgeSegmentSamples", VisionDataType.Integer),
                 new("sampleCount", VisionDataType.Integer), new("searchLine", VisionDataType.Line2D),
                 new("widthDeviation", VisionDataType.Double, Required: false), new("withinTolerance", VisionDataType.Boolean),
                 new("widthOutOfTolerance", VisionDataType.Boolean), new("toleranceEnabled", VisionDataType.Boolean),
@@ -40,9 +44,11 @@ internal static class CaliperWidthCatalog
                 new("lowerTolerance", "Lower Tolerance", "number", 0, 0, 10000000, 0.01, Unit: "px", Group: "Validation",
                     Description: "Allowed minus deviation from nominalWidth. 0/0 disables the tolerance gate and evaluationState becomes not-evaluated."),
                 new("upperTolerance", "Upper Tolerance", "number", 0, 0, 10000000, 0.01, Unit: "px", Group: "Validation",
-                    Description: "Allowed plus deviation from nominalWidth. Keep minWidth/maxWidth for candidate filtering only; this gate decides pass/fail.")
+                    Description: "Allowed plus deviation from nominalWidth. Keep minWidth/maxWidth for candidate filtering only; this gate decides pass/fail."),
+                new("minEdgeSegmentSamples", "Min Edge Segment Samples (0=off)", "number", 0, 0, 100000, 1, Group: "Validation",
+                    Description: "Reject a pair when either edge sits in a continuous-sample segment shorter than this. Pairs spanning a mask break are always rejected.")
             ],
-            "Native subpixel edge-pair measurement of bright strips, dark gaps and line widths. Returns width along the search line, ordered endpoints and center; supports width filtering and nominal-width selection. Place the line perpendicular to the target boundaries for perpendicular width. Uses Gaussian sigma=1 and at least 8 contiguous profile samples. ROI holes split profiles and cannot be bridged. No qualifying pair returns found=false with no width or points. Supports rigid px-to-px localization transforms; outputs remain in image pixels.",
+            "Native subpixel edge-pair measurement of bright strips, dark gaps and line widths. Returns width along the search line, ordered endpoints and center; supports width filtering and nominal-width selection. Place the line perpendicular to the target boundaries for perpendicular width. continuousSegmentCount/longestContinuousSamples/maskBreakIndicesJson expose how ROI holes split the profile, and pairs that would bridge a mask break are rejected (reason=edge-pair-spans-mask-break), because a width across a hole has no physical meaning. Uses Gaussian sigma=1 and at least 8 contiguous profile samples. No qualifying pair returns found=false with no width or points. Supports rigid px-to-px localization transforms; outputs remain in image pixels.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), RoiImageBindings: [new("roi", "image")]),
 
         // Product-depth PD-1: Cognex-style multi-station width array (卡尺阵列).

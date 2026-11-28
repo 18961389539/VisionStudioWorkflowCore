@@ -146,6 +146,29 @@ public sealed class ArcFitNode : IVisionNodeExecutor
         var radii = points.Select(p => MeasurementMath.Hypot(p.X - circle.X, p.Y - circle.Y)).ToArray();
         var minimum = radii.Min(); var maximum = radii.Max();
         var rms = Math.Sqrt(radii.Average(r => (r - circle.Radius) * (r - circle.Radius)));
+        // 短弧的可观测性：弧越短，矢高越小，同样的残差会被放大成越大的半径不确定度。
+        // conditionNumber = 1/(1-cos(sweep/2))，radiusUncertainty 用 rms 乘同一放大倍率。
+        var halfSweepRad = Math.Max(1e-9, sweep / 2 * Math.PI / 180);
+        var leverAmplification = Math.Max(1e-9, 1 - Math.Cos(halfSweepRad));
+        var conditionNumber = 1 / leverAmplification;
+        var radiusUncertainty = rms / leverAmplification;
+        var maxConditionNumber = node.GetDouble("maxConditionNumber", 0);
+        var maxRadiusUncertainty = node.GetDouble("maxRadiusUncertainty", 0);
+        if (!double.IsFinite(maxConditionNumber) || maxConditionNumber < 0 ||
+            !double.IsFinite(maxRadiusUncertainty) || maxRadiusUncertainty < 0)
+            throw new InvalidOperationException(
+                "measure.arcFit maxConditionNumber and maxRadiusUncertainty must be finite and >= 0 (0 disables).");
+        var observabilityOk =
+            (maxConditionNumber <= 0 || conditionNumber <= maxConditionNumber) &&
+            (maxRadiusUncertainty <= 0 || radiusUncertainty <= maxRadiusUncertainty);
+        if (!observabilityOk)
+            return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "arc-observability-weak", new()
+            {
+                ["coverageDeg"] = VisionValue.Double(sweep),
+                ["conditionNumber"] = VisionValue.Double(conditionNumber),
+                ["radiusUncertainty"] = VisionValue.Double(radiusUncertainty),
+                ["rms"] = VisionValue.Double(rms)
+            }, nodeType: Type));
         var deviation = maximum - minimum;
         var within = maxDeviation <= 0 || deviation <= maxDeviation;
         var chord = MeasurementMath.Hypot(
@@ -155,7 +178,8 @@ public sealed class ArcFitNode : IVisionNodeExecutor
 
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", points.Length),
             ("radius", circle.Radius), ("sweepDeg", sweep), ("coverageDeg", sweep), ("arcLength", arcLength),
-            ("chordLength", chord), ("deviation", deviation), ("rms", rms), ("withinTolerance", within));
+            ("chordLength", chord), ("deviation", deviation), ("rms", rms), ("conditionNumber", conditionNumber),
+            ("radiusUncertainty", radiusUncertainty), ("observabilityOk", observabilityOk), ("withinTolerance", within));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -166,13 +190,18 @@ public sealed class ArcFitNode : IVisionNodeExecutor
                 ["sweepDeg"] = VisionValue.Double(sweep), ["arcLength"] = VisionValue.Double(arcLength),
                 ["chordLength"] = VisionValue.Double(chord), ["minRadius"] = VisionValue.Double(minimum),
                 ["maxRadius"] = VisionValue.Double(maximum), ["deviation"] = VisionValue.Double(deviation),
-                ["rms"] = VisionValue.Double(rms), ["withinTolerance"] = VisionValue.Boolean(within),
+                ["rms"] = VisionValue.Double(rms), ["conditionNumber"] = VisionValue.Double(conditionNumber),
+                ["radiusUncertainty"] = VisionValue.Double(radiusUncertainty),
+                ["observabilityOk"] = VisionValue.Boolean(observabilityOk),
+                ["withinTolerance"] = VisionValue.Boolean(within),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["found"] = true, ["radius"] = circle.Radius, ["sweepDeg"] = sweep, ["arcLength"] = arcLength,
                 ["chordLength"] = chord, ["deviation"] = deviation, ["rms"] = rms, ["sampleCount"] = points.Length,
+                ["conditionNumber"] = conditionNumber, ["radiusUncertainty"] = radiusUncertainty,
+                ["observabilityOk"] = observabilityOk,
                 ["withinTolerance"] = within, ["maxDeviation"] = maxDeviation, ["unit"] = "px",
                 ["algorithmBackend"] = "jlvision", ["diagnostics"] = diagnostics
             },
@@ -351,8 +380,21 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
         if (minRadiusLimit > 0 && maxCurvatureLimit > 0)
             throw new InvalidOperationException("Enable only one of minRadius or maxCurvature.");
         var closed = node.GetBool("closed", true);
+        var windowLengthPx = node.GetDouble("windowLength", 0);
+        if (!double.IsFinite(windowLengthPx) || windowLengthPx < 0)
+            throw new InvalidOperationException("measure.curvature windowLength must be finite and >= 0 (0 keeps the point-count window).");
 
         var points = ProfileMath.SelectContour(context, node, closed);
+        var windowMode = "points";
+        var resampleStepPx = 0.0;
+        if (windowLengthPx > 0)
+        {
+            // 弧长窗口：先按弧长重采样，使 2*window+1 个点恰好跨过 windowLength，
+            // 避免“同样点数在稀疏段代表更长物理跨度”导致的系统性曲率偏差。
+            resampleStepPx = windowLengthPx / (2 * window + 1);
+            points = ProfileMath.Resample(points, closed, resampleStepPx, 100000);
+            windowMode = "arcLength";
+        }
         var minimumNeeded = 2 * window + 3;
         if (points.Length < minimumNeeded)
             return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", nodeType: Type));
@@ -361,6 +403,7 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
         var radii = new double[count];
         double sumCurvature = 0; var fitted = 0;
         var buffer = new List<VisionPoint2D>(minimumNeeded);
+        var windowLengths = new List<double>(count);
         for (var i = 0; i < count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -372,6 +415,14 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
                 else if (index < 0 || index >= count) { buffer.Clear(); break; }
                 buffer.Add(points[index]);
             }
+            // 开放轮廓两端只有部分窗口；这些点仍可给曲率，但不能参与窗口长度一致性统计。
+            if (buffer.Count == 2 * window + 1)
+            {
+                var span = 0d;
+                for (var k = 1; k < buffer.Count; k++)
+                    span += MeasurementMath.Hypot(buffer[k].X - buffer[k - 1].X, buffer[k].Y - buffer[k - 1].Y);
+                windowLengths.Add(span);
+            }
             if (buffer.Count < 3) { radii[i] = double.NaN; continue; }
             if (!ProfileMath.TryFitCircle(buffer, out var circle)) { radii[i] = double.NaN; continue; }
             radii[i] = circle.Radius; sumCurvature += 1 / circle.Radius; fitted++;
@@ -382,6 +433,14 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
 
         var minEntry = finite.MinBy(v => v.r);
         var meanCurvature = sumCurvature / fitted;
+        var actualWindowLength = windowLengths.Count > 0 ? windowLengths.Average() : 0;
+        var windowLengthCv = 0d;
+        if (windowLengths.Count > 1 && actualWindowLength > 1e-12)
+        {
+            var variance = windowLengths.Average(value => (value - actualWindowLength) * (value - actualWindowLength));
+            windowLengthCv = Math.Sqrt(variance) / actualWindowLength;
+        }
+        var windowUniformityOk = windowMode == "arcLength" ? windowLengthCv <= 0.05 : windowLengthCv <= 0.25;
         var corners = new List<(int Index, double Radius, VisionPoint2D Point)>();
         if (cornerRadius > 0)
         {
@@ -410,6 +469,8 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", count),
             ("minRadius", minEntry.r), ("minRadiusIndex", minEntry.i), ("meanCurvature", meanCurvature),
             ("cornerCount", corners.Count), ("window", window), ("cornerRadius", cornerRadius),
+            ("windowMode", windowMode), ("windowLength", windowLengthPx), ("actualWindowLength", actualWindowLength),
+            ("windowLengthCv", windowLengthCv), ("windowUniformityOk", windowUniformityOk), ("resampleStepPx", resampleStepPx),
             ("toleranceEnabled", toleranceEnabled), ("evaluationState", evaluationState), ("withinTolerance", within));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
@@ -423,12 +484,18 @@ public sealed class ContourCurvatureNode : IVisionNodeExecutor
                     index = c.Index, radius = Math.Round(c.Radius, 6), x = Math.Round(c.Point.X, 6), y = Math.Round(c.Point.Y, 6)
                 }))),
                 ["withinTolerance"] = VisionValue.Boolean(within), ["toleranceEnabled"] = VisionValue.Boolean(toleranceEnabled),
+                ["windowMode"] = VisionValue.String(windowMode), ["windowLength"] = VisionValue.Double(windowLengthPx),
+                ["actualWindowLength"] = VisionValue.Double(actualWindowLength), ["windowLengthCv"] = VisionValue.Double(windowLengthCv),
+                ["windowUniformityOk"] = VisionValue.Boolean(windowUniformityOk),
                 ["evaluationState"] = VisionValue.String(evaluationState), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
                 ["found"] = true, ["minRadius"] = minEntry.r, ["maxCurvature"] = 1 / minEntry.r,
                 ["meanCurvature"] = meanCurvature, ["cornerCount"] = corners.Count, ["sampleCount"] = count,
+                ["windowMode"] = windowMode, ["windowLength"] = windowLengthPx, ["actualWindowLength"] = actualWindowLength,
+                ["windowLengthCv"] = windowLengthCv, ["windowUniformityOk"] = windowUniformityOk,
+                ["resampleStepPx"] = resampleStepPx,
                 ["withinTolerance"] = within, ["toleranceEnabled"] = toleranceEnabled,
                 ["evaluationState"] = evaluationState, ["unit"] = "px", ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             },
@@ -454,12 +521,17 @@ public sealed class ProfileFilterNode : IVisionNodeExecutor
         var endEffect = node.GetString("endEffect", "reflect").ToLowerInvariant();
         if (endEffect is not ("reflect" or "discard")) throw new InvalidOperationException($"measure.profileFilter endEffect '{endEffect}' is not supported (reflect | discard).");
         var closed = node.GetBool("closed", false);
+        var minUsableLength = node.GetDouble("minUsableLength", 0);
+        var minRetainedPoints = node.GetInt("minRetainedPoints", 0);
+        var allowTruncatedKernel = node.GetBool("allowTruncatedKernel", false);
+        if (!double.IsFinite(minUsableLength) || minUsableLength < 0 || minRetainedPoints is < 0 or > 10000000)
+            throw new InvalidOperationException("measure.profileFilter minUsableLength/minRetainedPoints must be >= 0 (0 disables each).");
 
         var points = ProfileMath.SelectContour(context, node, closed);
         if (points.Length < 3) return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", nodeType: Type));
 
         var (inputU, inputZ, origin, ux, uy, inputGap) = ProfileMath.ProjectWithGap(points);
-        if (ProfileMath.CheckInputGap(node, inputGap, points.Length) is { } gapFailure) return ValueTask.FromResult(gapFailure);
+        if (ProfileMath.CheckInputGap(node, inputGap, points.Length, step, inputU) is { } gapFailure) return ValueTask.FromResult(gapFailure);
         var (u, z) = ProfileMath.Uniformize(inputU, inputZ, step, ToleranceGeometry.MaxPoints);
         var length = u[^1] - u[0];
         var actualStep = length / (u.Length - 1);
@@ -475,6 +547,28 @@ public sealed class ProfileFilterNode : IVisionNodeExecutor
         var removed = u.Length - (end - start);
         var usableLength = u[end - 1] - u[start];
         var kernelTruncated = edge < requestedRadius;
+        var retainedPointCount = end - start;
+        var droppedHeadLength = u[start] - u[0];
+        var droppedTailLength = u[^1] - u[end - 1];
+        var usableLengthRatio = length > 1e-12 ? usableLength / length : 0;
+        // discard 模式下核被截断意味着边缘支撑不足：默认拒绝，只有显式声明才允许。
+        if (!reflect && kernelTruncated && !allowTruncatedKernel)
+            return ValueTask.FromResult(ToleranceGeometry.Missing(retainedPointCount, "kernel-truncated", new()
+            {
+                ["usableLength"] = VisionValue.Double(usableLength),
+                ["kernelTruncated"] = VisionValue.Boolean(true),
+                ["requestedKernelRadius"] = VisionValue.Integer(requestedRadius),
+                ["effectiveKernelRadius"] = VisionValue.Integer(edge)
+            }, nodeType: Type));
+        if ((minUsableLength > 0 && usableLength < minUsableLength - 1e-9) ||
+            (minRetainedPoints > 0 && retainedPointCount < minRetainedPoints))
+            return ValueTask.FromResult(ToleranceGeometry.Missing(retainedPointCount, "insufficient-usable-length", new()
+            {
+                ["usableLength"] = VisionValue.Double(usableLength),
+                ["usableLengthRatio"] = VisionValue.Double(usableLengthRatio),
+                ["minUsableLength"] = VisionValue.Double(minUsableLength),
+                ["minRetainedPoints"] = VisionValue.Integer(minRetainedPoints)
+            }, nodeType: Type));
 
         var waviness = new VisionPoint2D[end - start];
         var residual = new VisionPoint2D[end - start];
@@ -494,6 +588,9 @@ public sealed class ProfileFilterNode : IVisionNodeExecutor
             ("cutoff", cutoff), ("length", length), ("removedPointCount", removed), ("endEffect", endEffect),
             ("actualSampleStep", actualStep), ("maxObservedInputGap", inputGap),
             ("usableLength", usableLength), ("kernelTruncated", kernelTruncated), ("unit", "px"),
+            ("retainedPointCount", retainedPointCount), ("droppedHeadLength", droppedHeadLength),
+            ("droppedTailLength", droppedTailLength), ("usableLengthRatio", usableLengthRatio),
+            ("minUsableLength", minUsableLength), ("minRetainedPoints", minRetainedPoints),
             ("residualPeak", residualPeak), ("wavinessPeak", wavinessPeak));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
@@ -505,6 +602,10 @@ public sealed class ProfileFilterNode : IVisionNodeExecutor
                 ["residualRms"] = VisionValue.Double(residualRms),
                 ["actualSampleStep"] = VisionValue.Double(actualStep), ["maxObservedInputGap"] = VisionValue.Double(inputGap),
                 ["usableLength"] = VisionValue.Double(usableLength), ["kernelTruncated"] = VisionValue.Boolean(kernelTruncated),
+                ["retainedPointCount"] = VisionValue.Integer(retainedPointCount),
+                ["droppedHeadLength"] = VisionValue.Double(droppedHeadLength),
+                ["droppedTailLength"] = VisionValue.Double(droppedTailLength),
+                ["usableLengthRatio"] = VisionValue.Double(usableLengthRatio),
                 ["removedPointCount"] = VisionValue.Integer(removed), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
@@ -537,6 +638,10 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
         if (!double.IsFinite(evaluationParam) || evaluationParam < 0) throw new InvalidOperationException("measure.roughness evaluationLength must be finite and >= 0 (0 uses the whole profile).");
         var maxRa = node.GetDouble("maxRa", 0);
         if (!double.IsFinite(maxRa) || maxRa < 0) throw new InvalidOperationException("measure.roughness maxRa must be finite and >= 0 (0 disables the gate).");
+        var maxRz = node.GetDouble("maxRz", 0);
+        if (!double.IsFinite(maxRz) || maxRz < 0) throw new InvalidOperationException("measure.roughness maxRz must be finite and >= 0 (0 disables the gate).");
+        var evaluationStartPx = node.GetDouble("evaluationStartPx", -1);
+        if (!double.IsFinite(evaluationStartPx)) throw new InvalidOperationException("measure.roughness evaluationStartPx must be finite (-1 uses the trailing window).");
         var endEffect = node.GetString("endEffect", "reflect").Trim().ToLowerInvariant();
         if (endEffect is not ("reflect" or "discard"))
             throw new InvalidOperationException("measure.roughness endEffect must be reflect or discard.");
@@ -555,7 +660,7 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
         if (points.Length < 4) return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", nodeType: Type));
 
         var (inputU, inputZ, _, _, _, inputGap) = ProfileMath.ProjectWithGap(points);
-        if (ProfileMath.CheckInputGap(node, inputGap, points.Length) is { } gapFailure) return ValueTask.FromResult(gapFailure);
+        if (ProfileMath.CheckInputGap(node, inputGap, points.Length, step, inputU) is { } gapFailure) return ValueTask.FromResult(gapFailure);
         var (u, z) = ProfileMath.Uniformize(inputU, inputZ, step, ToleranceGeometry.MaxPoints);
         var length = u[^1] - u[0];
         var actualStep = length / (u.Length - 1);
@@ -569,17 +674,28 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
         var end = reflect ? u.Length : u.Length - requestedRadius;
         var available = u[end - 1] - u[start];
         var requestedLength = evaluationParam > 0 ? Math.Min(evaluationParam, available) : available;
-        var keep = Math.Min(end - start, (int)Math.Floor(requestedLength / actualStep + 1e-9) + 1);
+        var wantedSamples = (int)Math.Floor(requestedLength / actualStep + 1e-9) + 1;
+        // 默认取尾部窗口；显式 evaluationStartPx 固定起点，便于对多个窗口做可比复测。
+        var windowStart = end - Math.Min(end - start, wantedSamples);
+        var evaluationStartTruncated = false;
+        if (evaluationStartPx >= 0)
+        {
+            var candidate = start + (int)Math.Round((evaluationStartPx - u[start]) / Math.Max(actualStep, 1e-12));
+            evaluationStartTruncated = candidate < start;
+            windowStart = Math.Clamp(candidate, start, Math.Max(start, end - 3));
+        }
+        var windowEnd = Math.Min(end, windowStart + Math.Max(3, wantedSamples));
+        var keep = windowEnd - windowStart;
         if (keep < 3)
             return ValueTask.FromResult(ToleranceGeometry.Missing(keep, "insufficient-evaluation-samples", nodeType: Type));
 
         var mean = ProfileMath.Gaussian(z, cutoff, actualStep, reflect, cancellationToken, out var edge);
         var kernelTruncated = edge < requestedRadius;
-        var evaluated = u[end - 1] - u[end - keep];
+        var evaluated = u[windowEnd - 1] - u[windowStart];
         var window = new double[keep];
         for (var i = 0; i < keep; i++)
         {
-            var sample = end - keep + i;
+            var sample = windowStart + i;
             window[i] = z[sample] - mean[sample];
         }
         var ra = window.Average(Math.Abs);
@@ -597,13 +713,24 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
             var slice = window[from..to];
             rzValues.Add(slice.Max() + -slice.Min());
         }
-        var rz = rzValues.Count > 0 ? rzValues.Average() : rmax;
+        // 标准 Rz 是 5 个取样长度的峰谷均值；取样长度不足时只能给出整个评价窗口的极差，
+        // 不能把两个不同定义的数都叫 rz 并直接拿标准限值判定。
+        var rzWholeWindow = rmax;
+        var rzValidForRating = rzValues.Count >= 3;
+        var rz = rzValidForRating ? rzValues.Average() : 0;
         var crossings = 0;
         for (var i = 1; i < window.Length; i++) if (Math.Sign(window[i]) != Math.Sign(window[i - 1])) crossings++;
-        var within = maxRa <= 0 || ra <= maxRa;
+        var raOk = maxRa <= 0 || ra <= maxRa;
+        var rzOk = maxRz <= 0 || rzValidForRating && rz <= maxRz;
+        var within = raOk && rzOk;
+        var reason = raOk && rzOk ? "ok" : !raOk ? "ra-exceeded" : "rz-not-ratable-or-exceeded";
         var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", window.Length),
-            ("cutoff", cutoff), ("evaluationLength", evaluated), ("ra", ra), ("rq", rq), ("rz", rz), ("rmax", rmax),
-            ("samplingLengths", rzValues.Count), ("withinTolerance", within), ("gateEnabled", maxRa > 0),
+            ("cutoff", cutoff), ("evaluationLength", evaluated), ("ra", ra), ("rq", rq), ("rz", rz),
+            ("rzWholeWindow", rzWholeWindow), ("rzValidForRating", rzValidForRating), ("rmax", rmax),
+            ("samplingLengths", rzValues.Count), ("withinTolerance", within), ("gateEnabled", maxRa > 0 || maxRz > 0),
+            ("evaluationStartIndex", windowStart), ("evaluationEndIndex", windowEnd - 1),
+            ("evaluationStartU", u[windowStart]), ("evaluationEndU", u[windowEnd - 1]),
+            ("availableStartU", u[start]), ("evaluationStartTruncated", evaluationStartTruncated),
             ("actualSampleStep", actualStep), ("maxObservedInputGap", inputGap), ("endEffect", endEffect),
             ("kernelTruncated", kernelTruncated), ("unit", "px"), ("measurementKind", "imageTrend"));
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -614,6 +741,14 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
                 ["ra"] = VisionValue.Double(ra), ["rq"] = VisionValue.Double(rq), ["rz"] = VisionValue.Double(rz),
                 ["rp"] = VisionValue.Double(rp), ["rv"] = VisionValue.Double(rv), ["rmax"] = VisionValue.Double(rmax),
                 ["zeroCrossings"] = VisionValue.Integer(crossings), ["withinTolerance"] = VisionValue.Boolean(within),
+                ["rzWholeWindow"] = VisionValue.Double(rzWholeWindow), ["rzValidForRating"] = VisionValue.Boolean(rzValidForRating),
+                ["reason"] = VisionValue.String(reason),
+                ["evaluationStartIndex"] = VisionValue.Integer(windowStart), ["evaluationEndIndex"] = VisionValue.Integer(windowEnd - 1),
+                ["evaluationStartU"] = VisionValue.Double(u[windowStart]), ["evaluationEndU"] = VisionValue.Double(u[windowEnd - 1]),
+                ["availableStartU"] = VisionValue.Double(u[start]),
+                ["evaluationStartRequestedPx"] = VisionValue.Double(evaluationStartPx),
+                ["evaluationStartTruncated"] = VisionValue.Boolean(evaluationStartTruncated),
+                ["evaluationSpanRequested"] = VisionValue.Double(requestedLength),
                 ["actualSampleStep"] = VisionValue.Double(actualStep), ["maxObservedInputGap"] = VisionValue.Double(inputGap),
                 ["rzSamplingLengths"] = VisionValue.Integer(rzValues.Count), ["kernelTruncated"] = VisionValue.Boolean(kernelTruncated),
                 ["gateEnabled"] = VisionValue.Boolean(maxRa > 0), ["unit"] = VisionValue.String("px"),
@@ -622,6 +757,12 @@ public sealed class ProfileRoughnessNode : IVisionNodeExecutor
             new Dictionary<string, object?>
             {
                 ["found"] = true, ["ra"] = ra, ["rq"] = rq, ["rz"] = rz, ["rp"] = rp, ["rv"] = rv, ["rmax"] = rmax,
+                ["rzWholeWindow"] = rzWholeWindow, ["rzValidForRating"] = rzValidForRating,
+                ["reason"] = reason, ["maxRa"] = maxRa, ["maxRz"] = maxRz,
+                ["evaluationStartIndex"] = windowStart, ["evaluationEndIndex"] = windowEnd - 1,
+                ["evaluationStartU"] = u[windowStart], ["evaluationEndU"] = u[windowEnd - 1],
+                ["availableStartU"] = u[start], ["evaluationStartRequestedPx"] = evaluationStartPx,
+                ["evaluationStartTruncated"] = evaluationStartTruncated, ["evaluationSpanRequested"] = requestedLength,
                 ["cutoff"] = cutoff, ["evaluationLength"] = evaluated, ["sampleCount"] = window.Length,
                 ["actualSampleStep"] = actualStep, ["maxObservedInputGap"] = inputGap, ["endEffect"] = endEffect,
                 ["rzSamplingLengths"] = rzValues.Count, ["kernelTruncated"] = kernelTruncated,
@@ -651,6 +792,9 @@ public sealed class ContourDistanceNode : IVisionNodeExecutor
         var limit = node.GetDouble("limit", 0);
         if (!double.IsFinite(limit) || limit < 0) throw new InvalidOperationException("measure.contourDistance limit must be finite and >= 0 (0 disables the gate).");
         var closed = node.GetBool("closed", true);
+        var direction = node.GetString("direction", "aToB").Trim().ToLowerInvariant();
+        if (direction is not ("atob" or "btoa" or "symmetric"))
+            throw new InvalidOperationException("measure.contourDistance direction must be aToB, bToA or symmetric.");
 
         var a = ProfileMath.SelectContour(context, node, closed);
         var b = ProfileMath.SelectContour(context, node, closed, "referenceContours", "referenceIndex");
@@ -658,58 +802,91 @@ public sealed class ContourDistanceNode : IVisionNodeExecutor
             return ValueTask.FromResult(ToleranceGeometry.Missing(0, "insufficient-points", nodeType: Type));
 
         var sa = ProfileMath.Resample(a, closed, step, budget);
-        var min = double.MaxValue; var max = 0.0; var sum = 0.0;
-        VisionPoint2D closestA = default; VisionPoint2D closestB = default;
-        // Distance is sample-to-segment, never sample-to-sample. Only the source
-        // sampling introduces an approximation; the target retains every segment.
-        foreach (var p in sa)
+        var sb = ProfileMath.Resample(b, closed, step, budget);
+        var forward = Sweep(sa, b);
+        var backward = Sweep(sb, a);
+
+        var directedAToB = forward.Max;
+        var directedBToA = backward.Max;
+        var symmetricDistance = Math.Max(directedAToB, directedBToA);
+        var symmetricGap = Math.Min(forward.Min, backward.Min);
+        var reported = direction switch
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var direct = double.MaxValue; VisionPoint2D best = default;
-            var segments = closed ? b.Length : b.Length - 1;
-            for (var j = 0; j < segments; j++)
-            {
-                var q = b[j]; var end = b[(j + 1) % b.Length];
-                var ex = end.X - q.X; var ey = end.Y - q.Y;
-                var length2 = ex * ex + ey * ey;
-                var t = length2 > 0 ? Math.Clamp(((p.X - q.X) * ex + (p.Y - q.Y) * ey) / length2, 0, 1) : 0;
-                var projection = new VisionPoint2D(q.X + t * ex, q.Y + t * ey);
-                var distance = MeasurementMath.Hypot(p.X - projection.X, p.Y - projection.Y);
-                if (distance < direct) { direct = distance; best = projection; }
-            }
-            if (direct < min) { min = direct; closestA = p; closestB = best; }
-            if (direct > max) max = direct;
-            sum += direct;
-        }
-        var mean = sum / sa.Length;
+            "btoa" => mode == "gap" ? backward.Min : backward.Max,
+            "symmetric" => mode == "gap" ? symmetricGap : symmetricDistance,
+            _ => mode == "gap" ? forward.Min : forward.Max
+        };
+        var reportedMinimum = direction == "btoa" ? backward.Min : direction == "symmetric" ? symmetricGap : forward.Min;
+        var reportedMaximum = direction == "btoa" ? backward.Max : direction == "symmetric" ? symmetricDistance : forward.Max;
+        var reportedMean = direction == "btoa" ? backward.Mean : direction == "symmetric" ? (forward.Mean + backward.Mean) / 2 : forward.Mean;
+        var closest = direction == "btoa" ? backward : forward;
+
         // A source sample is at most half a grid step from any omitted source point.
         var minSamplingErrorBoundPx = step / 2;
         var maxSamplingErrorBoundPx = step;
-        var reported = mode == "gap" ? min : max;
         var within = limit <= 0 || reported <= limit;
-        var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("sampleCount", sa.Length),
-            ("mode", mode), ("minDistance", min), ("maxDistance", max), ("meanDistance", mean), ("withinTolerance", within),
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true),
+            ("sampleCount", sa.Length + sb.Length), ("mode", mode), ("direction", direction),
+            ("directedAToB", directedAToB), ("directedBToA", directedBToA),
+            ("symmetricDistance", symmetricDistance), ("symmetricGap", symmetricGap),
+            ("minDistance", reportedMinimum), ("maxDistance", reportedMaximum), ("meanDistance", reportedMean),
+            ("withinTolerance", within),
             ("minSamplingErrorBoundPx", minSamplingErrorBoundPx), ("maxSamplingErrorBoundPx", maxSamplingErrorBoundPx),
             ("distanceDefinition", "source-samples-to-reference-segments"));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
-                ["found"] = VisionValue.Boolean(true), ["sampleCount"] = VisionValue.Integer(sa.Length),
-                ["distance"] = VisionValue.Double(reported), ["minDistance"] = VisionValue.Double(min),
-                ["maxDistance"] = VisionValue.Double(max), ["meanDistance"] = VisionValue.Double(mean),
-                ["closestPointA"] = VisionValue.Point(closestA), ["closestPointB"] = VisionValue.Point(closestB),
+                ["found"] = VisionValue.Boolean(true), ["sampleCount"] = VisionValue.Integer(sa.Length + sb.Length),
+                ["distance"] = VisionValue.Double(reported), ["minDistance"] = VisionValue.Double(reportedMinimum),
+                ["maxDistance"] = VisionValue.Double(reportedMaximum), ["meanDistance"] = VisionValue.Double(reportedMean),
+                ["direction"] = VisionValue.String(direction),
+                ["directedAToB"] = VisionValue.Double(directedAToB), ["directedBToA"] = VisionValue.Double(directedBToA),
+                ["symmetricDistance"] = VisionValue.Double(symmetricDistance), ["symmetricGap"] = VisionValue.Double(symmetricGap),
+                ["closestPointA"] = VisionValue.Point(closest.ClosestA), ["closestPointB"] = VisionValue.Point(closest.ClosestB),
                 ["minSamplingErrorBoundPx"] = VisionValue.Double(minSamplingErrorBoundPx),
                 ["maxSamplingErrorBoundPx"] = VisionValue.Double(maxSamplingErrorBoundPx),
                 ["withinTolerance"] = VisionValue.Boolean(within), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
-                ["found"] = true, ["distance"] = reported, ["minDistance"] = min, ["maxDistance"] = max,
-                ["meanDistance"] = mean, ["mode"] = mode, ["sampleCount"] = sa.Length,
+                ["found"] = true, ["distance"] = reported, ["minDistance"] = reportedMinimum, ["maxDistance"] = reportedMaximum,
+                ["meanDistance"] = reportedMean, ["mode"] = mode, ["direction"] = direction,
+                ["directedAToB"] = directedAToB, ["directedBToA"] = directedBToA,
+                ["symmetricDistance"] = symmetricDistance, ["symmetricGap"] = symmetricGap,
+                ["sampleCount"] = sa.Length + sb.Length,
                 ["withinTolerance"] = within, ["limit"] = limit, ["unit"] = "px",
                 ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             },
-            [ToleranceGeometry.Segment("closest-gap", new VisionLine2D(closestA, closestB), $"{min:0.###}")]));
+            [ToleranceGeometry.Segment("closest-gap", new VisionLine2D(closest.ClosestA, closest.ClosestB), $"{reportedMinimum:0.###}")]));
+
+        (double Min, double Max, double Mean, VisionPoint2D ClosestA, VisionPoint2D ClosestB) Sweep(
+            VisionPoint2D[] source, VisionPoint2D[] target)
+        {
+            var minimum = double.MaxValue; var maximum = 0.0; var total = 0.0;
+            VisionPoint2D closestSource = default; VisionPoint2D closestTarget = default;
+            // Distance is sample-to-segment, never sample-to-sample. Only the source
+            // sampling introduces an approximation; the target retains every segment.
+            foreach (var p in source)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var direct = double.MaxValue; VisionPoint2D best = default;
+                var segments = closed ? target.Length : target.Length - 1;
+                for (var j = 0; j < segments; j++)
+                {
+                    var q = target[j]; var end = target[(j + 1) % target.Length];
+                    var ex = end.X - q.X; var ey = end.Y - q.Y;
+                    var length2 = ex * ex + ey * ey;
+                    var t = length2 > 0 ? Math.Clamp(((p.X - q.X) * ex + (p.Y - q.Y) * ey) / length2, 0, 1) : 0;
+                    var projection = new VisionPoint2D(q.X + t * ex, q.Y + t * ey);
+                    var distance = MeasurementMath.Hypot(p.X - projection.X, p.Y - projection.Y);
+                    if (distance < direct) { direct = distance; best = projection; }
+                }
+                if (direct < minimum) { minimum = direct; closestSource = p; closestTarget = best; }
+                if (direct > maximum) maximum = direct;
+                total += direct;
+            }
+            return (minimum, maximum, total / source.Length, closestSource, closestTarget);
+        }
     }
 }
 

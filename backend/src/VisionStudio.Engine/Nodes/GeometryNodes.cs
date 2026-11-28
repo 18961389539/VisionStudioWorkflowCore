@@ -577,19 +577,33 @@ public sealed class RotatedRectangleNode : IVisionNodeExecutor
 var sourceImage = context.RequireImage("image");
         var minArea = node.GetDouble("minArea", 500);
         if (!double.IsFinite(minArea) || minArea <= 0) throw new InvalidOperationException("measure.rotatedRect minArea must be finite and > 0.");
+        var unit = (node.GetString("unit", "px") ?? "px").Trim();
+        if (unit.Length is < 1 or > 16) throw new InvalidOperationException("measure.rotatedRect unit must be 1..16 characters.");
+        // 像素量不能直接当物理尺寸放行：只有显式声明物理单位才允许下游用于尺寸判定。
+        var dimensionalUseAllowed = !string.Equals(unit, "px", StringComparison.OrdinalIgnoreCase);
         var roi = node.GetRoi();
 
         using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
         using var analysis = VisionGeometryHelpers.ApplyRoi(gray, roi);
         JLVisionOperators.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-        var best = contours
-            .Select(c => (Contour: c, Area: JLVisionOperators.ContourArea(c)))
+        var areas = contours.Select(contour => JLVisionOperators.ContourArea(contour)).ToArray();
+        var candidates = contours.Select((contour, index) => (Contour: contour, Area: areas[index], Index: index))
             .Where(x => x.Area >= minArea)
             .OrderByDescending(x => x.Area)
-            .FirstOrDefault();
+            .ToArray();
+        var selectedIndex = candidates.Length > 0 ? candidates[0].Index : -1;
+        var filteredCount = contours.Length - candidates.Length;
 
-        if (best.Contour is null)
-            throw new InvalidOperationException($"No contour found with area >= {minArea:0.##}.");
+        if (candidates.Length == 0)
+        {
+            if (contours.Length == 0)
+                throw new InvalidOperationException("measure.rotatedRect.noContours: no external contour was found in the analysis region.");
+            var largest = areas.Length > 0 ? areas.Max() : 0;
+            throw new InvalidOperationException(
+                $"measure.rotatedRect.allContoursBelowMinArea: {contours.Length} contour(s) found, all below minArea={minArea:0.##} (largest={largest:0.##}, filtered={filteredCount}). Lower minArea or check the threshold.");
+        }
+
+        var best = candidates[0];
 
         var rr = JLVisionOperators.MinAreaRect(best.Contour);
         var rectangle = new VisionRectangle2D(rr.Center.X, rr.Center.Y, rr.Size.Width, rr.Size.Height, rr.Angle);
@@ -613,7 +627,13 @@ var sourceImage = context.RequireImage("image");
                 ["height"] = VisionValue.Double(rectangle.Height),
                 ["area"] = VisionValue.Double(best.Area),
                 ["aspectRatio"] = VisionValue.Double(Math.Max(rectangle.Width, rectangle.Height) / Math.Max(1e-9, Math.Min(rectangle.Width, rectangle.Height))),
-                ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(Type, ("width", rectangle.Width), ("height", rectangle.Height), ("angleDeg", rectangle.AngleDeg), ("contourArea", best.Area), ("minArea", minArea), ("candidateContours", contours.Length)))
+                ["candidateCount"] = VisionValue.Integer(contours.Length),
+                ["filteredCount"] = VisionValue.Integer(filteredCount),
+                ["selectedIndex"] = VisionValue.Integer(selectedIndex),
+                ["selectionRule"] = VisionValue.String("largestArea"),
+                ["unit"] = VisionValue.String(unit),
+                ["dimensionalUseAllowed"] = VisionValue.Boolean(dimensionalUseAllowed),
+                ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(Type, ("width", rectangle.Width), ("height", rectangle.Height), ("angleDeg", rectangle.AngleDeg), ("contourArea", best.Area), ("minArea", minArea), ("candidateContours", contours.Length), ("filteredContours", filteredCount), ("selectedIndex", selectedIndex), ("unit", unit), ("dimensionalUseAllowed", dimensionalUseAllowed)))
             },
             new Dictionary<string, object?>
             {
@@ -621,7 +641,10 @@ var sourceImage = context.RequireImage("image");
                 ["width"] = Math.Round(rectangle.Width, 2),
                 ["height"] = Math.Round(rectangle.Height, 2),
                 ["angleDeg"] = Math.Round(rectangle.AngleDeg, 2),
-                ["contourArea"] = Math.Round(best.Area, 2)
+                ["contourArea"] = Math.Round(best.Area, 2),
+                ["candidateCount"] = contours.Length, ["filteredCount"] = filteredCount,
+                ["selectedIndex"] = selectedIndex, ["selectionRule"] = "largestArea",
+                ["unit"] = unit, ["dimensionalUseAllowed"] = dimensionalUseAllowed
             },
             overlays));
     }

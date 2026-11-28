@@ -19,6 +19,8 @@ public sealed class MetrologyResultNode : IVisionNodeExecutor
         VisionMetrologyResult? selected = null;
         var matchingNames = 0;
         var indices = new HashSet<int>();
+        var normalizedNames = new Dictionary<string, int>(StringComparer.Ordinal);
+        var conflicts = new List<object>();
         foreach (var item in results)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -28,25 +30,67 @@ public sealed class MetrologyResultNode : IVisionNodeExecutor
                 throw new InvalidOperationException($"Metrology result object index {item.Index} must be in 0..511.");
             if (!indices.Add(item.Index))
                 throw new InvalidOperationException($"Metrology result index {item.Index} is not unique; each authored object must have its own index.");
-            if (name.Length > 0 ? item.Name == name : item.Index == (int)index)
+
+            // 名称契约只在按名字选择时生效；按 authored index 选择时重名不影响定位。
+            var normalized = (item.Name ?? "").Trim();
+            if (name.Length > 0)
+            {
+                if (normalized.Length == 0)
+                    conflicts.Add(new { index = item.Index, name = item.Name, conflict = "blank-name" });
+                else if (normalizedNames.TryGetValue(normalized, out var firstIndex))
+                    conflicts.Add(new { index = item.Index, name = normalized, conflict = "duplicate-name", firstIndex });
+                else
+                    normalizedNames.Add(normalized, item.Index);
+            }
+
+            if (name.Length > 0 ? string.Equals(normalized, name, StringComparison.Ordinal) : item.Index == (int)index)
             {
                 selected = item;
                 matchingNames++;
             }
         }
         if (name.Length > 0 && matchingNames > 1)
-            throw new InvalidOperationException($"Metrology result name '{name}' is not unique; rename the authored objects or select by index.");
+            conflicts.Add(new { index = -1, name, conflict = "ambiguous-selection", matches = matchingNames });
+
+        if (conflicts.Count > 0)
+        {
+            var conflictJson = System.Text.Json.JsonSerializer.Serialize(conflicts);
+            var failDiag = CoordinateValidation.Diagnostics(Type,
+                ("selector", name.Length > 0 ? "name" : "index"), ("found", false),
+                ("status", "name-conflict"), ("reason", "authored-name-conflict"),
+                ("count", results.Count), ("conflictCount", conflicts.Count), ("conflictsJson", conflictJson));
+            return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+            {
+                ["found"] = VisionValue.Boolean(false), ["count"] = VisionValue.Integer(results.Count),
+                ["name"] = VisionValue.String(name), ["kind"] = VisionValue.String(""),
+                ["authoredId"] = VisionValue.Integer(-1), ["status"] = VisionValue.String("name-conflict"),
+                ["reason"] = VisionValue.String("authored-name-conflict"), ["geometryValid"] = VisionValue.Boolean(false),
+                ["conflictsJson"] = VisionValue.String(conflictJson),
+                ["diagnostics"] = VisionValue.String(failDiag)
+            }, new Dictionary<string, object?>
+            {
+                ["found"] = false, ["status"] = "name-conflict", ["reason"] = "authored-name-conflict",
+                ["conflictCount"] = conflicts.Count, ["conflictsJson"] = conflictJson, ["diagnostics"] = failDiag
+            }));
+        }
+
         var found = selected?.Found == true;
         if (found) ValidateGeometry(selected!);
         cancellationToken.ThrowIfCancellationRequested();
         var selectedIndex = selected?.Index ?? (name.Length > 0 ? -1 : (int)index);
+        var status = found ? "found" : selected is null ? "not-found" : "not-measured";
+        var reason = found ? "ok" : status == "not-found" ? "authored-object-not-found" : "measurement-failed";
         var diag = CoordinateValidation.Diagnostics(Type,
             ("selector", name.Length > 0 ? "name" : "index"), ("requestedName", name),
             ("requestedIndex", name.Length > 0 ? null : (object)(int)index),
-            ("found", found), ("count", results.Count), ("selectedIndex", selectedIndex), ("kind", selected?.Kind));
+            ("found", found), ("status", status), ("reason", reason),
+            ("count", results.Count), ("selectedIndex", selectedIndex), ("kind", selected?.Kind),
+            ("geometryValid", found));
         var outputs = new Dictionary<string, VisionValue>
         {
             ["found"] = VisionValue.Boolean(found), ["count"] = VisionValue.Integer(results.Count),
+            ["authoredId"] = VisionValue.Integer(selectedIndex), ["status"] = VisionValue.String(status),
+            ["reason"] = VisionValue.String(reason), ["geometryValid"] = VisionValue.Boolean(found),
             ["name"] = VisionValue.String(selected?.Name ?? name), ["kind"] = VisionValue.String(selected?.Kind ?? ""),
             ["diagnostics"] = VisionValue.String(diag)
         };
@@ -59,9 +103,11 @@ public sealed class MetrologyResultNode : IVisionNodeExecutor
             if (selected.Pose is { } pose) outputs["pose"] = VisionValue.Pose(pose);
             if (selected.ResidualPx is { } residual) outputs["residual"] = VisionValue.Double(residual);
         }
+        // 失败时任何几何端口都不赋值，geometryValid=false 明确告知下游不能沿用上一轮缓存。
         return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?>
         {
             ["found"] = found, ["name"] = selected?.Name ?? name, ["index"] = selectedIndex,
+            ["authoredId"] = selectedIndex, ["status"] = status, ["reason"] = reason, ["geometryValid"] = found,
             ["kind"] = selected?.Kind, ["selector"] = name.Length > 0 ? "name" : "index", ["diagnostics"] = diag
         }));
     }

@@ -63,13 +63,16 @@ internal static class MetrologyCatalog
         new("measure.metrologyResult", "Select Metrology Result", "Measurement",
             [new("exec", VisionDataType.Control), new("results", VisionDataType.MetrologyResults)],
             [new("found", VisionDataType.Boolean), new("count", VisionDataType.Integer), new("name", VisionDataType.String), new("kind", VisionDataType.String),
+                new("authoredId", VisionDataType.Integer), new("status", VisionDataType.String),
+                new("reason", VisionDataType.String), new("geometryValid", VisionDataType.Boolean),
+                new("conflictsJson", VisionDataType.String, Required: false),
                 new("center", VisionDataType.Point2D, Required: false), new("circle", VisionDataType.Circle, Required: false),
                 new("line", VisionDataType.Line2D, Required: false), new("rectangle", VisionDataType.Rectangle2D, Required: false),
                 new("pose", VisionDataType.Pose2D, Required: false), new("radius", VisionDataType.Double, Required: false),
                 new("residual", VisionDataType.Double, Required: false), new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [new("name", "Object Name", "text", "", Description: "Select by unique authored object name. Empty uses the index."),
                 new("index", "Index", "number", 0, 0, 511, 1, VisibleWhen: new("name", [""]), Description: "Zero-based authored object index; failed objects retain their position.")],
-            "Select one typed metrology result by name or authored index. Connect circle/line/center/pose directly to downstream measurements. Missing or failed objects return found=false and no geometry. Reject duplicate object indices, lists over 512 objects, and invalid geometry or residuals in a successful selected result. Diagnostics record the selector, matched index/kind and object count.",
+            "Select one typed metrology result by name or authored index. Names are trimmed and validated on load: blank or duplicate names are listed in conflictsJson and the node returns found=false / status=name-conflict instead of silently taking the first match. Missing or failed objects return found=false, authoredId and status/reason, and geometryValid=false with no geometry ports assigned, so a downstream node cannot reuse stale cached geometry. Reject duplicate object indices, lists over 512 objects, and invalid geometry or residuals in a successful selected result.",
             "builtin", new VisionToolCapabilities(EmitsOverlay: false))
     ];
 }

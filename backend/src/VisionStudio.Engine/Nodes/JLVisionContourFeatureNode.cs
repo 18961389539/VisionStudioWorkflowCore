@@ -31,10 +31,37 @@ public sealed class JLVisionContourFeatureNode : IVisionNodeExecutor
         var selectedContour = contours[selectedIndex];
         var secondIndex = 0;
 
-        CoordinateValidation.RequireFinite(OperatorParameterForms.Number(node, "row", 0), "row");
-        CoordinateValidation.RequireFinite(OperatorParameterForms.Number(node, "column", 0), "column");
-        CoordinateValidation.RequireFinite(OperatorParameterForms.Number(node, "row2", 10), "row2");
-        CoordinateValidation.RequireFinite(OperatorParameterForms.Number(node, "column2", 10), "column2");
+        var row = OperatorParameterForms.Number(node, "row", 0);
+        var column = OperatorParameterForms.Number(node, "column", 0);
+        var row2 = OperatorParameterForms.Number(node, "row2", 10);
+        var column2 = OperatorParameterForms.Number(node, "column2", 10);
+        CoordinateValidation.RequireFinite(row, "row");
+        CoordinateValidation.RequireFinite(column, "column");
+        CoordinateValidation.RequireFinite(row2, "row2");
+        CoordinateValidation.RequireFinite(column2, "column2");
+
+        NodeExecutorResult FeatureFailure(string reason) => new(
+            new Dictionary<string, VisionValue>
+            {
+                ["found"] = VisionValue.Boolean(false), ["reason"] = VisionValue.String(reason),
+                ["value"] = VisionValue.Double(0), ["values"] = VisionValue.String("{}"),
+                ["pointCount"] = VisionValue.Integer(selectedContour.Points.Count),
+                ["feature"] = VisionValue.String(key),
+                ["diagnostics"] = VisionValue.String(JLVisionNodeSupport.Diagnostics(
+                    node.Type, "standard", 0, ("found", false), ("reason", reason), ("feature", key),
+                    ("selectedIndex", selectedIndex), ("pointCount", selectedContour.Points.Count)))
+            },
+            new Dictionary<string, object?>
+            {
+                ["found"] = false, ["reason"] = reason, ["feature"] = key, ["algorithmBackend"] = "jlvision"
+            });
+
+        // 模式必须在原生调用前校验，非法自由文本不能透传；退化参考线也不能悄悄算距离。
+        var mode = node.GetString("mode", "").Trim();
+        if (key == "distanceCc" && mode.Length > 0 && mode is not ("point_to_point" or "point_to_segment"))
+            return ValueTask.FromResult(FeatureFailure("invalid-distance-mode"));
+        if (key is "distanceLc" or "distanceSc" && Math.Abs(row2 - row) + Math.Abs(column2 - column) < 1e-9)
+            return ValueTask.FromResult(FeatureFailure("zero-length-reference"));
         if (feature.NeedsSecond && !context.TryGetValue("contour2", out _))
             throw new InvalidOperationException($"JLVision contour feature '{key}' requires a contour2 input.");
 
@@ -54,11 +81,8 @@ public sealed class JLVisionContourFeatureNode : IVisionNodeExecutor
             {
                 Contour = primary,
                 Second = second,
-                Row = OperatorParameterForms.Number(node, "row", 0),
-                Column = OperatorParameterForms.Number(node, "column", 0),
-                Row2 = OperatorParameterForms.Number(node, "row2", 10),
-                Column2 = OperatorParameterForms.Number(node, "column2", 10),
-                Mode = node.GetString("mode", string.Empty).Trim()
+                Row = row, Column = column, Row2 = row2, Column2 = column2,
+                Mode = mode
             };
 
             var result = feature.Run(args);
@@ -67,13 +91,26 @@ public sealed class JLVisionContourFeatureNode : IVisionNodeExecutor
                 foreach (var (name, value) in result.Extra) values[name] = value;
 
             var pointCount = selectedContour.Points.Count;
+            // areaCenter 的主值是“点数”，不是面积：给出机器可读的 valueKind/unit 与显式面积特征名。
+            // 原生 Extra 里的 row/column 可能是质心（areaCenter），不能被输入参数覆盖。
+            values.TryAdd("row", row);
+            values.TryAdd("column", column);
+            values["pointCount"] = pointCount;
+            var valueKind = key == "areaCenter" ? "pointCount"
+                : key.Contains("area", StringComparison.OrdinalIgnoreCase) ? "area"
+                : key.Contains("distance", StringComparison.OrdinalIgnoreCase) ? "length"
+                : "count";
+            var valueUnit = valueKind == "area" ? "px²" : valueKind == "length" ? "px" : "count";
             var selectedContours = new[] { selectedContour };
             var viewport = JLVisionNodeSupport.PreviewViewport(selectedContour.Points);
             using var overlaySurface = JLVisionNodeSupport.Canvas(viewport.Width, viewport.Height);
             JLVisionNodeSupport.DrawPreviewContours(overlaySurface, selectedContours, new OpenCvSharp.Scalar(0, 255, 255), viewport);
             var outputs = new Dictionary<string, VisionValue>
             {
+                ["found"] = VisionValue.Boolean(true), ["reason"] = VisionValue.String("ok"),
                 ["value"] = VisionValue.Double(result.Value),
+                ["valueKind"] = VisionValue.String(valueKind), ["unit"] = VisionValue.String(valueUnit),
+                ["areaFeature"] = VisionValue.String(key == "areaCenter" ? "area" : ""),
                 ["values"] = VisionValue.String(JsonSerializer.Serialize(values, JsonOptions)),
                 ["contour"] = VisionValue.Contours(selectedContours),
                 ["inputCount"] = VisionValue.Integer(contours.Count),
@@ -82,13 +119,18 @@ public sealed class JLVisionContourFeatureNode : IVisionNodeExecutor
                 ["pointCount"] = VisionValue.Integer(pointCount),
                 ["feature"] = VisionValue.String(key),
                 ["diagnostics"] = VisionValue.String(JLVisionNodeSupport.Diagnostics(
-                    node.Type, "standard", 0, ("feature", key), ("value", result.Value), ("pointCount", pointCount), ("selectedIndex", selectedIndex), ("secondIndex", feature.NeedsSecond ? secondIndex : null), ("inputCount", contours.Count), ("previewTransform", viewport)))
+                    node.Type, "standard", 0, ("found", true), ("feature", key), ("value", result.Value),
+                    ("valueKind", valueKind), ("unit", valueUnit), ("pointCount", pointCount),
+                    ("selectedIndex", selectedIndex), ("secondIndex", feature.NeedsSecond ? secondIndex : null),
+                    ("inputCount", contours.Count), ("previewTransform", viewport)))
             };
             var summary = new Dictionary<string, object?>
             {
                 ["algorithmBackend"] = "jlvision",
                 ["feature"] = key,
                 ["featureLabel"] = feature.Label,
+                ["valueKind"] = valueKind,
+                ["unit"] = valueUnit,
                 ["parametersUsed"] = feature.Note,
                 ["value"] = result.Value,
                 ["values"] = values

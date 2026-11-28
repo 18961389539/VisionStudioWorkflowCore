@@ -106,22 +106,39 @@ internal static class ProfileMath
 
     private static readonly double GaussianSigmaPerCutoff = Math.Sqrt(Math.Log(2) / Math.PI) / Math.Sqrt(2 * Math.PI);
 
-    public static NodeExecutorResult? CheckInputGap(NodeDefinition node, double inputGap, int pointCount)
+    public static NodeExecutorResult? CheckInputGap(NodeDefinition node, double inputGap, int pointCount,
+        double sampleStep = 0, IReadOnlyList<double>? axis = null)
     {
         var maximum = node.GetDouble("maxInputGap", 0);
         if (!double.IsFinite(maximum) || maximum < 0)
             throw new InvalidOperationException($"{node.Type} maxInputGap must be finite and >= 0.");
-        if (maximum == 0 || inputGap <= maximum) return null;
+        // 0 不再等于“关闭断口检查”：默认只允许 3 个采样步长的缺口，否则重采样会把
+        // 实际缺失的轮廓段线性桥接，凭空造出 waviness/residual。显式阈值才允许跨更大的洞。
+        var inferred = maximum == 0 && sampleStep > 0;
+        var limit = inferred ? 3 * sampleStep : maximum;
+        if (limit <= 0 || inputGap <= limit + 1e-9) return null;
+        var gapIndices = new List<int>();
+        if (axis is not null)
+        {
+            for (var index = 1; index < axis.Count; index++)
+                if (axis[index] - axis[index - 1] > limit + 1e-9) gapIndices.Add(index - 1);
+        }
+        var gapIndicesJson = System.Text.Json.JsonSerializer.Serialize(gapIndices.Take(64));
         var diagnostics = CoordinateValidation.Diagnostics(node.Type, ("found", false), ("sampleCount", pointCount),
-            ("reason", "profile-input-gap-exceeded"), ("maxObservedInputGap", inputGap), ("maxInputGap", maximum));
+            ("reason", "profile-input-gap-exceeded"), ("maxObservedInputGap", inputGap), ("maxInputGap", limit),
+            ("gapLimitInferred", inferred), ("gapCount", gapIndices.Count), ("gapIndicesJson", gapIndicesJson));
         return new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
             ["found"] = VisionValue.Boolean(false), ["sampleCount"] = VisionValue.Integer(pointCount),
-            ["maxObservedInputGap"] = VisionValue.Double(inputGap), ["diagnostics"] = VisionValue.String(diagnostics)
+            ["maxObservedInputGap"] = VisionValue.Double(inputGap),
+            ["gapIndicesJson"] = VisionValue.String(gapIndicesJson),
+            ["diagnostics"] = VisionValue.String(diagnostics)
         }, new Dictionary<string, object?>
         {
             ["found"] = false, ["sampleCount"] = pointCount, ["reason"] = "profile-input-gap-exceeded",
-            ["maxObservedInputGap"] = inputGap, ["maxInputGap"] = maximum, ["unit"] = "px", ["diagnostics"] = diagnostics
+            ["maxObservedInputGap"] = inputGap, ["maxInputGap"] = limit, ["gapLimitInferred"] = inferred,
+            ["gapCount"] = gapIndices.Count, ["gapIndicesJson"] = gapIndicesJson,
+            ["unit"] = "px", ["diagnostics"] = diagnostics
         });
     }
 
