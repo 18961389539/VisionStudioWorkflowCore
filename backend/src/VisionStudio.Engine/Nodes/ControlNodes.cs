@@ -193,15 +193,27 @@ public sealed class ResultDispositionNode : IVisionNodeExecutor
             throw new InvalidOperationException("flow.result okLabel and ngLabel must be non-empty.");
         if (okLabel.Length > 32 || ngLabel.Length > 32)
             throw new InvalidOperationException("flow.result labels must be at most 32 characters.");
+        var reset = node.GetBool("reset", false);
+        var sticky = node.GetBool("sticky", false);
         var disposition = pass ? okLabel : ngLabel;
-        var diag = CoordinateValidation.Diagnostics(Type, ("pass", pass), ("disposition", disposition), ("okLabel", okLabel), ("ngLabel", ngLabel));
+        var diag = CoordinateValidation.Diagnostics(Type, ("pass", pass), ("disposition", disposition),
+            ("okLabel", okLabel), ("ngLabel", ngLabel), ("sticky", sticky), ("reset", reset), ("nodeId", node.Id));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
                 ["pass"] = VisionValue.Boolean(pass),
                 ["disposition"] = VisionValue.String(disposition),
+                // 运行时据此清空本作用域的旧值，再写入本次结果（显式重置）。
+                ["resetScope"] = VisionValue.Boolean(reset),
+                ["sticky"] = VisionValue.Boolean(sticky),
+                ["warningCount"] = VisionValue.Integer(0),
                 ["diagnostics"] = VisionValue.String(diag)
             },
-            new Dictionary<string, object?> { ["pass"] = pass, ["disposition"] = disposition, ["okLabel"] = okLabel, ["ngLabel"] = ngLabel, ["diagnostics"] = diag }));
+            new Dictionary<string, object?>
+            {
+                ["pass"] = pass, ["disposition"] = disposition, ["okLabel"] = okLabel, ["ngLabel"] = ngLabel,
+                ["sticky"] = sticky, ["reset"] = reset, ["nodeId"] = node.Id, ["warningCount"] = 0,
+                ["diagnostics"] = diag
+            }));
     }
 }

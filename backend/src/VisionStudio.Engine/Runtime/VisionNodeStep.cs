@@ -28,7 +28,11 @@ public sealed class VisionNodeStep(VisionNodeRuntime nodeRuntime) : StepBodyAsyn
             data.OutputsByNode[LoopNodeId] = current;
         }
 
-        await nodeRuntime.ExecuteAsync(data, NodeId, context.CancellationToken);
+        // 循环体内执行的节点带上最内层循环标识与迭代号：flow.break 用它证明中断只绑定当前循环。
+        var loopBound = !string.IsNullOrWhiteSpace(LoopNodeId);
+        await nodeRuntime.ExecuteAsync(data, NodeId, context.CancellationToken,
+            loopBound ? LoopNodeId : null,
+            loopBound ? data.GetLoopCounter(LoopNodeId) : null);
         if (FlowSemantics.IsForEach(data.RequireNode(NodeId).Type))
         {
             if (!data.OutputsByNode.TryGetValue(NodeId, out var outputs) ||

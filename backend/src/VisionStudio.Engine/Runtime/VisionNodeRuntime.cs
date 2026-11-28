@@ -20,7 +20,9 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
     public async ValueTask<VisionNodeRuntimeOutcome> ExecuteAsync(
         VisionWorkflowData data,
         string nodeId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? enclosingLoopId = null,
+        int? loopIteration = null)
     {
         var node = data.RequireNode(nodeId);
 
@@ -51,7 +53,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             using (captureCaliperDiagnostic ? CaliperCircleDiagnosticCapture.Begin(diagnostic => caliperDiagnostic = diagnostic) : null)
             using (captureCaliperEdgeDiagnostic ? CaliperEdgeDiagnosticCapture.Begin(diagnostic => caliperEdgeDiagnostic = diagnostic) : null)
                 result = await dispatcher.ExecuteAsync(node, inputs, data.WorkflowScope, cancellationToken, data.RunId, data.ModelAssets,
-                    data.Definition.Id, data.DebugMode != DebugRunMode.Full);
+                    data.Definition.Id, data.DebugMode != DebugRunMode.Full, enclosingLoopId, loopIteration);
             if (FlowSemantics.IsTry(node.Type))
                 result = await ExecuteTryBodyAsync(data, node, result, cancellationToken);
             sw.Stop();
@@ -110,20 +112,26 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
                 data.BeginLoop(node.Id, "repeat", (int)total);
             }
 
-            if (FlowSemantics.IsResult(node.Type) &&
-                result.Outputs.TryGetValue("disposition", out var disposition) &&
-                disposition.Type == VisionDataType.String && disposition.Value is string qualityDisposition)
+            if (FlowSemantics.IsResult(node.Type))
             {
-                // Inside a Parallel branch the disposition is scoped to that branch and merged at the
-                // paired Join (any-NG), so branch completion order can never mask an NG with a later OK.
-                var contribution = data.RecordDisposition(node.Id, qualityDisposition);
-                if (contribution.ScopedToBranch)
+                var resetRequested = result.Outputs.TryGetValue("resetScope", out var resetValue) && resetValue.Value is true;
+                if (resetRequested) data.ResetDisposition(node.Id);
+                if (result.Outputs.TryGetValue("disposition", out var disposition) &&
+                    disposition.Type == VisionDataType.String && disposition.Value is string qualityDisposition)
                 {
-                    reportSummary = new Dictionary<string, object?>(reportSummary)
+                    // Inside a Parallel branch the disposition is scoped to that branch and merged at the
+                    // paired Join (any-NG), so branch completion order can never mask an NG with a later OK.
+                    var sticky = result.Outputs.TryGetValue("sticky", out var stickyValue) && stickyValue.Value is true;
+                    var contribution = data.RecordDisposition(node.Id, qualityDisposition, sticky);
+                    var audit = new Dictionary<string, object?>(reportSummary)
                     {
-                        [NodeSummaryKeys.DispositionScope] = $"{contribution.RegionId}.{contribution.BranchName}",
-                        [NodeSummaryKeys.BranchDisposition] = contribution.BranchDisposition
+                        [NodeSummaryKeys.DispositionScope] = contribution.ScopeId ?? "run",
+                        [NodeSummaryKeys.DispositionSetBy] = node.Id,
+                        [NodeSummaryKeys.DispositionPrevious] = contribution.PreviousDisposition
                     };
+                    if (contribution.ScopedToBranch) audit[NodeSummaryKeys.BranchDisposition] = contribution.BranchDisposition;
+                    if (resetRequested) audit[NodeSummaryKeys.DispositionReset] = true;
+                    reportSummary = audit;
                 }
             }
 
@@ -265,13 +273,31 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
 
     private static IReadOnlyDictionary<string, object?> FailureSummary(VisionWorkflowData data, Exception exception, CancellationToken cancellationToken)
     {
-        if (data.CurrentTryAttempt is not { } current) return new Dictionary<string, object?>();
-        return new Dictionary<string, object?>
+        var summary = new Dictionary<string, object?>();
+        // 主动失败必须与运行时异常可区分：监控按 intentional/failureCode 分组，不会把计划内停机当缺陷。
+        if (FindIntentionalFailure(exception) is { } intentional)
         {
-            ["handledByTry"] = !(exception is OperationCanceledException && cancellationToken.IsCancellationRequested),
-            ["tryNodeId"] = current.NodeId,
-            ["tryAttempt"] = current.Attempt
-        };
+            summary["intentional"] = true;
+            summary["failureCode"] = intentional.Code;
+            if (intentional.DetailsJson is { } details) summary["details"] = details;
+        }
+        if (data.CurrentTryAttempt is { } current)
+        {
+            summary["handledByTry"] = !(exception is OperationCanceledException && cancellationToken.IsCancellationRequested);
+            summary["tryNodeId"] = current.NodeId;
+            summary["tryAttempt"] = current.Attempt;
+        }
+        return summary;
+    }
+
+    private static IntentionalWorkflowFailureException? FindIntentionalFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+            if (current is IntentionalWorkflowFailureException intentional) return intentional;
+        if (exception is AggregateException aggregate)
+            foreach (var inner in aggregate.Flatten().InnerExceptions)
+                if (inner is IntentionalWorkflowFailureException intentional) return intentional;
+        return null;
     }
 
     private static IReadOnlyDictionary<string, VisionValueSnapshot> SnapshotValues(IReadOnlyDictionary<string, VisionValue> values)

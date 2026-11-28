@@ -232,13 +232,15 @@ public static partial class BuiltInNodeCatalog
             "Result / Disposition",
             "Flow",
             [ExecIn, new("pass", VisionDataType.Boolean)],
-            [new("pass", VisionDataType.Boolean), new("disposition", VisionDataType.String), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), Next],
+            [new("pass", VisionDataType.Boolean), new("disposition", VisionDataType.String), new("resetScope", VisionDataType.Boolean), new("sticky", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), Next],
             [new("okLabel", "OK Label", "text", "OK", Description: "Disposition string when pass is true."),
                 new("ngLabel", "NG Label", "text", "NG", Description: "Disposition string when pass is false."),
+                new("sticky", "Sticky NG", "boolean", false, Group: "Disposition", Description: "When true, an NG in this scope stays NG across later writes until a reset; default false keeps overwrite so a retry that finally passes can clear the earlier NG."),
+                new("reset", "Reset Scope Before Writing", "boolean", false, Group: "Disposition", Description: "Clears the disposition of this scope before applying pass, which is the explicit way to recover from a sticky NG."),
 
 
                 ],
-            "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
+            "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics; inside flow.forEach any-NG accumulates across iterations. The run report records dispositionScope, dispositionSetBy and dispositionPrevious for every write, so a later OK can be traced back to the NG it replaced. sticky=true keeps any-NG in this scope until reset=true clears it first.",
             "builtin"),
         new(
             "flow.parallel",

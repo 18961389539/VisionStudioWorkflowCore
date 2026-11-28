@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using VisionStudio.Abstractions;
 
@@ -111,8 +114,12 @@ public sealed class FlowFailNode : IVisionNodeExecutor
 {
     public string Type => "flow.fail";
 
-    public const int MaxMessageLength = 4096;
-    public const int MaxCodeLength = 64;
+    public const int MaxMessageLength = IntentionalWorkflowFailureException.MaxMessageLength;
+    public const int MaxCodeLength = IntentionalWorkflowFailureException.MaxCodeLength;
+    public const int MaxDetailsBytes = IntentionalWorkflowFailureException.MaxDetailsBytes;
+
+    /// <summary>失败码只允许稳定字符集：换行/空格/控制字符会让监控无法按码分组。</summary>
+    private static readonly Regex CodePattern = new("^[A-Za-z][A-Za-z0-9_.:-]*$", RegexOptions.CultureInvariant);
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
@@ -125,16 +132,55 @@ public sealed class FlowFailNode : IVisionNodeExecutor
         if (code.Length == 0) throw new InvalidOperationException("flow.fail code must not be empty.");
         if (code.Length > MaxCodeLength)
             throw new InvalidOperationException($"flow.fail code must be at most {MaxCodeLength} characters.");
+        if (!CodePattern.IsMatch(code))
+            throw new InvalidOperationException("flow.fail code must start with a letter and contain only letters, digits, '_', '.', ':' or '-'.");
 
         var message = context.TryGetValue("message", out var connected)
             ? connected.Require<string>("message")
             : node.GetString("message", "Workflow stopped by flow.fail.");
         if (message.Length > MaxMessageLength)
             throw new InvalidOperationException($"flow.fail message must be at most {MaxMessageLength} characters.");
-        if (string.IsNullOrWhiteSpace(message))
-            message = "Workflow stopped by flow.fail.";
+        message = Sanitize(message);
+        if (message.Length == 0) message = "Workflow stopped by flow.fail.";
 
-        // 抛出前不写任何输出：运行器会把它记成失败节点，并在运行结果里保留这条消息。
-        throw new InvalidOperationException($"[{code}] {message}");
+        var details = ReadDetails(context, node);
+
+        // 抛出前不写任何输出：运行器把它记成失败节点，并把 intentional/failureCode 写进运行报表。
+        throw new IntentionalWorkflowFailureException(code, $"[{code}] {message}", details);
+    }
+
+    /// <summary>保留换行与制表符，其余 C0/DEL 控制字符替换为空格，避免把终端转义序列写进日志与报表。</summary>
+    private static string Sanitize(string message)
+    {
+        var builder = new StringBuilder(message.Length);
+        foreach (var ch in message)
+        {
+            if (ch is '\n' or '\t') builder.Append(ch);
+            else if (char.IsControl(ch)) builder.Append(' ');
+            else builder.Append(ch);
+        }
+        return builder.ToString().Trim();
+    }
+
+    /// <summary>可选上下文：端口优先，其次参数；必须是 JSON 对象且不超过 8 KiB，防止错误日志被无限放大。</summary>
+    private static string? ReadDetails(NodeExecutionContext context, NodeDefinition node)
+    {
+        var json = context.TryGetValue("details", out var value)
+            ? value.Require<string>("details")
+            : node.GetString("detailsJson", string.Empty);
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        if (Encoding.UTF8.GetByteCount(json) > MaxDetailsBytes)
+            throw new InvalidOperationException($"flow.fail details must be at most {MaxDetailsBytes} UTF-8 bytes.");
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new InvalidOperationException("flow.fail details must be a JSON object.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"flow.fail details is not valid JSON: {ex.Message}", ex);
+        }
+        return json;
     }
 }

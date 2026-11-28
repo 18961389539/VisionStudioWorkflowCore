@@ -12,7 +12,9 @@ public sealed record DispositionContribution(
     bool ScopedToBranch,
     string? RegionId = null,
     string? BranchName = null,
-    string? BranchDisposition = null);
+    string? BranchDisposition = null,
+    string? ScopeId = null,
+    string? PreviousDisposition = null);
 
 /// <summary>Aggregation produced when a Parallel region's Join executes.</summary>
 public sealed record ParallelJoinAggregation(
@@ -113,6 +115,14 @@ public sealed class ParallelDispositionTracker
         branchName = string.Empty;
         return false;
     }
+
+    /// <summary>Reads the current branch slot value, if any, so an audit trail can report the previous disposition.</summary>
+    public string? GetBranchDisposition(string regionId, string branchName)
+        => _branchDispositions.TryGetValue(SlotKey(regionId, branchName), out var value) ? value : null;
+
+    /// <summary>Clears one branch slot so an explicit reset can start a new disposition in that branch.</summary>
+    public bool ResetBranch(string regionId, string branchName)
+        => _branchDispositions.TryRemove(SlotKey(regionId, branchName), out _);
 
     /// <summary>Records a branch contribution (any-NG) and returns the combined branch value.</summary>
     public string ContributeBranchDisposition(string regionId, string branchName, string disposition)

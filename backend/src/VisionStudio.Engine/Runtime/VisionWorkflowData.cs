@@ -329,37 +329,58 @@ public sealed class VisionWorkflowData : IDisposable
     /// <summary>Branch-scoped disposition tracker; Empty unless the workflow contains Parallel regions.</summary>
     public ParallelDispositionTracker ParallelDispositions { get; private set; } = ParallelDispositionTracker.Empty;
     private HashSet<string> _forEachBodyNodeIds = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string> _forEachBodyLoops = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _stickyScopes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Configures Parallel branch scoping and ForEach any-NG aggregation from structured regions.</summary>
     public void ConfigureParallelDispositions(IReadOnlyList<StructuredControlRegion> regions)
     {
         ParallelDispositions = ParallelDispositionTracker.FromRegions(regions);
-        _forEachBodyNodeIds = regions
-            .Where(region => region.Kind.Equals("ForEach", StringComparison.OrdinalIgnoreCase))
-            .SelectMany(region => region.BranchNodeIds.TryGetValue("body", out var nodes) ? nodes : [])
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _forEachBodyLoops = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var region in regions.Where(region => region.Kind.Equals("ForEach", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!region.BranchNodeIds.TryGetValue("body", out var nodes)) continue;
+            foreach (var nodeId in nodes) _forEachBodyLoops[nodeId] = region.ControlNodeId;
+        }
+        _forEachBodyNodeIds = _forEachBodyLoops.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
     /// Records one flow.result. Inside a Parallel branch the value is held in the branch slot
-    /// (any-NG) until the paired Join merges it. Results in a ForEach body also use any-NG across
-    /// iterations, while an unscoped result elsewhere keeps its explicit overwrite semantics.
+    /// (any-NG) until the paired Join merges it. ForEach bodies aggregate any-NG across iterations.
+    /// Outside those scopes the default stays explicit overwrite — a retry that finally passes must
+    /// be able to clear an earlier NG; sticky=true keeps any-NG until flow.result runs with resetScope.
     /// </summary>
-    public DispositionContribution RecordDisposition(string nodeId, string disposition)
+    public DispositionContribution RecordDisposition(string nodeId, string disposition, bool sticky = false)
     {
         if (ParallelDispositions.TryGetBranchScope(nodeId, out var regionId, out var branchName))
         {
+            var previous = ParallelDispositions.GetBranchDisposition(regionId, branchName);
             var branchDisposition = ParallelDispositions.ContributeBranchDisposition(regionId, branchName, disposition);
-            return new DispositionContribution(disposition, ScopedToBranch: true, regionId, branchName, branchDisposition);
+            return new DispositionContribution(disposition, ScopedToBranch: true, regionId, branchName, branchDisposition,
+                ScopeId: $"{regionId}.{branchName}", PreviousDisposition: previous);
         }
 
-        if (_forEachBodyNodeIds.Contains(nodeId))
-            QualityDisposition = QualityDisposition is null
-                ? disposition
-                : ParallelDispositionTracker.Combine(QualityDisposition, disposition);
-        else
-            QualityDisposition = disposition;
-        return new DispositionContribution(disposition, ScopedToBranch: false);
+        var scopeId = _forEachBodyLoops.TryGetValue(nodeId, out var loopId) ? $"forEach:{loopId}" : "run";
+        // sticky 是作用域级策略：第一次写入声明后，本作用域后续写入一律按 any-NG 合并，
+        // 直到显式 reset 清空。forEach 体天然跨迭代 any-NG，无需声明。
+        if (sticky) _stickyScopes.Add(scopeId);
+        var previousDisposition = QualityDisposition;
+        var aggregate = _forEachBodyNodeIds.Contains(nodeId) || _stickyScopes.Contains(scopeId);
+        QualityDisposition = aggregate && previousDisposition is not null
+            ? ParallelDispositionTracker.Combine(previousDisposition, disposition)
+            : disposition;
+        return new DispositionContribution(disposition, ScopedToBranch: false, ScopeId: scopeId, PreviousDisposition: previousDisposition);
+    }
+
+    /// <summary>Clears the disposition of the scope that owns <paramref name="nodeId"/>; used by an explicit reset.</summary>
+    public bool ResetDisposition(string nodeId)
+    {
+        if (ParallelDispositions.TryGetBranchScope(nodeId, out var regionId, out var branchName))
+            return ParallelDispositions.ResetBranch(regionId, branchName);
+        _stickyScopes.Remove(_forEachBodyLoops.TryGetValue(nodeId, out var loopId) ? $"forEach:{loopId}" : "run");
+        QualityDisposition = null;
+        return true;
     }
 
     /// <summary>

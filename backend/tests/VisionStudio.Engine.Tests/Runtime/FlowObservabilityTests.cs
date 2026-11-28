@@ -51,7 +51,7 @@ public sealed class FlowObservabilityTests
     [Fact]
     public async Task Fail_ThrowsWithCodeAndMessage()
     {
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var error = await Assert.ThrowsAsync<IntentionalWorkflowFailureException>(() =>
             new FlowFailNode().ExecuteAsync(Ctx(), Def("E_ROBOT_TIMEOUT", ("message", "机器人 3 秒内未回位")), CancellationToken.None).AsTask());
         Assert.Equal("[E_ROBOT_TIMEOUT] 机器人 3 秒内未回位", error.Message);
     }
@@ -59,12 +59,12 @@ public sealed class FlowObservabilityTests
     [Fact]
     public async Task Fail_InputOverridesParameterAndBlankFallsBack()
     {
-        var overridden = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var overridden = await Assert.ThrowsAsync<IntentionalWorkflowFailureException>(() =>
             new FlowFailNode().ExecuteAsync(Ctx(("message", VisionValue.String("端口原因"))), Def("NG", ("message", "参数原因")), CancellationToken.None).AsTask());
         Assert.Contains("端口原因", overridden.Message);
 
         // 空白文本回退到默认句，而不是抛出 "[CODE] " 这种无信息量的消息。
-        var blank = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var blank = await Assert.ThrowsAsync<IntentionalWorkflowFailureException>(() =>
             new FlowFailNode().ExecuteAsync(Ctx(), Def("NG", ("message", "   ")), CancellationToken.None).AsTask());
         Assert.Contains("stopped by flow.fail", blank.Message);
 

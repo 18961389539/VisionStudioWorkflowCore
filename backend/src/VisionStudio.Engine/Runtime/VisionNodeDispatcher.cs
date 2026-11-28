@@ -42,7 +42,9 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
         string? runId,
         IModelAssetSource? modelAssets,
         string? workflowId,
-        bool isDebugRun)
+        bool isDebugRun,
+        string? enclosingLoopId = null,
+        int? loopIteration = null)
     {
         var registration = registry.Require(node.Type);
         ValidateInputs(node, registration.Catalog, inputs);
@@ -62,7 +64,9 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
             var context = new NodeExecutionContext(inputs, workflowScope, runId, modelAssets)
             {
                 WorkflowId = workflowId,
-                IsDebugRun = isDebugRun
+                IsDebugRun = isDebugRun,
+                EnclosingLoopId = enclosingLoopId,
+                LoopIteration = loopIteration
             };
             result = await ExecuteWithTimeoutAsync(registration, node, context, timeoutMs, cancellationToken);
         }

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using VisionStudio.Abstractions;
 
 namespace VisionStudio.Engine.Nodes;
@@ -118,6 +119,12 @@ public sealed class BreakLoopNode : IVisionNodeExecutor
 {
     public string Type => "flow.break";
 
+    public const int MaxReasonLength = 512;
+    public const int MaxReasonCodeLength = 64;
+
+    /// <summary>机器判定用稳定代码：只允许字母开头与 [A-Za-z0-9_.:-]，避免自由文本被当成判据。</summary>
+    private static readonly Regex ReasonCodePattern = new("^[A-Za-z][A-Za-z0-9_.:-]*$", RegexOptions.CultureInvariant);
+
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -125,18 +132,39 @@ public sealed class BreakLoopNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 
-        var reason = node.GetString("reason", string.Empty);
-        if (reason.Length > 512)
-            throw new InvalidOperationException("flow.break reason must be at most 512 characters.");
+        var reasonCode = node.GetString("reasonCode", "manual-break").Trim();
+        if (reasonCode.Length == 0 || reasonCode.Length > MaxReasonCodeLength || !ReasonCodePattern.IsMatch(reasonCode))
+            throw new InvalidOperationException($"flow.break reasonCode must be 1..{MaxReasonCodeLength} characters, start with a letter and contain only letters, digits, '_', '.', ':' or '-'.");
 
-        var diagnostics = CoordinateValidation.Diagnostics(Type, ("reason", reason), ("breakRequested", true));
+        var reason = node.GetString("reason", string.Empty);
+        if (reason.Length > MaxReasonLength)
+            throw new InvalidOperationException($"flow.break reason must be at most {MaxReasonLength} characters.");
+        foreach (var ch in reason)
+            if (ch < ' ' && ch is not ('\t' or '\n') || ch == '\u007f')
+                throw new InvalidOperationException("flow.break reason must not contain control characters; use reasonCode for machine matching.");
+
+        // 循环标识与迭代号由运行时按编译期绑定注入：中断标记只作用于最内层循环，且不会跨运行泄漏。
+        var loopId = context.EnclosingLoopId ?? string.Empty;
+        var iteration = context.LoopIteration ?? -1;
+        var diagnostics = CoordinateValidation.Diagnostics(Type,
+            ("reason", reason), ("reasonCode", reasonCode), ("breakRequested", true),
+            ("enclosingLoopId", loopId), ("loopIteration", iteration), ("loopBound", loopId.Length > 0));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
                 ["breakRequested"] = VisionValue.Boolean(true),
+                ["reasonCode"] = VisionValue.String(reasonCode),
                 ["reason"] = VisionValue.String(reason),
+                ["enclosingLoopId"] = VisionValue.String(loopId),
+                ["loopIteration"] = VisionValue.Integer(iteration),
+                ["loopBound"] = VisionValue.Boolean(loopId.Length > 0),
                 ["diagnostics"] = VisionValue.String(diagnostics)
             },
-            new Dictionary<string, object?> { ["reason"] = reason, ["breakRequested"] = true, ["diagnostics"] = diagnostics }));
+            new Dictionary<string, object?>
+            {
+                ["reason"] = reason, ["reasonCode"] = reasonCode, ["breakRequested"] = true,
+                ["enclosingLoopId"] = loopId, ["loopIteration"] = iteration, ["loopBound"] = loopId.Length > 0,
+                ["diagnostics"] = diagnostics
+            }));
     }
 }

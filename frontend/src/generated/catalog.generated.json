@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "2cdac208f4a95b641a5fc08a97005cb79c84af20a9556140c9e899f7c2dbd5ad",
+  "hash": "3acaeb3d4cecfe522722e3db0469ff1a2bb537c108a4e6043e2203cfc4f36386",
   "items": [
     {
       "type": "image.acquire",
@@ -16010,8 +16010,28 @@
           "required": true
         },
         {
+          "name": "reasonCode",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "reason",
           "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "enclosingLoopId",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "loopIteration",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "loopBound",
+          "dataType": "Boolean",
           "required": true
         },
         {
@@ -16022,15 +16042,23 @@
       ],
       "parameters": [
         {
+          "name": "reasonCode",
+          "label": "Reason Code",
+          "type": "text",
+          "defaultValue": "manual-break",
+          "group": "Diagnostics",
+          "description": "Stable machine-readable code (1-64 chars, letter first, then letters/digits/'_'/'.'/':'/'-'). Monitors group by this code; the free-form reason is for humans."
+        },
+        {
           "name": "reason",
           "label": "Reason",
           "type": "text",
           "defaultValue": "",
           "group": "Diagnostics",
-          "description": "Optional free-form reason recorded in diagnostics and the run report (max 512 characters)."
+          "description": "Optional free-form reason recorded in diagnostics and the run report (max 512 characters; control characters are rejected)."
         }
       ],
-      "description": "Exit the enclosing flow.while or flow.repeat early. Wire: exec in, next to whatever should still run in this iteration before the loop ends. The node sets the loop break flag, so the remaining steps of the current iteration are skipped and the next condition check ends the loop through the done route. This node must be wired directly in the loop body sequence: break inside If/Switch/Try/Parallel branches and break inside flow.forEach are rejected at compile time because the semantics would be misleading.",
+      "description": "Exit the enclosing flow.while or flow.repeat early. enclosingLoopId/loopIteration are bound by the runtime to the innermost loop and reset with it, so a break never leaks into the next loop or the next run. Wire: exec in, next to whatever should still run in this iteration before the loop ends. The node sets the loop break flag, so the remaining steps of the current iteration are skipped and the next condition check ends the loop through the done route. This node must be wired directly in the loop body sequence: break inside If/Switch/Try/Parallel branches and break inside flow.forEach are rejected at compile time because the semantics would be misleading.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -16165,6 +16193,11 @@
           "name": "message",
           "dataType": "String",
           "required": false
+        },
+        {
+          "name": "details",
+          "dataType": "String",
+          "required": false
         }
       ],
       "outputs": [
@@ -16194,6 +16227,14 @@
           "description": "Short machine-readable code prefixed to the failure message as [CODE]; 1-64 characters, must not be blank."
         },
         {
+          "name": "detailsJson",
+          "label": "Failure Details (JSON object)",
+          "type": "textarea",
+          "defaultValue": "",
+          "group": "Failure",
+          "description": "Optional JSON object carried into the run report as details (max 8 KiB). Use it for station, batch or measured values instead of inflating the message."
+        },
+        {
           "name": "message",
           "label": "Failure Message",
           "type": "textarea",
@@ -16202,7 +16243,7 @@
           "description": "Reason reported as the run error. The message input overrides it; blank text falls back to the default sentence. At most 4096 characters."
         }
       ],
-      "description": "Stop the whole run with an explicit reason instead of waiting for some later node to fail by accident. The node always throws, so the run result reports this message as the error and the trace marks this node as failed; the next port exists only so the graph stays wireable (nothing after it executes). Use flow.result when you only need an OK/NG disposition that keeps running. Because flow.try bodies only accept deterministic pipeline nodes, Fail cannot be used inside a try body to reach the error branch.",
+      "description": "Stop the whole run with an explicit reason instead of waiting for some later node to fail by accident. The node throws an intentional failure: the run report marks the failed node with intentional=true, failureCode=<code> and optional details, so monitoring can separate a planned stop from a program defect. The node always throws, so the run result reports this message as the error and the trace marks this node as failed; the next port exists only so the graph stays wireable (nothing after it executes). Use flow.result when you only need an OK/NG disposition that keeps running. Because flow.try bodies only accept deterministic pipeline nodes, Fail cannot be used inside a try body to reach the error branch.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -17147,6 +17188,16 @@
           "required": true
         },
         {
+          "name": "resetScope",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sticky",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -17176,9 +17227,25 @@
           "type": "text",
           "defaultValue": "NG",
           "description": "Disposition string when pass is false."
+        },
+        {
+          "name": "sticky",
+          "label": "Sticky NG",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Disposition",
+          "description": "When true, an NG in this scope stays NG across later writes until a reset; default false keeps overwrite so a retry that finally passes can clear the earlier NG."
+        },
+        {
+          "name": "reset",
+          "label": "Reset Scope Before Writing",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Disposition",
+          "description": "Clears the disposition of this scope before applying pass, which is the explicit way to recover from a sticky NG."
         }
       ],
-      "description": "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
+      "description": "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics; inside flow.forEach any-NG accumulates across iterations. The run report records dispositionScope, dispositionSetBy and dispositionPrevious for every write, so a later OK can be traced back to the NG it replaced. sticky=true keeps any-NG in this scope until reset=true clears it first.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

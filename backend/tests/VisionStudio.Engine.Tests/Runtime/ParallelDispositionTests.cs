@@ -219,7 +219,8 @@ public sealed class ParallelDispositionTests
 
         Assert.True(result.Success, result.Error);
         Assert.Equal("NG", result.QualityDisposition);
-        Assert.False(Report(result, "r1").Summary.ContainsKey("dispositionScope"));
+        Assert.Equal("run", Convert.ToString(Report(result, "r1").Summary[NodeSummaryKeys.DispositionScope]));
+        Assert.Equal("r1", Convert.ToString(Report(result, "r1").Summary[NodeSummaryKeys.DispositionSetBy]));
         Assert.False(Report(result, "r1").Summary.ContainsKey("parallelRegionId"));
     }
 

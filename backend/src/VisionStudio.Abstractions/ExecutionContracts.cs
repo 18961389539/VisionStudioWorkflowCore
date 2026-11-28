@@ -28,6 +28,9 @@ public static class NodeSummaryKeys
     public const string BranchDispositions = "branchDispositions";
     public const string ParallelRegionId = "parallelRegionId";
     public const string ParallelBranch = "parallelBranch";
+    public const string DispositionSetBy = "dispositionSetBy";
+    public const string DispositionPrevious = "dispositionPrevious";
+    public const string DispositionReset = "dispositionReset";
 }
 
 public sealed record NodeExecutorResult(
@@ -91,6 +94,15 @@ public sealed class NodeExecutionContext
 
     /// <summary>Identity of this run, distinct from the reusable compiled plan scope.</summary>
     public string? RunId { get; }
+
+    /// <summary>
+    /// 最近一层结构化循环（flow.while / flow.repeat / flow.forEach）的节点 id；循环体外为 null。
+    /// 由运行时按编译期绑定写入，节点可用它证明自己作用于最内层循环，而不是沿用上一次运行的标记。
+    /// </summary>
+    public string? EnclosingLoopId { get; init; }
+
+    /// <summary>节点开始执行时所属循环的零基迭代号；循环体外为 null。</summary>
+    public int? LoopIteration { get; init; }
 
     public VisionValue RequireValue(string port)
     {
