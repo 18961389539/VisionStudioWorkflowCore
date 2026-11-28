@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Nodes;
@@ -111,6 +111,30 @@ public sealed class BatchMatchingGeometryTests
                     ["targetPoints"] = Points([new(0, 0), new(10, 0), new(0, 10)])
                 }),
                 Def("match.homography"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Homography_RobotUseWithoutPlanarityConfirmation_IsRefused()
+    {
+        // 四个共面点可以拟出残差极低的单应，但"2D 残差小"证明不了四个点在同一深度平面。
+        var source = Points([new(0, 0), new(100, 0), new(100, 80), new(0, 80)]);
+        var target = Points([new(5, 5), new(105, 5), new(105, 85), new(5, 85)]);
+
+        var refused = await new HomographyRegistrationNode().ExecuteAsync(
+            Ctx(new() { ["sourcePoints"] = source, ["targetPoints"] = target }),
+            Def("match.homography", """{"robotUse":true}"""), CancellationToken.None);
+
+        Assert.False((bool)refused.Outputs["found"].Value!);
+        Assert.False((bool)refused.Outputs["robotSafe"].Value!);
+        Assert.Contains("planarityConfirmed", (string)refused.Outputs["diagnostics"].Value!, StringComparison.Ordinal);
+
+        // 显式确认后同一组点必须放行：门控只挡"未确认"，不挡正常用例。
+        var confirmed = await new HomographyRegistrationNode().ExecuteAsync(
+            Ctx(new() { ["sourcePoints"] = source, ["targetPoints"] = target }),
+            Def("match.homography", """{"robotUse":true,"planarityConfirmed":true}"""), CancellationToken.None);
+
+        Assert.True((bool)confirmed.Outputs["found"].Value!, (string)confirmed.Outputs["diagnostics"].Value!);
+        Assert.True((bool)confirmed.Outputs["robotSafe"].Value!);
     }
 
     [Fact]

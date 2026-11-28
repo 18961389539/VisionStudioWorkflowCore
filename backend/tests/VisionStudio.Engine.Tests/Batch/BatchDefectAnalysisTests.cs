@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using VisionStudio.Engine.Nodes;
 
 namespace VisionStudio.Engine.Tests;
@@ -265,5 +265,78 @@ public sealed class BatchDefectAnalysisTests
                     ["image"] = VisionValue.Image(VisionStudio.Engine.Camera.VisionImage.Own(image.Clone()))
                 }),
                 Def("defect.dataset", """{"directory":"C:/Windows/Temp"}"""), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Dataset_OverwriteRequiresExclusiveAccess_AndLeavesIndexReadable()
+    {
+        using var image = new OpenCvSharp.Mat(120, 160, OpenCvSharp.MatType.CV_8UC1, OpenCvSharp.Scalar.All(30));
+        OpenCvSharp.Cv2.Rectangle(image, new OpenCvSharp.Rect(20, 20, 30, 20), OpenCvSharp.Scalar.All(220), -1);
+        var directory = $"artifacts/test-defect-lock-{Guid.NewGuid():N}";
+        var inputs = () => Ctx(new()
+        {
+            ["detections"] = Dets(Det(0, 20, 20, 30, 20)),
+            ["image"] = VisionValue.Image(VisionStudio.Engine.Camera.VisionImage.Own(image.Clone()))
+        });
+
+        var first = await new DefectDatasetNode().ExecuteAsync(inputs(),
+            Def("defect.dataset", JsonSerializer.Serialize(new { dataset = "unit", directory })), CancellationToken.None);
+        var root = (string)first.Outputs["directory"].Value!;
+        var indexPath = System.IO.Path.Combine(root, "index.json");
+        var before = System.IO.File.ReadAllText(indexPath);
+
+        try
+        {
+            // 另一个进程/线程持有独占锁：overwrite 必须拒绝，而不是半途覆盖已有样本。
+            using (new System.IO.FileStream(System.IO.Path.Combine(root, ".defect-dataset.lock"),
+                       System.IO.FileMode.OpenOrCreate, System.IO.FileAccess.ReadWrite, System.IO.FileShare.None))
+            {
+                var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                    await new DefectDatasetNode().ExecuteAsync(inputs(),
+                        Def("defect.dataset", JsonSerializer.Serialize(new { dataset = "unit", directory, conflictPolicy = "overwrite" })),
+                        CancellationToken.None));
+                Assert.Contains("exclusive access", error.Message);
+            }
+
+            // 被拒绝之后，既有索引必须原样可读。
+            Assert.Equal(before, System.IO.File.ReadAllText(indexPath));
+        }
+        finally
+        {
+            System.IO.Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Dataset_OverwriteRefusesDirectoryWithoutIndex()
+    {
+        using var image = new OpenCvSharp.Mat(60, 80, OpenCvSharp.MatType.CV_8UC1, OpenCvSharp.Scalar.All(30));
+        OpenCvSharp.Cv2.Rectangle(image, new OpenCvSharp.Rect(10, 10, 20, 16), OpenCvSharp.Scalar.All(220), -1);
+        var directory = $"artifacts/test-defect-noindex-{Guid.NewGuid():N}";
+        var root = System.IO.Path.GetFullPath(directory);
+        System.IO.Directory.CreateDirectory(root);
+        var stray = System.IO.Path.Combine(root, "existing.png");
+        await System.IO.File.WriteAllBytesAsync(stray, [1, 2, 3]);
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await new DefectDatasetNode().ExecuteAsync(
+                    Ctx(new()
+                    {
+                        ["detections"] = Dets(Det(0, 10, 10, 20, 16)),
+                        ["image"] = VisionValue.Image(VisionStudio.Engine.Camera.VisionImage.Own(image.Clone()))
+                    }),
+                    Def("defect.dataset", JsonSerializer.Serialize(new { dataset = "unit", directory, conflictPolicy = "overwrite" })),
+                    CancellationToken.None));
+
+            Assert.Contains("requires a valid index.json", error.Message);
+            // 没有索引证明这些文件不属于本数据集：拒绝时不得改动它们。
+            Assert.Equal(new byte[] { 1, 2, 3 }, await System.IO.File.ReadAllBytesAsync(stray));
+        }
+        finally
+        {
+            System.IO.Directory.Delete(root, recursive: true);
+        }
     }
 }

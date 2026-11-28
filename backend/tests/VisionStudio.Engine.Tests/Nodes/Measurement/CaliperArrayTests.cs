@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -45,6 +45,38 @@ public sealed class CaliperArrayTests
         Assert.True(foundStations >= 5);
         Assert.Contains(result.Overlays ?? [], o => o.Id == "caliper-array-label");
         Assert.Contains(result.Overlays ?? [], o => o.Id.StartsWith("caliper-array-profile-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SingleValidStation_IsRejectedBySpatialCoverage_AndEveryMissIsExplained()
+    {
+        // 只在中间一条很窄的水平带里有边缘：9 个站点（沿切线方向分布）里只有中间 1~2 站能看到。
+        using var image = MakeHorizontalBand(left: 30, right: 64, bandTop: 44, bandHeight: 8, height: 96);
+        var result = await Run(image, new()
+        {
+            ["startX"] = 5, ["startY"] = 48, ["endX"] = 120, ["endY"] = 48,
+            ["caliperCount"] = 9, ["edgeLength"] = 60, ["sampleWidth"] = 1
+        });
+        DisposeImage(result);
+
+        var valid = result.Outputs["validCount"].Require<long>("validCount");
+        // minValidCalipers=1 也救不了它：覆盖率门限才是这里的判据。
+        Assert.True(valid <= 3, $"expected a handful of valid stations, got {valid}");
+        Assert.False(Found(result), "a single visible station must not produce a passing width");
+        Assert.Equal("insufficient-spatial-coverage", Convert.ToString(result.Summary["reason"]));
+        // 默认 minValidRatio=0.5：一站有效远低于门限，所以判据是覆盖率而不是 minValidCalipers。
+        Assert.True(result.Outputs["validRatio"].Require<double>("validRatio") < 0.5);
+        Assert.True(result.Outputs["coverageRatio"].Require<double>("coverageRatio") < 0.5);
+
+        // 每一个缺失站点都必须带索引和原因，不能只给一个总数。
+        using var doc = JsonDocument.Parse(result.Outputs["invalidStations"].Require<string>("invalidStations"));
+        Assert.Equal(9 - valid, doc.RootElement.GetArrayLength());
+        foreach (var station in doc.RootElement.EnumerateArray())
+        {
+            Assert.True(station.TryGetProperty("Index", out var index));
+            Assert.InRange(index.GetInt32(), 0, 8);
+            Assert.False(string.IsNullOrWhiteSpace(station.GetProperty("Reason").GetString()));
+        }
     }
 
     [Fact]
@@ -161,6 +193,16 @@ public sealed class CaliperArrayTests
 
     private static bool Found(NodeExecutorResult result) => result.Outputs["found"].Require<bool>("found");
     private static void DisposeImage(NodeExecutorResult result) => result.Outputs["image"].Require<VisionImage>("image").Dispose();
+
+    /// <summary>只在 [bandTop, bandTop+bandHeight) 行有亮条：用于证明站点空间覆盖不足会被拒绝。</summary>
+    private static VisionImage MakeHorizontalBand(double left, double right, int bandTop, int bandHeight, int height)
+    {
+        var mat = new Mat(height, 128, MatType.CV_8UC1, Scalar.All(20));
+        for (var y = bandTop; y < Math.Min(height, bandTop + bandHeight); y++)
+            for (var x = (int)left; x <= (int)right; x++)
+                mat.Set(y, x, (byte)220);
+        return VisionImage.Own(mat);
+    }
 
     private static VisionImage MakeStrip(double left, double right, bool dark = false, int height = 64)
     {
