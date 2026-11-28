@@ -26,7 +26,10 @@ public sealed class JlVisionAdvancedIntegrationTests
         for (var i = 0; i < 20; i++) points.Add(new(55.25, 20.75 + i));
         for (var i = 0; i < 40; i++) points.Add(new(55.25 - i, 40.75));
         for (var i = 0; i <= 20; i++) points.Add(new(15.25, 40.75 - i));
-        return new(0, points, -1, false, 800, 120, .7, new(15.25, 20.75, 40, 20), new(35.25, 30.75, 23));
+        return new(0, points, -1, false, 800, 120, .7, new(15.25, 20.75, 40, 20), new(35.25, 30.75, 23))
+        {
+            CoordinateFrame = "Image"
+        };
     }
 
     [Theory]
@@ -44,13 +47,48 @@ public sealed class JlVisionAdvancedIntegrationTests
         Cv2.Rectangle(mat, new Rect(20, 20, 50, 40), Scalar.All(230), -1);
         Cv2.Line(mat, new(10, 80), new(80, 80), Scalar.All(240), 3);
         using var image = VisionImage.Own(mat.Clone());
-        var result = await Run(new JLVisionFeatureExtractNode(), new { @operator = operation, low = 2, high = 5, threshold = 1, maskSize = 5 }, new() { ["image"] = VisionValue.Image(image) });
+        var parameters = new Dictionary<string, object> { ["operator"] = operation };
+        switch (operation)
+        {
+            case "linesGauss":
+            case "linesFacet":
+            case "linesColor":
+            case "edgesSubPix":
+            case "edgesColorSubPix":
+                parameters["low"] = 2;
+                parameters["high"] = 5;
+                break;
+            case "pointsHarris":
+            case "pointsFoerstner":
+                parameters["threshold"] = 1;
+                break;
+            case "detectEdgeSegments":
+                parameters["low"] = 2;
+                break;
+        }
+        var result = await Run(new JLVisionFeatureExtractNode(), parameters, new() { ["image"] = VisionValue.Image(image) });
         try
         {
-            Assert.True(result.Outputs["found"].Require<bool>("found")); Assert.True(result.Outputs["count"].Require<long>("count") > 0);
+            Assert.True(result.Outputs["found"].Require<bool>("found"));
+            var count = result.Outputs["count"].Require<long>("count");
+            Assert.True(count > 0);
             var contours = result.Outputs["contours"].Require<IReadOnlyList<VisionContour>>("contours");
             Assert.NotEmpty(result.Outputs["detections"].Require<IReadOnlyList<VisionDetection>>("detections"));
             _ = JsonSerializer.Serialize(contours); // Native attributes must also be JSON-safe.
+            using var pointsDocument = JsonDocument.Parse(result.Outputs["points"].Require<string>("points"));
+            var points = pointsDocument.RootElement.GetProperty("points").EnumerateArray()
+                .Select(point => new VisionPoint2D(point.GetProperty("X").GetDouble(), point.GetProperty("Y").GetDouble())).ToArray();
+            if (operation is "pointsHarris" or "pointsFoerstner")
+            {
+                Assert.Empty(contours);
+                Assert.Equal(count, points.LongLength);
+                Assert.Contains(points, point => point == result.Outputs["point"].Require<VisionPoint2D>("point"));
+            }
+            else
+            {
+                Assert.Equal(count, contours.LongCount());
+                Assert.Empty(points);
+            }
             if (operation == "linesGauss") Assert.Contains(contours, c => c.Attributes?.ContainsKey("width_left") == true);
         }
         finally { Release(result); }

@@ -237,9 +237,18 @@ public sealed class Batch3RecognitionNodeTests
     {
         using var source = new Mat(40, 60, MatType.CV_8UC3, new Scalar(20, 90, 220));
         var result = await RunOnnx(new OnnxClassificationNode(), "inference.classification", TinyModels.Classification,
-            source, new { inputWidth = 8, inputHeight = 8, applySoftmax = false });
+            source, new { inputWidth = 8, inputHeight = 8, layout = "scores", applySoftmax = false, aggregation = "logits" });
         Assert.Equal(2, checked((int)result.Outputs["classIndex"].Require<long>("classIndex")));
         Assert.Equal(220, source.At<Vec3b>(0, 0).Item2);
+    }
+
+    [Fact]
+    public async Task ClassificationRejectsProbabilityAggregationWithoutSoftmax()
+    {
+        using var source = new Mat(40, 60, MatType.CV_8UC3, new Scalar(20, 90, 220));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => RunOnnx(new OnnxClassificationNode(), "inference.classification", TinyModels.Classification,
+            source, new { inputWidth = 8, inputHeight = 8, layout = "scores", applySoftmax = false, aggregation = "probability" }));
+        Assert.Contains("requires applySoftmax=true", ex.Message);
     }
 
     [Theory]
@@ -249,7 +258,7 @@ public sealed class Batch3RecognitionNodeTests
     {
         using var source = new Mat(40, 60, MatType.CV_8UC3, new Scalar(20, 90, 220));
         var result = await RunOnnx(new OnnxClassificationNode(), "inference.classification", TinyModels.ClassificationDynamicBatch,
-            source, new { inputWidth = 8, inputHeight = 8, applySoftmax = false, multiCrop });
+            source, new { inputWidth = 8, inputHeight = 8, layout = "scores", applySoftmax = false, aggregation = "logits", multiCrop });
         Assert.Equal(viewCount, Convert.ToInt32(result.Summary["batchSize"]));
         Assert.Equal(viewCount, Convert.ToInt32(result.Summary["viewCount"]));
         Assert.Equal(2, checked((int)result.Outputs["classIndex"].Require<long>("classIndex")));
@@ -263,7 +272,7 @@ public sealed class Batch3RecognitionNodeTests
     {
         using var source = new Mat(40, 60, MatType.CV_8UC3, new Scalar(20, 90, 220));
         var result = await RunOnnx(new OnnxClassificationNode(), "inference.classification", TinyModels.Classification,
-            source, new { inputWidth = 8, inputHeight = 8, applySoftmax = false, multiCrop = "five" });
+            source, new { inputWidth = 8, inputHeight = 8, layout = "scores", applySoftmax = false, aggregation = "logits", multiCrop = "five" });
         Assert.Equal(1, Convert.ToInt32(result.Summary["batchSize"]));
         Assert.Equal(5, Convert.ToInt32(result.Summary["viewCount"]));
         Assert.Equal(2, checked((int)result.Outputs["classIndex"].Require<long>("classIndex")));

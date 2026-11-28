@@ -137,7 +137,8 @@ public sealed class BatchQThinNodeTests
         var target = new VisionRobotTarget2D(10, 20, 0, "RobotBase", "mm", "ABB", "BatchQ");
         var result = await node.ExecuteAsync(
             Ctx(new() { ["target"] = VisionValue.RobotTarget(target) }),
-            Def("robot.executeTarget", """{"robotId":"virtual-abb-1","action":"Handshake","timeoutMs":2000}"""),
+            // The virtual ABB defaults to 250 mm/s; this target is about 555 mm from its initial pose.
+            Def("robot.executeTarget", """{"robotId":"virtual-abb-1","action":"Handshake","timeoutMs":5000}"""),
             CancellationToken.None);
         Assert.Contains("robot.executeTarget", (string)result.Outputs["diagnostics"].Value!);
         Assert.True(result.Outputs.ContainsKey("commandId"));

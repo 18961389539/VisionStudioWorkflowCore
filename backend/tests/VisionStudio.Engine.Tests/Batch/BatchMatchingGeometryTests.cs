@@ -114,6 +114,19 @@ public sealed class BatchMatchingGeometryTests
     }
 
     [Fact]
+    public async Task Homography_RejectsCollinearPointsWithoutReportingRobotSafe()
+    {
+        var collinear = Points([new(0, 0), new(10, 0), new(20, 0), new(30, 0)]);
+        var result = await new HomographyRegistrationNode().ExecuteAsync(
+            Ctx(new() { ["sourcePoints"] = collinear, ["targetPoints"] = collinear }),
+            Def("match.homography", """{"robotUse":true,"planarityConfirmed":true}"""), CancellationToken.None);
+
+        Assert.False((bool)result.Outputs["found"].Value!);
+        Assert.False((bool)result.Outputs["robotSafe"].Value!);
+        Assert.Contains("collinear", (string)result.Outputs["diagnostics"].Value!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Pose3D_RecoversKnownCameraPose()
     {
         var objects = new[]
@@ -137,7 +150,8 @@ public sealed class BatchMatchingGeometryTests
                 cameraMatrixJson = "[800,0,320,0,800,240,0,0,1]",
                 distortionJson = "[]",
                 solver = "iterative",
-                unit = "mm"
+                unit = "mm",
+                coordinateSystemConfirmed = true
             })), CancellationToken.None);
 
         Assert.True((bool)result.Outputs["found"].Value!, (string)result.Outputs["diagnostics"].Value!);
@@ -198,7 +212,8 @@ public sealed class BatchMatchingGeometryTests
                 solver = "iterative",
                 useExtrinsicGuess = true,
                 guessRvecJson = "[0.4,-0.1,0.05]",
-                guessTvecJson = "[10,-20,500]"
+                guessTvecJson = "[10,-20,500]",
+                coordinateSystemConfirmed = true
             })), CancellationToken.None);
 
         Assert.True(result.Outputs["found"].Require<bool>("found"));

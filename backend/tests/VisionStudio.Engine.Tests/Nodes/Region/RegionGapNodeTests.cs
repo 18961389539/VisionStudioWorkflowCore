@@ -163,9 +163,12 @@ public sealed class RegionGapNodeTests
         Assert.False(result.Outputs["withinTolerance"].Require<bool>("withinTolerance"));   // 10 > 8
         Assert.Contains("depth", result.Outputs["defectsJson"].Require<string>("defectsJson"));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await new ContourConvexityNode().ExecuteAsync(
-                Ctx(new() { ["contours"] = VisionValue.Contours([notched]) }),
-                Def("contour.convexity", """{"closed":false}"""), CancellationToken.None));
+        // 开放轮廓不再抛异常，而是显式标记“未评价”，避免下游把不可计算当成合格。
+        var open = await new ContourConvexityNode().ExecuteAsync(
+            Ctx(new() { ["contours"] = VisionValue.Contours([notched]) }),
+            Def("contour.convexity", """{"closed":false}"""), CancellationToken.None);
+        Assert.False(open.Outputs["found"].Require<bool>("found"));
+        Assert.False(open.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.Equal("not-evaluated-open-contour", open.Outputs["evaluationState"].Require<string>("evaluationState"));
     }
 }

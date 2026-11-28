@@ -68,8 +68,12 @@ public sealed class MaskToVisionNodesTests
         if (overLimit)
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RegionFromMaskNode(), mask, Node()));
+            Assert.Contains("component budget", error.Message);
             Assert.Contains("10100 components", error.Message);
             Assert.Contains("10000", error.Message);
+            Assert.Contains("\"reason\":\"component-budget\"", error.Message);
+            Assert.Contains("\"componentCount\":10100", error.Message);
+            Assert.Contains("\"componentLimit\":10000", error.Message);
         }
         else
         {
@@ -93,6 +97,9 @@ public sealed class MaskToVisionNodesTests
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RegionFromMaskNode(), mask, Node()));
             Assert.Contains("1000000 run limit", error.Message);
+            Assert.Contains("\"reason\":\"run-budget\"", error.Message);
+            Assert.Contains("\"runCount\":1000001", error.Message);
+            Assert.Contains("\"runLimit\":1000000", error.Message);
         }
         else
         {
@@ -239,6 +246,8 @@ public sealed class MaskToVisionNodesTests
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(executor, mask, parameters));
             Assert.Contains("finite and within 0..1", error.Message);
+            if (executor is ContourFromMaskNode)
+                Assert.Contains("stage=mask-validation", error.Message);
         }
     }
 

@@ -37,6 +37,12 @@ public sealed class ContourThicknessApiTests(VisionStudioApiFactory factory) : I
         var result = await Run(workflow);
         var wall = Report(result, "thickness");
         Assert.False(wall.GetProperty("summary").GetProperty("found").GetBoolean());
+        Assert.False(wall.GetProperty("summary").GetProperty("measurementValid").GetBoolean());
+        Assert.False(wall.GetProperty("outputs").GetProperty("withinTolerance").GetProperty("value").GetBoolean());
+        Assert.False(wall.GetProperty("outputs").GetProperty("coverageComplete").GetProperty("value").GetBoolean());
+        Assert.Equal(0, wall.GetProperty("outputs").GetProperty("maxUnsampledArcPx").GetProperty("value").GetDouble());
+        Assert.Equal("missing-or-insufficient-contour", wall.GetProperty("outputs").GetProperty("reason").GetProperty("value").GetString());
+        Assert.Equal("[]", wall.GetProperty("outputs").GetProperty("samplesJson").GetProperty("value").GetString());
         Assert.False(wall.GetProperty("outputs").TryGetProperty("minThickness", out _));
         Assert.Equal("NG", Report(result, "missing").GetProperty("summary").GetProperty("disposition").GetString());
         Assert.DoesNotContain(result.GetProperty("nodeReports").EnumerateArray(), report => report.GetProperty("nodeId").GetString() == "result");

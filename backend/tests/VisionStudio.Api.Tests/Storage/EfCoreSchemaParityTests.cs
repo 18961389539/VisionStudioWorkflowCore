@@ -24,7 +24,7 @@ public sealed class EfCoreSchemaParityTests(ITestOutputHelper output)
             .UseSqlite(generated).Options);
         await db.Database.EnsureCreatedAsync();
 
-        foreach (var table in InfrastructureTables)
+        foreach (var table in TablesOutsideEfModel)
         {
             await using var command = migrated.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name=$name;";
@@ -32,7 +32,7 @@ public sealed class EfCoreSchemaParityTests(ITestOutputHelper output)
             Assert.Equal(1L, await command.ExecuteScalarAsync());
         }
 
-        var expected = await SqliteSchemaSnapshot.ReadAsync(migrated, InfrastructureTables);
+        var expected = await SqliteSchemaSnapshot.ReadAsync(migrated, TablesOutsideEfModel);
         var actual = await SqliteSchemaSnapshot.ReadAsync(generated, equivalentUniqueIndexes: EquivalentUniqueIndexes);
         var differences = SqliteSchemaSnapshot.Differences(expected, actual);
         var knownDifferences = LegacyNullablePrimaryKeys.Select(key => $"table:{key}/notnull: SQL=0; EF=1")
@@ -161,6 +161,12 @@ public sealed class EfCoreSchemaParityTests(ITestOutputHelper output)
 
     private static readonly HashSet<string> InfrastructureTables =
         ["schema_info", "schema_migration_history", "legacy_alarm_import"];
+
+    // 媒体库索引表由 MediaLibraryIndex 的原生 SQL 独占管理（upsert/清理/分页查询都在 SQL 侧），
+    // EF 模型不映射它：EnsureCreated 生成的库缺这张表，启动迁移一定会补上，因此对齐检查按“库外表”处理。
+    private static readonly HashSet<string> SqlManagedTables = ["media_index_items"];
+
+    private static readonly HashSet<string> TablesOutsideEfModel = [.. InfrastructureTables, .. SqlManagedTables];
 
     // Keep mutable values as unique indexes, not EF alternate keys (which cannot be changed while tracked).
     private static readonly HashSet<string> EquivalentUniqueIndexes =

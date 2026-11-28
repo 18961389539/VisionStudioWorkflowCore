@@ -41,7 +41,8 @@ public sealed class AlignmentRegionApiTests(VisionStudioApiFactory factory) : IC
             patch["x"] = 460; patch["y"] = 50; patch["width"] = 100; patch["height"] = 100;
         }
         var response = await _client.PostAsJsonAsync("/api/run", workflow);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, body);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
         var reports = result.GetProperty("nodeReports").EnumerateArray().ToArray();

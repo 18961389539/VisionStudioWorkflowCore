@@ -34,7 +34,11 @@ public sealed class BatchIMeasurePreprocessTests
         Assert.Equal(6L,(long)line.Outputs["pointCount"].Value!);
         var noisy=new Dictionary<string,VisionValue>();
         for(var i=0;i<6;i++) noisy[$"point{i+1}"]=VisionValue.Point(new(i*10,i*10+(i%2==0?2:-2)));
-        await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new FitLineNode().ExecuteAsync(Ctx(noisy),Def("measure.fitLine","{\"maxRmsError\":0.001}"),CancellationToken.None));
+        // 质量不合格改为结构化结果：不再抛异常，保留直线与残差供复检。
+        var gated = await new FitLineNode().ExecuteAsync(Ctx(noisy),Def("measure.fitLine","{\"maxRmsError\":0.001}"),CancellationToken.None);
+        Assert.False(gated.Outputs["found"].Require<bool>("found"));
+        Assert.Equal("rms-exceeded", gated.Outputs["reason"].Require<string>("reason"));
+        Assert.True(gated.Outputs.ContainsKey("line"));
         var circleInputs=new Dictionary<string,VisionValue>();
         for(var i=0;i<8;i++){var ang=i*Math.PI/4; circleInputs[$"point{i+1}"]=VisionValue.Point(new(50+20*Math.Cos(ang),50+20*Math.Sin(ang)));}
         var circle=await new FitCircleNode().ExecuteAsync(Ctx(circleInputs),Def("measure.fitCircle"),CancellationToken.None);

@@ -198,7 +198,7 @@ public sealed class GdtNodeTests
             ["datum"] = VisionValue.Pose(new VisionPose2D(0, 0, 0))
         }, "{}");
         Assert.False(two.Outputs["found"].Require<bool>("found"));
-        Assert.Contains("at least 3", two.Outputs["diagnostics"].Require<string>("diagnostics"));
+        Assert.Contains("insufficient-samples", two.Outputs["diagnostics"].Require<string>("diagnostics"));
     }
 
     [Fact]
@@ -220,7 +220,8 @@ public sealed class GdtNodeTests
 
         Assert.Equal(0.3d, result.Outputs["runout"].Require<double>("runout"), 6);
         Assert.False(result.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
-        Assert.False(result.Outputs.ContainsKey("coverageDeg"));
+        // 轴向模式现在把沿基准轴的跨度作为 coverageDeg 输出，用于证明采样计划已通过。
+        Assert.Equal(0.3d, result.Outputs["coverageDeg"].Require<double>("coverageDeg"), 6);
         Assert.False(result.Outputs.ContainsKey("highAngleDeg"));
     }
 

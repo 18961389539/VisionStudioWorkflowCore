@@ -104,7 +104,7 @@ public sealed class Batch5PrecisionNodeTests
 
         // 位置窗口：孔洞中心约 (80,80)、外部中心约 (100,100)——窗口只覆盖外部中心。
         var window = await Run(new ContourFilterNode(), ContourInputs(contours),
-            """{"windowX":85,"windowY":85,"windowWidth":30,"windowHeight":30}""");
+            """{"windowEnabled":true,"windowX":85,"windowY":85,"windowWidth":30,"windowHeight":30}""");
         Assert.Equal(1, Convert.ToInt32(window.Summary["count"]));
 
         // maxCount 截断计入 dropped。

@@ -166,7 +166,7 @@ public sealed class P1CompletionNodeTests
 
     [Theory]
     [InlineData("""{"sourceMode":"frameSet","mode":"mean"}""", "legacy", "unchecked")]
-    [InlineData("""{"sourceMode":"frameSet","mode":"mean","alignmentPolicy":"prealigned"}""", "prealigned", "operatorConfirmed")]
+    [InlineData("""{"sourceMode":"frameSet","mode":"mean","alignmentPolicy":"prealigned","referenceGrid":"grid-12"}""", "prealigned", "operatorConfirmed")]
     public async Task Fuse_ReportsCamerasAndAlignmentForASynchronizedFrameSet(string parameters, string policy, string status)
     {
         using var frameSet = SynchronizedFrameSet();
@@ -306,14 +306,14 @@ public sealed class P1CompletionNodeTests
     {
         var inputs = new Dictionary<string, VisionValue> { ["encoder"] = VisionValue.Double(2500) };
         var add = await Run(new ConveyorCalibrationNode(), "calibration.conveyor", inputs,
-            """{"countsPerUnit":1000,"lineSpeedUnitPerSec":100,"triggerDelayMs":50}""");
+            """{"countsPerUnit":1000,"lineSpeedUnitPerSec":100,"triggerDelayMs":50,"lineDirection":"forward","speedDirection":"forward","motionState":"steady"}""");
         Assert.Equal(2.5d, add.Outputs["position"].Require<double>("position"), 9);
         Assert.Equal(5d, add.Outputs["triggerOffset"].Require<double>("triggerOffset"), 9);
         Assert.Equal(7.5d, add.Outputs["compensatedPosition"].Require<double>("compensatedPosition"), 9);
         Assert.Equal("mm", add.Outputs["unit"].Require<string>("unit"));
 
         var subtract = await Run(new ConveyorCalibrationNode(), "calibration.conveyor", inputs,
-            """{"countsPerUnit":1000,"lineSpeedUnitPerSec":100,"triggerDelayMs":50,"compensationSign":"subtract"}""");
+            """{"countsPerUnit":1000,"lineSpeedUnitPerSec":100,"triggerDelayMs":50,"compensationSign":"subtract","lineDirection":"reverse","speedDirection":"reverse","motionState":"steady"}""");
         Assert.Equal(-2.5d, subtract.Outputs["compensatedPosition"].Require<double>("compensatedPosition"), 9);
     }
 

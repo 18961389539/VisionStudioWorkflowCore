@@ -62,7 +62,10 @@ public sealed class CaliperArrayTests
         DisposeImage(result);
         Assert.False(Found(result), Convert.ToString(result.Summary["reason"]));
         Assert.Equal(0L, result.Outputs["validCount"].Require<long>("validCount"));
-        Assert.Equal("no-edge-pair-above-threshold", result.Summary["reason"]);
+        Assert.Equal("insufficient-spatial-coverage", result.Summary["reason"]);
+        Assert.Equal(0d, result.Outputs["validRatio"].Require<double>("validRatio"));
+        Assert.Equal(0d, result.Outputs["coverageRatio"].Require<double>("coverageRatio"));
+        Assert.Equal(0d, result.Outputs["continuousRatio"].Require<double>("continuousRatio"));
         Assert.False(result.Outputs.ContainsKey("widthMean"));
     }
 
@@ -109,6 +112,40 @@ public sealed class CaliperArrayTests
         Assert.Equal(1L, result.Outputs["validCount"].Require<long>("validCount"));
         Assert.InRange(result.Outputs["widthMean"].Require<double>("widthMean"), 29.7, 30.3);
         Assert.Equal(0d, result.Outputs["widthStd"].Require<double>("widthStd"));
+    }
+
+    [Fact]
+    public async Task ToleranceGateReportsDeviationWithoutChangingFound()
+    {
+        using var image = MakeStrip(40, 70);
+        var baseline = new Dictionary<string, object?>
+        {
+            ["startX"] = 5, ["startY"] = 32, ["endX"] = 120, ["endY"] = 32,
+            ["caliperCount"] = 3, ["minValidCalipers"] = 1, ["sampleWidth"] = 1, ["nominalWidth"] = 33,
+            ["minValidRatio"] = 0, ["minCoverageRatio"] = 0, ["minContinuousRatio"] = 0
+        };
+        var disabled = await Run(image, baseline);
+        DisposeImage(disabled);
+        Assert.True(Found(disabled), Convert.ToString(disabled.Summary["reason"]));
+        Assert.Equal("not-evaluated", disabled.Outputs["evaluationState"].Require<string>("evaluationState"));
+        Assert.False(disabled.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+
+        var pass = new Dictionary<string, object?>(baseline) { ["lowerTolerance"] = 4, ["upperTolerance"] = 1 };
+        var passing = await Run(image, pass);
+        DisposeImage(passing);
+        Assert.True(Found(passing));
+        Assert.True(passing.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.Equal("pass", passing.Outputs["evaluationState"].Require<string>("evaluationState"));
+        Assert.InRange(passing.Outputs["widthDeviation"].Require<double>("widthDeviation"), -4, 1);
+
+        var fail = new Dictionary<string, object?>(baseline) { ["lowerTolerance"] = 0.01, ["upperTolerance"] = 0.01 };
+        var failing = await Run(image, fail);
+        DisposeImage(failing);
+        // 超差不是“未测到”：found 与 widthMean 仍在，只翻转判定。
+        Assert.True(Found(failing));
+        Assert.True(failing.Outputs.ContainsKey("widthMean"));
+        Assert.False(failing.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.Equal("fail", failing.Outputs["evaluationState"].Require<string>("evaluationState"));
     }
 
     [Fact]

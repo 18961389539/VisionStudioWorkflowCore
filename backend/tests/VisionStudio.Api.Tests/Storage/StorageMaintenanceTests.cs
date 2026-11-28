@@ -68,6 +68,57 @@ CREATE TABLE run_traces(run_id TEXT PRIMARY KEY,started_at TEXT NOT NULL DEFAULT
     }
 
     [Fact]
+    public async Task HistoryAheadOfSchemaVersion_ReconcilesWithoutReplayingCommittedMigrations()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var runner = new SqliteSchemaMigrationRunner();
+        var initial = await runner.MigrateAsync(connection);
+        var v39AppliedAt = initial.History.Single(x => x.Version == 39).AppliedAt;
+
+        await using (var command = connection.CreateCommand())
+        {
+            // Simulate an old restore/tool that rolled back only schema_info and removed
+            // one history row while leaving later committed migrations intact.
+            command.CommandText = """
+DELETE FROM schema_migration_history WHERE version=37;
+UPDATE schema_info SET version=36 WHERE id=1;
+""";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var status = await runner.MigrateAsync(connection);
+        Assert.Equal(SqliteSchemaMigrationRunner.CurrentVersion, status.CurrentVersion);
+        Assert.Equal(SqliteSchemaMigrationRunner.CurrentVersion, status.History.Count);
+        Assert.False(status.History.Single(x => x.Version == 37).Baselined);
+        Assert.Equal(v39AppliedAt, status.History.Single(x => x.Version == 39).AppliedAt);
+    }
+
+    [Fact]
+    public async Task MediaProvenanceMigration_CanReplayWhenColumnsAlreadyExist()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var runner = new SqliteSchemaMigrationRunner();
+        await runner.MigrateAsync(connection);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+DELETE FROM schema_migration_history WHERE version=39;
+UPDATE schema_info SET version=38 WHERE id=1;
+""";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var status = await runner.MigrateAsync(connection);
+        Assert.Equal(SqliteSchemaMigrationRunner.CurrentVersion, status.CurrentVersion);
+        Assert.False(status.History.Single(x => x.Version == 39).Baselined);
+        Assert.Equal("572fe9b11b811fdbbe01c8ed8ed2ea62e083426be34c983d3c086609700777d5",
+            status.History.Single(x => x.Version == 39).Checksum);
+    }
+
+    [Fact]
     public async Task BackupAndRestore_RoundTripDatabaseAndPreviewArtifacts()
     {
         using var factory = new StorageVisionStudioApiFactory();

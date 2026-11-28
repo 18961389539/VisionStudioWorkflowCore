@@ -38,8 +38,8 @@ public sealed class DeviceManagerTests
     }
 
     [Theory]
-    [InlineData("resultOk", "payload", "resultReady", 1)]
-    [InlineData("resultReady", "ready-publish", "validR", 6)]
+    [InlineData("resultOk", "payload", "resultReady", 5)]
+    [InlineData("resultReady", "ready-publish", "validR", 10)]
     public async Task WriteVisionResultReportsUncertainWriteAndLastAcknowledgedTag(string failingTag, string stage, string confirmedTag, int count)
     {
         var driver = new RecordingDeviceDriver("vision-plc", 0, VisionResultTags,
@@ -52,8 +52,14 @@ public sealed class DeviceManagerTests
         Assert.Contains($"at {stage}", error.Message);
         Assert.Contains($"last confirmed tag: {confirmedTag}", error.Message);
         Assert.Contains($"write with unknown outcome: {failingTag}", error.Message);
+        Assert.Contains("Compensation:", error.Message);
+        Assert.Contains("The sequence was NOT retried", error.Message);
         Assert.Equal(count, driver.Writes.Count);
         Assert.DoesNotContain(("resultReady", (object?)true), driver.Writes);
+        Assert.Equal(("resultReady", (object?)false), driver.Writes[^4]);
+        Assert.Equal(("validX", (object?)false), driver.Writes[^3]);
+        Assert.Equal(("validY", (object?)false), driver.Writes[^2]);
+        Assert.Equal(("validR", (object?)false), driver.Writes[^1]);
     }
 
     [Fact]

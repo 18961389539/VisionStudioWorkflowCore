@@ -39,7 +39,7 @@ public sealed class ContourThicknessTests
         Assert.Contains(result.Overlays ?? [], overlay => overlay.Stroke == "#f5222d");
         using var samples = JsonDocument.Parse(result.Outputs["samplesJson"].Require<string>("samplesJson"));
         Assert.Contains(samples.RootElement.EnumerateArray(), sample => sample.GetProperty("Thickness").GetDouble() < 3);
-        Assert.Equal(72, samples.RootElement.GetArrayLength());
+        Assert.Equal(mode == "shortest" ? 72 : 144, samples.RootElement.GetArrayLength());
     }
 
     [Fact]
@@ -67,6 +67,45 @@ public sealed class ContourThicknessTests
         Assert.False(result.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
         Assert.Equal(0L, result.Outputs["thinSampleCount"].Require<long>("thinSampleCount"));
         Assert.Contains(result.Overlays ?? [], overlay => overlay.Id == "thickness-minimum" && overlay.Stroke == "#f5222d");
+    }
+
+    [Fact]
+    public async Task AdaptiveMidpointsStayOnEdgesInsteadOfFollowingCornerBisectors()
+    {
+        var result = await Run(Rectangle(30, 30, 70, 70), Rectangle(20, 20, 90, 90),
+            new { measurementMode = "innernormal", sampleStep = 100 });
+        Assert.True(Found(result), Convert.ToString(result.Summary["reason"]));
+        using var samples = JsonDocument.Parse(result.Outputs["samplesJson"].Require<string>("samplesJson"));
+        Assert.Equal(8, samples.RootElement.GetArrayLength());
+        Assert.All(samples.RootElement.EnumerateArray(), sample =>
+        {
+            var inner = sample.GetProperty("Inner");
+            var x = inner.GetProperty("X").GetDouble();
+            var y = inner.GetProperty("Y").GetDouble();
+            Assert.True(x is >= 30 and <= 70 && (Math.Abs(x - 30) < 1e-8 || Math.Abs(x - 70) < 1e-8)
+                || y is >= 30 and <= 70 && (Math.Abs(y - 30) < 1e-8 || Math.Abs(y - 70) < 1e-8));
+        });
+        Assert.Contains(samples.RootElement.EnumerateArray(), sample =>
+            Math.Abs(sample.GetProperty("Thickness").GetDouble() - 20) < 1e-8);
+        Assert.True(result.Outputs["coverageComplete"].Require<bool>("coverageComplete"));
+        Assert.True(result.Outputs["maxUnsampledArcPx"].Require<double>("maxUnsampledArcPx") <= 20);
+        Assert.Equal(result.Outputs["maxUnsampledArcPx"].Require<double>("maxUnsampledArcPx") / 2,
+            result.Outputs["samplingUncertaintyPx"].Require<double>("samplingUncertaintyPx"));
+    }
+
+    [Theory]
+    [InlineData("shortest")]
+    [InlineData("innernormal")]
+    public async Task UpperToleranceFailuresAreCountedSeparately(string mode)
+    {
+        var result = await Run(Rectangle(30, 30, 70, 70), Rectangle(20, 20, 80, 80),
+            new { measurementMode = mode, sampleStep = 10, maxThickness = 9 });
+        Assert.True(Found(result), Convert.ToString(result.Summary["reason"]));
+        Assert.False(result.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.Equal(0L, result.Outputs["thinSampleCount"].Require<long>("thinSampleCount"));
+        var upper = result.Outputs["upperFailureCount"].Require<long>("upperFailureCount");
+        Assert.True(upper > 0);
+        Assert.Equal(upper, result.Outputs["outOfToleranceSampleCount"].Require<long>("outOfToleranceSampleCount"));
     }
 
     [Fact]
@@ -182,7 +221,12 @@ public sealed class ContourThicknessTests
     private static void Missing(NodeExecutorResult result, string reason)
     {
         Assert.False(Found(result)); Assert.Equal(reason, result.Summary["reason"]);
-        foreach (var key in new[] { "minThickness", "maxThickness", "meanThickness", "withinTolerance", "minLine", "minInnerPoint", "minOuterPoint" })
+        Assert.False(result.Outputs["measurementValid"].Require<bool>("measurementValid"));
+        Assert.False(result.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.False(result.Outputs["coverageComplete"].Require<bool>("coverageComplete"));
+        Assert.Equal(reason, result.Outputs["reason"].Require<string>("reason"));
+        Assert.Equal("[]", result.Outputs["samplesJson"].Require<string>("samplesJson"));
+        foreach (var key in new[] { "minThickness", "maxThickness", "meanThickness", "stdDev", "variation", "minLine", "minInnerPoint", "minOuterPoint" })
             Assert.False(result.Outputs.ContainsKey(key), key);
     }
     private static bool Found(NodeExecutorResult result) => result.Outputs["found"].Require<bool>("found");

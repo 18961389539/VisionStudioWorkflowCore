@@ -94,15 +94,24 @@ public sealed class GeometryNumericStabilityTests
         Assert.True(result.Outputs["withinSegments"].Require<bool>("withinSegments"));
     }
 
-    [Fact]
-    public async Task Intersection_PreservesTheAbsoluteParallelTolerance()
+    [Theory]
+    [InlineData(1e-4)]
+    [InlineData(1)]
+    [InlineData(1e4)]
+    public async Task Intersection_ParallelToleranceUsesScaleInvariantAngles(double scale)
     {
-        var inputs = Inputs(("lineA", VisionValue.Line(new(new(0, 0), new(1e-4, 0)))),
-            ("lineB", VisionValue.Line(new(new(0, 0), new(0, 1e-4)))));
-        var result = await new IntersectionNode().ExecuteAsync(inputs, Node("geometry.intersection"), default);
-        Assert.True(result.Outputs["withinSegments"].Require<bool>("withinSegments"));
+        // 夹角 2e-7° 必须大于显式给的 1e-7° 容差才算相交；默认 1e-6° 下面这条仍应判平行。
+        const double angleDeg = 2e-7;
+        var slope = Math.Tan(angleDeg * Math.PI / 180);
+        var inputs = Inputs(("lineA", VisionValue.Line(new(new(0, 0), new(scale, 0)))),
+            ("lineB", VisionValue.Line(new(new(0, 0), new(scale, scale * slope)))));
+
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await new IntersectionNode().ExecuteAsync(
-            inputs, Node("geometry.intersection", new { parallelTolerance = 1e-7 }), default));
+            inputs, Node("geometry.intersection"), default));
+        var result = await new IntersectionNode().ExecuteAsync(
+            inputs, Node("geometry.intersection", new { parallelTolerance = 1e-7 }), default);
+        Assert.Equal(new VisionPoint2D(0, 0), result.Outputs["point"].Require<VisionPoint2D>("point"));
+        Assert.True(result.Outputs["withinSegments"].Require<bool>("withinSegments"));
     }
 
     [Fact]

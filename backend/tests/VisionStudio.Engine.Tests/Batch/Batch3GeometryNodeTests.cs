@@ -123,8 +123,12 @@ public sealed class Batch3GeometryNodeTests
         var pose=scaled.Outputs["pose"].Require<VisionPose2D>("pose");
         Assert.Equal(x.X,pose.X,2); Assert.Equal(x.Y,pose.Y,2); Assert.Equal(x.Theta*180/Math.PI,pose.ThetaDeg,2);
         Assert.Null(scaled.Summary["unitWarning"]);
-        var unscaled=await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,sourceUnit="px",unit="mm"})),default);
-        Assert.NotNull(unscaled.Summary["unitWarning"]);
+        var unscaled = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,sourceUnit="px",unit="mm"})),default));
+        Assert.Contains("visionScale=1", unscaled.Message);
+        // confirmUnitScale 只在人工核对过尺度来源后放行，并保留告警供下游追溯。
+        var confirmed = await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,sourceUnit="px",unit="mm",confirmUnitScale=true})),default);
+        Assert.NotNull(confirmed.Summary["unitWarning"]);
     }
 
     [Fact]

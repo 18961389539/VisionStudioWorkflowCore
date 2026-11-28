@@ -17,9 +17,7 @@ public sealed class JlVisionOperatorSurfaceContourTests
     [MemberData(nameof(Operators))]
     public async Task ContourOperator_Executes(string key)
     {
-        var result = await Run(key,
-            """{"operator":"__KEY__","size":30,"count":5,"row":48,"column":48,"phi":0,"length1":20,"length2":12,"min":0,"max":1000000000,"mode":""}"""
-                .Replace("__KEY__", key));
+        var result = await Run(key, CatalogDefaultParametersJson(key));
 
         Assert.Equal(key, Convert.ToString(result.Summary["operator"]));
         // 生成器不受输入影响；其余算子至少产出 0 条轮廓（裁剪可能清空），但必须能枚举。
@@ -46,6 +44,28 @@ public sealed class JlVisionOperatorSurfaceContourTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await Run("differenceClosedContours", """{"operator":"differenceClosedContours"}""", withSecond: false));
         Assert.Contains("requires a contour2 input", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""{"operator":"closeContours","size":6}""", "size")]
+    [InlineData("""{"operator":"closeContours","mode":"unused"}""", "mode")]
+    public async Task ContourOperator_RejectsIrrelevantNonDefaultParameter(string json, string parameter)
+    {
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Run("closeContours", json));
+
+        Assert.Contains($"rejects irrelevant non-default parameter(s): {parameter}", error.Message, StringComparison.Ordinal);
+    }
+
+    private static string CatalogDefaultParametersJson(string key)
+    {
+        var node = new NodeDefinition("n1", "jlvision.contourOp", null, null,
+            new Dictionary<string, JsonElement> { ["operator"] = JsonSerializer.SerializeToElement(key) });
+        var catalog = BuiltInNodeCatalog.Require(node.Type);
+        var parameters = catalog.Parameters.ToDictionary(parameter => parameter.Name,
+            parameter => JsonSerializer.SerializeToElement(OperatorParameterForms.Resolve(node, catalog, parameter).DefaultValue));
+        parameters["operator"] = JsonSerializer.SerializeToElement(key);
+        return JsonSerializer.Serialize(parameters);
     }
 
     private static async Task<NodeExecutorResult> Run(string key, string json, bool withSecond = true)

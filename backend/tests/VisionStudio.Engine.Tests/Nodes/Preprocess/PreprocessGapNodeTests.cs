@@ -81,6 +81,22 @@ public sealed class PreprocessGapNodeTests
         Assert.Equal(42, processed.At<byte>(0, 0));
     }
 
+    [Fact]
+    public void ByteSaturation_CountsLowAndHighSamplesAcrossChannels()
+    {
+        using var source = new Mat(2, 2, MatType.CV_8UC3, Scalar.All(128));
+        source.Set(0, 0, new Vec3b(0, 255, 128));
+        source.Set(0, 1, new Vec3b(255, 0, 255));
+        source.Set(1, 0, new Vec3b(0, 0, 0));
+        source.Set(1, 1, new Vec3b(1, 254, 2));
+
+        var saturation = PreprocessP1Diagnostics.ByteSaturation(source, 255);
+
+        Assert.Equal(5, saturation.Low);
+        Assert.Equal(3, saturation.High);
+        Assert.Equal(2d / 3, saturation.Ratio, 12);
+    }
+
     // ── CLAHE ───────────────────────────────────────────────────────
     [Fact]
     public async Task Clahe_RaisesLocalContrast_InTheDarkHalf()

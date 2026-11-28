@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine;
@@ -35,9 +37,13 @@ public sealed class ScriptWorkerProcessTests
             Assert.Equal(VisionPluginWorkerProtocol.Version, discovery.Discovery!.ProtocolVersion);
             Assert.Contains(discovery.Discovery.Tools, tool => tool.Catalog.Type == "script.csharp");
 
+            const string source = "Output.Number = Input.Number(\"a\") * 2;";
             var parameters = new Dictionary<string, JsonElement>
             {
-                ["source"] = JsonSerializer.SerializeToElement("Output.Number = Input.Number(\"a\") * 2;")
+                ["source"] = JsonSerializer.SerializeToElement(source),
+                ["scriptApproved"] = JsonSerializer.SerializeToElement(true),
+                ["approvedSourceSha256"] = JsonSerializer.SerializeToElement(
+                    Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))))
             };
             var execute = await ExchangeAsync(server, new PluginWorkerRequest
             {

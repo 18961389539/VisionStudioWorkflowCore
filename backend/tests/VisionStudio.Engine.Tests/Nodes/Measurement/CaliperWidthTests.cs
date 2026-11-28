@@ -201,6 +201,44 @@ public sealed class CaliperWidthTests
         Assert.Contains("frame", error.Message);
     }
 
+    [Fact]
+    public async Task ToleranceGateSeparatesOutOfToleranceFromNotMeasured()
+    {
+        // 33.5px 的亮条：搜索线固定，只改变公差配置。
+        using var image = MakeStrip(30.25, 63.75);
+        var measured = await Run(image, new() { ["nominalWidth"] = 33.5 });
+        DisposeImage(measured);
+        Assert.True(Found(measured));
+        Assert.Equal("not-evaluated", measured.Outputs["evaluationState"].Require<string>("evaluationState"));
+        Assert.False(measured.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+
+        var passing = await Run(image, new() { ["nominalWidth"] = 33.5, ["lowerTolerance"] = 0.5, ["upperTolerance"] = 0.5 });
+        DisposeImage(passing);
+        Assert.True(Found(passing));
+        Assert.True(passing.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.Equal("pass", passing.Outputs["evaluationState"].Require<string>("evaluationState"));
+        Assert.InRange(passing.Outputs["widthDeviation"].Require<double>("widthDeviation"), -0.5, 0.5);
+
+        // 超差必须仍然输出 width 与端点，只是判定 fail——不能让 NG 退化成“未测到”。
+        var failing = await Run(image, new() { ["nominalWidth"] = 33.5, ["lowerTolerance"] = 0.01, ["upperTolerance"] = 0.01 });
+        DisposeImage(failing);
+        Assert.True(Found(failing));
+        Assert.True(failing.Outputs.ContainsKey("width"));
+        Assert.False(failing.Outputs["withinTolerance"].Require<bool>("withinTolerance"));
+        Assert.True(failing.Outputs["widthOutOfTolerance"].Require<bool>("widthOutOfTolerance"));
+        Assert.Equal("fail", failing.Outputs["evaluationState"].Require<string>("evaluationState"));
+        Assert.Equal("ok", failing.Summary["reason"]);
+    }
+
+    [Fact]
+    public async Task NegativeToleranceIsRejected()
+    {
+        using var image = MakeStrip(30.25, 63.75);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(image, new() { ["lowerTolerance"] = -1 }));
+        Assert.Contains("non-negative", error.Message);
+    }
+
     private static VisionNodeRegistry Registry()
     {
         var registry = new VisionNodeRegistry();

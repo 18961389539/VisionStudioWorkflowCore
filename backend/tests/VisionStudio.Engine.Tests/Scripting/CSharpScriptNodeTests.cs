@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -55,6 +57,18 @@ public sealed class CSharpScriptNodeTests
         Assert.Equal(source.Height, outputImage.Height);
         Assert.Equal("gray", result.Outputs["text"].Require<string>("text"));
         Assert.True(result.Outputs["number"].Require<double>("number") > 0);
+    }
+
+    [Fact]
+    public async Task Script_RequiresApprovalBoundToExactSource()
+    {
+        var unapproved = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run("Output.Number = 1;", extra: """{"scriptApproved":false}"""));
+        Assert.Contains("requires explicit approval", unapproved.Message);
+
+        var tampered = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run("Output.Number = 2;", extra: """{"approvedSourceSha256":"0000000000000000000000000000000000000000000000000000000000000000"}"""));
+        Assert.Contains("does not match", tampered.Message);
     }
 
     [Fact]
@@ -238,7 +252,10 @@ public sealed class CSharpScriptNodeTests
         inputs ??= [];
         var parameters = new Dictionary<string, JsonElement>
         {
-            ["source"] = JsonSerializer.SerializeToElement(source)
+            ["source"] = JsonSerializer.SerializeToElement(source),
+            ["scriptApproved"] = JsonSerializer.SerializeToElement(true),
+            ["approvedSourceSha256"] = JsonSerializer.SerializeToElement(
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))))
         };
         if (extra is not null)
         {

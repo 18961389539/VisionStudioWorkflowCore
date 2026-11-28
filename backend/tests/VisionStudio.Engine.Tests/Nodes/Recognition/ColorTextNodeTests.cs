@@ -86,9 +86,15 @@ public sealed class ColorTextNodeTests : IDisposable
         Assert.InRange(result.Outputs["deltaE"].Require<double>("deltaE"), 170.4, 170.8);
         var input = Image(source); input["reference"] = VisionValue.Image(source);
         result = await Run(new ColorDifferenceNode(), input);
+        Assert.False(result.Outputs["found"].Require<bool>("found"));
+        Assert.False(result.Outputs["alignmentValid"].Require<bool>("alignmentValid"));
+        Assert.False(result.Outputs.ContainsKey("deltaE"));
+        result = await Run(new ColorDifferenceNode(), input,
+            new { referenceRegistered = true, registrationResidualPx = 0 });
         Assert.InRange(result.Outputs["deltaE"].Require<double>("deltaE"), 0, .0001);
         input["region"] = VisionValue.Region(new(16, 16, []));
-        result = await Run(new ColorDifferenceNode(), input);
+        result = await Run(new ColorDifferenceNode(), input,
+            new { referenceRegistered = true, registrationResidualPx = 0 });
         Assert.False(result.Outputs["found"].Require<bool>("found")); Assert.False(result.Outputs.ContainsKey("deltaE"));
         var threshold = await Run(new RegionFromThresholdNode(), new() { ["domainImage"] = result.Outputs["domainImage"] }, new { minGray = 0, maxGray = 255 });
         Assert.Equal(0d, threshold.Outputs["area"].Require<double>("area"));

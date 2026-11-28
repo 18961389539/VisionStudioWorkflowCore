@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine;
@@ -770,7 +770,9 @@ public sealed class Batch5CaliperRegressionTests
         var unmasked = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(Inputs(croppedImage)), node, CancellationToken.None);
         Assert.True(Convert.ToBoolean(unmasked.Summary["found"]));
         var unmaskedRadius = unmasked.Outputs["circle"].Require<VisionCircle>("circle").Radius;
-        Assert.True(Math.Abs(unmaskedRadius - 10) > 1.5, $"Expected the zeroed crop boundary to bias the fit, got radius={unmaskedRadius}.");
+        // measure.fitCircle 的确定性鲁棒种子会优先选择支撑最多的圆，稀疏的裁剪边界不再把半径拉偏；
+        // 这里保留“掩膜后必须精确”的硬断言，同时确认无掩膜时结果仍是可用的真实圆而不是被边界带跑。
+        Assert.InRange(unmaskedRadius, 8.5, 11.5);
         (unmasked.Outputs["image"].Value as IDisposable)?.Dispose();
 
         var maskedInputs = Inputs(croppedImage);

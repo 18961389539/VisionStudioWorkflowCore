@@ -46,7 +46,8 @@ public sealed class Batch5ShapeMatchTests
         Assert.Equal(angle, pose.ThetaDeg);
 
         // 单目标 detections 与 count。
-        Assert.Equal(1, Convert.ToInt32(result.Outputs["count"].Require<long>("count")));
+        var shapeCount = Convert.ToInt32(result.Outputs["count"].Require<long>("count"));
+        Assert.Equal(1, shapeCount);
         var detections = result.Outputs["detections"].Require<IReadOnlyList<VisionDetection>>("detections");
         Assert.Single(detections);
         Assert.NotNull(detections[0].Confidence);
@@ -518,6 +519,15 @@ public sealed class Batch5ShapeMatchTests
         var expectedPose = TemplateCentroidThrough(expectedTransform);
         Assert.InRange(matched.Outputs["x"].Require<double>("x"), expectedPose.X - 3, expectedPose.X + 3);
         Assert.InRange(matched.Outputs["y"].Require<double>("y"), expectedPose.Y - 3, expectedPose.Y + 3);
+
+        var stale = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+                parameters.Replace("\"trainingOriginX\":0", "\"trainingOriginX\":1", StringComparison.Ordinal)));
+        Assert.Contains("Train the model again", stale.Message);
+        var tampered = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+                parameters.Replace("\"modelMode\":\"trained\"", "\"modelMode\":\"trained\",\"trainedModelHash\":\"" + new string('0', 64) + "\"", StringComparison.Ordinal)));
+        Assert.Contains("hash mismatch", tampered.Message);
     }
 
     [Fact]

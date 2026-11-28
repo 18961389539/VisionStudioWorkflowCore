@@ -22,7 +22,12 @@ public sealed class ProductionTraceWriterIntegrationTests
             [new("source", "image.synthetic", null, null, new()
             {
                 ["width"] = JsonSerializer.SerializeToElement(160),
-                ["height"] = JsonSerializer.SerializeToElement(120)
+                ["height"] = JsonSerializer.SerializeToElement(120),
+                // 合成图默认圆心/半径按 1280x960 画布设计，小画布必须显式收到画布内，
+                // 否则 image.synthetic 会按越界规则拒绝执行。
+                ["centerX"] = JsonSerializer.SerializeToElement(80),
+                ["centerY"] = JsonSerializer.SerializeToElement(60),
+                ["radius"] = JsonSerializer.SerializeToElement(40)
             })], []);
         var options = traces.GetArtifactOptions(32L * 1024 * 1024);
         var result = await runner.RunAsync(workflow, new(Artifacts: options));

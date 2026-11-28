@@ -7,11 +7,11 @@ namespace VisionStudio.Engine.Tests;
 public sealed class FaultInjectionTests
 {
     [Fact]
-    public async Task RobotHandshake_RetriesAfterInjectedTransientMoveFailure()
+    public async Task RobotHandshake_RetriesAfterInjectedTransientSendFailure()
     {
         var observer = new RecordingObserver();
         await using var manager = new RobotManager([observer]);
-        var adapter = new FailFirstMoveRobotAdapter();
+        var adapter = new FailFirstSendRobotAdapter();
         manager.Register(adapter);
 
         var target = new VisionRobotTarget2D(545, 255, 31, "RobotBase", "mm", "ABB", "FaultInjection");
@@ -83,10 +83,10 @@ public sealed class FaultInjectionTests
         }
     }
 
-    private sealed class FailFirstMoveRobotAdapter : IRobot2DAdapter
+    private sealed class FailFirstSendRobotAdapter : IRobot2DAdapter
     {
         private readonly VirtualAbbRobotAdapter _inner = new();
-        private int _moveCalls;
+        private int _sendCalls;
         public int InjectedFailures { get; private set; }
         public string Id => _inner.Id;
         public string Name => _inner.Name;
@@ -100,17 +100,19 @@ public sealed class FaultInjectionTests
         public Task ConnectAsync(CancellationToken cancellationToken = default) => _inner.ConnectAsync(cancellationToken);
         public Task DisconnectAsync(CancellationToken cancellationToken = default) => _inner.DisconnectAsync(cancellationToken);
         public Task ApplySettingsAsync(RobotRuntimeSettings settings, CancellationToken cancellationToken = default) => _inner.ApplySettingsAsync(settings, cancellationToken);
-        public Task<RobotCommandReceipt> SendTargetAsync(VisionRobotTarget2D target, CancellationToken cancellationToken = default) => _inner.SendTargetAsync(target, cancellationToken);
 
-        public Task<RobotCommandReceipt> MoveToAsync(VisionRobotTarget2D target, CancellationToken cancellationToken = default)
+        public Task<RobotCommandReceipt> SendTargetAsync(VisionRobotTarget2D target, CancellationToken cancellationToken = default)
         {
-            if (Interlocked.Increment(ref _moveCalls) == 1)
+            if (Interlocked.Increment(ref _sendCalls) == 1)
             {
                 InjectedFailures++;
-                throw new IOException("Injected transient robot transport failure before Execute.");
+                throw new IOException("Injected transient robot transport failure before TargetReady.");
             }
-            return _inner.MoveToAsync(target, cancellationToken);
+            return _inner.SendTargetAsync(target, cancellationToken);
         }
+
+        public Task<RobotCommandReceipt> MoveToAsync(VisionRobotTarget2D target, CancellationToken cancellationToken = default)
+            => _inner.MoveToAsync(target, cancellationToken);
 
         public Task AcknowledgeAsync(long commandId, CancellationToken cancellationToken = default) => _inner.AcknowledgeAsync(commandId, cancellationToken);
         public Task StopAsync(CancellationToken cancellationToken = default) => _inner.StopAsync(cancellationToken);
