@@ -7,7 +7,11 @@ internal static class MetrologyCatalog
         new("measure.metrology", "Metrology Model", "Measurement",
             [new("exec", VisionDataType.Control), new("image", VisionDataType.Image), new("pose", VisionDataType.Pose2D, Required: false)],
             [new("image", VisionDataType.Image), new("found", VisionDataType.Boolean), new("count", VisionDataType.Integer),
-                new("foundCount", VisionDataType.Integer), new("qualityUnknownCount", VisionDataType.Integer), new("measurements", VisionDataType.String), new("results", VisionDataType.MetrologyResults),
+                new("foundCount", VisionDataType.Integer), new("objectCount", VisionDataType.Integer),
+                new("addedCount", VisionDataType.Integer), new("addFailureCount", VisionDataType.Integer), new("missingCount", VisionDataType.Integer),
+                new("previewOnly", VisionDataType.Boolean),
+                new("qualityUnknownCount", VisionDataType.Integer), new("residualExceededCount", VisionDataType.Integer),
+                new("measurements", VisionDataType.String), new("results", VisionDataType.MetrologyResults),
                 new("residualRms", VisionDataType.Double, Required: false), new("residualMax", VisionDataType.Double, Required: false),
                 new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
@@ -43,7 +47,9 @@ internal static class MetrologyCatalog
                     ], Group: "Measure", Description: "Which detected edge inside each measure region feeds the fit."),
                 new("minScore", "Minimum Edge Score", "number", 0.3, 0, 1, 0.01, Group: "Measure", Description: "Native minimum fuzzy score for a measure region to contribute."),
                 new("requireAllFound", "Require All Objects", "boolean", true, Group: "Result", Description: "true = found requires every object to produce a result; false = found when at least one object succeeds. Per-object results are always returned in measurements."),
-                new("confirmUnknownQuality", "Confirm Unknown Quality", "boolean", false, Group: "Result", Description: "Explicit manual confirmation for ellipse/rectangle2 qualityUnknown results. Default false blocks automatic PASS; per-object qualityConfirmed can be used instead.")
+                new("confirmUnknownQuality", "Confirm Unknown Quality", "boolean", false, Group: "Result", Description: "Explicit manual confirmation for ellipse/rectangle2 qualityUnknown results. Default false blocks automatic PASS; per-object qualityConfirmed can be used instead."),
+                new("requireQualityKnown", "Require Quality Known", "boolean", true, Group: "Result", Description: "true = an object whose quality is unknown blocks found; false = geometry alone decides. Ellipse/rectangle2 have no computable residual, so they stay qualityUnknown unless confirmed."),
+                new("maxResidualPx", "Max Per-Object Residual (0=off)", "number", 0, 0, 100000, 0.01, Unit: "px", Group: "Result", Description: "Per-object residual gate. residualRms averages bad objects away; this rejects any single object above the limit with qualityStatus=residual-exceeded.")
             ],
             "One JLVision metrology model with mixed line / circle / ellipse / rectangle2 measurement objects, applied once per image. " +
             "Objects can be rigidly aligned by a pose input (dynamic ROI) or fixed offsets, which is the intended way to measure at a located position. " +

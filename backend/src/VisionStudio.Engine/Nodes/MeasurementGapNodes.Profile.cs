@@ -199,6 +199,11 @@ public sealed class MinimumZoneCircleNode : IVisionNodeExecutor
         if (maxIterations is < 10 or > 10000) throw new InvalidOperationException("measure.mzCircle maxIterations must be within 10..10000.");
         var maxZone = node.GetDouble("maxZoneWidth", 0);
         if (!double.IsFinite(maxZone) || maxZone < 0) throw new InvalidOperationException("measure.mzCircle maxZoneWidth must be finite and >= 0 (0 disables the gate).");
+        var nominalRadius = node.GetDouble("nominalRadius", 0);
+        var radiusTolerance = node.GetDouble("radiusTolerance", 0);
+        if (!double.IsFinite(nominalRadius) || nominalRadius < 0) throw new InvalidOperationException("measure.mzCircle nominalRadius must be finite and >= 0 (0 keeps the zone-width gate).");
+        if (!double.IsFinite(radiusTolerance) || radiusTolerance < 0) throw new InvalidOperationException("measure.mzCircle radiusTolerance must be finite and >= 0.");
+        if (nominalRadius > 0 && radiusTolerance <= 0) throw new InvalidOperationException("measure.mzCircle radiusTolerance must be > 0 when nominalRadius is set.");
 
         var points = ProfileMath.SelectContour(context, node, true);
         if (points.Length < 5) return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", nodeType: Type));
@@ -233,51 +238,90 @@ public sealed class MinimumZoneCircleNode : IVisionNodeExecutor
             };
         }
 
-        // 确定性模式搜索：从最小二乘圆心出发，8 方向试探 + 步长减半。
-        // 目标函数关于圆心的分段光滑（max/min 切换处有拐点），坐标下降足够且从不依赖点序。
-        var best = (Cx: lsq.X, Cy: lsq.Y);
-        var bestCost = Cost(best.Cx, best.Cy);
-        var step = Math.Max(precision, lsq.Radius * .05);
-        var iterations = 0;
-        var maxSteps = maxIterations * 12;
-        while (step > precision && iterations < maxSteps)
+        // 确定性模式搜索：8 方向试探 + 步长减半。目标函数关于圆心分段光滑（max/min 切换处有拐点），
+        // 坐标下降足够且不依赖点序；但单起点可能停在局部最优，因此用多个确定性起点交叉验证。
+        (double Cx, double Cy, double Cost, int Steps, bool Exhausted) Search(double startX, double startY)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var improved = false;
-            for (var k = 0; k < 8; k++)
+            var cx = startX; var cy = startY;
+            var cost = Cost(cx, cy);
+            var step = Math.Max(precision, lsq.Radius * .05);
+            var steps = 0;
+            while (step > precision && steps < maxIterations)
             {
-                var angle = k * Math.PI / 4;
-                var candidate = (Cx: best.Cx + step * Math.Cos(angle), Cy: best.Cy + step * Math.Sin(angle));
-                var cost = Cost(candidate.Cx, candidate.Cy);
-                if (cost < bestCost - 1e-12) { best = candidate; bestCost = cost; improved = true; }
+                cancellationToken.ThrowIfCancellationRequested();
+                var improved = false;
+                for (var k = 0; k < 8; k++)
+                {
+                    var angle = k * Math.PI / 4;
+                    var candidateX = cx + step * Math.Cos(angle); var candidateY = cy + step * Math.Sin(angle);
+                    var candidateCost = Cost(candidateX, candidateY);
+                    if (candidateCost < cost - 1e-12) { cx = candidateX; cy = candidateY; cost = candidateCost; improved = true; }
+                }
+                steps++;
+                if (!improved) step *= .5;
             }
-            iterations++;
-            if (!improved) step *= .5;
+            return (cx, cy, cost, steps, steps >= maxIterations && step > precision);
         }
-        if (iterations >= maxSteps)
-            throw new InvalidOperationException("measure.mzCircle did not converge within maxIterations; loosen precision or raise the budget.");
+
+        var probe = Math.Max(precision, lsq.Radius * .05);
+        var starts = new (double X, double Y)[] { (lsq.X, lsq.Y), (lsq.X + probe, lsq.Y), (lsq.X - probe, lsq.Y), (lsq.X, lsq.Y + probe), (lsq.X, lsq.Y - probe) };
+        var runs = new (double Cx, double Cy, double Cost, int Steps, bool Exhausted)[starts.Length];
+        for (var index = 0; index < starts.Length; index++) runs[index] = Search(starts[index].X, starts[index].Y);
+        var best = runs.OrderBy(run => run.Cost).First();
+        var worstCost = runs.Max(run => run.Cost);
+        var optimalityGap = worstCost - best.Cost;
+        // 模式搜索的终止精度是 precision，允许 4 倍余量吸收分段函数折点处的误差。
+        var convergenceTolerance = Math.Max(precision * 4, 1e-9);
+        var converged = !best.Exhausted && optimalityGap <= convergenceTolerance;
+        var iterations = runs.Sum(run => run.Steps);
 
         var final = Evaluate(best.Cx, best.Cy);
-        var within = maxZone <= 0 || final.Width <= maxZone;
         var shift = MeasurementMath.Hypot(final.Cx - lsq.X, final.Cy - lsq.Y);
-        var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", true), ("mode", mode),
+        var radiusMode = mode is "minimumcircumscribed" or "maximuminscribed";
+        // 图纸公差在三种模式下约束的对象不同：minZone 约束径向区宽，外接/内切圆约束半径。
+        // 未给名义半径时回退到 maxZoneWidth，保证既有工作流行为不变。
+        var gateMetric = radiusMode
+            ? nominalRadius > 0 ? "radius" : maxZone > 0 ? "zoneWidth" : "none"
+            : maxZone > 0 ? "zoneWidth" : "none";
+        double? gateValue = gateMetric switch { "radius" => final.Radius, "zoneWidth" => final.Width, _ => null };
+        double? gateLimit = gateMetric == "radius" ? radiusTolerance : gateMetric == "zoneWidth" ? maxZone : null;
+        var gateDeviation = gateMetric == "radius" ? final.Radius - nominalRadius : (double?)null;
+        var within = gateMetric switch
+        {
+            "radius" => Math.Abs(final.Radius - nominalRadius) <= radiusTolerance + 1e-9,
+            "zoneWidth" => final.Width <= maxZone + 1e-9,
+            _ => false
+        };
+        var evaluationState = gateMetric == "none" ? "not-evaluated" : within ? "pass" : "fail";
+        var found = converged;
+        var reason = !converged ? "not-converged" : evaluationState == "not-evaluated" ? "not-evaluated" : within ? "ok" : "tolerance-exceeded";
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("found", found), ("reason", reason), ("mode", mode),
             ("radius", final.Radius), ("zoneWidth", final.Width), ("lsqRadius", lsq.Radius), ("centerShift", shift),
-            ("iterations", iterations), ("sampleCount", points.Length), ("withinTolerance", within));
+            ("iterations", iterations), ("startCount", starts.Length), ("converged", converged), ("optimalityGap", optimalityGap),
+            ("convergenceTolerance", convergenceTolerance), ("sampleCount", points.Length),
+            ("gateMetric", gateMetric), ("gateValue", gateValue), ("gateLimit", gateLimit), ("withinTolerance", within),
+            ("evaluationState", evaluationState));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
-                ["found"] = VisionValue.Boolean(true), ["sampleCount"] = VisionValue.Integer(points.Length),
+                ["found"] = VisionValue.Boolean(found), ["sampleCount"] = VisionValue.Integer(points.Length),
                 ["circle"] = VisionValue.Circle(new VisionCircle(final.Cx, final.Cy, final.Radius)),
                 ["center"] = VisionValue.Point(new VisionPoint2D(final.Cx, final.Cy)), ["radius"] = VisionValue.Double(final.Radius),
                 ["zoneWidth"] = VisionValue.Double(final.Width), ["lsqRadius"] = VisionValue.Double(lsq.Radius),
                 ["centerShift"] = VisionValue.Double(shift), ["iterations"] = VisionValue.Integer(iterations),
+                ["converged"] = VisionValue.Boolean(converged), ["optimalityGap"] = VisionValue.Double(optimalityGap),
+                ["startCount"] = VisionValue.Integer(starts.Length),
+                ["gateMetric"] = VisionValue.String(gateMetric), ["evaluationState"] = VisionValue.String(evaluationState),
+                ["reason"] = VisionValue.String(reason),
                 ["withinTolerance"] = VisionValue.Boolean(within), ["diagnostics"] = VisionValue.String(diagnostics)
             },
             new Dictionary<string, object?>
             {
-                ["found"] = true, ["mode"] = mode, ["radius"] = final.Radius, ["zoneWidth"] = final.Width,
-                ["lsqRadius"] = lsq.Radius, ["centerShift"] = shift, ["iterations"] = iterations,
-                ["sampleCount"] = points.Length, ["withinTolerance"] = within, ["maxZoneWidth"] = maxZone,
+                ["found"] = found, ["reason"] = reason, ["mode"] = mode, ["radius"] = final.Radius, ["zoneWidth"] = final.Width,
+                ["lsqRadius"] = lsq.Radius, ["centerShift"] = shift, ["iterations"] = iterations, ["startCount"] = starts.Length,
+                ["converged"] = converged, ["optimalityGap"] = optimalityGap, ["convergenceTolerance"] = convergenceTolerance,
+                ["sampleCount"] = points.Length, ["withinTolerance"] = within, ["evaluationState"] = evaluationState,
+                ["gateMetric"] = gateMetric, ["maxZoneWidth"] = maxZone, ["nominalRadius"] = nominalRadius, ["radiusTolerance"] = radiusTolerance,
                 ["unit"] = "px", ["algorithmBackend"] = "managed", ["diagnostics"] = diagnostics
             },
             [new("mz-circle", VisionOverlayType.Circle, X: final.Cx, Y: final.Cy, Radius: final.Radius,

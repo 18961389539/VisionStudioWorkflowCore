@@ -164,14 +164,114 @@ var a = ToleranceGeometry.Circle(context, "circleA"); var b = ToleranceGeometry.
         var offset = new VisionPoint2D(b.X - a.X, b.Y - a.Y); var distance = MeasurementMath.Hypot(offset.X, offset.Y);
         if (!double.IsFinite(distance) || !double.IsFinite(offset.X) || !double.IsFinite(offset.Y)) throw new InvalidOperationException("measure.concentricity produced non-finite output.");
         var limit = node.GetDouble("maxCenterDistance", 0); if (!double.IsFinite(limit) || limit < 0) throw new InvalidOperationException("measure.concentricity maxCenterDistance must be finite and >= 0 (0 disables the tolerance).");
-        var within = limit <= 0 || distance <= limit;
+        var requireQualityKnown = node.GetBool("requireQualityKnown", false);
+        var maxFitError = node.GetDouble("maxFitError", 0);
+        var minSampleCount = node.GetInt("minSampleCount", 0);
+        var minCoverageDeg = node.GetDouble("minCoverageDeg", 0);
+        if (!double.IsFinite(maxFitError) || maxFitError < 0)
+            throw new InvalidOperationException("measure.concentricity maxFitError must be finite and >= 0 (0 disables the gate).");
+        if (minSampleCount < 0)
+            throw new InvalidOperationException("measure.concentricity minSampleCount must be >= 0 (0 disables the gate).");
+        if (!double.IsFinite(minCoverageDeg) || minCoverageDeg is < 0 or > 360)
+            throw new InvalidOperationException("measure.concentricity minCoverageDeg must be within 0..360 (0 disables the gate).");
+
+        var qualityA = ReadQuality(context, "circleA", "qualityA");
+        var qualityB = ReadQuality(context, "circleB", "qualityB");
+        // 质量门一旦配置就必须有证据：缺少元数据时不得给出合格结论。
+        string? qualityFailure = null;
+        foreach (var (name, quality) in new[] { ("circleA", qualityA), ("circleB", qualityB) })
+        {
+            if (quality is null)
+            {
+                if (requireQualityKnown) qualityFailure ??= "quality-unknown:" + name;
+                continue;
+            }
+            if (maxFitError > 0)
+            {
+                if (quality.FitError is not { } fitError) qualityFailure ??= "quality-unknown:" + name;
+                else if (fitError > maxFitError + 1e-12) qualityFailure ??= "quality-insufficient:" + name;
+            }
+            if (minSampleCount > 0 && (quality.SampleCount ?? 0) < minSampleCount) qualityFailure ??= "quality-insufficient:" + name;
+            if (minCoverageDeg > 0 && (quality.CoverageDeg ?? 0) < minCoverageDeg) qualityFailure ??= "quality-insufficient:" + name;
+        }
+        var qualityOk = qualityFailure is null;
         var toleranceEnabled = limit > 0;
-        var evaluationState = !toleranceEnabled ? "not-evaluated" : within ? "pass" : "fail";
+        var within = toleranceEnabled && distance <= limit + 1e-9 && qualityOk;
+        var evaluationState = !toleranceEnabled ? "not-evaluated" : !qualityOk ? "quality-insufficient" : within ? "pass" : "fail";
+        var reason = !toleranceEnabled ? "not-evaluated" : !qualityOk ? qualityFailure! : within ? "ok" : "center-distance-exceeded";
+        // circleA 是基准：centerOffset = circleB - circleA，角度按图像坐标系逆时针为正。
         var angle = Math.Atan2(offset.Y, offset.X) * 180 / Math.PI;
-        var diag = CoordinateValidation.Diagnostics(Type, ("centerDistance", distance), ("diametralOffset", 2 * distance), ("offsetAngleDeg", angle), ("maxCenterDistance", limit), ("toleranceEnabled", toleranceEnabled), ("evaluationState", evaluationState), ("withinTolerance", within));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["centerDistance"] = VisionValue.Double(distance), ["diametralOffset"] = VisionValue.Double(2 * distance), ["centerOffset"] = VisionValue.Point(offset), ["withinTolerance"] = VisionValue.Boolean(within), ["toleranceEnabled"] = VisionValue.Boolean(toleranceEnabled), ["evaluationState"] = VisionValue.String(evaluationState), ["diagnostics"] = VisionValue.String(diag) },
-            new Dictionary<string, object?> { ["centerDistance"] = distance, ["diametralOffset"] = 2 * distance, ["unit"] = "px", ["withinTolerance"] = within, ["toleranceEnabled"] = toleranceEnabled, ["evaluationState"] = evaluationState, ["diagnostics"] = diag },
+        var diag = CoordinateValidation.Diagnostics(Type,
+            ("centerDistance", distance), ("diametralOffset", 2 * distance), ("offsetAngleDeg", angle),
+            ("deltaX", offset.X), ("deltaY", offset.Y), ("referenceCircle", "circleA"),
+            ("maxCenterDistance", limit), ("toleranceEnabled", toleranceEnabled),
+            ("requireQualityKnown", requireQualityKnown), ("maxFitError", maxFitError),
+            ("minSampleCount", minSampleCount), ("minCoverageDeg", minCoverageDeg),
+            ("fitErrorA", qualityA?.FitError), ("fitErrorB", qualityB?.FitError),
+            ("sampleCountA", qualityA?.SampleCount), ("sampleCountB", qualityB?.SampleCount),
+            ("coverageDegA", qualityA?.CoverageDeg), ("coverageDegB", qualityB?.CoverageDeg),
+            ("evaluationState", evaluationState), ("reason", reason), ("withinTolerance", within));
+        var outputs = new Dictionary<string, VisionValue>
+        {
+            ["centerDistance"] = VisionValue.Double(distance), ["diametralOffset"] = VisionValue.Double(2 * distance),
+            ["centerOffset"] = VisionValue.Point(offset), ["deltaX"] = VisionValue.Double(offset.X), ["deltaY"] = VisionValue.Double(offset.Y),
+            ["offsetAngleDeg"] = VisionValue.Double(angle), ["referenceCircle"] = VisionValue.String("circleA"),
+            ["withinTolerance"] = VisionValue.Boolean(within), ["toleranceEnabled"] = VisionValue.Boolean(toleranceEnabled),
+            ["qualityStatusA"] = VisionValue.String(qualityA is null ? "unknown" : "known"),
+            ["qualityStatusB"] = VisionValue.String(qualityB is null ? "unknown" : "known"),
+            ["evaluationState"] = VisionValue.String(evaluationState), ["reason"] = VisionValue.String(reason),
+            ["diagnostics"] = VisionValue.String(diag)
+        };
+        if (qualityA?.FitError is { } errorA) outputs["fitErrorA"] = VisionValue.Double(errorA);
+        if (qualityB?.FitError is { } errorB) outputs["fitErrorB"] = VisionValue.Double(errorB);
+        if (qualityA?.SampleCount is { } countA) outputs["sampleCountA"] = VisionValue.Integer(countA);
+        if (qualityB?.SampleCount is { } countB) outputs["sampleCountB"] = VisionValue.Integer(countB);
+        if (qualityA?.CoverageDeg is { } coverageA) outputs["coverageDegA"] = VisionValue.Double(coverageA);
+        if (qualityB?.CoverageDeg is { } coverageB) outputs["coverageDegB"] = VisionValue.Double(coverageB);
+        return ValueTask.FromResult(new NodeExecutorResult(outputs,
+            new Dictionary<string, object?>
+            {
+                ["centerDistance"] = distance, ["diametralOffset"] = 2 * distance, ["unit"] = "px",
+                ["offsetAngleDeg"] = angle, ["referenceCircle"] = "circleA",
+                ["withinTolerance"] = within, ["toleranceEnabled"] = toleranceEnabled,
+                ["qualityStatusA"] = qualityA is null ? "unknown" : "known",
+                ["qualityStatusB"] = qualityB is null ? "unknown" : "known",
+                ["evaluationState"] = evaluationState, ["reason"] = reason, ["diagnostics"] = diag
+            },
             [ToleranceGeometry.Segment("circle-centre-offset", new(new(a.X, a.Y), new(b.X, b.Y)))]));
+    }
+
+    /// <summary>上游圆拟合的可选质量证据：缺省表示调用方没有提供，不等于质量合格。</summary>
+    private sealed record FitQuality(double? FitError, int? SampleCount, double? CoverageDeg);
+
+    private static FitQuality? ReadQuality(NodeExecutionContext context, string label, string port)
+    {
+        if (!context.TryGetValue(port, out var value)) return null;
+        var json = value.Require<string>(port);
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new InvalidOperationException($"{label} quality '{port}' must be a JSON object with fitError/sampleCount/coverageDeg.");
+            double? fitError = null; int? sampleCount = null; double? coverageDeg = null;
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var key = property.Name;
+                if (key.Equals("fitError", StringComparison.OrdinalIgnoreCase) || key.Equals("rmsError", StringComparison.OrdinalIgnoreCase) || key.Equals("residualPx", StringComparison.OrdinalIgnoreCase))
+                    fitError = property.Value.GetDouble();
+                else if (key.Equals("sampleCount", StringComparison.OrdinalIgnoreCase) || key.Equals("inlierCount", StringComparison.OrdinalIgnoreCase))
+                    sampleCount = property.Value.GetInt32();
+                else if (key.Equals("coverageDeg", StringComparison.OrdinalIgnoreCase))
+                    coverageDeg = property.Value.GetDouble();
+            }
+            if (fitError is < 0 || sampleCount is < 0 || coverageDeg is < 0 or > 360)
+                throw new InvalidOperationException($"{label} quality '{port}' has out-of-range values.");
+            return new FitQuality(fitError, sampleCount, coverageDeg);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"{label} quality '{port}' is not valid JSON: {ex.Message}");
+        }
     }
 }
 

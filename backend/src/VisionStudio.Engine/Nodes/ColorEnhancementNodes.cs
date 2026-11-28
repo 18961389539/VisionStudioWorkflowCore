@@ -213,34 +213,125 @@ public sealed class ColorDifferenceNode : IVisionNodeExecutor
             using var s1 = d1.MultImage(d1, 1d, 0d); using var s2 = d2.MultImage(d2, 1d, 0d); using var s3 = d3.MultImage(d3, 1d, 0d);
             using var sum12 = s1.AddImage(s2, 1d, 0d); using var sum = sum12.AddImage(s3, 1d, 0d); using var distance = sum.SqrtImage();
             using var domain = DefectNodeHelpers.Domain(distance, source.Width, source.Height, scoped, context);
-            var region = JLVisionRegions.FromNative(domain, source.Width, source.Height, cancellationToken); var area = JLVisionRegions.PixelArea(region); var found = area > 0;
-            var outputs = new Dictionary<string, VisionValue> { ["found"] = VisionValue.Boolean(found), ["area"] = VisionValue.Double(area),
-                ["alignmentValid"] = VisionValue.Boolean(true), ["region"] = VisionValue.Region(region) };
-            var summary = new Dictionary<string, object?> { ["found"] = found, ["area"] = area, ["metric"] = "CIE76", ["referenceSource"] = hasReference ? "image" : "srgb-constant", ["algorithmBackend"] = "jlvision" };
+            var differenceRegion = JLVisionRegions.FromNative(domain, source.Width, source.Height, cancellationToken);
+            var differenceArea = JLVisionRegions.PixelArea(differenceRegion);
+
+            var threshold = node.GetDouble("deltaEThreshold", 0);
+            if (!double.IsFinite(threshold) || threshold is < 0 or > 1000)
+                throw new InvalidOperationException("measure.colorDifference deltaEThreshold must be finite within 0..1000 (0 disables the gate).");
+            var thresholdEnabled = threshold > 0;
+            VisionRegion? defectRegion = null; double defectArea = 0;
+            if (thresholdEnabled)
+            {
+                using var above = distance.Threshold(threshold, 1e9);
+                using var clipped = above.Intersection(domain);
+                defectRegion = JLVisionRegions.FromNative(clipped, source.Width, source.Height, cancellationToken);
+                defectArea = JLVisionRegions.PixelArea(defectRegion);
+            }
+            // region/area 是下游一直用的“结果区域”：开启阈值后指向超差区域，未开启时保持完整差异区域。
+            var selectedRegion = defectRegion ?? differenceRegion;
+            var area = thresholdEnabled ? defectArea : differenceArea;
+            var found = differenceArea > 0;
+            var withinTolerance = thresholdEnabled && defectArea == 0;
+            var evaluationState = !thresholdEnabled ? "not-evaluated" : withinTolerance ? "pass" : "fail";
+            var evaluationReason = !found ? "empty-domain" : !thresholdEnabled ? "not-evaluated" : withinTolerance ? "ok" : "above-threshold";
+
+            using var distanceImage = VisionImage.Own(JLVisionImages.ToMat(distance));
+            var (p50, p90, p95, p99, overflow) = Percentiles(distanceImage.Mat, differenceRegion, cancellationToken);
+
+            var outputs = new Dictionary<string, VisionValue>
+            {
+                ["found"] = VisionValue.Boolean(found), ["area"] = VisionValue.Double(area),
+                ["alignmentValid"] = VisionValue.Boolean(true), ["region"] = VisionValue.Region(selectedRegion),
+                ["differenceRegion"] = VisionValue.Region(differenceRegion), ["differenceArea"] = VisionValue.Double(differenceArea),
+                ["thresholdEnabled"] = VisionValue.Boolean(thresholdEnabled), ["deltaEThreshold"] = VisionValue.Double(threshold),
+                ["withinTolerance"] = VisionValue.Boolean(withinTolerance), ["evaluationState"] = VisionValue.String(evaluationState),
+                ["reason"] = VisionValue.String(evaluationReason),
+                ["p50DeltaE"] = VisionValue.Double(p50), ["p90DeltaE"] = VisionValue.Double(p90),
+                ["p95DeltaE"] = VisionValue.Double(p95), ["p99DeltaE"] = VisionValue.Double(p99)
+            };
+            if (defectRegion is not null)
+            {
+                outputs["defectRegion"] = VisionValue.Region(defectRegion);
+                outputs["defectArea"] = VisionValue.Double(defectArea);
+            }
+            var summary = new Dictionary<string, object?>
+            {
+                ["found"] = found, ["area"] = area, ["differenceArea"] = differenceArea, ["defectArea"] = thresholdEnabled ? defectArea : null,
+                ["thresholdEnabled"] = thresholdEnabled, ["deltaEThreshold"] = threshold, ["withinTolerance"] = withinTolerance,
+                ["evaluationState"] = evaluationState, ["reason"] = evaluationReason,
+                ["metric"] = "CIE76", ["referenceSource"] = hasReference ? "image" : "srgb-constant", ["algorithmBackend"] = "jlvision"
+            };
             if (found)
             {
                 var stats = DefectNodeHelpers.Statistics(distance, domain);
                 outputs["deltaE"] = VisionValue.Double(stats.Mean); outputs["maxDeltaE"] = VisionValue.Double(stats.Max); outputs["stdDev"] = VisionValue.Double(stats.Deviation);
-                summary["deltaE"] = stats.Mean; summary["maxDeltaE"] = stats.Max;
+                summary["deltaE"] = stats.Mean; summary["maxDeltaE"] = stats.Max; summary["stdDev"] = stats.Deviation;
             }
+            summary["p50DeltaE"] = p50; summary["p90DeltaE"] = p90; summary["p95DeltaE"] = p95; summary["p99DeltaE"] = p99;
+            summary["clippedDeltaECount"] = overflow;
             var colorDiag = CoordinateValidation.Diagnostics(Type, ("found", found), ("area", area), ("metric", "CIE76"),
                 ("referenceSource", hasReference ? "image" : "srgb-constant"), ("alignmentValid", true),
                 ("referenceFrame", hasReference ? referenceValue!.Require<VisionImage>("reference").CoordinateFrame : "constant"),
                 ("currentFrame", source.CoordinateFrame),
                 ("registrationResidualPx", hasReference ? node.GetDouble("registrationResidualPx", 0) : 0), ("width", source.Width), ("height", source.Height),
+                ("differenceArea", differenceArea), ("defectArea", thresholdEnabled ? defectArea : null),
+                ("thresholdEnabled", thresholdEnabled), ("deltaEThreshold", threshold), ("withinTolerance", withinTolerance),
+                ("evaluationState", evaluationState), ("reason", evaluationReason),
+                ("p50DeltaE", p50), ("p95DeltaE", p95), ("p99DeltaE", p99), ("clippedDeltaECount", overflow),
                 ("deltaE", summary.GetValueOrDefault("deltaE")), ("maxDeltaE", summary.GetValueOrDefault("maxDeltaE")));
             outputs["diagnostics"] = VisionValue.String(colorDiag); summary["diagnostics"] = colorDiag;
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var image = VisionImage.Own(JLVisionImages.ToMat(distance)); outputs["image"] = VisionValue.Image(image);
-                outputs["domainImage"] = VisionValue.DomainImage(new VisionDomainImage(image.CloneOwned(), region));
+                outputs["image"] = VisionValue.Image(distanceImage.CloneOwned());
+                outputs["domainImage"] = VisionValue.DomainImage(new VisionDomainImage(distanceImage.CloneOwned(), selectedRegion));
                 return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
             }
             catch { foreach (var value in outputs.Values) (value.Value as IDisposable)?.Dispose(); throw; }
         }
         finally { reference?.Dispose(); constant?.Dispose(); }
     }
+    /// <summary>在差异区域的像素上建 0.25 ΔE 直方图；>100 的极值单独计数，避免截断后分位数失真。</summary>
+    private static (double P50, double P90, double P95, double P99, long Overflow) Percentiles(Mat mat, VisionRegion region, CancellationToken cancellationToken)
+    {
+        using var single = new Mat();
+        mat.ConvertTo(single, MatType.CV_32F);
+        var rows = single.AsRows<float>();
+        const double binWidth = 0.25; const int bins = 400;
+        var histogram = new long[bins + 1];
+        long overflow = 0;
+        foreach (var component in region.Components)
+        {
+            foreach (var run in component.Runs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                for (var column = run.StartColumn; column <= run.EndColumn; column++)
+                {
+                    var value = rows[run.Row][column];
+                    if (!float.IsFinite(value)) continue;
+                    var bin = value >= 100 ? bins : (int)(value / binWidth);
+                    histogram[bin]++;
+                    if (bin == bins) overflow++;
+                }
+            }
+        }
+        var total = histogram.Sum();
+        double At(double fraction)
+        {
+            if (total == 0) return 0;
+            var target = (long)Math.Ceiling(fraction * total);
+            long cumulative = 0;
+            for (var index = 0; index < histogram.Length; index++)
+            {
+                cumulative += histogram[index];
+                if (cumulative >= target) return Math.Min(100, (index + 1) * binWidth);
+            }
+            return 100;
+        }
+        return (At(.5), At(.9), At(.95), At(.99), overflow);
+    }
+
     private static JlImage Difference(JlImage current, JlImage reference, bool image)
     {
         if (image) return current.SubImage(reference, 1d, 0d);

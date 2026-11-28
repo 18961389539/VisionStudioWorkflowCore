@@ -130,6 +130,76 @@ public sealed class MetrologyNodeTests
         Assert.Contains("zero length", error.Message);
     }
 
+    [Fact]
+    public async Task PerObjectResidualGate_RejectsSingleOutlier()
+    {
+        using var mat = Disk(125, 130, 58, 260);
+        var objects = """[{"type":"circle","name":"bore","row":125,"column":130,"radius":58}]""";
+
+        var passed = await Run(mat, new() { ["objects"] = objects, ["measureLength1"] = 24, ["measureLength2"] = 6, ["measureThreshold"] = 20 });
+        using var _ = passed.Outputs["image"].Require<VisionImage>("image");
+        Assert.True(passed.Outputs["found"].Require<bool>("found"), Convert.ToString(passed.Summary["reason"]));
+        Assert.Equal(0L, passed.Outputs["residualExceededCount"].Require<long>("residualExceededCount"));
+
+        // 门限低于任何真实拟合残差：单个对象必须单独失败，而不是被 residualRms 平均掉。
+        var gated = await Run(mat, new()
+        {
+            ["objects"] = objects, ["measureLength1"] = 24, ["measureLength2"] = 6, ["measureThreshold"] = 20,
+            ["maxResidualPx"] = 1e-9
+        });
+        using var __ = gated.Outputs["image"].Require<VisionImage>("image");
+        Assert.False(gated.Outputs["found"].Require<bool>("found"));
+        Assert.Equal("residual-exceeded", Convert.ToString(gated.Summary["reason"]));
+        Assert.Equal(1L, gated.Outputs["residualExceededCount"].Require<long>("residualExceededCount"));
+        using var doc = JsonDocument.Parse(gated.Outputs["measurements"].Require<string>("measurements"));
+        Assert.Equal("residual-exceeded", doc.RootElement[0].GetProperty("qualityStatus").GetString());
+    }
+
+    [Fact]
+    public async Task PreviewMode_KeepsObjectCountAndPreviewFlag()
+    {
+        using var mat = Disk(125, 130, 58, 260);
+        var result = await Run(mat, new()
+        {
+            ["debugImagePreviewOnly"] = true,
+            ["objects"] = """
+                [{"type":"circle","name":"a","row":125,"column":130,"radius":58},
+                 {"type":"line","name":"b","rowBegin":20,"columnBegin":20,"rowEnd":20,"columnEnd":200}]
+                """
+        });
+        using var _ = result.Outputs["image"].Require<VisionImage>("image");
+
+        Assert.False(result.Outputs["found"].Require<bool>("found"));
+        Assert.True(result.Outputs["previewOnly"].Require<bool>("previewOnly"));
+        Assert.Equal(2L, result.Outputs["objectCount"].Require<long>("objectCount"));
+        Assert.Equal(0L, result.Outputs["addedCount"].Require<long>("addedCount"));
+        Assert.Equal(2, result.Outputs["results"].Require<IReadOnlyList<VisionMetrologyResult>>("results").Count);
+        Assert.Equal("preview-only", Convert.ToString(result.Summary["reason"]));
+    }
+
+    [Fact]
+    public async Task AddFailure_ReconcilesObjectAndAddedCounts()
+    {
+        using var mat = Disk(125, 130, 58, 260);
+        var result = await Run(mat, new()
+        {
+            ["objects"] = """
+                [{"type":"circle","name":"outside","row":-5000,"column":-5000,"radius":20},
+                 {"type":"circle","name":"bore","row":125,"column":130,"radius":58}]
+                """,
+            ["measureLength1"] = 24, ["measureLength2"] = 6, ["measureThreshold"] = 20
+        });
+        using var _ = result.Outputs["image"].Require<VisionImage>("image");
+
+        Assert.Equal(2L, result.Outputs["objectCount"].Require<long>("objectCount"));
+        var added = result.Outputs["addedCount"].Require<long>("addedCount");
+        var failures = result.Outputs["addFailureCount"].Require<long>("addFailureCount");
+        Assert.Equal(2L, added + failures);
+        Assert.Equal(added, result.Outputs["count"].Require<long>("count"));
+        Assert.Equal(added - result.Outputs["foundCount"].Require<long>("foundCount"), result.Outputs["missingCount"].Require<long>("missingCount"));
+        Assert.False(result.Outputs["previewOnly"].Require<bool>("previewOnly"));
+    }
+
     private static async Task<NodeExecutorResult> Run(
         Mat mat,
         Dictionary<string, object?> parameters,

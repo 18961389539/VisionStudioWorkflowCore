@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "dac3e487461d48e8b9ca88d3310633043742429001e5bdb75fff32c488cc623e",
+  "hash": "2cdac208f4a95b641a5fc08a97005cb79c84af20a9556140c9e899f7c2dbd5ad",
   "items": [
     {
       "type": "image.acquire",
@@ -29954,6 +29954,16 @@
           "name": "circleB",
           "dataType": "Circle",
           "required": true
+        },
+        {
+          "name": "qualityA",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "qualityB",
+          "dataType": "String",
+          "required": false
         }
       ],
       "outputs": [
@@ -29973,6 +29983,66 @@
           "required": true
         },
         {
+          "name": "deltaX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "deltaY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "offsetAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "referenceCircle",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "qualityStatusA",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "qualityStatusB",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "fitErrorA",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "fitErrorB",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "sampleCountA",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "sampleCountB",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "coverageDegA",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "coverageDegB",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "withinTolerance",
           "dataType": "Boolean",
           "required": true
@@ -29984,6 +30054,11 @@
         },
         {
           "name": "evaluationState",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "reason",
           "dataType": "String",
           "required": true
         },
@@ -30008,9 +30083,52 @@
           "max": 1000000,
           "step": 0.1,
           "description": "Optional concentricity tolerance in px; when disabled evaluationState=not-evaluated and withinTolerance must not be used as PASS."
+        },
+        {
+          "name": "requireQualityKnown",
+          "label": "Require Fit Quality",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Quality",
+          "description": "When enabled, a circle without qualityA/qualityB evidence cannot pass: withinTolerance=false and reason=quality-unknown:circleA|circleB."
+        },
+        {
+          "name": "maxFitError",
+          "label": "Max Fit Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "px",
+          "group": "Quality",
+          "description": "Upper bound on the upstream radial fit error; a short-arc or dented fit must not yield a PASS."
+        },
+        {
+          "name": "minSampleCount",
+          "label": "Min Sample Count (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Quality",
+          "description": "Minimum supporting points behind each circle fit."
+        },
+        {
+          "name": "minCoverageDeg",
+          "label": "Min Arc Coverage (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Quality",
+          "description": "Minimum angular coverage of each circle fit; a partial arc cannot localize a centre."
         }
       ],
-      "description": "Planar centre offset between two fitted circles. Wire: circleA + circleB → centerDistance/diametralOffset/centerOffset/withinTolerance. Key param: maxCenterDistance. Radii do not affect centre distance. Not 3D coaxility. A missing circle fails explicitly instead of inventing geometry. Units: pixels.",
+      "description": "Planar centre offset between two fitted circles. circleA is the datum: centerOffset = circleB - circleA, with deltaX/deltaY and offsetAngleDeg in image coordinates. Wire: circleA + circleB → centerDistance/diametralOffset/centerOffset/withinTolerance. Key param: maxCenterDistance. Radii do not affect centre distance. Quality evidence from the upstream fits can be wired as qualityA/qualityB JSON ({fitError|rmsError, sampleCount, coverageDeg}); with requireQualityKnown an evidence-free circle cannot pass, and maxFitError/minSampleCount/minCoverageDeg report reason=quality-insufficient:circleA|circleB naming the offending circle. A missing circle fails explicitly instead of inventing geometry. Not 3D coaxility. Units: pixels.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -30587,6 +30705,71 @@
           "required": false
         },
         {
+          "name": "differenceRegion",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "differenceArea",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "defectRegion",
+          "dataType": "Region",
+          "required": false
+        },
+        {
+          "name": "defectArea",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "thresholdEnabled",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "deltaEThreshold",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "evaluationState",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "p50DeltaE",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "p90DeltaE",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "p95DeltaE",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "p99DeltaE",
+          "dataType": "Double",
+          "required": true
+        },
+        {
           "name": "deltaE",
           "dataType": "Double",
           "required": false
@@ -30671,9 +30854,20 @@
           "step": 0.001,
           "unit": "px",
           "description": "Maximum accepted registration residual for a reference image."
+        },
+        {
+          "name": "deltaEThreshold",
+          "label": "Delta E Threshold (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 0.1,
+          "group": "Quality",
+          "description": "Defect threshold. 0 keeps the legacy full-difference region; > 0 splits the result into differenceRegion (every nonzero delta) and defectRegion (>= threshold), and withinTolerance means no pixel exceeds it."
         }
       ],
-      "description": "Pixelwise CIE76 ΔE in sRGB/D65 Lab. A reference image must be explicitly registered and carry a residual within the configured gate; otherwise found=false and no scalar is emitted. Wire: aligned same-size reference image or a constant sRGB color; optional domain. deltaE is the mean of per-pixel distances, not the distance between mean colors. Empty regions omit scalars. For patch consistency, not semantic segmentation.",
+      "description": "Pixelwise CIE76 ΔE in sRGB/D65 Lab. A reference image must be explicitly registered and carry a residual within the configured gate; otherwise found=false and no scalar is emitted. Wire: aligned same-size reference image or a constant sRGB color; optional domain. deltaE is the mean of per-pixel distances, not the distance between mean colors. With deltaEThreshold the node separates the full difference region from the above-threshold defect region: region/area follow the active gate (defect when the threshold is on), while differenceRegion/differenceArea always describe the complete difference and defectRegion/defectArea the exceedance. p50/p90/p95/p99 delta E and clippedDeltaECount make the distribution auditable, so a tiny number of bad pixels cannot hide behind a mean. Empty regions omit scalars. For patch consistency, not semantic segmentation.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -33218,8 +33412,53 @@
           "required": false
         },
         {
+          "name": "requestedSampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "validSampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "skippedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "coverageRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "coveragePassed",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "toleranceMode",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "maxAbsDeviation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "withinTolerance",
           "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "evaluationState",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
           "required": true
         },
         {
@@ -33298,9 +33537,49 @@
           "step": 0.1,
           "unit": "px",
           "description": "Allowed absolute deviation from nominalDistance when the gate is enabled."
+        },
+        {
+          "name": "toleranceMode",
+          "label": "Tolerance Mode",
+          "type": "select",
+          "defaultValue": "mean",
+          "options": [
+            {
+              "label": "Mean only",
+              "value": "mean"
+            },
+            {
+              "label": "Every sample",
+              "value": "allSamples"
+            }
+          ],
+          "group": "Quality",
+          "description": "mean compares the average spacing with nominalDistance; allSamples additionally requires every valid sample to stay inside nominalDistance +/- tolerance, so one local spike cannot be averaged away."
+        },
+        {
+          "name": "minCoverageRatio",
+          "label": "Min Coverage Ratio (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "group": "Quality",
+          "description": "Minimum fraction of requested rays that must hit segment B. Below it found=false with reason=insufficient-coverage, so a small overlap cannot masquerade as a full measurement."
+        },
+        {
+          "name": "minValidSamples",
+          "label": "Min Valid Samples (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "group": "Quality",
+          "description": "Absolute lower bound on valid intersections, on top of minCoverageRatio."
         }
       ],
-      "description": "Sample segment A and intersect rays in both directions with segment B. Report mean/min/max/population deviation of absolute pixel distances, optional nominal/tolerance gate, overlays for A/B/samples, and diagnostics. Parallel sampling direction is invalid; no overlap returns found=false. Not an image edge detector.",
+      "description": "Sample segment A and intersect rays in both directions with segment B. Report mean/min/max/population deviation of absolute pixel distances, optional nominal/tolerance gate, overlays for A/B/samples, and diagnostics. requestedSampleCount/validSampleCount/coverageRatio make partial overlap explicit, and minCoverageRatio/minValidSamples gate found so a handful of hits cannot pass as a full measurement. toleranceMode=allSamples rejects local spikes that a mean-only gate would average away. Every sample entry in samplesJson keeps index/uOnB/signedDistance/valid/skipReason so coverage can be recomputed. Parallel sampling direction is invalid; no overlap returns found=false with reason=no-intersection. Not an image edge detector.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -33360,7 +33639,37 @@
           "required": true
         },
         {
+          "name": "objectCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "addedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "addFailureCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "missingCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "previewOnly",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "qualityUnknownCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "residualExceededCount",
           "dataType": "Integer",
           "required": true
         },
@@ -33606,6 +33915,28 @@
           "group": "Result",
           "description": "Explicit manual confirmation for ellipse/rectangle2 qualityUnknown results. Default false blocks automatic PASS; per-object qualityConfirmed can be used instead.",
           "advanced": true
+        },
+        {
+          "name": "requireQualityKnown",
+          "label": "Require Quality Known",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Result",
+          "description": "true = an object whose quality is unknown blocks found; false = geometry alone decides. Ellipse/rectangle2 have no computable residual, so they stay qualityUnknown unless confirmed.",
+          "advanced": true
+        },
+        {
+          "name": "maxResidualPx",
+          "label": "Max Per-Object Residual (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 0.01,
+          "unit": "px",
+          "group": "Result",
+          "description": "Per-object residual gate. residualRms averages bad objects away; this rejects any single object above the limit with qualityStatus=residual-exceeded.",
+          "advanced": true
         }
       ],
       "description": "One JLVision metrology model with mixed line / circle / ellipse / rectangle2 measurement objects, applied once per image. Objects can be rigidly aligned by a pose input (dynamic ROI) or fixed offsets, which is the intended way to measure at a located position. Outputs one JSON row per object in image coordinates: circle -> row/column/radius; ellipse -> row/column/phiDeg/radius1/radius2; rectangle2 -> row/column/phiDeg/length1/length2; line -> ny/nx/distancePx (Hesse normal form) plus normalAngleDeg. Real limits of JLVisionLib 1.0.0: get_metrology_object_result returns a fixed value tuple per object type and no native score, so quality is reported as residualPx computed from the native measure points for circle and line only; ellipse/rectangle2 carry qualityUnknown=true and qualityStatus=unknown until explicitly confirmed. found never auto-passes unknown quality. Alignment is applied to the object geometry before measuring (AlignMetrologyModel is not used because its pose semantics are undocumented in this wrapper). No fuzzy-score map, no per-region rejection list, and no multi-instance (instance='all' only) in this version.",
@@ -33688,6 +34019,36 @@
           "required": true
         },
         {
+          "name": "startCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "converged",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "optimalityGap",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "gateMetric",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "evaluationState",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "withinTolerance",
           "dataType": "Boolean",
           "required": true
@@ -33750,14 +34111,14 @@
         },
         {
           "name": "maxIterations",
-          "label": "Max Iterations",
+          "label": "Max Iterations (per start)",
           "type": "number",
           "defaultValue": 400,
           "min": 10,
           "max": 10000,
           "step": 10,
           "group": "Circle",
-          "description": "Hard iteration budget per radius. Exceeding it fails instead of returning an unrefined circle."
+          "description": "Hard step budget for each deterministic start. Exhausting it marks the run not-converged (found=false, reason=not-converged) instead of returning an unrefined circle."
         },
         {
           "name": "maxZoneWidth",
@@ -33769,10 +34130,34 @@
           "step": 0.0001,
           "unit": "px",
           "group": "Limits",
-          "description": "Optional gate on zoneWidth. 0 disables it; a go/no-go ring gauge is exactly this gate."
+          "description": "Gate on zoneWidth for minZone, and the legacy fallback gate for MCCI/MIC when no nominal radius is given. 0 disables it."
+        },
+        {
+          "name": "nominalRadius",
+          "label": "Nominal Radius (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.0001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Drawing radius for MCCI/MIC. When set, those modes judge |radius - nominalRadius| instead of zoneWidth, because a shaft/hole limit is a radius callout."
+        },
+        {
+          "name": "radiusTolerance",
+          "label": "Radius Tolerance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.0001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Allowed absolute radius deviation; required when nominalRadius is set on MCCI/MIC."
         }
       ],
-      "description": "Extremal circle fits that a least-squares fit cannot give: minimum zone (ISO 1101), minimum circumscribed (shaft limit) and maximum inscribed (hole limit). Wire: contours -> circle/zoneWidth/lsqRadius. Starts from the least-squares centre and refines with a deterministic pattern search, so the result never depends on point order. withinTolerance gates zoneWidth. Units: pixels.",
+      "description": "Extremal circle fits that a least-squares fit cannot give: minimum zone (ISO 1101), minimum circumscribed (shaft limit) and maximum inscribed (hole limit). Wire: contours -> circle/zoneWidth/lsqRadius. Runs five deterministic pattern searches (least-squares centre plus four +/-10%-radius probes) and reports converged/optimalityGap/startCount, so a local optimum cannot pass as the metrology limit; exhausting maxIterations yields found=false with reason=not-converged. Gates follow the drawing: minZone compares zoneWidth with maxZoneWidth, while MCCI/MIC compare radius with nominalRadius +/- radiusTolerance (falling back to maxZoneWidth when no nominal radius is set); gateMetric/gateValue/gateLimit echo the quantity actually judged. The search never depends on point order; withinTolerance is false when no gate is configured, and evaluationState marks that case as not-evaluated. Units: pixels.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

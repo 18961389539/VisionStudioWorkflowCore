@@ -30,16 +30,19 @@ public sealed class MetrologyNode : IVisionNodeExecutor
         if (source.Mat.Empty())
             throw new InvalidOperationException("measure.metrology requires a non-empty image.");
 
+        var specs = ParseObjects(node.GetString("objects", "[]"));
         if (node.GetBool("debugImagePreviewOnly", false))
             return ValueTask.FromResult(new NodeExecutorResult(
                 new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(source.CloneOwned()),
                     ["found"] = VisionValue.Boolean(false), ["count"] = VisionValue.Integer(0), ["foundCount"] = VisionValue.Integer(0),
-                    ["qualityUnknownCount"] = VisionValue.Integer(0),
-                    ["measurements"] = VisionValue.String("[]"), ["results"] = VisionValue.MetrologyResults(Array.Empty<VisionMetrologyResult>()),
+                    ["objectCount"] = VisionValue.Integer(specs.Count), ["addedCount"] = VisionValue.Integer(0),
+                    ["addFailureCount"] = VisionValue.Integer(0), ["missingCount"] = VisionValue.Integer(0),
+                    ["previewOnly"] = VisionValue.Boolean(true), ["qualityUnknownCount"] = VisionValue.Integer(0),
+                    ["measurements"] = VisionValue.String("[]"),
+                    ["results"] = VisionValue.MetrologyResults(specs.Select((spec, i) => new VisionMetrologyResult(i, spec.Name, spec.Type, false)).ToArray()),
                     ["diagnostics"] = VisionValue.String("{\"previewOnly\":true}") },
-                new Dictionary<string, object?> { ["previewOnly"] = true }, []));
-
-        var specs = ParseObjects(node.GetString("objects", "[]"));
+                new Dictionary<string, object?> { ["previewOnly"] = true, ["objectCount"] = specs.Count,
+                    ["addedCount"] = 0, ["addFailureCount"] = 0, ["reason"] = "preview-only" }, []));
         if (specs.Count == 0)
             throw new InvalidOperationException("measure.metrology requires at least one measurement object in 'objects'.");
 
@@ -57,6 +60,10 @@ public sealed class MetrologyNode : IVisionNodeExecutor
         if (!double.IsFinite(minScore) || minScore is < 0 or > 1) throw new InvalidOperationException("measure.metrology minScore must be finite in [0,1].");
         var requireAllFound = node.GetBool("requireAllFound", true);
         var confirmUnknownQuality = node.GetBool("confirmUnknownQuality", false);
+        var requireQualityKnown = node.GetBool("requireQualityKnown", true);
+        var maxResidualPx = node.GetDouble("maxResidualPx", 0);
+        if (!double.IsFinite(maxResidualPx) || maxResidualPx < 0)
+            throw new InvalidOperationException("measure.metrology maxResidualPx must be finite and >= 0 (0 disables the gate).");
         var alignment = ResolveAlignment(context, node);
 
         using var gray = ToGray(source.Mat);
@@ -89,6 +96,11 @@ public sealed class MetrologyNode : IVisionNodeExecutor
                     ["found"] = VisionValue.Boolean(false),
                     ["count"] = VisionValue.Integer(0),
                     ["foundCount"] = VisionValue.Integer(0),
+                    ["objectCount"] = VisionValue.Integer(specs.Count),
+                    ["addedCount"] = VisionValue.Integer(0),
+                    ["addFailureCount"] = VisionValue.Integer(addFailures.Count),
+                    ["missingCount"] = VisionValue.Integer(0),
+                    ["previewOnly"] = VisionValue.Boolean(false),
                     ["qualityUnknownCount"] = VisionValue.Integer(0),
                     ["measurements"] = VisionValue.String("[]"),
                     ["results"] = VisionValue.MetrologyResults(specs.Select((spec, i) => new VisionMetrologyResult(i, spec.Name, spec.Type, false)).ToArray()),
@@ -99,6 +111,9 @@ public sealed class MetrologyNode : IVisionNodeExecutor
                     ["diagnostics"] = failed,
                     ["found"] = false,
                     ["reason"] = "no-measurement-object-could-be-added",
+                    ["objectCount"] = specs.Count,
+                    ["addedCount"] = 0,
+                    ["addFailureCount"] = addFailures.Count,
                     ["addFailures"] = addFailures
                 },
                 []));
@@ -157,6 +172,8 @@ public sealed class MetrologyNode : IVisionNodeExecutor
                 {
                     entry["residualPx"] = Math.Round(residual.Value, 4);
                     residuals.Add(residual.Value);
+                    // 聚合 RMS 会把单个坏对象稀释掉，所以逐对象门单独判定并保留原因。
+                    if (maxResidualPx > 0 && residual.Value > maxResidualPx + 1e-12) entry["qualityStatus"] = "residual-exceeded";
                 }
                 var overlay = BuildOverlay(spec, entry, alignment);
                 if (overlay is not null) overlays.Add(overlay);
@@ -168,15 +185,20 @@ public sealed class MetrologyNode : IVisionNodeExecutor
         var foundCount = measurements.Count(m => m.TryGetValue("found", out var f) && f is true);
         var unknownQualityCount = measurements.Count(m => m.TryGetValue("found", out var f) && f is true
             && m.TryGetValue("qualityStatus", out var q) && q is "unknown");
+        var residualExceededCount = measurements.Count(m => m.TryGetValue("found", out var f) && f is true
+            && m.TryGetValue("qualityStatus", out var q) && q is "residual-exceeded");
         var geometryComplete = requireAllFound ? foundCount == specs.Count : foundCount > 0;
-        var foundOverall = geometryComplete && unknownQualityCount == 0;
+        var qualityComplete = !requireQualityKnown || unknownQualityCount == 0;
+        var foundOverall = geometryComplete && qualityComplete && residualExceededCount == 0;
         var residualRms = residuals.Count > 0 ? Math.Sqrt(residuals.Sum(r => r * r) / residuals.Count) : (double?)null;
         var residualMax = residuals.Count > 0 ? residuals.Max() : (double?)null;
 
         var json = JsonSerializer.Serialize(measurements, JsonOptions);
         var diag = CoordinateValidation.Diagnostics(Type,
-            ("objects", specs.Count), ("foundCount", foundCount), ("missing", missing),
-            ("requireAllFound", requireAllFound), ("residualRms", residualRms), ("residualMax", residualMax),
+            ("objects", specs.Count), ("addedCount", indices.Count), ("addFailureCount", addFailures.Count),
+            ("foundCount", foundCount), ("missing", missing), ("residualExceededCount", residualExceededCount),
+            ("requireAllFound", requireAllFound), ("requireQualityKnown", requireQualityKnown), ("maxResidualPx", maxResidualPx),
+            ("residualRms", residualRms), ("residualMax", residualMax),
             ("transition", transition), ("select", select), ("minScore", minScore));
 
         var outputs = new Dictionary<string, VisionValue>
@@ -185,7 +207,13 @@ public sealed class MetrologyNode : IVisionNodeExecutor
             ["found"] = VisionValue.Boolean(foundOverall),
             ["count"] = VisionValue.Integer(measurements.Count),
             ["foundCount"] = VisionValue.Integer(foundCount),
+            ["objectCount"] = VisionValue.Integer(specs.Count),
+            ["addedCount"] = VisionValue.Integer(indices.Count),
+            ["addFailureCount"] = VisionValue.Integer(addFailures.Count),
+            ["missingCount"] = VisionValue.Integer(missing),
+            ["previewOnly"] = VisionValue.Boolean(false),
             ["qualityUnknownCount"] = VisionValue.Integer(unknownQualityCount),
+            ["residualExceededCount"] = VisionValue.Integer(residualExceededCount),
             ["measurements"] = VisionValue.String(json),
             ["results"] = VisionValue.MetrologyResults(specs.Select((spec, i) => TypedResult(spec, i, measurements.FirstOrDefault(entry => Convert.ToInt32(entry["objectIndex"]) == i), alignment)).ToArray()),
             ["diagnostics"] = VisionValue.String(diag)
@@ -197,11 +225,19 @@ public sealed class MetrologyNode : IVisionNodeExecutor
         {
             ["diagnostics"] = diag,
             ["found"] = foundOverall,
-            ["reason"] = foundOverall ? "measured" : unknownQualityCount > 0 ? "quality-unknown-not-confirmed" : "measurement-incomplete",
+            ["reason"] = foundOverall ? "measured"
+                : residualExceededCount > 0 ? "residual-exceeded"
+                : requireQualityKnown && unknownQualityCount > 0 ? "quality-unknown-not-confirmed"
+                : "measurement-incomplete",
             ["qualityUnknownCount"] = unknownQualityCount,
+            ["residualExceededCount"] = residualExceededCount,
+            ["requireQualityKnown"] = requireQualityKnown,
+            ["maxResidualPx"] = maxResidualPx,
             ["confirmUnknownQuality"] = confirmUnknownQuality,
             ["objectCount"] = specs.Count,
             ["foundCount"] = foundCount,
+            ["addedCount"] = indices.Count,
+            ["addFailureCount"] = addFailures.Count,
             ["missingCount"] = missing,
             ["addFailures"] = addFailures,
             ["residualRms"] = residualRms,

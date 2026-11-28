@@ -86,7 +86,11 @@ public static class MeasurementGapCatalog
             [Found, new("sampleCount", VisionDataType.Integer), new("circle", VisionDataType.Circle),
              new("center", VisionDataType.Point2D), new("radius", VisionDataType.Double), new("zoneWidth", VisionDataType.Double),
              new("lsqRadius", VisionDataType.Double), new("centerShift", VisionDataType.Double),
-             new("iterations", VisionDataType.Integer), new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
+             new("iterations", VisionDataType.Integer), new("startCount", VisionDataType.Integer),
+             new("converged", VisionDataType.Boolean), new("optimalityGap", VisionDataType.Double),
+             new("gateMetric", VisionDataType.String), new("evaluationState", VisionDataType.String),
+             new("reason", VisionDataType.String),
+             new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 Index,
                 new("mode", "Extremum Mode", "select", "minZone", Group: "Circle", Options:
@@ -97,12 +101,16 @@ public static class MeasurementGapCatalog
                 ], Description: "MZ minimizes the radial zone (ISO 1101 roundness), MCCI is the smallest circle containing the points (shaft), MIC the largest circle inside them (hole)."),
                 new("precision", "Search Precision", "number", .0001, .000001, 1, .0001, Unit: "px", Group: "Circle",
                     Description: "Pattern-search step floor. Smaller values cost more iterations and give no more digits than the input resolution."),
-                new("maxIterations", "Max Iterations", "number", 400, 10, 10000, 10, Group: "Circle",
-                    Description: "Hard iteration budget per radius. Exceeding it fails instead of returning an unrefined circle."),
+                new("maxIterations", "Max Iterations (per start)", "number", 400, 10, 10000, 10, Group: "Circle",
+                    Description: "Hard step budget for each deterministic start. Exhausting it marks the run not-converged (found=false, reason=not-converged) instead of returning an unrefined circle."),
                 new("maxZoneWidth", "Max Zone Width (0=off)", "number", 0, 0, 1000000, .0001, Unit: "px", Group: "Limits",
-                    Description: "Optional gate on zoneWidth. 0 disables it; a go/no-go ring gauge is exactly this gate."),
+                    Description: "Gate on zoneWidth for minZone, and the legacy fallback gate for MCCI/MIC when no nominal radius is given. 0 disables it."),
+                new("nominalRadius", "Nominal Radius (0=off)", "number", 0, 0, 1000000, .0001, Unit: "px", Group: "Limits",
+                    Description: "Drawing radius for MCCI/MIC. When set, those modes judge |radius - nominalRadius| instead of zoneWidth, because a shaft/hole limit is a radius callout."),
+                new("radiusTolerance", "Radius Tolerance", "number", 0, 0, 1000000, .0001, Unit: "px", Group: "Limits",
+                    Description: "Allowed absolute radius deviation; required when nominalRadius is set on MCCI/MIC."),
             ],
-            "Extremal circle fits that a least-squares fit cannot give: minimum zone (ISO 1101), minimum circumscribed (shaft limit) and maximum inscribed (hole limit). Wire: contours -> circle/zoneWidth/lsqRadius. Starts from the least-squares centre and refines with a deterministic pattern search, so the result never depends on point order. withinTolerance gates zoneWidth. Units: pixels.", "builtin",
+            "Extremal circle fits that a least-squares fit cannot give: minimum zone (ISO 1101), minimum circumscribed (shaft limit) and maximum inscribed (hole limit). Wire: contours -> circle/zoneWidth/lsqRadius. Runs five deterministic pattern searches (least-squares centre plus four +/-10%-radius probes) and reports converged/optimalityGap/startCount, so a local optimum cannot pass as the metrology limit; exhausting maxIterations yields found=false with reason=not-converged. Gates follow the drawing: minZone compares zoneWidth with maxZoneWidth, while MCCI/MIC compare radius with nominalRadius +/- radiusTolerance (falling back to maxZoneWidth when no nominal radius is set); gateMetric/gateValue/gateLimit echo the quantity actually judged. The search never depends on point order; withinTolerance is false when no gate is configured, and evaluationState marks that case as not-evaluated. Units: pixels.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
 
         // ── P1：曲率 / 圆角定位 ────────────────────────────────────────

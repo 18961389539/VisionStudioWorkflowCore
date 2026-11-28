@@ -492,15 +492,21 @@ var a = context.Require<VisionLine2D>("a"); var b = context.Require<VisionLine2D
         if (direction is not ("normal" or "angle")) throw new InvalidOperationException("Spacing direction must be normal or angle.");
         var nominal = node.GetDouble("nominalDistance", 0);
         var tolerance = node.GetDouble("tolerance", 0);
+        var minCoverageRatio = node.GetDouble("minCoverageRatio", 0);
+        var minValidSamples = node.GetInt("minValidSamples", 0);
+        var toleranceMode = node.GetString("toleranceMode", "mean").Trim().ToLowerInvariant();
         if (!double.IsFinite(nominal) || nominal < 0) throw new InvalidOperationException("nominalDistance must be finite and non-negative (0 disables the gate).");
         if (!double.IsFinite(tolerance) || tolerance < 0) throw new InvalidOperationException("tolerance must be finite and non-negative.");
         if (nominal > 0 && tolerance <= 0) throw new InvalidOperationException("tolerance must be > 0 when nominalDistance is set.");
+        if (!double.IsFinite(minCoverageRatio) || minCoverageRatio is < 0 or > 1) throw new InvalidOperationException("minCoverageRatio must be within 0..1.");
+        if (minValidSamples < 0 || minValidSamples > count) throw new InvalidOperationException("minValidSamples must be within 0..sampleCount.");
+        if (toleranceMode is not ("mean" or "allsamples")) throw new InvalidOperationException("toleranceMode must be mean or allSamples.");
         var dx = direction == "normal" ? -(a.End.Y - a.Start.Y) / a.Length : Math.Cos(angle * Math.PI / 180);
         var dy = direction == "normal" ? (a.End.X - a.Start.X) / a.Length : Math.Sin(angle * Math.PI / 180);
         var bx = b.End.X - b.Start.X; var by = b.End.Y - b.Start.Y;
         var determinant = dx * by - dy * bx;
         if (Math.Abs(determinant) < b.Length * 1e-10) throw new InvalidOperationException("Sampling direction is parallel to line B.");
-        var samples = new List<object>(); var distances = new List<double>(); var overlays = new List<VisionOverlay>
+        var samples = new List<SpacingSample>(count); var distances = new List<double>(); var overlays = new List<VisionOverlay>
         {
             new("line-a", VisionOverlayType.Line, X: a.Start.X, Y: a.Start.Y, X2: a.End.X, Y2: a.End.Y, Stroke: "#1677ff", StrokeWidth: 2),
             new("line-b", VisionOverlayType.Line, X: b.Start.X, Y: b.Start.Y, X2: b.End.X, Y2: b.End.Y, Stroke: "#52c41a", StrokeWidth: 2)
@@ -511,54 +517,96 @@ var a = context.Require<VisionLine2D>("a"); var b = context.Require<VisionLine2D
             var f = (double)i / (count - 1); var p = new VisionPoint2D(a.Start.X + f * (a.End.X - a.Start.X), a.Start.Y + f * (a.End.Y - a.Start.Y));
             var qx = b.Start.X - p.X; var qy = b.Start.Y - p.Y;
             var distance = (qx * by - qy * bx) / determinant; var u = (qx * dy - qy * dx) / determinant;
-            if (u < -1e-9 || u > 1 + 1e-9) continue;
+            if (!double.IsFinite(distance) || !double.IsFinite(u))
+            {
+                samples.Add(new(i, p, null, null, null, null, false, "non-finite"));
+                continue;
+            }
             var end = new VisionPoint2D(p.X + distance * dx, p.Y + distance * dy);
-            if (!double.IsFinite(distance) || !double.IsFinite(end.X) || !double.IsFinite(end.Y)) throw new InvalidOperationException("Spacing calculation overflowed.");
-            distances.Add(Math.Abs(distance)); samples.Add(new { Index = i, Start = p, End = end, Distance = Math.Abs(distance) });
-            if (overlays.Count < 202) overlays.Add(new($"spacing-{i}", VisionOverlayType.Line, X: p.X, Y: p.Y, X2: end.X, Y2: end.Y, Stroke: "#faad14", StrokeWidth: 1));
+            if (!double.IsFinite(end.X) || !double.IsFinite(end.Y))
+            {
+                samples.Add(new(i, p, null, u, distance, Math.Abs(distance), false, "overflow"));
+                continue;
+            }
+            if (u < -1e-9 || u > 1 + 1e-9)
+            {
+                // 射线落在 B 的延长线上：距离可算但没有物理意义，只作为覆盖率证据保留。
+                samples.Add(new(i, p, end, u, distance, Math.Abs(distance), false, "outside-b-segment"));
+                continue;
+            }
+            distances.Add(Math.Abs(distance));
+            samples.Add(new(i, p, end, u, distance, Math.Abs(distance), true, null));
+            if (overlays.Count < 202) overlays.Add(new VisionOverlay($"spacing-{i}", VisionOverlayType.Line, X: p.X, Y: p.Y, X2: end.X, Y2: end.Y, Stroke: "#faad14", StrokeWidth: 1));
         }
-        var found = distances.Count > 0;
-        double mean = 0, min = 0, max = 0, stdDev = 0, deviation = 0;
-        var withinTolerance = true;
-        if (found)
+        var validCount = distances.Count;
+        var coverageRatio = (double)validCount / count;
+        var coveragePassed = minCoverageRatio <= 0 || coverageRatio >= minCoverageRatio - 1e-12;
+        var enoughSamples = validCount >= Math.Max(1, minValidSamples);
+        var found = validCount > 0 && coveragePassed && enoughSamples;
+        double mean = 0, min = 0, max = 0, stdDev = 0, deviation = 0, maxAbsDeviation = 0;
+        if (validCount > 0)
         {
             mean = distances.Average(); min = distances.Min(); max = distances.Max();
             stdDev = Math.Sqrt(distances.Average(v => Math.Pow(v - mean, 2)));
-            if (nominal > 0)
-            {
-                deviation = mean - nominal;
-                withinTolerance = Math.Abs(deviation) <= tolerance;
-            }
+            deviation = nominal > 0 ? mean - nominal : 0;
+            maxAbsDeviation = nominal > 0 ? distances.Max(v => Math.Abs(v - nominal)) : distances.Max(v => Math.Abs(v - mean));
         }
-        else withinTolerance = false;
+        var gateEnabled = nominal > 0;
+        var withinTolerance = found && gateEnabled && (toleranceMode == "allsamples" ? maxAbsDeviation <= tolerance + 1e-9 : Math.Abs(deviation) <= tolerance + 1e-9);
+        var evaluationState = !gateEnabled ? "not-evaluated" : withinTolerance ? "pass" : "fail";
+        var reason = !found
+            ? validCount == 0 ? "no-intersection" : !coveragePassed ? "insufficient-coverage" : "insufficient-valid-samples"
+            : !gateEnabled ? "not-evaluated"
+            : withinTolerance ? "ok"
+            : toleranceMode == "allsamples" ? "sample-out-of-tolerance" : "tolerance-exceeded";
         var diag = CoordinateValidation.Diagnostics(Type,
-            ("found", found), ("sampleCount", distances.Count), ("requestedSamples", count), ("direction", direction),
-            ("angleDeg", angle), ("distance", mean), ("min", min), ("max", max), ("stdDev", stdDev),
-            ("nominalDistance", nominal), ("tolerance", tolerance), ("deviation", deviation), ("withinTolerance", withinTolerance));
+            ("found", found), ("reason", reason), ("sampleCount", validCount), ("requestedSamples", count),
+            ("validSampleCount", validCount), ("skippedCount", count - validCount), ("coverageRatio", coverageRatio),
+            ("minCoverageRatio", minCoverageRatio), ("minValidSamples", minValidSamples), ("coveragePassed", coveragePassed),
+            ("direction", direction), ("angleDeg", angle), ("distance", mean), ("min", min), ("max", max), ("stdDev", stdDev),
+            ("nominalDistance", nominal), ("tolerance", tolerance), ("toleranceMode", toleranceMode),
+            ("deviation", deviation), ("maxAbsDeviation", maxAbsDeviation), ("withinTolerance", withinTolerance),
+            ("evaluationState", evaluationState));
         var outputs = new Dictionary<string, VisionValue>
         {
             ["found"] = VisionValue.Boolean(found),
-            ["sampleCount"] = VisionValue.Integer(distances.Count),
+            ["reason"] = VisionValue.String(reason),
+            ["sampleCount"] = VisionValue.Integer(validCount),
+            ["requestedSampleCount"] = VisionValue.Integer(count),
+            ["validSampleCount"] = VisionValue.Integer(validCount),
+            ["skippedCount"] = VisionValue.Integer(count - validCount),
+            ["coverageRatio"] = VisionValue.Double(coverageRatio),
+            ["coveragePassed"] = VisionValue.Boolean(coveragePassed),
+            ["toleranceMode"] = VisionValue.String(toleranceMode),
             ["samplesJson"] = VisionValue.String(JsonSerializer.Serialize(samples)),
             ["withinTolerance"] = VisionValue.Boolean(withinTolerance),
+            ["evaluationState"] = VisionValue.String(evaluationState),
             ["diagnostics"] = VisionValue.String(diag)
         };
-        if (found)
+        if (validCount > 0)
         {
             outputs["distance"] = VisionValue.Double(mean); outputs["min"] = VisionValue.Double(min);
             outputs["max"] = VisionValue.Double(max); outputs["stdDev"] = VisionValue.Double(stdDev);
             outputs["deviation"] = VisionValue.Double(deviation);
+            outputs["maxAbsDeviation"] = VisionValue.Double(maxAbsDeviation);
         }
         var summary = new Dictionary<string, object?>
         {
-            ["found"] = found, ["sampleCount"] = distances.Count, ["unit"] = "px", ["direction"] = direction,
-            ["withinTolerance"] = withinTolerance, ["diagnostics"] = diag
+            ["found"] = found, ["reason"] = reason, ["sampleCount"] = validCount, ["requestedSampleCount"] = count,
+            ["validSampleCount"] = validCount, ["coverageRatio"] = coverageRatio, ["coveragePassed"] = coveragePassed,
+            ["minCoverageRatio"] = minCoverageRatio, ["minValidSamples"] = minValidSamples,
+            ["unit"] = "px", ["direction"] = direction, ["toleranceMode"] = toleranceMode,
+            ["withinTolerance"] = withinTolerance, ["evaluationState"] = evaluationState, ["diagnostics"] = diag
         };
-        if (found)
+        if (validCount > 0)
         {
             summary["distance"] = mean; summary["min"] = min; summary["max"] = max; summary["stdDev"] = stdDev;
             summary["nominalDistance"] = nominal; summary["tolerance"] = tolerance; summary["deviation"] = deviation;
+            summary["maxAbsDeviation"] = maxAbsDeviation;
         }
         return ValueTask.FromResult(new NodeExecutorResult(outputs, summary, overlays));
     }
-}
+
+    private sealed record SpacingSample(int Index, VisionPoint2D Start, VisionPoint2D? End, double? UOnB,
+        double? SignedDistance, double? Distance, bool Valid, string? SkipReason);
+    }
